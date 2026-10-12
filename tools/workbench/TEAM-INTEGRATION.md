@@ -8,8 +8,12 @@ or a benchmark score. RED, BLUE and human review are separate workflows.
 ## Open the guide / use the application
 
 Download `app/dist/guide.html` and open it in a browser to read the standalone guide. GitHub's file viewer displays HTML source,
-not a hosted application. The existing runner-hosted app is https://shinick-han.github.io/falsify-workbench/ ; it uses each
-participant's own local companion and CLI login. This branch does **not** deploy a Pseudo-Lab GitHub Pages site.
+not a hosted application. The branch preview is https://shinick-han.github.io/falsify-branch-preview/ and its online guide is
+https://shinick-han.github.io/falsify-branch-preview/guide.html . The deployment source is the separate runner-owned
+repository https://github.com/Shinick-Han/falsify-branch-preview . This is not a Pseudo-Lab official site, and this branch does
+**not** deploy a Pseudo-Lab GitHub Pages site. Model invocation and PDF export require each participant's own local companion;
+CLI login is required only for model invocation. The existing runner app at https://shinick-han.github.io/falsify-workbench/
+is unchanged. Both personal Pages apps share one origin and browser storage; use a separate browser profile for isolated records.
 
 To get this branch rather than the main branch (which does not include this proposal):
 

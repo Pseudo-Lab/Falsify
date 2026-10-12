@@ -76,7 +76,7 @@ check('harness JSON samples validate against the current core and stay secret-fr
 });
 const section=id=>{const at=html.indexOf(' id="'+id+'"');assert.ok(at>0,'section '+id);return strip(html.slice(at,html.indexOf('</section>',at)));};
 check('primary app link is the hosted page, not a file next to the guide',()=>{
-  assert.equal((html.match(/<a class="open-app" href="([^"]+)"/)||[])[1],'https://shinick-han.github.io/falsify-workbench/');
+  assert.equal((html.match(/<a class="open-app" href="([^"]+)"/)||[])[1],'https://shinick-han.github.io/falsify-branch-preview/');
   assert.ok(!hrefs.some(h=>/(^|\/)index\.html$/.test(h)),'no index.html file link');
   const sign=strip(html.slice(html.indexOf('<header'),html.indexOf('</header>')));
   assert.ok(sign.includes('http://127.0.0.1:7816/'),'labeled loopback URL');
