@@ -1,0 +1,155 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-12T01:27:57Z",
+  "title": "Design System: Falsify Paper Workbench",
+  "extensions": {
+    "colorMeta": {
+      "yellow": { "role": "primary", "displayName": "Terminal Yellow", "canonical": "#ffcc00", "tonalRamp": ["#1d0200", "#401000", "#5d2e00", "#7a4b00", "#996800", "#b88700", "#e9b700", "#ffec8d"] },
+      "ink": { "role": "primary", "displayName": "Sign Ink", "canonical": "#111315", "tonalRamp": ["#090b0d", "#202224", "#383b3d", "#535658", "#6f7274", "#8d8f92", "#bbbec1", "#eceff2"] },
+      "primary-hover": { "role": "primary", "displayName": "Ink Hover", "canonical": "#363c40", "tonalRamp": ["#070c0f", "#1d2226", "#353b3f", "#50565b", "#6c7377", "#899095", "#b8bfc4", "#e8f0f5"] },
+      "charcoal": { "role": "neutral", "displayName": "Concourse Charcoal", "canonical": "#202326", "tonalRamp": ["#090b0e", "#1f2225", "#383b3e", "#525659", "#6e7276", "#8c9093", "#babec2", "#ebeff3"] },
+      "rail-text": { "role": "neutral", "displayName": "Rail Text", "canonical": "#d7dde1", "tonalRamp": ["#080c0e", "#1e2225", "#363b3e", "#515659", "#6d7276", "#8a9094", "#b9bfc3", "#e9eff3"] },
+      "rail-hover": { "role": "neutral", "displayName": "Rail Hover", "canonical": "#33383d", "tonalRamp": ["#080c10", "#1e2227", "#363b40", "#51565b", "#6d7278", "#8a9096", "#b8bec5", "#e9eff6"] },
+      "muted": { "role": "neutral", "displayName": "Muted Slate", "canonical": "#5a626a", "tonalRamp": ["#060c12", "#1c2229", "#343b43", "#4e565e", "#6a737b", "#889099", "#b6bfc8", "#e6f0f9"] },
+      "line": { "role": "neutral", "displayName": "Divider Gray", "canonical": "#d9dde0", "tonalRamp": ["#090c0d", "#1f2224", "#383b3d", "#525658", "#6e7275", "#8c9092", "#babec1", "#ebeff2"] },
+      "surface": { "role": "neutral", "displayName": "Workspace Mist", "canonical": "#f3f4f4", "tonalRamp": ["#0b0b0b", "#212222", "#3a3b3b", "#555555", "#717272", "#8e8f8f", "#bdbebe", "#eeefef"] },
+      "paper": { "role": "neutral", "displayName": "Reading White", "canonical": "#fff", "tonalRamp": ["#0b0b0b", "#222222", "#3a3a3a", "#555555", "#717171", "#8f8f8f", "#bebebe", "#eeeeee"] },
+      "border-strong": { "role": "neutral", "displayName": "Steel Border", "canonical": "#aeb6bc", "tonalRamp": ["#070c10", "#1c2327", "#353c40", "#4f565c", "#6b7378", "#899096", "#b7bfc5", "#e7f0f6"] },
+      "field-stroke": { "role": "neutral", "displayName": "Field Stroke", "canonical": "#8c949b", "tonalRamp": ["#070c11", "#1c2228", "#353b41", "#4f565d", "#6b7379", "#889097", "#b7bfc6", "#e7f0f7"] },
+      "table-head": { "role": "neutral", "displayName": "Table Head Gray", "canonical": "#e8ebed", "tonalRamp": ["#0a0b0d", "#202223", "#383b3c", "#535657", "#6f7274", "#8d9091", "#bbbec0", "#eceff1"] },
+      "secondary-hover": { "role": "neutral", "displayName": "Light Hover", "canonical": "#e5e8e9", "tonalRamp": ["#0a0b0c", "#202223", "#393b3c", "#535657", "#6f7273", "#8d9091", "#bbbebf", "#eceff0"] },
+      "red-ink": { "role": "semantic", "displayName": "Error Red", "canonical": "#8e302b", "tonalRamp": ["#2d0000", "#4f0000", "#6f0f10", "#8f312c", "#b04f47", "#d26d64", "#ff9c91", "#ffcfc3"] },
+      "focus": { "role": "semantic", "displayName": "Focus Blue", "canonical": "#246388", "tonalRamp": ["#000b2b", "#002546", "#003f62", "#1b5b80", "#3b789f", "#5a97be", "#88c6f0", "#b8f8ff"] }
+    },
+    "typographyMeta": {
+      "gate": { "displayName": "Gate", "purpose": "Wayfinding sign location code; tabular bold. 40px below 1120px, 38px below 820px, 36px below 540px." },
+      "headline": { "displayName": "Headline", "purpose": "Sign next-decision message; keep-all word breaking. 21/20/18px at 1120/820/540px." },
+      "title": { "displayName": "Title", "purpose": "Work-surface headings beside the step code." },
+      "subtitle": { "displayName": "Subtitle", "purpose": "Subsection headings inside a work surface." },
+      "body": { "displayName": "Body", "purpose": "Default UI text, export outcome line, mode notes; prose capped near 75ch." },
+      "support": { "displayName": "Support", "purpose": "Muted explanations, check-row hints, storage notes." },
+      "label": { "displayName": "Label", "purpose": "Button text; links and tables also run at 12px." },
+      "caption": { "displayName": "Caption", "purpose": "Status chips and rail gate codes." },
+      "footer": { "displayName": "Footer", "purpose": "Inherited desktop page-foot line only; the footer source link is 12px with a 24px target." },
+      "code": { "displayName": "Code", "purpose": "Harness JSON editor." }
+    },
+    "shadows": [
+      { "name": "overlay", "value": "0 12px 50px #0004", "purpose": "Reset confirmation dialog only, over a #11131580 backdrop." }
+    ],
+    "motion": [
+      { "name": "motion-standard", "value": "160ms cubic-bezier(.16,1,.3,1)", "purpose": "Button background and color transitions." },
+      { "name": "flap-out", "value": "120ms cubic-bezier(.32,0,.67,0)", "purpose": "Upper old sign leaf folds away when the sign message changes." },
+      { "name": "flap-in", "value": "120ms 120ms cubic-bezier(.16,1,.3,1)", "purpose": "Lower new sign leaf folds in; leaves removed after 300ms." },
+      { "name": "reduced-motion", "value": "animation:none; transition:none", "purpose": "prefers-reduced-motion removes all animation; sign text swaps immediately." }
+    ],
+    "breakpoints": [
+      { "name": "mobile", "value": "540px" },
+      { "name": "single-column", "value": "700px" },
+      { "name": "header-rail", "value": "820px" },
+      { "name": "narrow-rail", "value": "1120px" },
+      { "name": "wide", "value": "1600px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Main action of a work surface: ink fill, white 12px/600 label.",
+      "html": "<button class=\"ds-btn ds-btn-primary\">Download</button>",
+      "css": ".ds-btn { display:inline-flex; align-items:center; justify-content:center; gap:10px; min-height:40px; padding:9px 15px; border-radius:6px; font-family:Segoe UI, Apple SD Gothic Neo, Malgun Gothic, Arial, sans-serif; font-size:12px; font-weight:600; border:1px solid var(--ink, #111315); cursor:pointer; transition:background 160ms cubic-bezier(.16,1,.3,1), color 160ms cubic-bezier(.16,1,.3,1); } .ds-btn:focus-visible { outline:3px solid #246388; outline-offset:4px; } .ds-btn:disabled { opacity:.5; cursor:not-allowed; } .ds-btn-primary { background:var(--ink, #111315); color:var(--paper, #fff); } .ds-btn-primary:hover { background:#363c40; }"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Alternative action: transparent fill, steel stroke.",
+      "html": "<button class=\"ds-btn-secondary\">Save plan JSON</button>",
+      "css": ".ds-btn-secondary { display:inline-flex; align-items:center; justify-content:center; min-height:40px; padding:9px 15px; border-radius:6px; font-family:Segoe UI, Apple SD Gothic Neo, Malgun Gothic, Arial, sans-serif; font-size:12px; font-weight:600; background:transparent; color:var(--ink, #111315); border:1px solid #aeb6bc; cursor:pointer; transition:background 160ms cubic-bezier(.16,1,.3,1); } .ds-btn-secondary:hover { background:#e5e8e9; border-color:var(--ink, #111315); } .ds-btn-secondary:focus-visible { outline:3px solid #246388; outline-offset:4px; }"
+    },
+    {
+      "name": "Text Button",
+      "kind": "button",
+      "refersTo": "text-button",
+      "description": "Low-weight underlined action.",
+      "html": "<button class=\"ds-text-btn\">Clear input</button>",
+      "css": ".ds-text-btn { border:0; background:none; color:var(--ink, #111315); font-family:Segoe UI, Apple SD Gothic Neo, Malgun Gothic, Arial, sans-serif; font-size:12px; text-decoration:underline; text-underline-offset:4px; padding:3px 0; cursor:pointer; } .ds-text-btn:hover { color:#3e667a; } .ds-text-btn:focus-visible { outline:3px solid #246388; outline-offset:4px; }"
+    },
+    {
+      "name": "Field",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "In-surface select or input: white, field stroke, 4px corners.",
+      "html": "<label class=\"ds-field\">Attack level<select><option>L1</option></select></label>",
+      "css": ".ds-field { display:block; font-family:Segoe UI, Apple SD Gothic Neo, Malgun Gothic, Arial, sans-serif; font-size:14px; font-weight:600; color:var(--ink, #111315); } .ds-field select, .ds-field input { display:block; width:100%; margin-top:6px; padding:10px; border:1px solid #8c949b; border-radius:4px; background:#fff; color:var(--ink, #111315); font:inherit; font-weight:400; } .ds-field select:focus-visible, .ds-field input:focus-visible { outline:3px solid #246388; outline-offset:4px; }"
+    },
+    {
+      "name": "Destination Rail",
+      "kind": "nav",
+      "refersTo": "nav-item",
+      "description": "Charcoal rail with gate-coded destinations; current item is a yellow plate.",
+      "html": "<nav class=\"ds-rail\"><button class=\"ds-rail-item\" aria-current=\"page\"><span>RED</span><span class=\"ds-rail-code\">R1</span></button><button class=\"ds-rail-item\"><span>BLUE</span><span class=\"ds-rail-code\">B1</span></button></nav>",
+      "css": ".ds-rail { display:grid; gap:5px; width:224px; padding:16px; background:#202326; } .ds-rail-item { display:flex; align-items:center; gap:12px; width:100%; padding:13px 12px; border:0; border-radius:6px; background:none; color:#d7dde1; font-family:Segoe UI, Apple SD Gothic Neo, Malgun Gothic, Arial, sans-serif; font-size:14px; font-weight:600; text-align:left; cursor:pointer; } .ds-rail-item:hover { background:#33383d; } .ds-rail-item[aria-current=page] { background:#ffcc00; color:#111315; } .ds-rail-item:focus-visible { outline:3px solid #246388; outline-offset:4px; } .ds-rail-code { margin-left:auto; font-size:11px; font-weight:500; opacity:.8; }"
+    },
+    {
+      "name": "Status Chip",
+      "kind": "chip",
+      "refersTo": "status-chip",
+      "description": "Factual state label; not interactive.",
+      "html": "<span class=\"ds-chip\">Same-engine self-check</span>",
+      "css": ".ds-chip { display:inline-block; font-family:Segoe UI, Apple SD Gothic Neo, Malgun Gothic, Arial, sans-serif; font-size:11px; padding:3px 8px; border:1px solid #afb6bc; border-radius:3px; color:#5a626a; }"
+    },
+    {
+      "name": "Wayfinding Sign",
+      "kind": "custom",
+      "refersTo": "wayfinding-sign",
+      "description": "The signature: gate code, next-decision message, and ink-plate arrow action.",
+      "html": "<section class=\"ds-sign\"><div class=\"ds-gate\">R1</div><div class=\"ds-sign-msg\"><strong>Select and edit candidates</strong><p>input.pdf · 1 candidate</p></div><button class=\"ds-sign-action\">Go to candidates<span class=\"ds-plate\"><svg viewBox=\"0 0 24 24\" width=\"26\" height=\"26\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M4 12h16M13 5l7 7-7 7\"/></svg></span></button></section>",
+      "css": ".ds-sign { display:flex; align-items:center; gap:22px; padding:14px 32px; background:#ffcc00; color:#111315; border-top:5px solid #111315; border-bottom:5px solid #111315; font-family:Segoe UI, Apple SD Gothic Neo, Malgun Gothic, Arial, sans-serif; } .ds-gate { font-size:44px; line-height:1; letter-spacing:-.04em; font-weight:700; font-variant-numeric:tabular-nums; min-width:64px; } .ds-sign-msg { flex:1; } .ds-sign-msg strong { display:block; font-size:22px; line-height:1.35; word-break:keep-all; } .ds-sign-msg p { margin:4px 0 0; font-size:13px; } .ds-sign-action { display:flex; align-items:center; gap:22px; background:none; border:0; color:#111315; font:inherit; font-size:14px; font-weight:700; cursor:pointer; } .ds-plate { display:grid; place-items:center; width:44px; height:44px; border-radius:4px; background:#111315; color:#fff; } .ds-sign-action:hover .ds-plate { background:#353a3e; } .ds-sign-action:focus-visible { outline:3px solid #246388; outline-offset:4px; }"
+    },
+    {
+      "name": "Work Surface with Step Head",
+      "kind": "card",
+      "refersTo": "work-surface",
+      "description": "Flat white numbered step container.",
+      "html": "<section class=\"ds-surface\"><div class=\"ds-step-head\"><span class=\"ds-step-code\">1</span><div><h2>Input · paper file</h2><p>PDF · DOCX · TXT · max 25MiB.</p></div></div></section>",
+      "css": ".ds-surface { background:#fff; padding:28px; border:1px solid #d9dde0; border-radius:6px; color:#111315; font-family:Segoe UI, Apple SD Gothic Neo, Malgun Gothic, Arial, sans-serif; font-size:14px; line-height:1.6; } .ds-surface:focus-within { border-color:#aeb6bc; } .ds-step-head { display:flex; align-items:flex-start; gap:14px; } .ds-step-head h2 { margin:0; font-size:22px; line-height:1.4; letter-spacing:-.02em; } .ds-step-head p { margin:4px 0 0; color:#5a626a; font-size:13px; } .ds-step-code { display:grid; place-items:center; width:30px; height:30px; flex-shrink:0; background:#111315; color:#fff; border-radius:4px; font-weight:700; font-variant-numeric:tabular-nums; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "Airport Terminal Wayfinding",
+    "overview": "The workbench reads like a terminal concourse: a charcoal rail of destinations, one yellow sign that names where you are and the next decision, and quiet white work surfaces where papers, candidates and records are read. The sign is the only loud object on screen; everything below it is calm, flat and legible. Gate-style codes (R1, B1, H1, A1, C1, and step numbers) give each destination and step a short, scannable identifier.\n\nDensity is that of an operating tool, not a marketing page. Each RED and BLUE destination is a vertical stack of three numbered work surfaces (input, execute, result) on a cool gray workspace. Human review, results and harness management are separate destinations, never a wizard that forces one case through every step. Supporting detail (help, manual JSON exchange, advanced budgets, engine limits) sits in native disclosures or muted supporting text so the primary path stays short.\n\nType is a single system sans stack chosen for Korean and Latin UI; no web font ships. Icons are rounded-stroke inline SVG pictograms; directional ones sit white-on-ink inside small square plates, like airport pictograms.",
+    "keyCharacteristics": [
+      "One yellow wayfinding sign per view, bounded by heavy ink rules.",
+      "Charcoal destination rail with a yellow current-destination plate.",
+      "Flat white work surfaces with thin dividers on a cool gray workspace.",
+      "System sans everywhere; gate codes in tabular bold.",
+      "Square ink plates for pictograms and step codes.",
+      "Split-flap sign change, removed entirely under reduced motion."
+    ],
+    "rules": [
+      { "name": "The Directional Yellow Rule", "body": "Yellow marks where you are, where to go next, or what is selected. It is never decoration, never a status color, never body text.", "section": "colors" },
+      { "name": "The One Sign Rule", "body": "Only the wayfinding band carries a yellow field. Below it, yellow appears only as small plates (the current rail item, the brand mark, connection-step numerals) and selection.", "section": "colors" },
+      { "name": "The One Face Rule", "body": "Controls, explanations and document excerpts use the system sans; hierarchy is size and weight.", "section": "typography" },
+      { "name": "The Tabular Code Rule", "body": "Gate codes, step codes, tables and record metadata use tabular numerals.", "section": "typography" },
+      { "name": "The Independent Destinations Rule", "body": "RED, BLUE, review, results and harness are sibling destinations, each with its own content. No layout implies one case must pass through them in sequence.", "section": "layout" },
+      { "name": "The Flat Work Surface Rule", "body": "Work surfaces, panels and cards never cast shadows; depth is tone and rule weight.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do keep exactly one yellow sign per view and use yellow only for position, next decision and selection.",
+      "Do pair every directional pictogram with a text label, and set directional pictograms white on a square ink plate.",
+      "Do give each destination and step a short gate code in tabular bold.",
+      "Do keep work surfaces flat: white, 1px Divider Gray, 6px corners.",
+      "Do keep keyboard focus visible with the 3px Focus Blue outline, and keep the reduced-motion path that removes the split-flap.",
+      "Do put secondary detail (help, manual exchange, budgets, limits) in native disclosures or muted 13px text.",
+      "Do state result provenance plainly in the status hierarchy: an engine self-check is labeled as a self-check with independent checks pending, not as verification."
+    ],
+    "donts": [
+      "Don't spread yellow to fills, chips, cards or status; it loses its wayfinding meaning.",
+      "Don't add drop shadows to surfaces or cards; the dialog is the only shadowed object.",
+      "Don't introduce a step-by-step case wizard or progress bar that chains RED, BLUE and review.",
+      "Don't use color alone for state; status always has text.",
+      "Don't ship a web font or a second display face."
+    ]
+  }
+}

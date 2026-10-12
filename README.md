@@ -216,3 +216,14 @@ We draw the corpus from the PMC Open Access subset, using only CC BY or CC0 pape
 - [시즌 12 AutoBioX](https://pseudo-lab.com/projects/ad2f2010-3ae1-4cf6-b231-a6d2ea5bb8ff) (AI 에이전트 연구 파이프라인)
 
 문의는 Issue로 남겨 주세요.
+
+## Workbench 제안 도구 (이 브랜치)
+
+러너가 구현한 논문 실험용 웹앱과 HTML 사용설명서를 [tools/workbench](tools/workbench)에 담았습니다.
+기존 프로젝트 소개·계획·평가 기준을 변경하지 않는 제안 도구이며, 팀 승인 또는 공식 벤치마크 검증을 뜻하지 않습니다.
+
+- [HTML 사용설명서](tools/workbench/app/dist/guide.html): 간단한 사용법을 먼저, 설치·RED·BLUE·검수·Harness·오류 해결을 뒤에 설명합니다. GitHub 화면은 HTML 소스를 표시하므로 파일을 내려받아 브라우저로 열어 주세요.
+- [실행·소스 안내](tools/workbench/TEAM-INTEGRATION.md): 브랜치 내려받기, 폴더 위치, 로컬 실행과 코드 출처.
+
+Workbench 원래 코드의 AGPL-3.0-only 및 외부 구성요소 고지를 해당 폴더에 유지했습니다.
+논문 원본·변조판·정답·비공개 Harness·실험 기록·녹음·로그인 정보·개인 PC 설정은 포함하지 않았습니다.

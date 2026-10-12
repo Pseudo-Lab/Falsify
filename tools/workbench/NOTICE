@@ -1,0 +1,18 @@
+Falsify Paper Workbench
+Copyright (C) 2026 Shinick-Han
+
+Original Workbench application code is licensed under the GNU Affero General
+Public License version 3 only (AGPL-3.0-only). See LICENSE.
+
+Corresponding source for the hosted application and local companion:
+https://github.com/Shinick-Han/falsify-workbench
+
+The optional Falsify PDF Editor module is separately maintained under
+AGPL-3.0-only. Its corresponding source, pinned upstream source submodules,
+PDFium patches, build instructions and third-party notices are available at:
+https://github.com/Shinick-Han/falsify-pdf-editor
+
+Browser parsing dependencies retain their notices in app/dist/vendor.
+Python and CLI dependencies are not bundled and retain their own licenses.
+Uploaded papers, user harnesses and experiment records are not distributed
+with this application and are not relicensed by this notice.

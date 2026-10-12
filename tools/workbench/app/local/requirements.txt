@@ -1,0 +1,4 @@
+# Existing root Codex backend requires jsonschema; PDF preservation is optional.
+# PyMuPDF is AGPL/commercial licensed. Resolve distribution obligations before bundling.
+jsonschema==4.26.0
+PyMuPDF==1.28.2

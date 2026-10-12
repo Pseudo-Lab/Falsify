@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="논문 파일을 브라우저에서 추출하고, 사용자 PC의 로컬 companion(127.0.0.1)과 페어링해 RED·BLUE를 독립 실행하거나 수동 JSON으로 교환하는 공개 작업대. 기록은 이 브라우저에만 저장됩니다.">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; worker-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' http://127.0.0.1:*; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>Falsify · Paper Workbench</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' fill='%23ffcc00'/%3E%3Cpath d='M11 10h20v5H17v5h11v5H17v10h-6z' fill='%23111315'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="document-red.css">
+  <link rel="stylesheet" href="experiment-ledger.css">
+  <link rel="stylesheet" href="image-editor.css">
+  <script src="harness-core.js" defer></script>
+  <script src="local-bridge.js" defer></script>
+  <script src="experiment-ledger.js" defer></script>
+  <script src="document-import.js" defer></script>
+  <script src="document-red-core.js" defer></script>
+  <script src="paper-analysis-core.js" defer></script>
+  <script src="document-export.js" defer></script>
+  <script src="app.js" defer></script>
+  <script src="document-preview.js" defer></script>
+  <script src="image-editor-core.js" defer></script>
+  <script src="image-editor.js" defer></script>
+  <script src="document-red.js" defer></script>
+  <script src="document-blue-core.js" defer></script>
+  <script src="document-blue.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">작업 영역으로 건너뛰기</a>
+  <svg class="svg-definitions" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <defs>
+      <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M4 12h16M13 5l7 7-7 7"/></symbol>
+      <symbol id="i-paper" viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6zM14 3v5h4M9 12h6M9 16h6"/></symbol>
+      <symbol id="i-review" viewBox="0 0 24 24"><path d="M9 4H5v17h14V4h-4M9 3h6v4H9zM8 14l3 3 5-6"/></symbol>
+      <symbol id="i-terminal" viewBox="0 0 24 24"><path d="M3 5h18v14H3zM6 9l3 3-3 3M12 15h5"/></symbol>
+      <symbol id="i-results" viewBox="0 0 24 24"><path d="M4 4v16h16M8 15V9M13 15V6M18 15v-4"/></symbol>
+      <symbol id="i-reset" viewBox="0 0 24 24"><path d="M4 9a8 8 0 1 1 0 6M4 3v6h6"/></symbol>
+    </defs>
+  </svg>
+
+  <aside class="rail" aria-label="작업 메뉴">
+    <a class="brand" href="#red" aria-label="Falsify 논문 실험 RED"><span class="brand-mark">F</span><span>Falsify<span class="brand-sub">Paper Workbench</span></span></a>
+    <nav class="main-nav" aria-label="목적지">
+      <div class="paper-nav-group" role="group" aria-labelledby="paper-nav-label" data-current="true">
+        <div class="paper-nav-label" id="paper-nav-label"><svg aria-hidden="true"><use href="#i-paper"/></svg><span>논문 실험</span></div>
+        <ul class="paper-subnav">
+          <li><button type="button" data-view="workbench" aria-current="page" aria-label="논문 실험 RED"><span>RED</span><span class="nav-code" aria-hidden="true">R1</span></button></li>
+          <li><button type="button" data-view="blue" aria-label="논문 실험 BLUE"><span>BLUE</span><span class="nav-code" aria-hidden="true">B1</span></button></li>
+        </ul>
+      </div>
+      <button type="button" data-view="review" aria-label="검수"><svg aria-hidden="true"><use href="#i-review"/></svg><span>검수</span><span class="nav-code" aria-hidden="true">H1</span></button>
+      <button type="button" data-view="results" aria-label="결과 기록"><svg aria-hidden="true"><use href="#i-results"/></svg><span>결과 기록</span><span class="nav-code" aria-hidden="true">A1</span></button>
+      <button type="button" data-view="agents" aria-label="Harness"><svg aria-hidden="true"><use href="#i-terminal"/></svg><span>Harness</span><span class="nav-code" aria-hidden="true">C1</span></button>
+    </nav>
+  </aside>
+
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="location"><span id="paper-name">Falsify</span><span class="slash" aria-hidden="true">/</span><span id="location-name">논문 실험 / RED</span></div>
+      <div class="top-actions"><button class="icon-button" id="reset" type="button" aria-label="작업 초기화" title="작업 초기화"><svg aria-hidden="true"><use href="#i-reset"/></svg></button></div>
+    </header>
+
+    <main id="main" tabindex="-1">
+      <section class="wayfinding" aria-label="현재 위치와 다음 작업">
+        <div class="gate-code" id="gate-code">R1</div>
+        <div class="sign-message"><h1 id="sign-title">논문 파일을 입력하세요</h1><p id="sign-detail">RED는 입력 파일에서 해석 왜곡 후보를 준비합니다.</p></div>
+        <button type="button" class="sign-action" id="sign-action"><span id="sign-action-label">파일 입력</span><span class="icon-square"><svg aria-hidden="true"><use href="#i-arrow"/></svg></span></button>
+      </section>
+
+      <div class="content">
+        <section class="role-step document-red local-bridge" id="local-bridge" aria-labelledby="bridge-title">
+          <div class="step-head"><span class="step-code" aria-hidden="true">L</span><div><h2 id="bridge-title">로컬 실행 연결</h2><p id="bridge-status" role="status" aria-live="polite">로컬 실행 상태 확인 중</p></div></div>
+          <div id="bridge-pair">
+            <ol class="bridge-steps">
+              <li><strong>처음 한 번 · 연결 앱 설치 (Windows)</strong><span><a class="text-link" href="https://github.com/Shinick-Han/falsify-workbench/archive/refs/heads/main.zip" rel="noopener noreferrer">앱 ZIP 다운로드</a> → 압축 풀기 → 그 폴더의 터미널에서 <code id="bridge-install">powershell -NoProfile -ExecutionPolicy Bypass -File .\install-connection.ps1</code> 한 번 실행. 현재 사용자(HKCU)에만 falsify:// 연결을 등록하며 관리자 권한이 필요 없습니다. 이 페이지는 아무것도 자동 설치·실행하지 않습니다.</span></li>
+              <li><strong>터미널 열기</strong><span>「연결 · 터미널 열기」를 누르고 브라우저가 물으면 열기를 허용합니다. 내 PC 터미널에 companion이 열립니다.</span></li>
+              <li><strong>토큰으로 연결</strong><span>터미널에 표시된 페어링 토큰을 붙여넣고 「토큰으로 연결」을 누릅니다. 인증된 capabilities만 확인하며 실행·동의는 자동으로 하지 않습니다.</span></li>
+            </ol>
+            <div class="button-row"><button class="button primary" type="button" id="bridge-launch" hidden>연결 · 터미널 열기</button></div>
+            <p id="bridge-other-os" class="muted" hidden>터미널 열기는 Windows 연결 앱 전용입니다. 다른 OS는 아래 「수동 실행 · 포트 변경」의 명령으로 companion을 실행한 뒤 토큰을 붙여넣으세요.</p>
+            <p id="bridge-launch-status" class="form-feedback" role="status" aria-live="polite"></p>
+            <div class="bridge-token-row"><label for="bridge-token">페어링 토큰<input id="bridge-token" type="password" autocomplete="off" spellcheck="false" maxlength="512"></label><div class="button-row"><button class="button secondary" type="button" id="bridge-connect">토큰으로 연결</button><button class="text-button" type="button" id="bridge-disconnect" hidden>연결 해제</button></div></div>
+            <p id="bridge-feedback" class="form-feedback" role="alert"></p>
+            <details class="red-help"><summary>수동 실행 · 포트 변경 · 연결 문제</summary>
+              <div class="red-settings"><label for="bridge-port">로컬 포트 (주소는 http://127.0.0.1 고정)<input id="bridge-port" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="5" value="7816" autocomplete="off" spellcheck="false"></label></div>
+              <p>터미널 열기와 수동 실행 모두 이 포트를 씁니다. 압축을 푼 폴더에서 직접 실행하려면 의존성을 프로젝트 폴더 안에 설치하는 launcher를 쓰세요: <code id="bridge-launcher">powershell -NoProfile -ExecutionPolicy Bypass -File .\start-companion.ps1</code> 의존성을 직접 설치한 뒤에는 <code id="bridge-command">python app/local/server.py --web-origin https://shinick-han.github.io</code>도 됩니다(새 PC에서 바로 실행하면 실패합니다). 포트를 바꾸면 같은 <code>-Port</code>/<code>--port</code>가 붙습니다. <a class="text-link" href="https://github.com/Shinick-Han/falsify-workbench/blob/main/docs/local-companion.md" target="_blank" rel="noopener noreferrer">로컬 companion 설치·실행 안내</a></p>
+              <p class="muted">「연결 · 터미널 열기」를 눌러도 아무 창이 뜨지 않으면 연결 앱이 설치되지 않았거나 브라우저가 실행을 막은 것입니다. 브라우저는 둘을 구분해 알려주지 않으므로 1단계 설치를 다시 하거나 위 명령으로 직접 실행하세요.</p>
+              <p class="muted">기본 실행기는 이 PC에 로그인된 Codex CLI이고, CLI 선택을 지원하는 companion에서는 RED·BLUE마다 Codex/Claude CLI·모델·effort를 고를 수 있습니다. 다른 실행기는 신뢰한 stdio wrapper를 Harness 계약으로 등록해 씁니다. API 키는 요청하지 않습니다. 토큰은 이 탭의 메모리에만 있고 저장·기록·내보내기에 포함되지 않으며, 새로고침하면 다시 붙여넣어야 합니다.</p>
+              <p class="muted">브라우저가 로컬 네트워크 접근 권한을 물으면 허용하세요. 권한 거부·CORS 거부·서버 미실행은 브라우저가 구분해 알려주지 않습니다. 127.0.0.1 HTTP 연결을 막는 브라우저는 <a class="text-link" data-bridge-local href="http://127.0.0.1:7816/" target="_blank" rel="noopener noreferrer">로컬 작업대 열기</a> 또는 수동 JSON 교환을 쓰세요. 결과 기록은 이 브라우저의 이 origin 저장소에만 있으며 클라우드 DB가 아닙니다.</p></details>
+          </div>
+        </section>
+        <section class="view role-view" id="view-workbench" aria-label="논문 실험 RED">
+          <section class="role-step document-red paper-intake" aria-labelledby="intake-title">
+            <div class="step-head"><span class="step-code" aria-hidden="true">1</span><div><h2 id="intake-title">입력 · 논문 파일</h2><p>PDF · DOCX · ODT · HTML · TXT/MD/LaTeX/CSV · 최대 25MiB. 추출은 이 브라우저에서 합니다.</p></div></div>
+            <div class="document-upload"><label class="file-label" for="paper-file">RED 논문 파일<input type="file" id="paper-file" accept=".pdf,.docx,.odt,.txt,.md,.markdown,.text,.html,.htm,.tex,.csv,.tsv,.rst"></label><button type="button" class="text-button" id="import-cancel" hidden>추출 취소</button><p id="import-status" class="form-feedback" role="status" aria-live="polite"></p></div>
+            <section id="import-preview" class="import-preview" hidden aria-labelledby="import-title">
+              <div class="section-heading compact"><h3 id="import-title">추출 결과 확인</h3><button type="button" class="text-button" id="import-clear">입력 초기화</button></div>
+              <p id="import-summary" class="muted"></p><p id="import-warning" class="muted"></p>
+              <label for="import-segment">미리보기 페이지 / 문단<select id="import-segment"></select></label>
+              <label for="import-text">추출 텍스트<textarea id="import-text" rows="9" readonly spellcheck="false"></textarea></label>
+              <p class="muted">미리보기 선택은 RED 입력 범위를 줄이지 않습니다. 기록하지 않은 입력은 새로고침하면 지워집니다.</p>
+            </section>
+            <details class="red-help"><summary>도움말 · AMAS 원문 PDF로 실험하기</summary><ol><li><a class="text-link" href="https://journals.plos.org/plosone/article/file?id=10.1371/journal.pone.0352174&amp;type=printable" target="_blank" rel="noopener noreferrer">PLOS 원문 PDF 다운로드 (22쪽)</a> 후 위 파일 입력으로 가져오세요.</li><li>선택 harness로 전체 RED 검토를 시작하고 후보를 선택하세요. Before/After를 읽고 After를 직접 수정할 수 있습니다.</li><li>실험용 사본과 변경 계획 JSON을 저장하세요. 보존 검사가 실패하면 다운로드가 차단됩니다.</li><li>BLUE에는 수정 파일만 입력하세요. 변경 계획은 검수에서만 대조합니다.</li></ol><p class="muted">스캔 파일은 먼저 OCR, 구형 DOC·HWP·RTF는 PDF/DOCX/TXT로 변환하세요.</p></details>
+          </section>
+
+          <section class="role-step document-red" aria-labelledby="red-execute-title">
+            <div class="step-head"><span class="step-code" aria-hidden="true">2</span><div><h2 id="red-execute-title">실행 · RED harness</h2></div></div>
+            <p id="red-connection" class="muted">로컬 실행 상태 확인 중</p>
+            <section id="document-red" class="role-run" tabindex="-1" hidden aria-labelledby="document-red-title">
+              <h3 id="document-red-title">문서 전체 RED 검토</h3><p id="red-document-summary" class="muted"></p>
+              <div class="red-analysis" id="red-analysis" hidden><div class="button-row"><button class="button secondary" type="button" id="red-analyze" aria-describedby="red-analysis-note" disabled>PDF 사전분석</button></div><p id="red-analysis-note" class="muted"></p><p id="red-analysis-status" class="form-feedback" role="status" aria-live="polite"></p><details class="red-help" id="red-analysis-result" hidden><summary>사전분석 요약 · 참고용 힌트</summary><div id="red-analysis-body"></div></details></div>
+              <details class="red-help image-edit" id="image-edit" hidden><summary>그림 한 곳 교체 · 선택 사항 (PDF)</summary>
+                <p id="image-note" class="muted"></p>
+                <ul class="image-limits"><li>사람이 직접 고른 그림 한 곳을 직접 고른 PNG로 바꾸는 수동 실험입니다. RED 모델 성능이나 과학적 타당성 판정이 아니며 모델을 호출하지 않습니다.</li><li>원본 파일은 바뀌지 않습니다. 선택한 한 곳만 바꾼 별도 실험용 사본과 별도 보고서 JSON을 만듭니다.</li><li>BLUE는 현재 사본의 텍스트만 읽습니다. 이 사본은 BLUE에 자동으로 넘기지 않습니다.</li><li>Form XObject 안의 그림·인라인 그림·잘림(clip)·회전·투명도 등은 지원하지 않으며 우회하지 않습니다.</li></ul>
+                <div class="button-row"><button class="button secondary" type="button" id="image-list" aria-describedby="image-note" disabled>그림 위치 목록 불러오기</button></div>
+                <p id="image-status" class="form-feedback" role="status" aria-live="polite"></p>
+                <fieldset class="image-occurrences" id="image-occurrences" hidden><legend>교체할 그림 한 곳</legend><div id="image-rows" class="image-rows"></div></fieldset>
+                <div class="image-replace" id="image-replace" hidden>
+                  <div class="image-compare"><figure><figcaption>Before · 원본</figcaption><img id="image-before" class="image-preview" alt="" hidden><p id="image-before-note" class="muted"></p></figure><figure><figcaption>After · 직접 고른 PNG</figcaption><img id="image-after" class="image-preview" alt="" hidden><label for="image-png">교체 PNG (4 MiB·400만 픽셀·한 변 8192 px 이하)</label><input type="file" id="image-png" accept="image/png" disabled><p id="image-png-status" class="form-feedback" role="status" aria-live="polite"></p></figure></div>
+                  <p id="image-stretch" class="image-stretch" hidden></p>
+                  <label class="check-row"><input type="checkbox" id="image-consent"><span>교체한 그림은 의도적 결함 연구용 실험 사본에만 반영합니다. 실제 논문·출판물로 제출하지 않습니다.</span></label>
+                  <div class="button-row"><button class="button primary" type="button" id="image-export" disabled>선택한 한 곳만 교체한 사본 만들기</button></div>
+                  <p id="image-export-status" class="form-feedback" role="status" aria-live="polite"></p>
+                  <div class="image-result" id="image-result" hidden><code id="image-result-hash" class="image-hash"></code><div class="button-row"><button class="button secondary" type="button" id="image-download-pdf" disabled>실험용 PDF 다운로드</button><button class="button secondary" type="button" id="image-download-report" disabled>교체 보고서 JSON 다운로드</button></div><p class="muted">보고서의 렌더 검사는 같은 엔진(MuPDF)의 자체 확인입니다. 독립 검사·도메인 검수는 아직 대기 중입니다.</p></div>
+                </div>
+              </details>
+              <div class="red-settings"><label>공격 단계<select id="red-level"><option value="1">L1 · 명시적 모순</option><option value="2">L2 · 필요한 조건 누락</option><option value="3">L3 · 근거 없는 해석</option></select></label></div>
+              <details class="red-help advanced"><summary>고급 설정 · 최대 모델 호출</summary><div class="red-settings"><label>최대 모델 호출 (1–32)<input id="red-budget" type="number" min="1" max="32" value="8"></label></div></details>
+              <label class="check-row"><input type="checkbox" id="red-consent"><span>전체 추출 텍스트를 선택 harness에 전송합니다.<small>원본 파일은 변경하지 않습니다. 사용자 코드/외부 서버는 자체 도구·격리를 관리합니다.</small></span></label>
+              <p class="storage-note">유효한 결과와 추출 논문 텍스트는 이 브라우저에 자동 저장됩니다. 클라우드에 공유되지 않습니다.</p>
+              <div class="button-row"><button class="button primary" type="button" id="red-start" disabled>선택 harness로 전체 검토</button><button class="button secondary" type="button" id="red-cancel" hidden>검토 취소</button></div>
+              <p id="red-progress" class="form-feedback" role="status" aria-live="polite"></p>
+              <details class="red-help"><summary>수동 JSON 교환 (로컬 연결 없이)</summary><div class="button-row"><button class="button secondary" type="button" id="red-request">수동 검토 요청 JSON</button></div><p class="storage-note">유효한 응답과 추출 논문 텍스트는 이 브라우저에 자동 저장됩니다. 클라우드에 공유되지 않습니다.</p><label for="red-response">요청의 revision·sourceHash가 포함된 응답 JSON</label><textarea id="red-response" rows="4" maxlength="150000" spellcheck="false"></textarea><button type="button" class="button secondary" id="red-import-response">응답 확인</button><p class="muted">수동 응답의 실제 실행 여부는 검증하지 않습니다. 원문 인용·위치·리비전은 확인합니다.</p></details>
+              <details class="red-help"><summary>도움말 · 로컬 실행과 파일 보존 범위</summary><p>위 연결 패널에서 내 PC의 companion과 페어링하거나, companion 폴더에서 <code>python app/local/server.py</code>를 실행하고 <a data-bridge-local href="http://127.0.0.1:7816/" target="_blank" rel="noopener noreferrer">로컬 작업대 열기</a>. 기본 실행기는 이 PC에 로그인된 Codex CLI이며, CLI 선택을 지원하는 companion에서는 아래 Harness 선택에서 Codex/Claude CLI·모델·effort를 고를 수 있습니다. 연결이 없으면 수동 JSON 교환만 가능합니다.</p><p>PDF 완성본은 연결된 companion이 알려준 편집 경로를 따릅니다. 기존 한 줄 보존 편집은 재사용 가능한 원본 글꼴의 한 줄 텍스트가 기존 공간에 들어갈 때만 편집하고, 변경 영역 밖을 96dpi로 비교하며 글리프 누락·혼합 글꼴·줄바꿈은 차단합니다. 줄바꿈 재배치 엔진(falsify-pdf-editor)을 제공하는 companion에서는 긴 After의 줄바꿈과 이어지는 페이지 추가를 시도합니다. 재배치 대상은 1단·회전 없음·잘림 없음인 최상위 본문 텍스트뿐이며, 그 밖의 텍스트는 재배치하지 않습니다. 추가 페이지의 머리말·꼬리말 지원 여부는 연결된 엔진에 따라 다릅니다. 지원 엔진은 원본 텍스트와 글꼴을 복제합니다. 원래 쪽번호는 바꾸지 않으며, 원본에 단독 아라비아 숫자 쪽번호가 있으면 추가 페이지는 그 번호에 소수 접미(예: 10.1)를 붙입니다. 실제 적용 여부와 지원 범위는 아래 편집 안내와 다운로드 결과에서 확인하세요. 실제 줄바꿈·페이지 수는 그 출력에 대한 같은 엔진의 자체검사 결과로만 보고하며, 독립 추출/렌더링·사람 검수는 별도로 필요합니다. TXT류는 인코딩·줄끝·변경 밖의 바이트를 보존하나 표시 앱의 자동 줄바꿈은 미검증입니다. DOCX/ODT/HTML은 원래 레이아웃을 검증할 렌더러가 없어 완성본 다운로드를 차단합니다.</p></details>
+            </section>
+            <p class="step-empty muted">논문 파일을 입력하면 실행 설정이 열립니다.</p>
+          </section>
+
+          <section class="role-step document-red" id="red-result-step" aria-labelledby="red-result-title">
+            <div class="step-head"><span class="step-code" aria-hidden="true">3</span><div><h2 id="red-result-title">결과 · 후보 선택과 사본</h2></div></div>
+            <p id="red-empty" class="muted">아직 후보가 없습니다. 전체 검토를 시작하거나 수동 응답을 가져오세요.</p>
+            <div id="red-candidates"></div>
+            <div class="red-export" id="red-export" hidden><p id="red-selection-summary"></p><p id="red-export-mode" class="red-export-mode" hidden></p><label class="check-row"><input type="checkbox" id="red-export-consent"><span>선택한 변경은 의도적 결함이 포함된 실험용 사본에만 반영합니다. 실제 논문·출판물로 제출하지 않습니다.</span></label><div class="button-row"><button class="button primary" type="button" id="red-download" disabled>보존 검사 후 완성본 다운로드</button><button class="button secondary" type="button" id="red-plan">변경 계획 JSON 저장</button></div><div id="red-export-status" class="form-feedback" role="status" aria-live="polite"></div><section class="red-preview" id="red-preview" aria-labelledby="red-preview-title" hidden><h3 id="red-preview-title">다운로드한 사본 미리보기</h3><p class="muted">방금 다운로드한 파일의 SHA-256을 다시 확인한 뒤에만 그 바이트를 이 브라우저에서 쪽 단위로 그립니다. 화면 확인용이며 시각 품질·독립 검사·과학적 타당성을 증명하지 않습니다.</p><code class="red-preview-hash" id="red-preview-hash"></code><div class="button-row"><button class="button secondary" type="button" id="red-preview-prev" disabled>이전 쪽</button><span class="red-preview-page" id="red-preview-page"></span><button class="button secondary" type="button" id="red-preview-next" disabled>다음 쪽</button><button class="button secondary" type="button" id="red-preview-download" disabled>같은 사본 다시 다운로드</button></div><p id="red-preview-status" class="form-feedback" role="status" aria-live="polite"></p><div class="red-preview-stage" id="red-preview-stage"></div></section><p class="muted">후보 선택은 도메인 검수·팀 승인·gold 판정이 아닙니다. 변경 근거는 별도 계획 JSON에만 기록합니다.</p></div>
+          </section>
+        </section>
+
+        <section class="view role-view" id="view-blue" hidden aria-label="논문 실험 BLUE">
+          <section id="document-blue" class="role-flow" tabindex="-1" aria-labelledby="blue-title">
+            <section class="role-step document-red" aria-labelledby="blue-title">
+              <div class="step-head"><span class="step-code" aria-hidden="true">1</span><div><h2 id="blue-title">입력 · BLUE 논문 파일</h2><p>RED와 독립적으로 수정 사본, 원본 또는 대조군 파일을 직접 고르세요. RED 계획·검수 기록은 보내지 않습니다.</p></div></div>
+              <label for="doc-blue-file">BLUE 검토 파일<input id="doc-blue-file" type="file" accept=".pdf,.txt,.md,.docx,.odt,.html,.htm"></label>
+              <p id="doc-blue-summary">아직 파일을 입력하지 않았습니다.</p>
+            </section>
+            <section class="role-step document-red" aria-labelledby="blue-execute-title">
+              <div class="step-head"><span class="step-code" aria-hidden="true">2</span><div><h2 id="blue-execute-title">실행 · BLUE harness</h2></div></div>
+              <p id="doc-blue-connection" class="muted"></p>
+              <details class="red-help advanced"><summary>고급 설정 · 최대 모델 호출</summary><div class="red-settings"><label>최대 모델 호출 (1–32)<input id="doc-blue-budget" type="number" min="1" max="32" value="8"></label></div></details>
+              <label class="check-row"><input id="doc-blue-consent" type="checkbox"><span>추출 텍스트를 선택 harness에 전송해 독립 BLUE 검토를 실행합니다.<small>문서에 제목·저자·출처가 남을 수 있습니다. 사용자 코드/서버의 내부 도구·격리는 보장하지 않습니다.</small></span></label>
+              <p class="storage-note">유효한 결과와 추출 논문 텍스트는 이 브라우저에 자동 저장됩니다. 클라우드에 공유되지 않습니다.</p>
+              <div class="button-row"><button id="doc-blue-start" class="button primary" type="button" disabled>BLUE 독립 검토 시작</button><button id="doc-blue-cancel" class="button secondary" type="button" hidden>취소</button><button id="doc-blue-clear" class="text-button" type="button">BLUE 입력 초기화</button></div>
+              <p id="doc-blue-progress" role="status" aria-live="polite"></p>
+              <details class="red-help"><summary>수동 JSON 교환 (로컬 연결 없이)</summary><div class="button-row"><button id="doc-blue-request" class="button secondary" type="button" disabled>수동 BLUE 요청 저장</button></div><p class="storage-note">유효한 응답과 추출 논문 텍스트는 이 브라우저에 자동 저장됩니다. 클라우드에 공유되지 않습니다.</p><label for="doc-blue-response">현재 요청의 응답 JSON<textarea id="doc-blue-response" rows="5" maxlength="150000"></textarea></label><button id="doc-blue-apply" class="button secondary" type="button" disabled>응답 적용 (실행 출처 미검증)</button></details>
+            </section>
+            <section class="role-step document-red" aria-labelledby="blue-result-title">
+              <div class="step-head"><span class="step-code" aria-hidden="true">3</span><div><h2 id="blue-result-title">결과 · BLUE 지적</h2></div></div>
+              <p id="doc-blue-result-summary" class="muted"></p>
+              <div id="doc-blue-findings"></div>
+              <div class="button-row"><button id="doc-blue-record" class="button secondary" type="button" disabled>BLUE 실행 결과 기록</button><button class="text-button" type="button" data-view="review">검수로 이동</button></div><p id="doc-blue-record-status" role="status"></p>
+            </section>
+          </section>
+        </section>
+
+        <section class="view" id="view-review" hidden aria-labelledby="review-title">
+          <section id="human-evaluation" class="document-red" aria-labelledby="review-title">
+            <div class="section-heading"><div><h2 id="review-title">검수</h2><p>실행 결과를 사람이 평가합니다. RED / BLUE 실행과 분리된 기록이며 승인이나 과학적 gold를 자동 확정하지 않습니다.</p></div></div>
+            <label for="evaluation-run">평가할 실행<select id="evaluation-run"><option value="">RED / BLUE에서 결과를 먼저 기록하세요</option></select></label>
+            <p id="evaluation-binding" class="muted"></p><div id="evaluation-output"></div>
+            <section id="evaluation-plan-section" hidden><h3>BLUE 변경 기록 대조 (선택)</h3><p>고정된 실행의 출력 파일 해시와 대조합니다. 인용 겹침은 탐지 성공 판정이 아닙니다. 여기의 계획·판정은 모델 요청에 포함되지 않습니다.</p><label for="evaluation-plan">RED 변경 계획 JSON<input id="evaluation-plan" type="file" accept=".json"></label><p id="evaluation-plan-status" role="status"></p><div id="evaluation-comparison"></div></section>
+            <form id="evaluation-form">
+              <div class="ledger-fields"><label>평가자<input id="evaluation-reviewer" maxlength="120" required placeholder="이름 또는 식별자"></label><label>사례 / 실험 조건<input id="evaluation-case" maxlength="160" required placeholder="예: AMAS-L1 / C 의미 왜곡"></label><label>판정<select id="evaluation-verdict"><option value="uncertain">유보 / 판단 불가</option><option value="supported">근거 있는 행동</option><option value="unsupported">근거 부족 / 잘못된 행동</option><option value="mixed">일부 적절</option></select></label><label>전반적 품질 (1–5)<select id="evaluation-score"><option value="">미평가</option><option value="1">1 · 낮음</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5 · 높음</option></select></label></div>
+              <label for="evaluation-note">판정 근거 · 오탐/누락 · 검증 한계<textarea id="evaluation-note" rows="4" maxlength="3000" required placeholder="RED: 실제 논리 결함인가, 수정 범위는 적절한가? BLUE: 충돌 설명이 타당한가, 오탐·누락은 무엇인가?"></textarea></label>
+              <button class="button primary" id="evaluation-save" type="submit" disabled>검수 기록 추가</button><p id="evaluation-status" role="status" aria-live="polite"></p>
+            </form><h3>검수 이력</h3><div id="evaluation-history"></div>
+          </section>
+        </section>
+
+        <section class="view" id="view-results" hidden aria-label="결과 기록"></section>
+
+        <section class="view" id="view-agents" hidden aria-label="Harness">
+          <aside class="connection-plan"><h3>선택 harness 실행 경로</h3><ol><li><strong>웹 작업대 (공개 페이지 또는 로컬)</strong><span>논문 추출·전송/실행 동의·앱 호출 예산</span></li><li><strong>인증된 loopback broker (127.0.0.1)</strong><span>공개 페이지는 페어링 토큰+허용 origin으로만 호출 · RED/BLUE/PDF 및 등록 harness 계약 처리</span></li><li><strong>Codex / Claude CLI · stdio wrapper · HTTPS</strong><span>기본은 이 PC에 로그인된 Codex CLI(도구 제한). CLI 선택을 지원하는 companion에서는 RED·BLUE마다 Codex/Claude CLI·모델·effort를 고르며, 선택은 새 harness 내용 해시로 기록됩니다. 다른 실행기는 신뢰한 stdio wrapper로 등록 · 사용자 코드/서버의 내부 실행 경계는 미검증</span></li></ol><p>공개 페이지는 상단 연결 패널에서 내 PC의 companion과 페어링하며, 사용자가 시작한 RED/BLUE 실행만 보냅니다. 연결 없이 쓰려면 companion 폴더에서 <code>python app/local/server.py</code> 실행 후 <a class="text-link" data-bridge-local href="http://127.0.0.1:7816/" target="_blank" rel="noopener noreferrer">로컬 작업대 열기</a>, 또는 수동 JSON 교환을 쓰세요.</p><p class="muted">기본 BLUE Codex만 새 일회성 세션입니다. 앱은 OS 샌드박스가 아니며 사용자 harness가 과거 상태를 공유하지 않도록 직접 관리해야 합니다. 모델 출력과 사람 검수·팀 승인은 별개입니다. shell 문자열·API 키 입력·승인 자동 생성은 제공하지 않습니다.</p></aside>
+        </section>
+
+        <footer class="page-foot"><span>Falsify · Paper document-consistency workbench</span><a class="source-link" id="source-link" href="https://github.com/Shinick-Han/falsify-workbench" target="_blank" rel="noopener noreferrer">소스 코드 · AGPL-3.0-only</a></footer>
+      </div>
+    </main>
+  </div>
+  <dialog id="reset-dialog"><h2>입력한 논문을 초기화할까요?</h2><p>기록하지 않은 RED/BLUE 입력과 결과를 지웁니다. 원본 파일과 저장된 실행·검수·Harness 기록은 유지합니다.</p><form method="dialog" class="button-row"><button class="button secondary" value="cancel">취소</button><button class="button primary" value="reset">논문 입력 초기화</button></form></dialog>
+</body>
+</html>

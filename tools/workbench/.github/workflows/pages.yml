@@ -1,0 +1,74 @@
+name: Publish workbench
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: github-pages
+  cancel-in-progress: false
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Python dependencies
+        run: python -m pip install -r app/local/requirements.txt -r app/local/requirements-images.txt
+      - name: Browser contracts
+        working-directory: app
+        run: npm test
+      - name: Broker and document contracts (no paid models)
+        run: python -m unittest discover -s app/tests -p 'test_*.py'
+  verify-windows-launcher:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Connection launcher dry-run contracts (PowerShell 7)
+        shell: pwsh
+        run: ./scripts/test-connection.ps1
+      - name: PDF editor startup configuration (PowerShell 7)
+        shell: pwsh
+        run: ./scripts/test-pdf-editor-config.ps1
+      - name: Companion restart and reconnect contracts (PowerShell 7)
+        shell: pwsh
+        run: ./scripts/test-companion-lifecycle.ps1
+      - name: Connection launcher dry-run contracts (Windows PowerShell)
+        shell: powershell
+        run: ./scripts/test-connection.ps1
+      - name: PDF editor startup configuration (Windows PowerShell)
+        shell: powershell
+        run: ./scripts/test-pdf-editor-config.ps1
+      - name: Companion restart and reconnect contracts (Windows PowerShell)
+        shell: powershell
+        run: ./scripts/test-companion-lifecycle.ps1
+  deploy:
+    needs: [verify, verify-windows-launcher]
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: app/dist
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4

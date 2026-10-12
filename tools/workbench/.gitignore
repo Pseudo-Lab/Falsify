@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+node_modules/
+.venv/
+.local/
+*.log
+*.zip
+.DS_Store
+app/local-test-output/
+app/.sites/
+app/.openai/
+.pdf-editor.local.json

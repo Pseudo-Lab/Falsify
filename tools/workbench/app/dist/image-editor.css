@@ -1,0 +1,28 @@
+.image-edit{max-width:75ch}
+.image-edit>p,.image-replace>p{margin:8px 0}
+.image-limits{margin:8px 0;padding-left:18px;font-size:13px;line-height:1.6;color:var(--muted)}
+.image-limits li{margin:2px 0;overflow-wrap:anywhere}
+.image-occurrences{margin:12px 0;padding:0;border:0;min-width:0}
+.image-occurrences legend{font-weight:600;padding:0;margin-bottom:4px}
+.image-rows{display:grid;gap:0}
+.document-red label.image-row{display:flex;align-items:center;gap:12px;padding:10px 0;border-top:1px solid var(--line);font-weight:400;cursor:pointer;min-width:0}
+.image-row input{flex-shrink:0;width:18px;height:18px;margin:0;accent-color:var(--ink)}
+.image-row input:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+.image-row.unsupported{cursor:default;color:var(--muted)}
+.image-thumb{flex-shrink:0;width:64px;height:64px;object-fit:contain;background:var(--surface);border:1px solid var(--line)}
+.image-row-text{display:flex;flex-direction:column;gap:2px;min-width:0;font-size:14px;line-height:1.5;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.image-row-note{font-size:13px;color:var(--muted)}
+.image-row-reason{color:var(--ink)}
+.image-compare{display:grid;grid-template-columns:1fr 1fr;gap:24px;margin:12px 0}
+.image-compare figure{margin:0;min-width:0}
+.image-compare figcaption{font-weight:600;margin-bottom:6px}
+.image-preview{display:block;max-width:100%;max-height:320px;height:auto;object-fit:contain;background:var(--surface);border:1px solid var(--line)}
+.document-red .image-compare label{display:block;margin-top:10px}
+.image-compare input[type=file]{display:block;max-width:100%;margin:8px 0;font-weight:400}
+.image-stretch{padding:10px 12px;background:var(--surface);font-size:14px;line-height:1.6}
+.image-stretch.error,#image-status.error,#image-png-status.error,#image-export-status.error{color:var(--red-ink)}
+.image-result{margin:8px 0}
+.image-hash{display:block;font-family:Consolas,monospace;font-size:12px;color:var(--muted);overflow-wrap:anywhere;word-break:break-all}
+@media(max-width:700px){
+.image-compare{grid-template-columns:1fr;gap:16px}
+.image-thumb{width:48px;height:48px}}

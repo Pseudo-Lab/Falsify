@@ -1,0 +1,18 @@
+{
+  "schema": "falsify.team-workbench-source.v1",
+  "upstreamRepository": "https://github.com/Shinick-Han/falsify-workbench",
+  "applicationSourceCommit": "52d1b64056e33f1f0daa5b7751fd49f28be5f102",
+  "applicationVersion": "0.2.0-alpha.2",
+  "destinationRepository": "https://github.com/Pseudo-Lab/Falsify",
+  "destinationBranch": "feat/workbench-html-guide-20261012",
+  "destinationSubtree": "tools/workbench",
+  "documentationOverlay": ["app/dist/guide.html", "app/tests/guide.spec.cjs"],
+  "documentationSourceCommit": "12c82dd20cd200d306380151eea4d7e43220cdc9",
+  "guideFileSha256": "55d7aa3285d74d5cbef600244fcf9c29a76c670d9ef904236ff4801863254e69",
+  "sourceOnly": true,
+  "teamApproval": "not_claimed",
+  "scientificValidation": "not_claimed",
+  "includesPrivateResearch": false,
+  "includesPatchedEditorWasm": false,
+  "installsRootActions": false
+}

@@ -1,0 +1,5 @@
+# Optional: manual single-occurrence image replacement (POST /api/paper/images*). Requires Python >= 3.11.
+# Not installed automatically; without these the imageEditor capability reports available: false and every other
+# operation keeps working. PyMuPDF comes from requirements.txt.
+pikepdf==10.17.0
+Pillow==12.3.0

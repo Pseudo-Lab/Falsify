@@ -1,0 +1,392 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Falsify Paper Workbench 사용 안내</title>
+<style>
+:root{--yellow:#ffcc00;--ink:#111315;--muted:#5a626a;--line:#d9dde0;--surface:#f3f4f4;--paper:#fff;--red-ink:#8e302b;--focus:#246388;--table-head:#e8ebed}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.7 "Segoe UI","Apple SD Gothic Neo","Malgun Gothic",Arial,sans-serif;word-break:keep-all;overflow-wrap:anywhere}
+.wrap{max-width:70ch;margin:0 auto;padding:0 32px}
+.skip{position:absolute;left:-9999px;top:0;background:var(--ink);color:var(--paper);padding:8px 14px}
+.skip:focus{left:16px;top:8px;z-index:10}
+.sign{background:var(--yellow);padding:22px 0 18px}
+.sign h1{margin:0;font-size:32px;line-height:1.25;letter-spacing:-0.02em}
+.sign p{margin:6px 0 0}
+.open-app{display:inline-block;margin-top:10px;font-weight:700}
+h2{font-size:22px;line-height:1.4;margin:48px 0 12px;padding-top:14px;border-top:2px solid var(--ink)}
+h3{font-size:16px;margin:28px 0 6px}
+p,li,td,th,dd{font-size:16px}
+ol,ul{padding-left:1.4em}
+li{margin:4px 0}
+a{color:var(--ink);text-decoration-thickness:1px;text-underline-offset:3px}
+a:hover{text-decoration-thickness:2px}
+a:focus-visible,.skip:focus-visible{outline:3px solid var(--focus);outline-offset:2px}
+code,pre{font-family:Consolas,"D2Coding",monospace;font-size:14px}
+code{background:var(--surface);padding:1px 4px;border-radius:3px}
+pre{background:var(--surface);padding:12px 14px;overflow-x:auto;line-height:1.5;white-space:pre}
+pre code{background:none;padding:0}
+.ui{font-weight:600}
+.muted{color:var(--muted)}
+.note{border-left:1px solid var(--red-ink);padding:2px 0 2px 12px}
+.quick h3{margin-top:22px}
+.toc ol{columns:2;column-gap:32px}
+.toc li{break-inside:avoid}
+.table-wrap{overflow-x:auto}
+table{border-collapse:collapse;width:100%;margin:12px 0}
+caption{text-align:left;font-weight:700;padding-bottom:6px}
+th,td{text-align:left;vertical-align:top;padding:8px 10px;border-bottom:1px solid var(--line)}
+th{background:var(--table-head)}
+dt{font-weight:700;margin-top:14px}
+dd{margin:2px 0 0 0}
+footer{margin:56px 0 40px;padding-top:12px;border-top:1px solid var(--line);color:var(--muted);font-size:14px}
+@media (max-width:640px){
+.wrap{padding:0 16px}
+.sign h1{font-size:26px}
+.toc ol{columns:1}
+th,td{padding:6px}
+}
+@media print{
+.skip,.open-app{display:none}
+.sign{background:none;border-bottom:3px solid #000;padding:0 0 8px}
+body{font-size:11pt}
+.wrap{max-width:none;padding:0}
+a{text-decoration:none}
+a[href^="http"]::after{content:" (" attr(href) ")";font-size:9pt}
+h2{break-after:avoid}
+pre,table{break-inside:avoid}
+.toc ol{columns:1}
+}
+</style>
+</head>
+<body>
+<a class="skip" href="#quick">본문 바로가기</a>
+<header class="sign">
+<div class="wrap">
+<h1>Falsify Paper Workbench 사용 안내</h1>
+<p>alpha2 기준 · RED, BLUE, 검수는 서로 독립적으로 씁니다. 필요한 것만 고르세요.</p>
+<a class="open-app" href="https://shinick-han.github.io/falsify-workbench/">앱 열기 (공개 Workbench 페이지)</a>
+<p>이 안내 파일은 오프라인으로 열어도 됩니다. 앱은 위 공개 페이지나, 로컬 작업대 방식으로 companion을 실행 중일 때의 로컬 주소(기본 <code>http://127.0.0.1:7816/</code>)로 엽니다. 내려받은 <code>index.html</code>을 파일로 직접 여는 방식은 완전히 지원하지 않습니다.</p>
+</div>
+</header>
+<main id="main" class="wrap">
+<p><strong>준비물</strong>: 파일 추출, 수동 JSON 교환, 검수, 기록은 브라우저만 있으면 됩니다. PDF 사전분석, PDF 편집본·그림 교체 사본을 내보낼 때만 내 PC의 companion(Python 3.10 이상, 그림 교체는 3.11 이상)이 필요하고, 이때 CLI 로그인은 필요 없습니다. 직접 설치하고 내 구독으로 로그인한 Codex CLI 또는 Claude Code는 앱에서 모델을 실행할 때만 companion과 함께 필요합니다. API 키 등록은 없습니다. RED만, BLUE만, 검수만 따로 써도 됩니다.</p>
+
+<section id="quick" class="quick" aria-labelledby="quick-title">
+<h2 id="quick-title">빠른 사용</h2>
+<h3>처음 한 번만 (companion이 필요할 때)</h3>
+<ol>
+<li>새로 받는다면 <code>git clone --branch feat/workbench-html-guide-20261012 https://github.com/Pseudo-Lab/Falsify.git</code> 후 <code>cd Falsify/tools/workbench</code>로 들어갑니다(main 브랜치에는 이 폴더가 없습니다). 이미 설치해 쓰던 폴더가 있으면 그대로 씁니다. Windows는 그 폴더에서 <code>start-companion.ps1</code>을 한 번 실행해 로컬 실행기(companion)를 준비합니다(첫 실행만 의존성 설치). macOS/Linux는 <a href="#launch">수동 실행</a>을 따릅니다.</li>
+<li>모델을 실행할 때만: 쓸 CLI 하나를 설치하고 로그인합니다: <code>codex login</code>, 또는 <code>claude</code> 실행 후 로그인. PDF 사전분석·내보내기만 한다면 건너뜁니다. 자세한 것은 <a href="#prereq">준비물과 설치</a>.</li>
+</ol>
+<h3>매번</h3>
+<ol>
+<li><a href="https://shinick-han.github.io/falsify-workbench/">공개 Workbench</a>(또는 로컬 작업대 주소)를 엽니다. 파일 추출, 후보 After 편집, TXT류 내보내기, 수동 JSON 교환, 검수, 기록은 브라우저 안에서 합니다. PDF 사전분석·내보내기는 원본 PDF 바이트를 내 PC의 companion에 보내 처리하고, 모델을 실행하면 추출문이 내 CLI(또는 외부 HTTPS harness)를 거쳐 밖으로 전송됩니다.</li>
+<li>모델 실행이나 PDF 사전분석·내보내기가 필요할 때만 연결합니다: companion 터미널에 나온 <b class="ui">페어링 토큰</b>을 붙여넣고 <b class="ui">토큰으로 연결</b>. 로컬 작업대 주소(127.0.0.1)로 열었다면 토큰이 필요 없습니다.</li>
+<li>왼쪽에서 할 일 하나를 고릅니다. 순서는 정해져 있지 않습니다.</li>
+</ol>
+<h3>RED · 실험용 변경 사본 만들기</h3>
+<ol>
+<li><b class="ui">파일 입력</b>으로 논문을 올리고 <b class="ui">추출 결과 확인</b>에서 텍스트를 봅니다.</li>
+<li><b class="ui">공격 단계</b>와 CLI·<b class="ui">모델 ID</b>·<b class="ui">effort</b>를 고르고 전송 동의를 체크한 뒤 <b class="ui">선택 harness로 전체 검토</b>.</li>
+<li>후보는 처음에 모두 미선택입니다. 쓸 후보만 체크하고 필요하면 After를 직접 고칩니다.</li>
+<li>실험용 사본 동의를 체크하고 <b class="ui">보존 검사 후 완성본 다운로드</b>, 그리고 <b class="ui">변경 계획 JSON 저장</b>. 계획 JSON은 BLUE에 주지 않습니다.</li>
+</ol>
+<p>연결 없이 쓰려면 2단계 대신 <b class="ui">수동 JSON 교환 (로컬 연결 없이)</b>으로 요청·응답 JSON을 주고받습니다(<a href="#connect">연결 방식</a>).</p>
+<h3>BLUE · 독립 검토</h3>
+<ol>
+<li><b class="ui">BLUE 검토 파일</b>에 아무 시험용 문서나 올립니다. RED를 먼저 할 필요가 없습니다.</li>
+<li>BLUE용 harness와 CLI를 고르고 동의한 뒤 <b class="ui">BLUE 독립 검토 시작</b>. 결과는 <b class="ui">결과 · BLUE 지적</b>에 나옵니다.</li>
+</ol>
+<p>연결 없이 쓰려면 2단계 대신 <b class="ui">수동 JSON 교환 (로컬 연결 없이)</b>으로 요청·응답 JSON을 주고받습니다(<a href="#connect">연결 방식</a>).</p>
+<h3>검수 · 사람 평가</h3>
+<ol>
+<li><b class="ui">검수</b>에서 <b class="ui">평가할 실행</b>으로 저장된 실행을 고릅니다.</li>
+<li><b class="ui">평가자</b>, <b class="ui">판정</b>, <b class="ui">판정 근거 · 오탐/누락 · 검증 한계</b>를 쓰고 <b class="ui">검수 기록 추가</b>.</li>
+</ol>
+</section>
+
+<nav id="toc" class="toc" aria-labelledby="toc-title">
+<h2 id="toc-title">자세한 안내 차례</h2>
+<ol>
+<li><a href="#prereq">준비물과 설치</a></li>
+<li><a href="#launch">소스 받기와 첫 실행</a></li>
+<li><a href="#connect">연결 방식 세 가지</a></li>
+<li><a href="#red">RED 자세히</a></li>
+<li><a href="#pdf-export">PDF·텍스트 내보내기</a></li>
+<li><a href="#image">그림 한 곳 교체</a></li>
+<li><a href="#blue">BLUE 자세히</a></li>
+<li><a href="#review">검수</a></li>
+<li><a href="#harness">Harness 등록</a></li>
+<li><a href="#results">결과 기록 읽는 법</a></li>
+<li><a href="#storage">저장·백업·개인정보</a></li>
+<li><a href="#security">보안 경계</a></li>
+<li><a href="#trouble">문제 해결</a></li>
+<li><a href="#limits">형식과 한계</a></li>
+<li><a href="#examples">짧은 실습 예시</a></li>
+<li><a href="#docs">기술 문서</a></li>
+</ol>
+</nav>
+
+<section id="prereq" aria-labelledby="prereq-title">
+<h2 id="prereq-title">1. 준비물과 설치</h2>
+<div class="table-wrap"><table>
+<caption>무엇이 언제 필요한가</caption>
+<thead><tr><th>항목</th><th>필요한 때</th></tr></thead>
+<tbody>
+<tr><td><a href="https://www.python.org/downloads/">Python</a> 3.10 이상</td><td>companion 기본 기능(PDF 사전분석, PDF 한 줄 편집 내보내기, 모델 실행 중계). PATH에서 찾을 수 있어야 합니다.</td></tr>
+<tr><td>Python 3.11 이상</td><td>선택 기능 <a href="#image">그림 한 곳 교체</a>만. <code>.venv</code>가 3.11 이상으로 만들어져 있어야 합니다.</td></tr>
+<tr><td>Node 24 이상</td><td>긴 After 줄바꿈 재배치 엔진을 <em>직접 설정한 경우에만</em>. 기본 설치에는 필요 없습니다.</td></tr>
+<tr><td>Codex CLI 또는 Claude Code</td><td>앱의 기본 실행기로 모델을 부를 때만. 하나만 있어도 됩니다. PDF 사전분석·내보내기·그림 교체에는 필요 없습니다.</td></tr>
+</tbody></table></div>
+<h3>CLI 설치와 로그인</h3>
+<ul>
+<li><strong>Codex CLI</strong>: 공식 <a href="https://learn.chatgpt.com/docs/codex/cli">Codex CLI 문서</a>의 설치 방법을 따릅니다. <code>codex login</code>으로 ChatGPT 계정 로그인 후 <code>codex login status</code>로 확인합니다(<a href="https://learn.chatgpt.com/docs/auth">인증 문서</a>). 앱은 ChatGPT 로그인만 쓰며 API 키로 자동 전환하지 않습니다.</li>
+<li><strong>Claude Code</strong>: 공식 <a href="https://code.claude.com/docs/en/setup">설치 문서</a>의 Windows 네이티브(또는 winget) 설치를 따릅니다. <code>claude --version</code>으로 확인하고 <code>claude</code>를 실행해 브라우저 로그인으로 내 구독 계정에 연결합니다. 앱은 API 인증·외부 provider 경로를 거부합니다.</li>
+</ul>
+<p class="note">로그인이 되어 있어도 특정 모델이나 effort를 계정에서 쓸 수 있다는 보장은 없습니다. 지원되지 않으면 실행이 실패하며 다른 모델이나 유료 API로 자동 대체하지 않습니다. 이 안내는 모델을 추천하지 않습니다.</p>
+</section>
+
+<section id="launch" aria-labelledby="launch-title">
+<h2 id="launch-title">2. 소스 받기와 첫 실행</h2>
+<p>companion은 모델 실행, PDF 사전분석, PDF 편집·그림 교체 내보내기에만 필요합니다. 브라우저만으로 쓰는 수동 JSON 교환이나 검수만 한다면 이 장을 건너뜁니다. 팀 저장소의 main 브랜치에는 <code>tools/workbench</code>가 없으므로 새로 받을 때는 Workbench 브랜치를 지정합니다. 이미 설치해 쓰던 Workbench 폴더가 있으면 다시 받거나 <code>git pull</code>할 필요 없이 그 폴더를 그대로 쓰고, 원래 폴더를 지우거나 바꾸지 않습니다. 스크립트는 실행 전에 직접 읽어 보세요.</p>
+<pre><code>git clone --branch feat/workbench-html-guide-20261012 https://github.com/Pseudo-Lab/Falsify.git
+cd Falsify/tools/workbench
+powershell -NoProfile -ExecutionPolicy Bypass -File .\start-companion.ps1</code></pre>
+<p>이 안내의 다른 명령에 나오는 <code>cd tools/workbench</code>는 저장소 루트(<code>Falsify</code>) 기준이며, 이미 <code>tools/workbench</code> 안에 있다면 <code>cd</code> 줄은 건너뜁니다. Windows의 <code>start-companion.ps1</code>과 클릭 실행 링크는 편의 기능이고, macOS/Linux는 아래 수동 실행으로 씁니다.</p>
+<ul>
+<li>보이는 PowerShell 창에서 실행됩니다. 첫 실행은 이 폴더에 <code>.venv</code>를 만들고 고정 버전 의존성을 PyPI에서 설치합니다. 이후에는 요구사항이 바뀔 때만 다시 설치합니다.</li>
+<li>시작 전에 PATH에서 찾은 <code>codex</code> / <code>claude</code>를 알려 줍니다(실행하지는 않음). 이어서 <b class="ui">페어링 토큰</b>을 출력합니다.</li>
+<li>실행 정책 옵션은 이 프로세스에만 적용되며 전역 정책을 바꾸지 않습니다. <code>-NoInstall</code>은 pip를 건너뛰고, <code>-NoPdf</code>는 새 환경에서 PDF 편집 의존성 설치를 건너뜁니다.</li>
+</ul>
+<h3>선택: 한 번 등록하는 클릭 실행 링크</h3>
+<p>앱의 <b class="ui">연결 · 터미널 열기</b> 버튼은 이 등록이 있어야 동작합니다. 현재 사용자(HKCU)에만 <code>falsify://</code>를 등록하고 관리자 권한, 시작 프로그램, 서비스를 만들지 않습니다.</p>
+<pre><code>cd tools/workbench
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install-connection.ps1 -WhatIf
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install-connection.ps1</code></pre>
+<p class="note">등록 후에는 이 폴더를 옮기거나 이름을 바꾸지 마세요. 옮겼다면 <code>uninstall-connection.ps1</code>로 지우고 새 위치에서 다시 등록합니다. 링크는 포트만 전달하며 토큰은 절대 링크에 담기지 않습니다.</p>
+<h3>macOS / Linux</h3>
+<pre><code>cd tools/workbench
+python3 -m venv .venv
+.venv/bin/python -m pip install -r app/local/requirements.txt
+.venv/bin/python app/local/server.py --web-origin https://shinick-han.github.io</code></pre>
+</section>
+
+<section id="connect" aria-labelledby="connect-title">
+<h2 id="connect-title">3. 연결 방식 세 가지</h2>
+<dl>
+<dt>공개 페이지 + 토큰 연결</dt>
+<dd><a href="https://shinick-han.github.io/falsify-workbench/">공개 Workbench</a>에서 <b class="ui">로컬 실행 연결</b> 패널을 엽니다. 터미널의 토큰 한 줄을 <b class="ui">페어링 토큰</b>에 붙여넣고 <b class="ui">토큰으로 연결</b>. 브라우저가 로컬 네트워크 접근을 물으면 이 사이트에만 허용합니다. 연결은 기능 확인만 하며 모델을 실행하지 않습니다. 포트를 바꿨다면 <b class="ui">수동 실행 · 포트 변경 · 연결 문제</b>에서 같은 번호로 맞춥니다.</dd>
+<dt>로컬 작업대 (토큰 불필요)</dt>
+<dd>한 번 <code>start-companion.ps1</code>로 의존성이 설치된 뒤, <code>tools/workbench</code> 폴더에서 <code>.\.venv\Scripts\python.exe app/local/server.py</code>를 <code>--web-origin</code> 없이 실행하고, 출력된 <code>http://127.0.0.1:&lt;포트&gt;/</code>를 엽니다. 같은 origin 세션이라 페어링이 필요 없습니다. 기록은 공개 페이지와 따로 저장됩니다.</dd>
+<dt>수동 JSON 교환 (연결 없음)</dt>
+<dd>RED와 BLUE의 <b class="ui">수동 JSON 교환 (로컬 연결 없이)</b>에서 요청 JSON을 저장해 다른 곳에서 처리하고, 응답 JSON을 붙여넣습니다. 앱은 인용·위치·리비전은 확인하지만 실제로 모델이 실행됐는지는 검증하지 않습니다.</dd>
+</dl>
+</section>
+<section id="red" aria-labelledby="red-title">
+<h2 id="red-title">4. RED 자세히</h2>
+<p>RED는 입력 문서에서 해석을 왜곡하는 변경 후보를 모델에게 제안받고, 사람이 고른 것만 실험용 사본에 반영합니다.</p>
+<ol>
+<li><strong>입력</strong>: <b class="ui">RED 논문 파일</b>에 PDF, DOCX, ODT, HTML, TXT/MD/LaTeX/CSV 등을 올립니다(최대 25MiB). 추출은 브라우저에서 합니다. 스캔 PDF는 먼저 OCR하고, DOC·HWP·RTF는 PDF/DOCX/TXT로 변환합니다. <b class="ui">추출 결과 확인</b>의 미리보기 선택은 입력 범위를 줄이지 않습니다.</li>
+<li><strong>선택 사전분석</strong>: PDF라면 연결 후 <b class="ui">PDF 사전분석</b>을 누를 수 있습니다. 모델을 부르지 않고 쪽·객체 수와 텍스트 배치 상태만 참고용으로 보여 줍니다. 편집 허가나 품질 판정이 아닙니다.</li>
+<li><strong>설정</strong>: <b class="ui">공격 단계</b>에서 <b class="ui">L1 · 명시적 모순</b>, <b class="ui">L2 · 필요한 조건 누락</b>, <b class="ui">L3 · 근거 없는 해석</b> 중 하나를 고릅니다. Harness 선택 아래 <b class="ui">CLI</b>(<b class="ui">Harness 지정값</b>, <b class="ui">Codex CLI</b>, <b class="ui">Claude Code CLI</b>), <b class="ui">모델 ID</b>, <b class="ui">effort</b>(low/medium/high)를 고릅니다. 모델 목록은 입력 제안일 뿐입니다.</li>
+<li><strong>예산</strong>: <b class="ui">고급 설정 · 최대 모델 호출</b>(1–32)과 harness의 호출 상한 중 작은 값이 실제 상한입니다. 긴 추출문은 여러 묶음으로 나뉘어 전달되며, 전체를 전달할 예산이 모자라면 모델을 부르기 전에 시작하지 않습니다.</li>
+<li><strong>실행</strong>: 전체 추출 텍스트 전송 동의를 체크하고 <b class="ui">선택 harness로 전체 검토</b>. <b class="ui">검토 취소</b>는 결과를 버립니다. 이미 시작된 CLI 호출은 최대 180초까지 이어질 수 있습니다.</li>
+<li><strong>후보 선택</strong>: <b class="ui">결과 · 후보 선택과 사본</b>에서 각 후보의 Before(원본 인용)와 After를 읽습니다. 처음에는 모두 미선택이며, After는 직접 고칠 수 있습니다. After를 바꾸면 이전 다운로드의 검증은 무효가 됩니다. 현재 기본 텍스트 경로에서는 Before에 있는 숫자 토큰, 대괄호 인용(<code>[12]</code> 등), URL을 After에서 그대로 유지해야 하며, 바꾸면 "이번 범위에서는 수치·대괄호 인용·URL을 변경할 수 없습니다."로 거부됩니다.</li>
+<li><strong>저장</strong>: 실험용 사본 동의 후 <b class="ui">보존 검사 후 완성본 다운로드</b>. 검사에 실패하면 다운로드가 막힙니다. <b class="ui">변경 계획 JSON 저장</b>은 변경 근거를 따로 남기며 <strong>BLUE에 넣지 않습니다</strong>. 계획은 검수에서만 대조합니다. PDF는 <b class="ui">다운로드한 사본 미리보기</b>로 받은 바이트를 다시 확인해 그려 볼 수 있습니다(화면 확인용).</li>
+</ol>
+<p>유효한 모델 응답은 자동 기록됩니다. 고른 후보·편집 After는 완성본 다운로드나 <b class="ui">RED 실행 결과 기록</b>으로 저장됩니다. 근거 인용은 앱이 원문과 다시 대조합니다. 모델이 유보하거나 거절하면 후보를 강제로 만들거나 자동 재시도하지 않습니다.</p>
+<p class="note">이 제한은 숫자·대괄호·URL 문자열을 정규식으로 비교하는 좁은 검사입니다. 저자명이나 다른 서지 표기 변경을 의미적으로 막지 않으며, 팀의 과학적 변경 규칙은 이것과 별도로 정합니다. <b class="ui">공격 단계</b> 지침은 해석 왜곡만 다루며 프로젝트 전체의 D1·D2 설계를 구현한 것이 아닙니다.</p>
+</section>
+
+<section id="pdf-export" aria-labelledby="pdf-export-title">
+<h2 id="pdf-export-title">5. PDF·텍스트 내보내기</h2>
+<ul>
+<li><strong>기본(한 줄 보존 편집)</strong>: 연결된 companion이 PyMuPDF로 처리합니다. 재사용 가능한 원본 글꼴로 된 한 줄 텍스트가 원래 공간에 들어갈 때만 바꾸고, 변경 영역 밖을 비교합니다. 글리프 누락·혼합 글꼴·줄바꿈이 필요한 After는 차단합니다.</li>
+<li><strong>줄바꿈 재배치(선택)</strong>: 별도 모듈 <a href="https://github.com/Shinick-Han/falsify-pdf-editor">falsify-pdf-editor</a>를 직접 빌드·설정한 companion에서만 긴 After의 줄바꿈과 이어지는 페이지 추가를 시도합니다. 대상은 1단·회전 없음·잘림 없음인 본문 텍스트뿐입니다. 이 엔진과 검증된 WASM은 Workbench에 <strong>포함되어 있지 않으며</strong>, 사설로 패치한 WASM을 공개 저장소나 페이지에 올리지 않습니다. 설정 방법은 <a href="https://github.com/Pseudo-Lab/Falsify/blob/feat/workbench-html-guide-20261012/tools/workbench/docs/pdf-editor.md">PDF 편집기 설정</a>.</li>
+<li><strong>TXT류</strong>: TXT/MD/LaTeX/CSV 등은 브라우저에서 인코딩·줄끝·변경 밖 바이트를 보존해 내보냅니다. 표시 앱의 자동 줄바꿈은 검증하지 않습니다.</li>
+<li><strong>DOCX/ODT/HTML</strong>: 원래 레이아웃을 검증할 렌더러가 없어 완성본 다운로드를 막고 변경 계획만 저장합니다.</li>
+</ul>
+<p>줄바꿈·페이지 수는 그 출력에 대한 같은 엔진의 자체검사 결과일 뿐이며 독립 렌더링이나 사람 검수를 대신하지 않습니다.</p>
+</section>
+
+<section id="image" aria-labelledby="image-title">
+<h2 id="image-title">6. 그림 한 곳 교체 (선택, PDF)</h2>
+<p>모델과 무관한 수동 실험입니다. RED 모델 성능이나 과학적 타당성 판정이 아닙니다. 이미지 의존성은 자동 설치되지 않으므로 Python 3.11 이상 <code>.venv</code>에서 직접 설치한 뒤 다시 시작하고 새 토큰으로 연결합니다.</p>
+<pre><code>cd tools/workbench
+.\.venv\Scripts\python.exe -m pip install -r app/local/requirements-images.txt
+powershell -NoProfile -ExecutionPolicy Bypass -File .\start-companion.ps1 -NoInstall</code></pre>
+<ol>
+<li>RED에서 PDF를 올리고 <b class="ui">그림 한 곳 교체 · 선택 사항 (PDF)</b>을 엽니다.</li>
+<li><b class="ui">그림 위치 목록 불러오기</b>로 명시적으로 목록을 받습니다. 각 항목은 공유 리소스가 아니라 <strong>쪽과 위치</strong>입니다. 여러 곳에서 재사용되는 그림도 선택한 한 곳만 바뀝니다.</li>
+<li><b class="ui">교체할 그림 한 곳</b>을 고르고 <b class="ui">교체 PNG (4 MiB·400만 픽셀·한 변 8192 px 이하)</b>에 <strong>8비트 RGB 또는 완전 불투명 RGBA PNG</strong>를 올립니다. 팔레트·흑백·16비트·투명 PNG는 지원하지 않습니다.</li>
+<li>Before/After를 확인합니다. 원래 배치 상자의 크기는 고정되므로 비율이 다르면 늘어나 보입니다. 원본 상자와 같은 비율로 준비하세요.</li>
+<li>동의 후 <b class="ui">선택한 한 곳만 교체한 사본 만들기</b> → <b class="ui">실험용 PDF 다운로드</b>와 <b class="ui">교체 보고서 JSON 다운로드</b>. 보고서는 PDF에 넣지 않는 별도 파일이며, 원본과 텍스트 후보 다운로드는 덮어쓰지 않습니다.</li>
+</ol>
+<p>지원 범위는 페이지에 직접 그려진 불투명 래스터 이미지입니다. Form XObject 안·인라인 이미지, 잘림·회전·투명 마스크, 벡터 그림과 표는 지원하지 않으며 우회하지 않습니다. 입력 PDF 25 MiB, 출력 64 MiB 상한입니다. 보고서의 렌더 검사는 같은 엔진의 자체 확인이며 독립 과학 검증이 아닙니다.</p>
+</section>
+
+<section id="blue" aria-labelledby="blue-title">
+<h2 id="blue-title">7. BLUE 자세히</h2>
+<ul>
+<li><strong>독립 입력</strong>: <b class="ui">BLUE 검토 파일</b>에 수정 사본, 원본, 대조군 등 어떤 시험 파일이든 직접 고릅니다(PDF, TXT, MD, DOCX, ODT, HTML). RED 없이 써도 됩니다. RED 계획·정답·검수 기록은 모델 입력에 넣지 않습니다.</li>
+<li><strong>텍스트만 읽음</strong>: 현재 BLUE는 추출한 <strong>텍스트만</strong> 받습니다. 그림·도표 이미지와 수식 렌더링은 보지 않습니다. 그림을 바꾼 사본에서 BLUE가 아무것도 찾지 못해도 BLUE의 품질이나 회피 성공의 증거가 아닙니다.</li>
+<li><strong>실행</strong>: BLUE용 harness와 <b class="ui">CLI</b>·<b class="ui">모델 ID</b>·<b class="ui">effort</b>를 고르고(RED와 별개), 전송 동의 후 <b class="ui">BLUE 독립 검토 시작</b>. 문서에 제목·저자·출처가 남아 있을 수 있습니다.</li>
+<li><strong>긴 문서</strong>: 한 묶음이면 원문 전체를 한 번에 보냅니다. 여러 묶음(N개)이면 묶음 읽기 N회 + 재확인 대상 선택 1회 + 최종 판단 1회, 총 N+2회가 필요하며 예산이 모자라면 시작하지 않습니다. 재확인은 모델이 고른 <strong>일부 원문 구간</strong>(최대 8곳)만 다시 읽는 것이지 PDF 전체를 다시 읽는 것이 아닙니다.</li>
+<li><strong>결과</strong>: <b class="ui">결과 · BLUE 지적</b>에 지적과 원문 인용이 나옵니다. "전체 추출 텍스트 전달 완료"는 텍스트를 다 보냈다는 뜻일 뿐 정확도나 결함 전수 탐지를 뜻하지 않습니다. 유보·거절은 그대로 표시하고 자동 재시도하지 않습니다. 저장은 자동이며, 실패하면 <b class="ui">BLUE 실행 결과 기록</b>으로 다시 시도합니다.</li>
+</ul>
+</section>
+
+<section id="review" aria-labelledby="review-title">
+<h2 id="review-title">8. 검수</h2>
+<ol>
+<li><b class="ui">평가할 실행</b>에서 저장된 RED 또는 BLUE 실행을 고릅니다. 모델 원출력과 사람이 최종 선택·편집한 After는 구분되어 보입니다.</li>
+<li><b class="ui">평가자</b>, <b class="ui">사례 / 실험 조건</b>을 적습니다.</li>
+<li><b class="ui">판정</b>: <b class="ui">근거 있는 행동</b>, <b class="ui">근거 부족 / 잘못된 행동</b>, <b class="ui">일부 적절</b>, <b class="ui">유보 / 판단 불가</b>. 선택으로 <b class="ui">전반적 품질 (1–5)</b>.</li>
+<li><b class="ui">판정 근거 · 오탐/누락 · 검증 한계</b>는 필수입니다. <b class="ui">검수 기록 추가</b>는 이전 평가를 덮어쓰지 않고 <b class="ui">검수 이력</b>에 새로 쌓습니다.</li>
+</ol>
+<p><b class="ui">BLUE 변경 기록 대조 (선택)</b>: BLUE 입력 파일의 SHA-256이 보존 검사 후 내보낸 RED 사본의 출력 해시와 일치하면 변경 위치를 대조해 보여 줍니다. 일치 기록이 없으면 <b class="ui">RED 변경 계획 JSON</b>을 직접 고를 수 있습니다. 인용이 겹친다고 탐지 성공은 아니며, 변경별 판정은 사람이 정합니다. 모델 호출·승인·gold로 자동 승격하지 않습니다.</p>
+</section>
+
+<section id="harness" aria-labelledby="harness-title">
+<h2 id="harness-title">9. Harness 등록</h2>
+<p><b class="ui">Harness</b> 화면에서 역할별 실행 계약을 등록합니다. <b class="ui">harness JSON 가져오기</b>로 파일을 불러오거나 <b class="ui">RED 설정 예시</b>, <b class="ui">BLUE 설정 예시</b>, <b class="ui">로컬 코드 예시</b>, <b class="ui">외부 서버 예시</b>로 편집기를 채운 뒤 <b class="ui">새 harness 버전 등록</b>. 등록은 실행이 아닙니다. RED/BLUE 선택 메뉴에서 버전을 고릅니다.</p>
+<ul>
+<li>내용은 정렬 JSON의 SHA-256으로 고정됩니다. 같은 ID·버전이라도 내용이 다르면 별도 해시로 공존하고, 과거 실행 기록은 바뀌지 않습니다. UI에서 CLI·모델·effort를 바꾸면 새 내용 해시로 기록됩니다.</li>
+<li>기록되는 모델 표기는 <strong>요청한 ID</strong>입니다. 계정에서 실제로 어떤 버전으로 해석됐는지는 별도로 확인해야 합니다.</li>
+<li>기본 CLI(codex/claude)는 <code>settings</code>의 temperature나 도구 관련 설정을 적용하지 않습니다.</li>
+<li><code>stdio</code>는 JSON stdin/stdout 계약을 지키는 신뢰한 wrapper의 절대 경로를 씁니다. 채팅 CLI 경로만 넣어서는 동작하지 않습니다. <code>http</code>는 공인 HTTPS 주소만 허용합니다. 실행 시 사용자 코드 실행 동의를 따로 받습니다.</li>
+<li>별도의 키 보관·등록 기능은 없습니다. 등록한 harness JSON은 <code>settings</code> 같은 임의 필드까지 그대로 이 브라우저 localStorage에 저장되고 <b class="ui">전체 기록 JSON 백업</b>에도 들어가므로, 실수로 붙여넣은 API 키·토큰·로그인 정보가 남을 수 있습니다. JSON 어디에도 비밀값을 넣지 마세요. 앱은 비밀값을 자동으로 가려 주지 않으며, 백업 파일은 비공개로 보관합니다.</li>
+</ul>
+<h3>최소 예시 (Claude Code 구독, BLUE)</h3>
+<pre data-harness><code>{
+  "schema": "falsify.harness.v1",
+  "id": "my-blue",
+  "name": "내 BLUE",
+  "version": "1",
+  "role": "blue",
+  "instructions": "내부 근거와 결론의 논리적 연결을 검토한다.",
+  "maxCalls": 8,
+  "adapter": {"type": "claude"}
+}</code></pre>
+<h3>로컬 코드 예시 (stdio)</h3>
+<p>포함된 <a href="https://github.com/Pseudo-Lab/Falsify/blob/feat/workbench-html-guide-20261012/tools/workbench/app/examples/stdio_harness.py">stdio_harness.py</a>는 항상 <strong>정직하게 abstain</strong>하는 프로토콜 예시이며 모델이 아닙니다. 경로는 내 PC의 실제 절대 경로로 바꿉니다.</p>
+<pre data-harness><code>{
+  "schema": "falsify.harness.v1",
+  "id": "my-stdio-blue",
+  "name": "내 로컬 BLUE wrapper",
+  "version": "1",
+  "role": "blue",
+  "instructions": "입력 문서의 내부 일관성을 검토한다.",
+  "maxCalls": 4,
+  "adapter": {"type": "stdio", "executable": "C:/Python311/python.exe", "args": ["D:/harness/stdio_harness.py"]}
+}</code></pre>
+<p>필드 규칙과 호출 입출력은 <a href="https://github.com/Pseudo-Lab/Falsify/blob/feat/workbench-html-guide-20261012/tools/workbench/docs/harness-contract.md">Harness 계약</a>을 따릅니다.</p>
+</section>
+
+<section id="results" aria-labelledby="results-title">
+<h2 id="results-title">10. 결과 기록 읽는 법</h2>
+<p><b class="ui">결과 기록</b> 표는 harness 내용 해시, 역할, 모델 표기, 입력 텍스트 해시, RED 단계, 호출 예산이 같은 것끼리 묶습니다. <b class="ui">품질 평균</b>은 실행마다 가장 최근 사람 평가 1건의 주관적 점수 평균이며 유보는 뺍니다. <strong>accuracy나 탐지율이 아닙니다.</strong></p>
+<ul>
+<li>저장된 유효 응답만 들어갑니다. 실패한 요청은 모두 기록되지 않으므로 전수 실행·실패율 지표가 아닙니다.</li>
+<li>수동 응답과 가져온 기록은 출처 미검증으로 표시됩니다.</li>
+<li>이 Workbench 실행기는 실험 진행을 돕는 제안 도구입니다. 공식 과학 벤치마크나 팀이 승인한 실험 범위가 아니며, 대조군·반복 실행 같은 비교 설계는 별도로 정해야 합니다.</li>
+</ul>
+</section>
+
+<section id="storage" aria-labelledby="storage-title">
+<h2 id="storage-title">11. 저장·백업·개인정보</h2>
+<ul>
+<li>기록은 이 브라우저의 origin별 localStorage에만 있습니다. 클라우드나 공동 DB가 아니며, 공개 페이지와 로컬 작업대의 기록도 서로 다릅니다.</li>
+<li>저장 기록에는 <strong>논문 추출문</strong>이 들어갑니다. 공용 PC에서는 쓰지 마세요.</li>
+<li>새로고침하면 기록하지 않은 입력·결과와 페어링 토큰이 사라집니다. 토큰은 탭 메모리에만 있습니다.</li>
+<li>옮기거나 보관하려면 <b class="ui">결과 기록</b>의 <b class="ui">전체 기록 JSON 백업</b>, 다른 곳에서 <b class="ui">백업 JSON 병합</b>. 가져온 실행은 출처 미검증으로 표시됩니다. 백업 파일도 논문 텍스트를 담으므로 비공개로 보관합니다.</li>
+<li>상한: harness 100개, 실행 100건, 검수 1,000건, 가져오기 4.5MB. 앱에 일괄 삭제는 없으며 사이트 데이터 삭제는 브라우저 설정에서 합니다.</li>
+</ul>
+</section>
+
+<section id="security" aria-labelledby="security-title">
+<h2 id="security-title">12. 보안 경계</h2>
+<ul>
+<li>companion은 <code>127.0.0.1</code>에만 열리고 LAN에는 열리지 않습니다. 공개 페이지는 토큰과 허용 origin으로만 호출합니다.</li>
+<li>브라우저 신뢰는 <strong>origin 전체</strong>(<code>https://shinick-han.github.io</code>) 단위입니다. 신뢰할 때만 연결하고, 토큰을 화면 캡처나 메시지로 공유하지 마세요. companion을 끄면 토큰이 무효가 됩니다.</li>
+<li>실행하면 추출문이 내 CLI를 통해 해당 모델 제공자에게 전송됩니다. 외부 HTTPS harness는 논문을 받습니다.</li>
+<li>사용자 harness 코드는 <strong>OS 샌드박스가 아닙니다</strong>. 최소 환경과 임시 폴더에서 실행할 뿐 PC 파일·네트워크에 접근할 수 있으므로 신뢰하는 코드만 씁니다. 기본 CLI의 도구 제한도 OS 수준 격리가 아닙니다.</li>
+<li>RED와 BLUE는 독립이지만, custom harness가 상태를 공유하거나 지침에 정답을 넣으면 블라인드 조건이 깨집니다. 이 경계는 운영자가 지킵니다.</li>
+</ul>
+</section>
+
+<section id="trouble" aria-labelledby="trouble-title">
+<h2 id="trouble-title">13. 문제 해결</h2>
+<dl>
+<dt>버튼이 눌리지 않음</dt>
+<dd>파일 미입력, 연결 없음, 동의 미체크, harness 해시 고정 중, 다른 작업 진행 중인지 확인합니다. 작업 중에는 연결 변경도 잠깁니다.</dd>
+<dt>터미널이 안 열림 / 포트 사용 중</dt>
+<dd>클릭 실행 링크가 등록되지 않았거나 브라우저가 막았을 수 있습니다. 직접 <code>start-companion.ps1</code>을 실행합니다. 다른 프로그램이 포트를 쓰면 launcher는 그 프로세스를 끄지 않습니다. <code>-Port 7817</code>처럼 빈 포트를 쓰고 앱의 <b class="ui">로컬 포트 (주소는 http://127.0.0.1 고정)</b>도 같은 값으로 맞춥니다.</dd>
+<dt>인증 거부</dt>
+<dd>companion을 다시 시작하면 이전 토큰은 무효입니다. 새 터미널의 토큰을 붙여넣습니다. 브라우저 기록은 지워지지 않습니다.</dd>
+<dt>CLI·모델 오류, 예산 부족</dt>
+<dd>CLI가 설치·로그인됐는지, 모델 ID와 effort를 계정이 지원하는지 확인합니다. 자동 대체는 없습니다. 예산 부족이면 <b class="ui">최대 모델 호출 (1–32)</b>을 늘리거나 harness 상한을 확인합니다.</dd>
+<dt>응답 적용 차단 (원문 불일치)</dt>
+<dd>후보의 Before나 인용이 추출 원문과 정확히 일치하지 않으면 적용하지 않습니다. 다시 실행합니다.</dd>
+<dt>After 거부 (수치·인용·URL 변경)</dt>
+<dd>현재 기본 텍스트 경로는 Before의 숫자 토큰, 대괄호 인용, URL을 After에서 바꾸는 것을 거부합니다. After의 그 부분을 Before와 같게 되돌립니다. 이 검사를 우회하는 방법은 없으며, 모델의 유보·거절도 재시도로 넘기지 않습니다.</dd>
+<dt>PDF 다운로드 차단</dt>
+<dd>글꼴·글리프 문제, 기본 편집기에서 After가 원래 줄 공간을 넘는 경우, 재배치 대상이 아닌 텍스트(다단·회전·잘림)인 경우입니다. After를 줄이거나 재배치 엔진을 설정합니다.</dd>
+<dt>그림 교체 실패</dt>
+<dd>Form 내부·인라인 그림은 목록에서 지원 불가입니다. 교체 결과가 원본과 같아 선택 영역이 바뀌지 않으면(no-op) 실패로 처리합니다.</dd>
+<dt>저장 공간 부족</dt>
+<dd>기존 기록은 덮어쓰지 않습니다. <b class="ui">전체 기록 JSON 백업</b> 후 공간을 확보하고 다시 기록합니다.</dd>
+<dt>유보·거절</dt>
+<dd>모델의 유보나 거절은 그대로 결과입니다. 앱은 우회하거나 강제로 재시도하지 않습니다.</dd>
+</dl>
+</section>
+
+<section id="limits" aria-labelledby="limits-title">
+<h2 id="limits-title">14. 형식과 한계</h2>
+<div class="table-wrap"><table>
+<caption>입력 형식과 받을 수 있는 결과</caption>
+<thead><tr><th>입력</th><th>RED 다운로드</th><th>BLUE 입력</th></tr></thead>
+<tbody>
+<tr><td>PDF</td><td>실험용 PDF (companion 필요)</td><td>가능 (텍스트만)</td></tr>
+<tr><td>TXT · MD · LaTeX · CSV · TSV · RST</td><td>바이트 보존 텍스트 파일</td><td>TXT · MD 가능</td></tr>
+<tr><td>DOCX · ODT · HTML</td><td>차단, 변경 계획 JSON만</td><td>가능 (텍스트만)</td></tr>
+<tr><td>PNG (그림 교체용)</td><td>교체 PDF + 별도 보고서 JSON</td><td>해당 없음</td></tr>
+</tbody></table></div>
+<p>Word 형식으로 내보내는 기능은 없습니다. 화면의 상태는 두 종류로 읽습니다. <strong>경고·사용 불가</strong>(예: 사전분석 사용 불가, 독립 검사 미실행, 구버전 companion)는 그 기능만 쓸 수 없다는 뜻이고 다른 기능은 계속 쓸 수 있습니다. <strong>확정 실패</strong>(보존 검사 실패, 해시 불일치, 원문 불일치)는 결과 파일을 내주지 않습니다.</p>
+</section>
+
+<section id="examples" aria-labelledby="examples-title">
+<h2 id="examples-title">15. 짧은 실습 예시</h2>
+<h3>RED만 쓰기</h3>
+<ol>
+<li>직접 만든 짧은 시험용 TXT를 <b class="ui">RED 논문 파일</b>에 올립니다.</li>
+<li><b class="ui">L1 · 명시적 모순</b>, <b class="ui">Codex CLI</b>를 고르고 동의 후 <b class="ui">선택 harness로 전체 검토</b>.</li>
+<li>후보 하나만 체크하고 After를 다듬은 뒤 <b class="ui">보존 검사 후 완성본 다운로드</b>와 <b class="ui">변경 계획 JSON 저장</b>.</li>
+</ol>
+<h3>BLUE만 쓰기 (다른 harness)</h3>
+<ol>
+<li><b class="ui">Harness</b>에서 위 stdio 예시를 경로만 고쳐 등록합니다.</li>
+<li>BLUE에서 그 harness를 고르고 아무 시험 PDF를 <b class="ui">BLUE 검토 파일</b>에 올린 뒤, 코드 실행 동의와 함께 <b class="ui">BLUE 독립 검토 시작</b>.</li>
+<li>예시 wrapper는 abstain하므로 결과는 유보입니다. 이는 정상이며 탐지 실패가 아닙니다. 자기 모델 pipeline으로 바꿔 씁니다.</li>
+</ol>
+<h3>이어서 쓰기 (선택)</h3>
+<p>RED 사본을 내려받은 뒤 <b class="ui">이 사본으로 BLUE 실행</b>을 쓰거나 BLUE에 그 파일을 직접 올립니다. 이후 <b class="ui">검수</b>에서 BLUE 실행을 고르면 출력 해시 일치로 변경 위치를 대조할 수 있습니다. 판정은 사람이 합니다.</p>
+</section>
+
+<section id="docs" aria-labelledby="docs-title">
+<h2 id="docs-title">16. 기술 문서</h2>
+<ul>
+<li><a href="https://github.com/Pseudo-Lab/Falsify/blob/feat/workbench-html-guide-20261012/tools/workbench/docs/local-companion.md">로컬 companion 연결</a> · <a href="https://github.com/Pseudo-Lab/Falsify/blob/feat/workbench-html-guide-20261012/tools/workbench/docs/harness-contract.md">Harness 계약과 검수</a></li>
+<li><a href="https://github.com/Pseudo-Lab/Falsify/blob/feat/workbench-html-guide-20261012/tools/workbench/docs/pdf-image-editing.md">그림 한 곳 교체</a> · <a href="https://github.com/Pseudo-Lab/Falsify/blob/feat/workbench-html-guide-20261012/tools/workbench/docs/pdf-editor.md">PDF 편집기 설정</a></li>
+<li><a href="https://github.com/Pseudo-Lab/Falsify/blob/feat/workbench-html-guide-20261012/tools/workbench/README.md">README</a> · <a href="https://github.com/Pseudo-Lab/Falsify/blob/feat/workbench-html-guide-20261012/tools/workbench/LICENSE">라이선스 (AGPL-3.0-only)</a></li>
+</ul>
+</section>
+</main>
+<footer class="wrap">
+<p>모델 결과와 사람 검수는 과학적 gold, 도메인 승인, 검증된 성능 지표가 아닙니다. 이 안내는 alpha2 화면 기준이며 화면 문구가 바뀌면 화면을 우선합니다.</p>
+</footer>
+</body>
+</html>
