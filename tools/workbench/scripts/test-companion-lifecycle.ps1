@@ -282,7 +282,7 @@ function Invoke-Launcher([string]$Project, [string[]]$Arguments, [hashtable]$Env
 
 # Bounded failure diagnostic: ANSI-stripped launcher text, token-like values redacted, at most 1200 characters.
 function Write-LauncherDiagnostic([string]$Name, $Result) {
-    $text = $Result.Text -replace '(?i)(token[^:\r\n]*:\s*)\S+', '$1<redacted>' -replace '(?i)stub-token-[0-9a-f]+', '<redacted>'
+    $text = $Result.Text -replace '(?i)(token[^:\r\n]*:\s*)\S+', '$1<redacted>' -replace '(?i)[a-z-]*token-[0-9a-f]+', '<redacted>'
     if ($text.Length -gt 1200) { $text = $text.Substring(0, 1200) + ' ...' }
     Write-Host "diag $Name (exit $($Result.ExitCode)):"
     Write-Host $text
@@ -363,10 +363,14 @@ if ($python) {
         Check 'setup failures preserve the idle companion' (-not $old.HasExited -and (Read-Mark $oldMark) -notmatch 'POST /api/launcher/restart' -and $result.Output -notmatch [regex]::Escape($oldToken))
 
         # Owned idle restart: graceful restart through the API, then a new broker in this terminal.
+        # The new stub must outlive the launcher readiness poll: one Get-FalsifyPortOccupant (listener + CIM lookup) measured
+        # 3.5-6 s on Windows hosts, so a 4 s lifetime could exit mid-poll and be reported as stopped before listening.
         $newMark = Join-Path $work 'idle-new.mark'
-        $result = Invoke-Launcher $project (@('-Port', [string]$port) + $baseArgs) @{ FAKE_MARK = $newMark; FAKE_LIFETIME = '4' }
+        $result = Invoke-Launcher $project (@('-Port', [string]$port) + $baseArgs) @{ FAKE_MARK = $newMark; FAKE_LIFETIME = '20' }
         $null = $old.WaitForExit(10000)
-        Check 'idle restart: launcher completes with the new broker' ($result.Done -and $result.ExitCode -eq 0 -and $result.Output -match 'RestartingtheidleFalsifycompanion')
+        $idleOk = $result.Done -and $result.ExitCode -eq 0 -and $result.Output -match 'RestartingtheidleFalsifycompanion'
+        Check 'idle restart: launcher completes with the new broker' $idleOk
+        if (-not $idleOk) { Write-Host "diag idle restart: done=$($result.Done)"; Write-LauncherDiagnostic 'idle restart' $result }
         Check 'idle restart: old companion exited gracefully through its own restart' ($old.HasExited -and $old.ExitCode -eq 0 -and (Read-Mark $oldMark) -match 'restarting' -and (Read-Mark $oldMark) -match 'exited')
         Check 'idle restart: new broker listened and exited' ((Read-Mark $newMark) -match 'listening' -and (Read-Mark $newMark) -match 'exited')
         Check 'idle restart: token never printed' ($result.Output -notmatch [regex]::Escape($oldToken))

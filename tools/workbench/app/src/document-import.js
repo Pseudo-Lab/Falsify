@@ -64,6 +64,12 @@ function finalize(format,segments,warnings){
   if(text.includes('\0'))fail('바이너리 데이터가 포함되어 있습니다. PDF·DOCX·ODT 또는 UTF-8 TXT로 변환하세요.');
   return {format,text,segments,warnings,provenance:'local-extraction-unverified'};
 }
+// PDF.js passes a glyph's raw char code through as text when the font has no Unicode mapping
+// (e.g. TeX CMEX10 big delimiters at codes 0x00/0x01/0x10/0x11). Those are glyphs, not file bytes:
+// mark each one 1:1 so offsets and word boundaries survive. TAB/LF/CR stay as whitespace.
+const MARK='�';
+const CONTROL=/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g;
+function unmapped(str,count){return str.replace(CONTROL,()=>{count();return MARK;});}
 async function pdf(bytes,{signal,onProgress}){
   if(new TextDecoder().decode(bytes.subarray(0,1024)).indexOf('%PDF-')<0)fail('PDF 서명이 없습니다. 손상된 파일인지 확인하세요.');
   const lib=await import('./vendor/pdf.mjs');check(signal);
@@ -76,14 +82,15 @@ async function pdf(bytes,{signal,onProgress}){
   try{
     doc=await task.promise;check(signal);
     if(doc.numPages>LIMITS.pages)fail('PDF는 200페이지까지 지원합니다. 필요한 부분을 나누어 가져오세요.');
-    const segments=[],blank=[];let length=0;
+    const segments=[],blank=[],glyphPages=[];let length=0,glyphs=0;
     for(let n=1;n<=doc.numPages;n++){
       check(signal);onProgress?.('PDF '+n+' / '+doc.numPages+'페이지 추출 중');
-      const page=await doc.getPage(n);const content=await page.getTextContent();let text='';
-      for(const item of content.items){if(typeof item.str!=='string')continue;text+=item.str+(item.hasEOL?'\n':' ');if(text.length+length>LIMITS.chars)fail('추출 텍스트는 1,000,000자까지 지원합니다. 문서를 나누어 가져오세요.');}
+      const page=await doc.getPage(n);const content=await page.getTextContent();let text='',marked=0;
+      for(const item of content.items){if(typeof item.str!=='string')continue;text+=unmapped(item.str,()=>marked++)+(item.hasEOL?'\n':' ');if(text.length+length>LIMITS.chars)fail('추출 텍스트는 1,000,000자까지 지원합니다. 문서를 나누어 가져오세요.');}
+      if(marked){glyphs+=marked;glyphPages.push(n);}
       text=text.trim();length+=text.length;if(!text)blank.push(n);segments.push({label:'PDF p. '+n,text});page.cleanup();
     }
-    return finalize('PDF',segments,['PDF 읽기 순서·다단 편집·표·수식은 원본과 대조하세요. 텍스트 추출은 레이아웃 검증이 아닙니다.',...(blank.length?['텍스트 없는 페이지: '+blank.join(', ')+'. 이미지·스캔 페이지는 OCR이 필요합니다.']:[])]);
+    return finalize('PDF',segments,['PDF 읽기 순서·다단 편집·표·수식은 원본과 대조하세요. 텍스트 추출은 레이아웃 검증이 아닙니다.',...(blank.length?['텍스트 없는 페이지: '+blank.join(', ')+'. 이미지·스캔 페이지는 OCR이 필요합니다.']:[]),...(glyphs?['유니코드 대응이 없는 PDF 글리프 '+glyphs+'개를 '+MARK+'로 표시했습니다(페이지 '+glyphPages.join(', ')+'). 수식 괄호 등 기호일 수 있으니 원본과 대조하세요.']:[])]);
   }catch(error){
     check(signal);if(timedOut)fail('PDF 추출이 60초를 초과했습니다. 필요한 페이지만 나누거나 TXT로 변환하세요.');if(error.name==='PasswordException')fail('암호화된 PDF입니다. 권한이 있는 원본 앱에서 암호를 해제한 사본을 가져오세요.');
     if(error.name==='InvalidPDFException')fail('PDF를 읽을 수 없습니다. 원본 앱에서 다시 저장하세요.');throw error;

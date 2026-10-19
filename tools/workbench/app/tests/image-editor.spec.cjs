@@ -82,7 +82,7 @@ function world(cap=CAP){
   const URLmock={createObjectURL:blob=>{downloads.push(blob);return 'blob:'+downloads.length;},revokeObjectURL:u=>revoked.push(u)};
   const fakeSetTimeout=(fn,ms)=>{if(ms>=60000){timers.push({fn,ms,live:true});return 'deadline-'+(timers.length-1);}return setTimeout(fn,ms);};
   const fakeClearTimeout=id=>{if(typeof id==='string'&&id.startsWith('deadline-'))timers[Number(id.slice(9))].live=false;else clearTimeout(id);};
-  const ctx=vm.createContext({document,crypto:globalThis.crypto,FalsifyDocumentRed:C,FalsifyLocalBridge:bridge,FalsifyLab:lab,FalsifyExport:{textFile:async(file,patches)=>({bytes:new TextEncoder().encode('edited text'),verification:null})},
+  const ctx=vm.createContext({document,crypto:globalThis.crypto,FalsifyDocumentRed:C,FalsifyHarness:require('../dist/harness-core.js'),FalsifyLocalBridge:bridge,FalsifyLab:lab,FalsifyExport:{textFile:async(file,patches)=>({bytes:new TextEncoder().encode('edited text'),verification:null})},
     TextEncoder,TextDecoder,CustomEvent,Event,URL:URLmock,Blob,File,setTimeout:fakeSetTimeout,clearTimeout:fakeClearTimeout,AbortController,confirm:()=>true,addEventListener(){},btoa,atob,Uint8Array,Array,Promise,Error,Map,Set,JSON,Number,String,Object,Math});
   for(const f of ['image-editor-core.js','image-editor.js','document-red.js'])vm.runInContext(read(f),ctx,{filename:f});
   for(const type of ['falsify:blue-file','falsify:blue-document'])document.addEventListener(type,()=>events.push(type));

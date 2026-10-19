@@ -21,7 +21,7 @@ function world(){
   const digests=[];const crypto={randomUUID:()=>'u'+Math.random().toString(16).slice(2),subtle:{digest:(_,bytes)=>new Promise((resolve,reject)=>digests.push({label:new TextDecoder().decode(bytes),resolve:()=>resolve(new Uint8Array(32).buffer),reject}))}};
   const lab={calls:[],busy(role,v){if(role==='red')lab.calls.push(!!v);},allowed:()=>true,ready:Promise.resolve(),bind:(_,r)=>r,record:async()=>'run1'};
   const bridge={calls:[],busy(role,v){if(role==='red')bridge.calls.push(!!v);},session:()=>null,state:()=>({status:'manual',connected:false,cap:null}),capabilities:()=>({red:true,pdf:false})};
-  const ctx=vm.createContext({document,crypto,FalsifyDocumentRed:C,FalsifyLocalBridge:bridge,FalsifyLab:lab,FalsifyExport:{},TextEncoder,TextDecoder,CustomEvent,Event,URL,Blob,File,setTimeout,clearTimeout,confirm:()=>true,addEventListener(){},btoa,atob,Uint8Array,Array,Promise,Error,Map,JSON,Number,String});
+  const ctx=vm.createContext({document,crypto,FalsifyDocumentRed:C,FalsifyHarness:require('../dist/harness-core.js'),FalsifyLocalBridge:bridge,FalsifyLab:lab,FalsifyExport:{},TextEncoder,TextDecoder,CustomEvent,Event,URL,Blob,File,setTimeout,clearTimeout,confirm:()=>true,addEventListener(){},btoa,atob,Uint8Array,Array,Promise,Error,Map,JSON,Number,String});
   vm.runInContext(SOURCE,ctx,{filename:'document-red.js'});
   const fire=(type,detail)=>document.dispatchEvent(new CustomEvent(type,{cancelable:true,detail}));
   const load=(name,text)=>fire('falsify:document',{file:{name,type:'text/plain',arrayBuffer:async()=>new TextEncoder().encode('FILE:'+name).buffer},result:{text,format:'TXT',segments:[{label:'p1',text}]}});

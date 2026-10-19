@@ -52,7 +52,7 @@ class BlindTypographyTests(unittest.TestCase):
         return {'id': 'answerkey-7f3a', 'label': 'PDF p. 1', 'before': before, 'after': after}
 
     def assert_clean_edit(self, raw, before, after):
-        out, _ = export_pdf(raw, [self.patch(before, after)])
+        out, self.verification = export_pdf(raw, [self.patch(before, after)])
         src, dst = self.open(raw), self.open(out)
         text = ' '.join(dst[0].get_text().split())
         self.assertNotIn(before, text); self.assertIn(after, text); self.assertIn(UNTOUCHED, text)
@@ -92,11 +92,39 @@ class BlindTypographyTests(unittest.TestCase):
         with self.assertRaises(ValueError): export_pdf(symbolic_pdf([BEFORE, UNTOUCHED]), [self.patch(BEFORE, after)])
 
     def test_mid_line_edit_keeps_neighbour_positions(self):
+        # Contract change 2026-10-19 (F5): a shorter After closes its gap. The rest of the edited line moves by exactly
+        # the reported followingTextShift with glyph, font, size and baseline kept, and the move is declared
+        # (unselectedGlyphPositionsUnchanged false); the prefix and every other line keep their exact positions.
         raw = symbolic_pdf([BEFORE, UNTOUCHED])
+        src, dst = self.assert_clean_edit(raw, 'does not show', 'does show')
+        v, baseline = self.verification, chars(src)[0][2]
+        shift = v['edits'][0]['followingTextShift']
+        left, right = 50 + advance('Study'), 50 + advance('Study does not show') - 0.01
+        line = lambda d: [c for c in chars(d) if c[2] == baseline]
+        self.assertEqual([c for c in chars(dst) if c[2] != baseline], [c for c in chars(src) if c[2] != baseline])
+        self.assertEqual([c for c in line(dst) if c[1] < left], [c for c in line(src) if c[1] < left])
+        moved = advance('does show') - advance('does not show')
+        self.assertLess(moved, 0); self.assertAlmostEqual(shift['pt'], moved, delta=0.002)
+        old = [c for c in line(src) if c[1] >= right]
+        new = [c for c in line(dst) if c[1] >= right + moved]
+        self.assertEqual(len(new), len(old)); self.assertEqual(shift['glyphs'], len(old))
+        for (c, x, y, font, size), (d, x2, y2, font2, size2) in zip(old, new):
+            self.assertEqual((d, y2, font2, size2), (c, y, font, size)); self.assertAlmostEqual(x2, x + shift['pt'], delta=0.002)
+        # No other glyph on the line: prefix + After + the shifted rest is the whole line.
+        self.assertEqual(len(line(dst)), len(line(src)) - len('does not show') + len('does show'))
+        self.assertFalse(v['unselectedGlyphPositionsUnchanged'])
+        self.assertEqual(v['unselectedGlyphsShiftedAlongEditedLine'], len(old)); self.assertNotIn('gapCloseFallback', v)
+
+    def test_mid_line_edit_with_separately_positioned_rest_keeps_neighbour_positions(self):
+        # Fallback side of the same contract: a rest the export cannot prove moves with the edit (its own Tm) stays fixed.
+        raw = with_line(symbolic_pdf([BEFORE, UNTOUCHED]), 'Study does not show ', 'benefit.')
         src, dst = self.assert_clean_edit(raw, 'does not show', 'does show')
         left, right = 50 + advance('Study'), 50 + advance('Study does not show ') - 0.01
         keep = lambda d: [c for c in chars(d) if c[0] != ' ' and (c[1] < left or c[1] >= right)]
         self.assertEqual(keep(dst), keep(src))
+        v = self.verification
+        self.assertTrue(v['unselectedGlyphPositionsUnchanged']); self.assertEqual(v['unselectedGlyphsShiftedAlongEditedLine'], 0)
+        self.assertIsNone(v['edits'][0]['followingTextShift'])
 
     def test_visible_neighbour_overlap_rejected(self):
         raw = with_line(symbolic_pdf([BEFORE, UNTOUCHED]), 'Study', -0.5, 'does not show benefit.')

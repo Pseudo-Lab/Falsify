@@ -70,5 +70,10 @@ test('manual response is never execution-verified, even with forged reread metad
   const s=w.progress();assert.match(s,/수동 응답의 실행·전달 여부 미검증\. 원문 재확인 실행 여부 미검증\(수동 응답\)\.$/);assert.doesNotMatch(s,/재확인 수행|전달 완료|forged/);
   assert.match(w.get('doc-blue-result-summary').textContent,/수동 응답 · 실행 출처 미검증/);assert.equal(w.calls.length,0,'no broker call');});
 
+test('abstain and refusal still state delivery coverage and reread instead of hiding an incomplete review',async()=>{
+  for(const [status,head] of [['abstain',/^BLUE 판단 유보\. 탐지 실패로 변환하지 않습니다\. /],['refusal',/^BLUE 요청 거절\. 우회·자동 재시도하지 않습니다\. /]]){const w=world();await w.load();
+    w.reply=async p=>{if(p==='/api/blue/jobs')return {id:'j1'};const r=w.calls[0].body;return {state:'completed',result:{schema:r.schema,revision:r.revision,sourceHash:r.sourceHash,status,findings:[],model:'synthetic',coverage:{calls:2,complete:false,reread:{status:'incomplete',selectedSegments:[],deliveredChars:0,truncated:false}}}};};
+    await w.start();await until(()=>head.test(w.progress()),status);assert.match(w.progress(),/앱 adapter 호출 2회\. 전달 미완료\. 원문 근거 재확인 미완료\.$/,status);assert.equal(w.calls.length,2,'no retry');}});
+
 (async()=>{let passed=0;for(const [name,fn] of tests){try{await fn();passed++;console.log('PASS '+name);}catch(e){console.error('FAIL '+name+'\n'+(e.stack||e));process.exitCode=1;}}
   console.log(JSON.stringify({passed,total:tests.length}));})();

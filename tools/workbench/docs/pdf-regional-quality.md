@@ -55,7 +55,29 @@ unchanged paragraph glyph, with identical text, styles and vector drawings. Thes
   output (a vector tick or white cover is a drawing, so it stays `failed` even if its ink were small).
 
 A pixel on blank page, on a glyph that did not drift, on a recolored, resized or renamed glyph, or on a glyph moved
-beyond 0.002 pt is still a definite `failed`. Beyond 4096 such pixels (`NOISE_MAX`) nothing is classified.
+beyond 0.002 pt (and not part of a rigid run, below) is still a definite `failed`. Beyond 4096 such pixels
+(`NOISE_MAX`) nothing is classified.
+
+### Rigid runs up to 0.02 pt (`RIGID_TOL`)
+
+An engine that re-emits text positions in floating point (for example a re-derived leading) can translate a whole run
+of unchanged glyphs by a few thousandths of a point; a real editor output moved a kept same-line stretch by 0.011/0.008
+pt and following lines by up to 0.016 pt. Such glyphs also count as drifted when they form a **rigid run**:
+
+- at least two consecutive glyphs of one unedited line, or of one kept stretch of an edited line between selections;
+- each with the same character and exact style (font name, size, color) as its source glyph;
+- all moved by one common nonzero vector (every box and baseline delta within 0.002 pt of the run's first glyph, box
+  shape kept), of at most 0.02 pt in every coordinate (`RIGID_TOL`, under 1/30 of a raster pixel at 96 dpi).
+
+The same ink (8%), drawing, image, annotation and unmatched-text proof as above still has to explain every changed
+pixel, so the result is at most a `warning`, never `passed`. A single glyph, a run whose glyphs moved differently, a
+restyled glyph, a run moved beyond 0.02 pt, or a kept stretch that slid along its line (a longer/shorter After) is
+never rigid. `DRIFT_TOL` itself is unchanged.
+
+This is a tolerance, not a proof of invisibility: a 0.02 pt translation is accepted for a run whose pixels re-quantize
+within the ink rule, and nothing checks that the translation came from float re-emission rather than a deliberate
+shift of that size. Conversely, cumulative leading error beyond 0.02 pt on a long paragraph (each line a little
+further off) still fails whenever it changes pixels, even if it is equally invisible.
 
 ## Isolation
 
@@ -78,3 +100,10 @@ coordinates or paths.
 - Drift noise is classified from MuPDF's own drawing, image and annotation lists plus ink: a shading or other content
   those lists do not report, drawn on a drifted glyph and keeping its ink within 8%, would be a `warning`, not a
   `failed`.
+- Rigid runs widen the drift tolerance from 0.002 pt to 0.02 pt for runs of at least two glyphs (above); a single
+  glyph keeps the 0.002 pt limit.
+- `edited_text_order` first reads lines in MuPDF's geometric sort order. Column growth can re-pair side-by-side lines
+  and falsely appear to lose text. A definite-loss verdict becomes `warning` only when an additional block-order
+  comparison equals the source with exactly the selected edits. This additional proof retains hyphens and minus signs;
+  it does not use a character bag or forgive deletions, additions or substitutions. Different block segmentation may
+  still conservatively refuse an otherwise correct output. Position, style and visibility checks remain separate.

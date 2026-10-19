@@ -30,14 +30,45 @@
   // Brokers without cliSelection only accept the legacy Codex adapter.
   const needsCliCaps=h=>!!h?.adapter&&(h.adapter.type==='claude'||Object.hasOwn(h.adapter,'model')||Object.hasOwn(h.adapter,'effort'));
   function derivedFrom(h,base){if(!cliCapable(h)||!cliCapable(base))return false;const strip=x=>{const c={...x};delete c.adapter;return canonical(c);};return strip(h)===strip(base);}
+  // Record kinds are derived from stored fields only, so legacy records are never rewritten. Only a local broker run counts as an
+  // execution of its harness; manual and imported records keep the requested harness, which is not proof that it ran.
+  const ORIGINS=Object.freeze({executed:'로컬 broker 실행',manual:'수동 응답 · 실행 미검증',imported:'가져온 기록 · 출처 미검증'});
+  const origin=provenance=>provenance==='local-codex'?'executed':provenance==='manual-unverified'?'manual':'imported';
+  // executed: the broker reported the stored harness hash AND a well-formed harness canonically equal to the stored one (checked when
+  // recorded, re-derived here so a legacy record with a copied hash but another definition stays unknown); requested: selected, never attested.
+  function brokerHarness(r){try{return r.response?.harnessHash===r.harnessHash&&canonical(r.response.harness)===canonical(r.harness);}catch{return false;}}
+  function attestation(r){const o=origin(r.provenance);return o==='executed'?(brokerHarness(r)?'executed':'unknown'):o==='manual'?'requested':'unknown';}
+  const HARNESS_ROLE=Object.freeze({executed:'실행 harness',requested:'요청 harness',unknown:'실행 미확인 harness'});
+  const STATUS=Object.freeze({ok:'완료',abstain:'유보',refusal:'거절',unknown:'상태 미상'});
+  const count=x=>Number.isSafeInteger(x)&&x>=0?x:null;
+  // Coverage counts only for a local broker run. RED coverage.complete=false means the app stopped at a chunk read, so its final
+  // synthesis call never ran even when every chunk was read; BLUE coverage carries no synthesis flag. A valid call count is kept
+  // even when the completeness flag is missing; an absent or invalid count stays null (unknown), never zero.
+  function outcome(role,res,provenance){const status=Object.hasOwn(STATUS,res?.status)?res.status:'unknown',c=res?.coverage,none={status,complete:null,synthesis:null,chunks:null,completedChunks:null,calls:null};
+    if(origin(provenance)!=='executed')return {...none,verified:false};
+    if(!c||typeof c!=='object')return {...none,verified:true};
+    if(typeof c.complete!=='boolean')return {...none,verified:true,calls:count(c.calls)};
+    return {status,verified:true,complete:c.complete,synthesis:role==='red'?c.complete:null,chunks:count(c.chunks),completedChunks:count(c.completedChunks),calls:count(c.calls)};}
+  function outcomeText(role,res,provenance){const x=outcome(role,res,provenance),parts=['결과 '+STATUS[x.status]];
+    if(!x.verified)parts.push((origin(provenance)==='manual'?'수동 응답':'가져온 기록')+'이라 실행·검토 범위 미검증');
+    else if(x.complete===null){parts.push('검토 범위 보고 없음');if(x.calls!==null)parts.push('앱 adapter 호출 '+x.calls+'회');}
+    else{parts.push(x.complete?'전체 추출 텍스트 전달 완료':'검토 범위 미완료');if(x.chunks>1&&x.completedChunks!==null)parts.push('분할 읽기 '+x.completedChunks+' / '+x.chunks);
+      if(x.synthesis!==null)parts.push(x.synthesis?'후보 종합 단계 실행':'후보 종합 단계 미실행');if(x.calls!==null)parts.push('앱 adapter 호출 '+x.calls+'회');}
+    return parts.join(' · ');}
+  // A final snapshot is not another execution; app adapter calls are summed from broker reports only (user harness internals are separate).
+  // Executions without a valid reported count are tallied in callsUnknown, so a missing report never reads as zero calls.
+  function counts(runs){const c={executed:0,manual:0,imported:0,snapshots:0,calls:0,callsUnknown:0};for(const r of runs){if(r.snapshotOf){c.snapshots++;continue;}const o=origin(r.provenance);c[o]++;if(o==='executed'){const n=outcome(r.role,r.response,r.provenance).calls;if(n===null)c.callsUnknown++;else c.calls+=n;}}return c;}
+  // Known calls are a lower bound when some executions did not report a count; zero is shown only when every execution reported one.
+  const callsText=(calls,unknown,executions)=>!unknown?'앱 adapter 호출 '+calls+'회':unknown>=executions?'앱 adapter 호출 수 미보고 '+unknown+'건':'앱 adapter 호출 '+calls+'회 이상, 호출 수 미보고 '+unknown+'건';
+  // Groups never mix executed, manual and imported records, so each denominator counts one kind. Means use attested executions only.
   function summarize(runs,reviews){
     const groups=new Map();
-    for(const r of runs){const key=[r.role,r.harnessHash,r.model,r.sourceHash,r.level||'-',r.maxCalls].join('|');
-      if(!groups.has(key))groups.set(key,{role:r.role,harness:r.harness,hash:r.harnessHash,model:r.model,sourceHash:r.sourceHash,level:r.level,maxCalls:r.maxCalls,runs:0,reviewed:0,scores:[],uncertain:0,manual:0});
-      const g=groups.get(key);g.runs++;if(r.provenance!=='local-codex')g.manual++;
+    for(const r of runs){const o=origin(r.provenance),a=attestation(r),key=[r.role,o,a,r.harnessHash,r.model,r.sourceHash,r.level||'-',r.maxCalls].join('|');
+      if(!groups.has(key))groups.set(key,{role:r.role,origin:o,attestation:a,harness:r.harness,hash:r.harnessHash,model:r.model,sourceHash:r.sourceHash,level:r.level,maxCalls:r.maxCalls,runs:0,reviewed:0,scores:[],uncertain:0,manual:0,statuses:{ok:0,abstain:0,refusal:0,unknown:0},incomplete:0,calls:0,callsUnknown:0});
+      const g=groups.get(key),x=outcome(r.role,r.response,r.provenance);g.runs++;if(r.provenance!=='local-codex')g.manual++;g.statuses[x.status]++;if(x.complete===false)g.incomplete++;if(x.calls!==null)g.calls+=x.calls;else if(o==='executed')g.callsUnknown++;
       const latest=reviews.filter(v=>v.runId===r.id).at(-1);if(latest){g.reviewed++;if(latest.verdict==='uncertain')g.uncertain++;if(latest.score!==null&&latest.verdict!=='uncertain')g.scores.push(latest.score);}
     }
-    return [...groups.values()].map(g=>({...g,mean:g.scores.length?g.scores.reduce((a,b)=>a+b,0)/g.scores.length:null}));
+    return [...groups.values()].map(g=>({...g,mean:g.attestation==='executed'&&g.scores.length?g.scores.reduce((a,b)=>a+b,0)/g.scores.length:null}));
   }
-  return {validate,canonical,hash,builtin,summarize,CLI,EFFORTS,DEFAULT_EFFORT,MODEL,validModel,cliCapable,cliSelection,withCli,needsCliCaps,derivedFrom};
+  return {validate,canonical,hash,builtin,summarize,CLI,EFFORTS,DEFAULT_EFFORT,MODEL,validModel,cliCapable,cliSelection,withCli,needsCliCaps,derivedFrom,ORIGINS,origin,attestation,HARNESS_ROLE,STATUS,outcome,outcomeText,counts,callsText};
 });

@@ -211,4 +211,35 @@ class Isolation(unittest.TestCase):
             report=json.loads(child.stdout)
             self.assertEqual(status(report,'edited_page_render'),'failed',report)
 
+class LigatureOrder(unittest.TestCase):
+    # A ligature glyph (one origin, several ToUnicode characters) on an unedited line: the source reports its components
+    # at bit-identical origins, a float re-serialized output at origins a few 1e-5 pt apart (values from the T-0071 RCA).
+    STYLE=('termes',10.037,0,'Termes')
+    def line(self,parts,line=1,style=STYLE):
+        R=q._regions()
+        return [R._Char(c,(x,295.0685,x+w,305.1055),302.675,style,line,10) for c,x,w in parts]
+    SRC=[('a',342.2117,8.3627),('f',350.5743408203125,3.3424),('l',350.5743408203125,2.7903),('i',350.5743408203125,2.8112),('n',353.3855,4.9)]
+    OUT=[('a',342.2116,8.3627),('f',350.5743103027344,3.3424),('l',350.5743103027344,2.7903),('i',350.57427978515625,2.8112),('n',353.3854,4.9)]
+    def rows(self,chars):
+        R=q._regions();return R._rows(chars)
+    def test_ligature_components_keep_extraction_order_under_origin_noise(self):
+        R=q._regions();S,O=self.line(self.SRC),self.line(self.OUT)
+        (_,row),=self.rows(S);(_,orow),=self.rows(O)
+        self.assertEqual(R._text(S,row),'aflin')
+        self.assertEqual(R._text(O,orow),R._text(S,row));self.assertEqual(R._same_row(S,row,O,orow,True),'same')
+    def test_reordered_or_restyled_components_still_differ(self):
+        R=q._regions();S=self.line(self.SRC);(_,row),=self.rows(S)
+        swapped=[self.OUT[0],self.OUT[3],self.OUT[1],self.OUT[2],self.OUT[4]]  # the output really extracts 'i' first
+        O=self.line(swapped);(_,orow),=self.rows(O)
+        self.assertNotEqual(R._text(O,orow),R._text(S,row));self.assertIsNone(R._same_row(S,row,O,orow,True))
+        O=self.line(self.OUT,style=('termes',10.6,0,'Termes'));(_,orow),=self.rows(O)
+        self.assertIsNone(R._same_row(S,row,O,orow,True),'a resized ligature is never the same row')
+    def test_distinct_glyphs_and_lines_are_still_ordered_by_position(self):
+        R=q._regions()
+        # Extraction order disagrees with geometry beyond DRIFT_TOL: geometry still decides.
+        O=self.line([('b',350.5763,3.0),('a',350.5743,3.0)]);(_,orow),=self.rows(O);self.assertEqual(R._text(O,orow),'ab')
+        # Same origin but different MuPDF lines (e.g. an overprint): not a ligature, position then index order.
+        O=self.line([('b',350.5743408,3.0)],line=1)+self.line([('a',350.5743103,3.0)],line=2);(_,orow),=self.rows(O)
+        self.assertEqual(R._text(O,orow),'ab')
+
 if __name__=='__main__':unittest.main()

@@ -36,6 +36,8 @@ For the module, clone with `--recurse-submodules` and follow its
 [candidate build instructions](https://github.com/Shinick-Han/falsify-pdf-editor/blob/main/docs/BUILD.md).
 This source release does **not** bundle or automatically download a patched WASM: selecting
 the upstream default binary is not a substitute for the stream-order-patched candidate.
+Workbench 0.2.0-alpha.3 was checked against editor 0.1.0-alpha.5 (repeated same-line re-edits and
+word-spacing source patches); that runtime was verified on the maintainer host only and is not bundled.
 
 - Capability probe (`/api/capabilities` → `pdfEditor`, also warmed in the background at
   start): checks module/manifest presence, `node --version` >= 24, then runs the fixed

@@ -6,6 +6,7 @@ import hashlib
 import http.client
 import io
 import json
+import re
 import subprocess
 import sys
 import tempfile
@@ -222,6 +223,69 @@ class ExportTests(Base):
         with self.assertRaisesRegex(ValueError,'node_too_old'):svc.export(payload())
         self.assertEqual([c for c in self.runner.calls if '--request' in c['argv']],[])
 
+def refusing(report,code='SELF_CHECK_FAILED',write_out=False):
+    """Editor run that exits 1 after writing the given (bridge-sanitized or hostile) report, optionally with an output."""
+    def run(args):
+        if report is not None:Path(args['--report']).write_text(json.dumps(report))
+        if write_out:Path(args['--out']).write_bytes(OUTPUT)
+        return SimpleNamespace(returncode=1,stdout=json.dumps({'ok':False,'code':code}).encode()+b'\n')
+    return run
+
+class RefusalDiagnosticsTests(Base):
+    """A refused export names known self-check failure / error repair warning codes with fixed labels; nothing else."""
+    SECRET='C:/Users/secret/source.pdf sk-live-123 the result may hold <script>'
+    def refuse(self,report,code='SELF_CHECK_FAILED',write_out=False):
+        svc=self.service(edit=refusing(report,code,write_out))
+        with patch.object(server,'handle_export',side_effect=AssertionError('legacy fallback')):
+            with self.assertRaises(ValueError) as ctx:svc.export(payload())
+        self.assertFalse(self.runner.tempdir.exists(),'own temp dir removed');self.assertEqual(svc.leftovers,[])
+        self.assertEqual(self.quality.calls,[],'refused output never reaches QA or the caller')
+        return str(ctx.exception)
+    def head(self,code):return f'PDF 편집기가 변경을 적용하지 못했습니다 ({code}).'
+    def test_self_check_failures_named_with_pages_and_dedup(self):
+        sc={'status':'failed','failures':[{'code':'edited_page_text_or_order_mismatch','pageIndex':2},{'code':'header_footer_moved','pageIndex':2},
+            {'code':'edited_page_text_or_order_mismatch','pageIndex':2},{'code':'edge_band_body_changed','pageIndex':4},{'code':'header_footer_moved','pageIndex':3}]}
+        msg=self.refuse({'ok':False,'error':{'code':'SELF_CHECK_FAILED','message':self.SECRET},'selfCheck':sc})
+        self.assertEqual(msg,self.head('SELF_CHECK_FAILED')+' 진단: 편집한 페이지의 텍스트/순서가 기대와 다름[edited_page_text_or_order_mismatch] (p. 3); '
+            '머리글/바닥글이 움직임[header_footer_moved] (p. 3, 4); 머리글/바닥글 가장자리 영역의 본문이 바뀜[edge_band_body_changed] (p. 5). '+es.NO_FALLBACK)
+        self.assertEqual(re.search(r'\(([A-Z][A-Z0-9_]{2,63})\)',msg)[1],'SELF_CHECK_FAILED','QA classifiers still read the top code first')
+    def test_pagination_error_warning_only_error_severity(self):
+        warnings=[{'pageIndex':2,'code':'pagination_required','severity':'info'},{'pageIndex':2,'code':'reading_order_not_exact','severity':'warning'},
+            {'pageIndex':2,'code':'pagination_unsupported_foreign_object_in_flow','severity':'error'}]
+        msg=self.refuse({'ok':False,'error':{'code':'LAYOUT_UNSUPPORTED'},'warnings':warnings,'selfCheck':{'status':'not-run','failures':[]}},code='LAYOUT_UNSUPPORTED')
+        self.assertEqual(msg,self.head('LAYOUT_UNSUPPORTED')+' 진단: 넘치는 본문 흐름에 텍스트가 아닌 개체가 있어 페이지 넘김 미지원'
+            '[pagination_unsupported_foreign_object_in_flow] (p. 3). '+es.NO_FALLBACK)
+    def test_unknown_malformed_and_unsafe_fields_never_leak(self):
+        s=self.SECRET
+        failures=[{'code':s,'pageIndex':1},{'code':'Header_Footer_Moved'},{'code':['header_footer_moved']},{'code':{'x':1}},'header_footer_moved',None,7,
+            {'code':'header_footer_moved '},{'code':'unknown_future_code','pageIndex':0},{'code':'after_missing','pageIndex':True,'message':s,'before':s,'after':s},
+            {'code':'after_missing','pageIndex':-1},{'code':'after_missing','pageIndex':10**9},{'code':'after_missing','pageIndex':'3'},{'code':'after_missing','pageIndex':1.0}]
+        report={'ok':False,'error':{'code':'SELF_CHECK_FAILED','message':s},'selfCheck':{'status':'failed','failures':failures,'method':s},
+            'warnings':[{'code':'resize_failed','severity':'ERROR'},{'code':s,'severity':'error'},'x'],'runtime':{'wasmSha256':WASM,'candidate':{'manifestPath':s}},'engineLog':[s]*50}
+        msg=self.refuse(report)
+        self.assertEqual(msg,self.head('SELF_CHECK_FAILED')+' 진단: After 문구가 출력에서 확인되지 않음[after_missing]. '+es.NO_FALLBACK)
+        for leak in ['secret','sk-live','script','C:/','unknown_future_code','Header_Footer','result may hold',WASM]:self.assertNotIn(leak,msg)
+    def test_counts_bounded(self):
+        codes=list(es.REFUSAL_REASONS)[:10]
+        failures=[{'code':c,'pageIndex':p} for c in codes for p in range(8)]
+        msg=self.refuse({'ok':False,'selfCheck':{'status':'failed','failures':failures}})
+        self.assertEqual([c for c in codes if f'[{c}]' in msg],codes[:es.MAX_REASONS])
+        self.assertIn(f'[{codes[0]}] (p. 1, 2, 3);',msg);self.assertLess(len(msg),1200)
+        late=[{'code':'after_missing'}]*es.MAX_REASON_SCAN+[{'code':'header_footer_moved'}]
+        self.assertNotIn('header_footer_moved',self.refuse({'ok':False,'selfCheck':{'status':'failed','failures':late}}),'scan bounded')
+    def test_missing_or_shapeless_report_keeps_generic_failure(self):
+        generic=self.head('SELF_CHECK_FAILED')+' '+es.NO_FALLBACK
+        for report in [None,{'ok':False},{'ok':False,'selfCheck':'failed'},{'ok':False,'selfCheck':{'failures':{'code':'after_missing'}}},
+                {'ok':False,'warnings':{'code':'resize_failed','severity':'error'}},[{'code':'after_missing'}],{'ok':False,'selfCheck':{'failures':[{'code':'unknown'}]}}]:
+            with self.subTest(report=report):self.assertEqual(self.refuse(report),generic)
+        self.assertEqual(self.refuse(None,code='lower bad'),self.head('EDITOR_FAILED')+' '+es.NO_FALLBACK)
+    def test_output_written_by_failed_editor_is_not_returned(self):
+        msg=self.refuse({'ok':False,'selfCheck':{'status':'failed','failures':[{'code':'glyphs_off_page','pageIndex':0}]}},write_out=True)
+        self.assertIn('[glyphs_off_page] (p. 1)',msg)
+    def test_success_path_unchanged(self):
+        result=self.service(edit={'warnings':[{'code':'header_footer_moved','severity':'warning','pageIndex':1}]}).export(payload())
+        self.assertEqual(base64.b64decode(result['file']),OUTPUT);self.assertEqual(result['verification']['diagnostics'],['header_footer_moved (p. 2)'])
+
 class IndependentQATests(Base):
     def test_production_qa_is_default_regardless_of_runner(self):
         self.assertIs(es.PdfEditorService(self.config,runner=FakeRunner()).quality,pdf_quality.inspect_isolated)
@@ -402,6 +466,11 @@ class ServerTests(Base):
             status,data=self.call(self.start(self.service()),'/api/export',payload());self.assertEqual(status,200);self.assertEqual(data['verification']['engine'],'falsify-pdf-editor')
             status,data=self.call(self.start(self.service(edit='fail')),'/api/export',payload());self.assertEqual(status,400);self.assertIn('MATCH_FAILED',data['error'])
         self.assertTrue(server.ACTIVE.acquire(blocking=False));server.ACTIVE.release()
+    def test_export_refusal_error_carries_known_reasons(self):
+        report={'ok':False,'selfCheck':{'status':'failed','failures':[{'code':'after_missing','pageIndex':0},{'code':'C:/x','pageIndex':0}]}}
+        status,data=self.call(self.start(self.service(edit=refusing(report))),'/api/export',payload())
+        self.assertEqual(status,400);self.assertNotIn('file',data);self.assertNotIn('C:/x',data['error'])
+        self.assertIn('(SELF_CHECK_FAILED). 진단: After 문구가 출력에서 확인되지 않음[after_missing] (p. 1).',data['error'])
     def test_unconfigured_export_keeps_legacy(self):
         with patch.object(server,'handle_export',lambda d:{'legacy':True}):
             self.assertEqual(self.call(self.start(None),'/api/export',payload()),(200,{'legacy':True}))

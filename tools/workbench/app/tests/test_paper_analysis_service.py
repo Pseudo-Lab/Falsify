@@ -16,6 +16,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 LOCAL = Path(__file__).resolve().parents[1] / 'local'
+ROOT_VERSION = (Path(__file__).resolve().parents[2] / 'VERSION').read_text(encoding='ascii').strip()
 sys.path.insert(0, str(LOCAL))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import server
@@ -460,7 +461,7 @@ class ServerTests(ContractAsserts, unittest.TestCase):
         self.assertEqual(result['response'][0], 200); self.assertTrue(active_free())
     def test_capabilities_and_optional_dependency_absence(self):
         status, _, caps = self.call('/api/capabilities', 'GET')
-        self.assertEqual(status, 200); self.assertEqual(caps['workbenchVersion'], '0.2.0-alpha.2')
+        self.assertEqual(status, 200); self.assertEqual(caps['workbenchVersion'], ROOT_VERSION)
         self.assertEqual(caps['paperAnalysis'], {'available': svc.capability()['available'], 'schema': 'falsify.pdf-analysis-summary.v1'})
         pdf = caps['pdf']
         with patch.object(svc.importlib.util, 'find_spec', lambda name, *a: None):

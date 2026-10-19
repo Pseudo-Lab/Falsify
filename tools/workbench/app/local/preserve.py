@@ -1,5 +1,9 @@
 """Conservative PDF edits: same line/font, no reflow, unchanged exterior pixels.
 
+A shorter After does not leave a hole before the rest of its line: when that rest is drawn by the same text operator,
+it moves left along its baseline by exactly the width the line lost (the original gap after the selection is kept),
+and every moved glyph is verified at that exact position; otherwise the original positions are kept as before.
+
 PyMuPDF is optional and is AGPL/commercial licensed; see docs/document-red.md.
 No Word/HTML renderer is configured: those exports fail closed, not reconstruct.
 """
@@ -8,8 +12,8 @@ import hashlib
 import re
 import struct
 
-from pdf_typography import (MAX_TRACKING_EM, MICRO_OVERLAP_PT, MIN_SPACE_RATIO, TIGHT_SPACE_RATIO, find_show, plan_fit,
-    rewrite_parts, source_space_range, verify_fit)
+from pdf_typography import (EPS, MAX_TRACKING_EM, MICRO_OVERLAP_PT, MIN_SPACE_RATIO, TIGHT_SPACE_RATIO, find_show, plan_fit,
+    rewrite_items, rewrite_parts, serialize_tj, source_space_range, verify_fit)
 from pdf_font_codec import font_codec  # Base14/Type0 existing-font codec (separate module).
 
 def font_names(buffer):
@@ -221,7 +225,45 @@ def page_chars(raw):
     return [(c, span) for block in raw['blocks'] for line in block.get('lines', []) for span in line['spans']
         for c in span.get('chars', []) if not c.get('synthetic')]
 
+def ink_boxes(page, raw):
+    """id(char of raw) -> the glyph's outline box (MuPDF accurate bboxes), or {} when that extraction does not pair
+    one-to-one with raw. A glyph whose outline box is empty keeps no entry (its line box is used) unless it is white
+    space, which has no ink."""
+    import pymupdf as fitz
+    plain = page_chars(raw)
+    accurate = page_chars(page.get_text('rawdict', flags=fitz.TEXTFLAGS_RAWDICT | fitz.TEXT_ACCURATE_BBOXES))
+    if len(accurate) != len(plain) or any(a['c'] != b['c'] or max(abs(u - v) for u, v in zip(a['origin'], b['origin'])) > 1e-3
+            for (a, _), (b, _) in zip(accurate, plain)): return {}
+    boxes = {}
+    for (a, _), (b, _) in zip(accurate, plain):
+        box = fitz.Rect(a['bbox'])
+        if not box.is_empty or b['c'].isspace(): boxes[id(b)] = box
+    return boxes
+
+# Antialiasing bleed (pt) around a vector path's stroke extent when testing it against text moved by a gap close.
+DECOR_BLEED_PT = 0.5
+
+def decoration_boxes(page):
+    """Painted extent of every vector path (bbox grown by half its stroke width plus DECOR_BLEED_PT, so a zero-height
+    rule or zero-width bar still has area) and every image placement on the page."""
+    import pymupdf as fitz
+    boxes = []
+    for d in page.get_drawings():
+        half = (d.get('width') or 0) / 2 + DECOR_BLEED_PT
+        boxes.append(fitz.Rect(d['rect']) + (-half, -half, half, half))
+    return boxes + [fitz.Rect(im['bbox']) for im in page.get_image_info()]
+
 def export_pdf(raw, patches):
+    """Export with closed shorter-After gaps where provable; any failure of that attempt falls back to the original
+    positions (the fallback's own result or error is returned)."""
+    state = {'closed': 0}
+    try: return _export_pdf(raw, patches, True, state)
+    except ValueError:
+        if not state['closed']: raise
+    output, verification = _export_pdf(raw, patches, False, {'closed': 0})
+    return output, verification | {'gapCloseFallback': True}
+
+def _export_pdf(raw, patches, close_gaps, state):
     import pymupdf as fitz
     if len(raw) > 25 * 1024 * 1024 or not raw.startswith(b'%PDF-'): raise ValueError('PDF 크기/서명 오류')
     if re.search(rb'/ByteRange\s*\[|/FT\s*/Sig\b', raw): raise ValueError('서명된 PDF는 편집하지 않습니다.')
@@ -229,7 +271,7 @@ def export_pdf(raw, patches):
     original = fitz.open(stream=raw, filetype='pdf')
     try:
         if doc.is_encrypted or doc.page_count > 200: raise ValueError('암호화/200페이지 초과 PDF는 편집하지 않습니다.')
-        jobs, raws, all_raw = {}, {}, []
+        jobs, raws, all_raw, inks = {}, {}, [], {}
         rawdict = lambda n: raws.setdefault(n, original[n].get_text('rawdict'))
         def document_raw():
             if not all_raw: all_raw.extend(rawdict(i) for i in range(original.page_count))
@@ -323,22 +365,52 @@ def export_pdf(raw, patches):
                 tightened.append({'side': 'right', 'overlapPt': round(rect.x1 - nxt['bbox'][0], 4)}); rect.x1 = nxt['bbox'][0]
             if prev is not None and prev['c'].isspace() and 0 < prev['bbox'][2] - rect.x0 <= MICRO_OVERLAP_PT:
                 tightened.append({'side': 'left', 'overlapPt': round(prev['bbox'][2] - rect.x0, 4)}); rect.x0 = prev['bbox'][2]
+            # Shorter After: the rest of the same extracted line (same baseline) moves left by the width the line lost.
+            followers, width = [], sum(natural)
+            if close_gaps:
+                line_chars = [c for s in line['spans'] for c in s.get('chars', []) if not c.get('synthetic')]
+                followers = line_chars[next(k for k, c in enumerate(line_chars) if c is chars[-1]) + 1:]
+                if width >= chars[-1]['bbox'][2] - origin[0] - EPS or any(abs(c['origin'][1] - origin[1]) > 0.01 for c in followers):
+                    followers = []
+            shift = width - (chars[-1]['bbox'][2] - origin[0]) if followers else 0.0
+            area = fitz.Rect(rect)
+            for c in followers: area |= fitz.Rect(c['bbox'])
             selected_chars = {id(c) for c in chars}
+            moved = {id(c) for c in followers}
+            # Characters on another baseline are tested by their glyph ink, not their line box: at ordinary leading
+            # the ascender-to-descender line boxes of adjacent lines overlap by a fraction of a point with no ink there.
+            # Characters on the selection's baseline (and any glyph without a measured outline box) keep the line box.
+            if n not in inks: inks[n] = ink_boxes(original[n], raw_text)
+            # Unselected text over the selection itself is refused. Under the moved rest of the line only (optional gap
+            # close), any foreign text, vector path or image would not move with it: the closure is unprovable and
+            # export_pdf falls back to the original positions.
+            unsafe = None
             for char, _ in page_chars(raw_text):
-                if id(char) not in selected_chars and rect.intersects(fitz.Rect(char['bbox'])):
+                if id(char) in selected_chars or id(char) in moved: continue
+                box = fitz.Rect(char['bbox'])
+                if abs(char['origin'][1] - origin[1]) > 0.01: box = inks[n].get(id(char), box)
+                if rect.intersects(box):
                     raise ValueError(f"{p['label']}: 선택하지 않은 텍스트와 편집 영역이 겹칩니다 "
                         f"(인접 문자 {char['c']!r}, bbox x0={char['bbox'][0]:.3f}, 편집 영역 x1={rect.x1:.3f}).")
-            end = min(rect.x1, nxt['origin'][0]) if nxt is not None else rect.x1
+                if unsafe is None and area.intersects(box): unsafe = f"text {char['c']!r}"
+            if followers:
+                state['closed'] += 1
+                extension = fitz.Rect(followers[0]['bbox'])
+                for c in followers[1:]: extension |= fitz.Rect(c['bbox'])
+                if unsafe is None and any(extension.intersects(box) for box in decoration_boxes(original[n])): unsafe = 'vector/image'
+                if unsafe: raise ValueError(f'gap close: {unsafe} under the following text')
+                end = origin[0] + width
+            else: end = min(rect.x1, nxt['origin'][0]) if nxt is not None else rect.x1
             space_natural = next((w for w, c in zip(natural, after) if c == ' '), 0.25 * span['size'])
             space_range = source_space_range(document_raw(), lambda name: normalize(name) == normalize(span['font']), span['size'], space_natural)
             try: plan = plan_fit(after, natural, end - origin[0], span['size'], space_natural, space_range)
             except ValueError as error: raise ValueError(f"{p['label']}: {error}") from None
             if codec_error: raise codec_error
-            if any(rect.intersects(a.rect) for a in (page.annots() or [])): raise ValueError('주석과 겹치는 영역은 편집하지 않습니다.')
-            if any(rect.intersects(link['from']) for link in page.get_links()): raise ValueError('링크와 겹치는 영역은 편집하지 않습니다.')
-            if any(rect.intersects(widget.rect) for widget in (page.widgets() or [])): raise ValueError('폼 필드와 겹치는 영역은 편집하지 않습니다.')
+            if any(area.intersects(a.rect) for a in (page.annots() or [])): raise ValueError('주석과 겹치는 영역은 편집하지 않습니다.')
+            if any(area.intersects(link['from']) for link in page.get_links()): raise ValueError('링크와 겹치는 영역은 편집하지 않습니다.')
+            if any(area.intersects(widget.rect) for widget in (page.widgets() or [])): raise ValueError('폼 필드와 겹치는 영역은 편집하지 않습니다.')
             for existing in jobs.get(n, []):
-                if rect.intersects(existing['rect']): raise ValueError('선택한 PDF 변경 영역이 겹칩니다.')
+                if area.intersects(existing['rect']): raise ValueError('선택한 PDF 변경 영역이 겹칩니다.')
             # Rewrite the original text operator itself so content order and following glyphs stay.
             # Graphics/text state carries across the page's content streams in order.
             if not codec['resource'] or font_resource_name(doc, page, codec['xref']) != codec['resource']: raise unsupported(p['label'], 'resource')
@@ -352,13 +424,23 @@ def export_pdf(raw, patches):
             extras_units = [v * 1000 / span['size'] for v in plan['extras']]
             try: splices, compensation = rewrite_parts(parts, codes, extras_units, lambda code: widths[code], codec['codeBytes'])
             except (LookupError, KeyError) as error: raise unsupported(p['label'], 'rewrite', str(error)) from None
+            if followers:
+                # The followers move only through the compensating offset after the replacement (natural extras, so it
+                # directly follows the codes). Anything else is not closed here; export_pdf falls back.
+                if len(parts) != 1 or any(extras_units): raise ValueError('gap close: not a single natural operator')
+                start_, end_, items, index, count, _ = parts[0]
+                new, comp = rewrite_items(items, index, count, codes, extras_units, lambda code: widths[code])
+                at = [k for k, (kind, _) in enumerate(items) if kind == 'g'][index] + len(codes)
+                if comp is None or at >= len(new) or new[at] != ('k', comp): raise ValueError('gap close: no compensating offset')
+                new[at] = ('k', comp - shift * 1000 / span['size'])
+                splices, compensation = [(start_, end_, serialize_tj(new, codec['codeBytes']))], [round(new[at][1], 3)]
             inplace = {'splices': [(part[5], *splice) for part, splice in zip(parts, splices)], 'operators': len(parts), 'compensationUnits': compensation}
             touched = {(sp[0], sp[1]) for sp in inplace['splices']}
             if any(touched & {(sp[0], sp[1]) for sp in o['inplace']['splices']} for o in jobs.get(n, [])):
                 raise ValueError('같은 원본 텍스트 연산자 안의 여러 변경은 아직 보존 편집하지 않습니다.')
-            jobs.setdefault(n, []).append({'patch': p, 'after': after, 'rect': rect, 'end': end, 'origin': origin, 'font': codec['resource'],
+            jobs.setdefault(n, []).append({'patch': p, 'after': after, 'rect': area, 'end': end, 'origin': origin, 'font': codec['resource'],
                 'natural': natural, 'plan': plan, 'size': span['size'], 'spanfont': span['font'], 'selected': selected_chars,
-                'tightened': tightened, 'inplace': inplace, 'codeBytes': codec['codeBytes']})
+                'tightened': tightened, 'inplace': inplace, 'codeBytes': codec['codeBytes'], 'shift': dict.fromkeys(moved, shift)})
         for n, edits in jobs.items():
             streams = {}
             for e in edits:
@@ -378,7 +460,7 @@ def export_pdf(raw, patches):
             programs = lambda d: sorted({hashlib.sha256(d.extract_font(f[0])[3]).hexdigest() for page in d for f in page.get_fonts(full=True) if f[0]})
             if any(describe(verified, n) != describe(original, n) for n in range(original.page_count)) or programs(verified) != programs(original):
                 raise ValueError('글꼴 리소스/프로그램이 변경되었습니다. 레이아웃 보존 다운로드를 차단합니다.')
-            report = []
+            report, shifted = [], 0
             # Sequential 96dpi raster comparison; no edited pixels outside precise masks.
             for n in range(original.page_count):
                 a, b = original[n], verified[n]
@@ -402,14 +484,18 @@ def export_pdf(raw, patches):
                     # recorded, not treated as reordering.
                     if expected.split() != text_b.split(): raise ValueError(f'PDF p. {n + 1}: 추출되는 읽기 순서가 원본과 달라졌습니다. 레이아웃 보존 다운로드를 차단합니다.')
                     exact_extraction = expected == text_b
-                    # Every unselected glyph (including adjacent spaces) keeps its character, font, size and origin.
+                    # Every unselected glyph (including adjacent spaces) keeps its character, font, size and origin; the
+                    # rest of a line after a shorter After keeps them too, moved along its baseline by exactly the shift.
                     selected = set().union(*(e['selected'] for e in jobs[n]))
+                    shifts = {k: v for e in jobs[n] for k, v in e['shift'].items()}
+                    shifted += len(shifts)
                     pool = {}
                     for c, span in page_chars(b.get_text('rawdict')): pool.setdefault(c['c'], []).append((c, span))
                     for c, span in page_chars(rawdict(n)):
                         if id(c) in selected: continue
                         candidates = pool.get(c['c'], [])
-                        hit = next((k for k, (d, s) in enumerate(candidates) if abs(d['origin'][0] - c['origin'][0]) <= 0.01
+                        x = c['origin'][0] + shifts.get(id(c), 0.0)
+                        hit = next((k for k, (d, s) in enumerate(candidates) if abs(d['origin'][0] - x) <= 0.01
                             and abs(d['origin'][1] - c['origin'][1]) <= 0.01 and s['font'] == span['font'] and abs(s['size'] - span['size']) <= 0.01), None)
                         if hit is None: raise ValueError(f"선택하지 않은 문자 {c['c']!r}의 위치/글꼴이 바뀌었습니다 (x={c['origin'][0]:.3f}). 레이아웃 보존 다운로드를 차단합니다.")
                         candidates.pop(hit)
@@ -428,6 +514,7 @@ def export_pdf(raw, patches):
                         measured = verify_fit(glyphs, e['after'], e['natural'], e['plan'], e['origin'], e['size'], e['end'])
                         entry['spacing'] = {k: v for k, v in e['plan'].items() if k != 'extras'} | measured
                         entry |= {'rewrittenOperators': e['inplace']['operators'], 'compensationUnits': e['inplace']['compensationUnits']}
+                        entry['followingTextShift'] = {'pt': round(next(iter(e['shift'].values())), 3), 'glyphs': len(e['shift'])} if e['shift'] else None
                         report.append(entry)
                 bytes_a, bytes_b, stride = pix_a.samples, pix_b.samples, pix_a.stride
                 for y in range(pix_a.height):
@@ -437,7 +524,8 @@ def export_pdf(raw, patches):
                         if row_a[x*3:x*3+3] != row_b[x*3:x*3+3] and not any(m.x0 <= x < m.x1 and m.y0 <= y < m.y1 for m in masks):
                             raise ValueError('선택 영역 밖의 픽셀이 바뀌었습니다. 레이아웃 보존 다운로드를 차단합니다.')
             return output, {'mode': 'pdf-original-font-single-line', 'pages': doc.page_count, 'rasterDpi': 96,
-                'outsideSelectedAreasUnchanged': True, 'textActuallyRemoved': True, 'unselectedGlyphPositionsUnchanged': True,
+                'outsideSelectedAreasUnchanged': True, 'textActuallyRemoved': True, 'unselectedGlyphPositionsUnchanged': not shifted,
+                'unselectedGlyphsShiftedAlongEditedLine': shifted,
                 'metadataUnchanged': True, 'fontResourcesUnchanged': True, 'logicalTextOrderPreserved': True, 'edits': report,
                 'typographyLimits': {'minSpaceRatio': MIN_SPACE_RATIO, 'tightSpaceRatio': TIGHT_SPACE_RATIO,
                     'spaceRange': 'narrowest/widest space the source uses for the same font and size',

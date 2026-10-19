@@ -60,6 +60,62 @@ NO_FALLBACK = '원본은 바뀌지 않았고, 이전 단일 줄 편집 방식으
 QA_FAILED = ('독립 PDF 품질 검사(MuPDF)가 출력 결함을 확인했습니다: {checks}. 편집하지 않은 페이지가 바뀌었거나 선택한 After/원문 '
     '텍스트가 출력에서 확인되지 않습니다. 안전한 자동 복구 방법이 없어 파일을 내보내지 않습니다. 선택한 변경 수를 줄이거나 '
     '다른 After 문구로 다시 시도하세요.')
+# Refusal reasons the UI may show: known lowercase codes of the editor's saved-file self-check failures and
+# error-severity repair warnings, each with a fixed Korean label. Any other code, and every free-form report
+# field, is dropped; only the known code and a validated page number accompany the label.
+REFUSAL_REASONS = {
+    'edited_page_text_or_order_mismatch': '편집한 페이지의 텍스트/순서가 기대와 다름',
+    'edited_flow_text_or_order_mismatch': '편집한 문단 흐름의 텍스트/순서가 기대와 다름',
+    'unedited_page_text_changed': '편집하지 않은 페이지의 텍스트가 바뀜',
+    'after_missing': 'After 문구가 출력에서 확인되지 않음',
+    'expected_text_uncomputable': '기대 텍스트를 계산할 수 없음',
+    'header_footer_moved': '머리글/바닥글이 움직임',
+    'edge_band_body_changed': '머리글/바닥글 가장자리 영역의 본문이 바뀜',
+    'glyphs_off_page': '글자가 페이지 밖으로 나감',
+    'glyph_overlap_increased': '글자 겹침이 늘어남',
+    'text_outside_source_columns': '텍스트가 원래 단 밖으로 나감',
+    'page_count_changed': '페이지 수가 바뀜',
+    'page_count_mismatch': '페이지 수가 예상과 다름',
+    'page_map_invalid': '원본-출력 페이지 대응이 올바르지 않음',
+    'edit_page_out_of_range': '편집 페이지가 문서 범위를 벗어남',
+    'inspection_error': '자기 점검을 실행하지 못함',
+    'continuation_without_edit': '편집 없는 페이지에 이어짐 페이지가 생김',
+    'continuation_page_empty': '이어짐 페이지가 비어 있음',
+    'continuation_line_count_mismatch': '이어짐 페이지 줄 수가 계획과 다름',
+    'continuation_outside_body_band': '이어짐 텍스트가 본문 영역 밖에 있음',
+    'continuation_page_size_mismatch': '이어짐 페이지 크기가 원본과 다름',
+    'continuation_edge_missing': '이어짐 페이지 머리글/바닥글이 빠짐',
+    'continuation_edge_extra': '이어짐 페이지 머리글/바닥글에 추가 내용이 있음',
+    'continuation_edge_style_mismatch': '이어짐 페이지 머리글/바닥글 서식이 다름',
+    'continuation_edge_style_unverifiable': '이어짐 페이지 머리글/바닥글 서식을 확인할 수 없음',
+    'continuation_page_number_ambiguous': '이어짐 페이지 번호가 모호함',
+    'continuation_page_number_mismatch': '이어짐 페이지 번호가 기대와 다름',
+    'continuation_page_number_moved': '이어짐 페이지 번호 위치가 바뀜',
+    'continuation_style_invalid': '이어짐 머리글/바닥글 양식이 올바르지 않음',
+    'pagination_unsupported': '넘친 본문을 다음 페이지로 넘길 수 없음',
+    'pagination_unsupported_foreign_object_in_flow': '넘치는 본문 흐름에 텍스트가 아닌 개체가 있어 페이지 넘김 미지원',
+    'pagination_unsupported_multi_column_flow': '여러 단에 걸친 흐름은 페이지 넘김 미지원',
+    'pagination_unsupported_edge_paragraph_in_flow': '본문 흐름 안의 머리글/바닥글 문단 때문에 페이지 넘김 미지원',
+    'pagination_unsupported_shared_objects': '개체를 공유하는 문단은 페이지 넘김 미지원',
+    'pagination_unsupported_non_top_level_text': '중첩된 텍스트 개체는 페이지 넘김 미지원',
+    'pagination_unsupported_type3_segments': 'Type3 글꼴 구간은 페이지 넘김 미지원',
+    'pagination_unsupported_rotated_page': '회전된 페이지는 페이지 넘김 미지원',
+    'pagination_unsupported_cropped_or_offset_page': '잘리거나 원점이 이동된 페이지는 페이지 넘김 미지원',
+    'pagination_budget_exceeded': '허용된 새 페이지 수를 넘음',
+    'pagination_apply_failed': '페이지 넘김을 적용하지 못함',
+    'pagination_body_band_invalid': '본문 영역을 확정할 수 없어 페이지 넘김 불가',
+    'pagination_flow_not_monotonic': '본문 줄 순서가 위에서 아래로 이어지지 않음',
+    'pagination_line_exceeds_body': '한 줄이 본문 영역보다 큼',
+    'reading_order_not_exact': '읽기 순서를 원본과 똑같이 맞출 수 없음',
+    'nontext_order_changed': '텍스트가 아닌 개체의 순서가 바뀜',
+    'context_mismatch': '선택한 Before 주변 문맥이 페이지와 맞지 않음',
+    'paragraph_objects_unavailable': '문단의 PDF 개체를 확인할 수 없음',
+    'resize_failed': '문단 크기 조정에 실패함',
+    'move_failed': '문단 이동에 실패함',
+    'reorder_remove_failed': '읽기 순서 조정(제거)에 실패함',
+    'reorder_insert_failed': '읽기 순서 조정(삽입)에 실패함',
+}
+MAX_REASONS, MAX_REASON_PAGES, MAX_REASON_SCAN = 6, 3, 256
 
 @dataclass(frozen=True)
 class EditorConfig:
@@ -114,6 +170,22 @@ def _single_json(raw):
 
 def _hex(value): return value if isinstance(value, str) and HEX64.fullmatch(value) else None
 def _count(value): return value if type(value) is int and value >= 0 else None
+
+def _refusal_reasons(report):
+    """' 진단: label[code] (p. N); ….' for known codes among the refused report's self-check failures and error-severity
+    repair warnings, deduplicated per code and bounded; '' when none is known. Never echoes report text."""
+    report = report if isinstance(report, dict) else {}
+    self_check = report.get('selfCheck') if isinstance(report.get('selfCheck'), dict) else {}
+    listed = lambda value: value[:MAX_REASON_SCAN] if isinstance(value, list) else []
+    items = listed(self_check.get('failures')) + [w for w in listed(report.get('warnings')) if isinstance(w, dict) and w.get('severity') == 'error']
+    pages = {}
+    for item in items:
+        code = item.get('code') if isinstance(item, dict) else None
+        if not isinstance(code, str) or code not in REFUSAL_REASONS or (code not in pages and len(pages) == MAX_REASONS): continue
+        found, page = pages.setdefault(code, []), item.get('pageIndex')
+        if type(page) is int and 0 <= page < 10000 and page + 1 not in found and len(found) < MAX_REASON_PAGES: found.append(page + 1)
+    reasons = [f'{REFUSAL_REASONS[c]}[{c}]' + (f" (p. {', '.join(map(str, p))})" if p else '') for c, p in pages.items()]
+    return f" 진단: {'; '.join(reasons)}." if reasons else ''
 
 def _continuation_capability(value, pagination):
     """Engine-declared continuation style, only with pagination and the exact known policy; else None.
@@ -275,7 +347,7 @@ class PdfEditorService:
             if result.returncode != 0 or status.get('ok') is not True:
                 error = (report or {}).get('error') if isinstance((report or {}).get('error'), dict) else {}
                 code = next((c for c in [error.get('code'), status.get('code')] if isinstance(c, str) and CODE.fullmatch(c)), 'EDITOR_FAILED')
-                raise ValueError(f'PDF 편집기가 변경을 적용하지 못했습니다 ({code}). {NO_FALLBACK}')
+                raise ValueError(f'PDF 편집기가 변경을 적용하지 못했습니다 ({code}).{_refusal_reasons(report)} {NO_FALLBACK}')
             return self._result(data, edits, cap, report, paths['out'], paths['source'], plan)
         finally: self._cleanup(directory, names.values())
 

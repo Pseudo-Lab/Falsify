@@ -176,7 +176,7 @@ function red({cap={red:true,blue:true,pdf:true},format='PDF',pdf={}}={}){
   const lab={busy(){},allowed:()=>true,ready:Promise.resolve(),bind:(_,r)=>r,record:async()=>nodeCrypto.randomUUID()};
   const bridge={busy(){},state:()=>({status:'paired',connected:true,cap}),capabilities:()=>cap,session:()=>({request:async(p,body)=>{calls.push({path:p,body});return reply(p,body);}})};
   const textFile=async()=>({bytes:new Uint8Array(Buffer.from('plain output')),verification:null});
-  const ctx=vm.createContext({document:w.document,crypto:globalThis.crypto,FalsifyDocumentRed:C,FalsifyLocalBridge:bridge,FalsifyLab:lab,FalsifyExport:{textFile},FalsifyPreview,TextEncoder,TextDecoder,CustomEvent,Event,URL:URLmock,Blob,File,setTimeout,clearTimeout,confirm:()=>true,addEventListener(){},btoa,atob,Uint8Array,Array,Promise,Error,Map,JSON,Number,String,Object});
+  const ctx=vm.createContext({document:w.document,crypto:globalThis.crypto,FalsifyDocumentRed:C,FalsifyHarness:require('../dist/harness-core.js'),FalsifyLocalBridge:bridge,FalsifyLab:lab,FalsifyExport:{textFile},FalsifyPreview,TextEncoder,TextDecoder,CustomEvent,Event,URL:URLmock,Blob,File,setTimeout,clearTimeout,confirm:()=>true,addEventListener(){},btoa,atob,Uint8Array,Array,Promise,Error,Map,JSON,Number,String,Object});
   vm.runInContext(RED,ctx,{filename:'document-red.js'});w.document.addEventListener('falsify:blue-file',e=>handoffs.push(e.detail));
   const fire=(type,detail)=>w.document.dispatchEvent(new CustomEvent(type,{cancelable:true,detail}));
   const r={...w,lib,log,downloads,calls,handoffs,fire,set reply(f){reply=f;},status:()=>text(w.get('red-export-status')),pstatus:()=>w.get('red-preview-status').textContent,canvas:()=>w.get('red-preview-stage').children,

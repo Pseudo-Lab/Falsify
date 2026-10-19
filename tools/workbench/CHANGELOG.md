@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.2.0-alpha.3
+
+Source-only prerelease. See docs/release-alpha3.md. The separately configured PDF editor is 0.1.0-alpha.5.
+
+- Experiment records separate local-broker runs, manual responses and imported records; a harness-hash mismatch or
+  missing hash is shown as an unconfirmed harness and excluded from averages. Model-call correctness stays unknown.
+- PDF import warns about glyphs without a Unicode mapping instead of silently using their text.
+- PDF export refusals carry fixed refusal codes; regional, typography and reading-order QA gained a bounded
+  rigid-run tolerance (0.02 pt, warning only) and a block-order proof for reordered-but-complete text.
+- Legacy editor/export fixes in the local companion, with focused regressions.
+
+Not claimed: complete DOCX/ODT/HTML layout output, figure-aware BLUE, a shared database, full-model benchmarks or
+AMAS documents being fixed. No arbitrary-PDF, invisibility or scientific performance claims.
+
 ## 0.2.0-alpha.2
 
 - Optional manual raster-image placement selection in RED, separate from text candidates and BLUE.

@@ -19,6 +19,14 @@ PIXEL_DELTA. Such samples are only a warning, and only when each one lies on an 
 exact style match the source and whose position moved by more than 0 and at most DRIFT_TOL, the glyph keeps its ink
 within NOISE_INK, and no drawing, image, annotation or unmatched output text differs or appears there. Anything else
 (an added mark, a white cover, a recolor, a resize) stays a definite failure.
+
+An engine that re-emits text positions in floating point (e.g. a re-derived leading) can instead translate a whole run
+of unchanged glyphs rigidly by a few thousandths of a point. A glyph also counts as drifted when it belongs to a rigid
+run: at least two consecutive glyphs of one unedited line (or one kept stretch of an edited line between selections),
+each with the same character and exact style, all moved by the same vector (every coordinate within DRIFT_TOL of the
+run's first glyph, box shape kept) of at most RIGID_TOL (far below one raster pixel). The same ink, drawing, image,
+annotation and unmatched-text proof applies; a single glyph, a run whose glyphs moved differently, a restyled glyph or a
+translation beyond RIGID_TOL stays a definite failure.
 """
 import hashlib
 import json
@@ -41,6 +49,7 @@ PIXEL_DELTA = 40         # channel levels a sample must move to count as changed
 MINOR_FRACTION = 0.0005  # sub-PIXEL_DELTA samples outside the excluded lines tolerated before it is a warning
 INK_DELTA = 64           # channel levels a pixel must differ from its line background to count as ink
 DRIFT_TOL = 0.002        # points: float32 re-serialization drift of an unchanged glyph (never a visible move)
+RIGID_TOL = 0.02         # points: rigid float re-emit translation of a whole run of unchanged glyphs (< 1/30 pixel)
 NOISE_INK = 0.08         # fraction of its ink a drifted glyph may gain or lose when its antialiased edge re-quantizes
 NOISE_MAX = 4096         # high-delta pixels examined for drift noise; beyond this a difference is definite
 IMAGE_KEYS = ('bbox', 'transform', 'digest', 'width', 'height', 'bpc', 'cs-name')
@@ -200,12 +209,18 @@ def _after_glyph(styles, ch, refs):
     return 'same' if 'same' in vs else 'font' if 'font' in vs else 'bad'
 
 def _rows(chars):
-    """[(baseline, char indices left to right)] grouping characters that share a baseline."""
+    """[(baseline, char indices left to right)] grouping characters that share a baseline. Characters MuPDF reports at
+    one glyph origin (a ligature's components: consecutive on one line, origins within DRIFT_TOL) keep their extraction
+    order, so a float re-serialization of that origin cannot permute them; their characters are still compared exactly."""
+    x = []
+    for i, ch in enumerate(chars):
+        prev = chars[i - 1] if i else None
+        x.append(x[-1] if prev is not None and prev.line == ch.line and abs(ch.box[0] - prev.box[0]) <= DRIFT_TOL else ch.box[0])
     rows = []
-    for i in sorted(range(len(chars)), key=lambda i: (chars[i].base, chars[i].box[0])):
+    for i in sorted(range(len(chars)), key=lambda i: (chars[i].base, x[i], i)):
         if rows and chars[i].base - rows[-1][0] <= BASE_TOL: rows[-1][1].append(i)
         else: rows.append((chars[i].base, [i]))
-    return [(base, sorted(idx, key=lambda i: chars[i].box[0])) for base, idx in rows]
+    return [(base, sorted(idx, key=lambda i: (x[i], i))) for base, idx in rows]
 
 def _text(chars, row): return ''.join(chars[i].c for i in row)
 
@@ -323,6 +338,17 @@ def _ink(pix, page, chars):
 
 def _box_eq(a, b): return all(abs(x - y) <= 0.01 for x, y in zip(a, b))
 
+def _rigid(run):
+    """True when a run of (source, output) glyph pairs (at least two, same character and exact style) moved by one
+    common nonzero vector of at most RIGID_TOL: every pair's baseline and box deltas lie within DRIFT_TOL of the first
+    pair's, and each box kept its shape (x0/x1 and y0/y1/baseline deltas agree within DRIFT_TOL)."""
+    if len(run) < 2 or any(s.c != o.c or s.style != o.style for s, o in run): return False
+    deltas = [(o.box[0] - s.box[0], o.box[2] - s.box[2], o.base - s.base, o.box[1] - s.box[1], o.box[3] - s.box[3]) for s, o in run]
+    ref = deltas[0]
+    if any(abs(d[0] - d[1]) > DRIFT_TOL or max(d[2:]) - min(d[2:]) > DRIFT_TOL for d in deltas): return False
+    if any(abs(a - b) > DRIFT_TOL for d in deltas for a, b in zip(d, ref)): return False
+    return 0 < max(abs(v) for d in deltas for v in d) <= RIGID_TOL
+
 def check_page(src_page, out_page, model, picks, mupdf, raster, max_chars):
     """Regional QA of one edited output page against its source page. picks: [(selected source char indices, After,
     source styles)] for every edit on the page, all resolved. Returns ({code: status}, {limitation keys})."""
@@ -363,12 +389,14 @@ def check_page(src_page, out_page, model, picks, mupdf, raster, max_chars):
     # text_font/after_font: a font name changed without a proven size, color or metric change (unverified, warning).
     lost = restyled = moved = text_font = after_font = False
     pairs = []  # (source, output) characters of unedited lines matched in place: candidates for float32 drift noise
+    runs = []   # consecutive (source, output) pairs of one line or kept stretch: candidates for a rigid translation
     first_row = lambda row, hits, placed: next(((q, v) for q in hits for v in (_same_row(S, row, O, out_rows[q][1], placed),) if v), None)
     for r, (_, row) in enumerate(src_rows):
         if r in edited_set or (not strict and any(S[i].block in blocks for i in row)): continue
         hits = [q for q in by_text.get(_text(S, row), ()) if q not in used]
         match = first_row(row, hits, True)
-        if match is not None: pairs += [(S[i], O[j]) for i, j in zip(row, out_rows[match[0]][1])]
+        if match is not None:
+            runs.append([(S[i], O[j]) for i, j in zip(row, out_rows[match[0]][1])]); pairs += runs[-1]
         else:
             match = first_row(row, hits, False)
             if match is not None: moved = True
@@ -379,9 +407,11 @@ def check_page(src_page, out_page, model, picks, mupdf, raster, max_chars):
     for ch in S: refs.setdefault((ch.c, ch.style), []).append(_width(ch))
     # zones: output-side areas that may legitimately differ but are outside the sealed source regions (warning only).
     boxes, style_bad, unknown, zones, kept = {k: [] for k in afters}, False, False, [], []
+    stretch = None  # source row of the current kept stretch of an edited line (broken by a selection or a new line)
     if strict:
         for (_, i, k), j in zip(expected, aligned):
             if k is not None:
+                stretch = None
                 boxes[k].append(O[j])
                 v = _after_glyph(picks[k][2], O[j], refs)
                 style_bad |= v == 'bad'; after_font |= v == 'font'
@@ -391,6 +421,8 @@ def check_page(src_page, out_page, model, picks, mupdf, raster, max_chars):
             v = _glyph(S[i].style, O[j], [_width(S[i])])
             restyled |= v == 'bad'; text_font |= v == 'font'
             kept.append((S[i], O[j]))
+            if stretch != row_of[i]: stretch = row_of[i]; runs.append([])
+            runs[-1].append(kept[-1])
             if abs(S[i].box[0] - O[j].box[0]) > POS_TOL or abs(S[i].box[2] - O[j].box[2]) > POS_TOL: zones += [S[i].box, O[j].box]
         res['edited_page_text'] = ('failed' if lost or restyled or moved else
             'warning' if text_font or len(used) < len(out_rows) else 'passed')
@@ -426,6 +458,9 @@ def check_page(src_page, out_page, model, picks, mupdf, raster, max_chars):
     pairs += [(s, o) for s, o in kept if abs(s.box[0] - o.box[0]) <= POS_TOL and abs(s.box[2] - o.box[2]) <= POS_TOL]
     drifted = [(s, o) for s, o in pairs if s.c == o.c and s.style == o.style and
         0 < max(abs(s.base - o.base), *(abs(a - b) for a, b in zip(s.box, o.box))) <= DRIFT_TOL]
+    # A kept stretch that slid along its line (zones) moved beyond RIGID_TOL and is never rigid.
+    seen = {id(o) for _, o in drifted}
+    drifted += [p for run in runs if _rigid(run) for p in run if id(p[1]) not in seen]
     matched = {id(o) for _, o in pairs} | {id(ch) for chars in boxes.values() for ch in chars}
     unmatched = [o.box for o in O if id(o) not in matched]
     explain = lambda high: bool(drifted) and _drift_noise(high, pa, pb, src_page, out_page, drifted, unmatched)

@@ -1,6 +1,6 @@
 # Workbench runner proposal
 
-This subtree contains an isolated source snapshot of the runner-developed **Falsify Paper Workbench 0.2.0-alpha.2** plus its
+This subtree contains an isolated source snapshot of the runner-developed **Falsify Paper Workbench 0.2.0-alpha.3** plus its
 quickstart-first Korean HTML usage guide. It does not replace the team's existing README, research plan, defect taxonomy,
 evaluation gates, corpus or licensing decisions. Inclusion in this proposal branch is not team approval, scientific validation
 or a benchmark score. RED, BLUE and human review are separate workflows.
@@ -13,7 +13,7 @@ https://shinick-han.github.io/falsify-branch-preview/guide.html . The deployment
 repository https://github.com/Shinick-Han/falsify-branch-preview . This is not a Pseudo-Lab official site, and this branch does
 **not** deploy a Pseudo-Lab GitHub Pages site. Model invocation and PDF export require each participant's own local companion;
 CLI login is required only for model invocation. The existing runner app at https://shinick-han.github.io/falsify-workbench/
-is unchanged. Both personal Pages apps share one origin and browser storage; use a separate browser profile for isolated records.
+is published separately from the same application snapshot. Both personal Pages apps share one origin and browser storage; use a separate browser profile for isolated records.
 
 To get this branch rather than the main branch (which does not include this proposal):
 
@@ -41,7 +41,7 @@ appropriate static host, not assumed fully functional when `index.html` is doubl
 ## Source and scope
 
 - Upstream: https://github.com/Shinick-Han/falsify-workbench
-- Frozen application snapshot: `52d1b64056e33f1f0daa5b7751fd49f28be5f102` (tag `v0.2.0-alpha.2`).
+- Frozen application snapshot: `352cee83a0ec3d35a88d6df1bd3d6eb8a2735da5` (tag `v0.2.0-alpha.3`).
 - The HTML guide and its focused test are a documentation-only overlay; its exact source commit and guide file hash are recorded in `INTEGRATION-SOURCE.json`.
 - `LICENSE`, `NOTICE`, vendor notices and the original source layout are retained here. Workbench is AGPL-3.0-only; this does
   not relabel all code in the team repository. Native optional dependencies retain their own licenses and are not bundled.

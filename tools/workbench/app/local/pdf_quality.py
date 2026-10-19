@@ -91,6 +91,9 @@ def sanitize(value):
 
 def _norm(text): return _DROP.sub('', unicodedata.normalize('NFKC', text or ''))
 
+_SPACE = re.compile(r'[\s\xad]+')
+def _norm_signed(text): return _SPACE.sub('', unicodedata.normalize('NFKC', text or ''))  # keeps hyphens and minus signs
+
 _REGIONS = []
 def _regions():
     """The sibling pdf_regions module loaded from this file's own directory by absolute path (never sys.path or the
@@ -223,6 +226,19 @@ def _lost_chunks(expected, actual):
     return [expected[i1:i2] for tag, i1, i2, _, _ in ops if tag in ('delete', 'replace')], \
         sum(j2 - j1 for tag, _, _, j1, j2 in ops if tag in ('insert', 'replace'))
 
+def _block_text(page, mupdf):
+    """Normalized text block by block, ordered by block top then left, so side-by-side columns are not interleaved."""
+    blocks = page.get_text('blocks', flags=mupdf.TEXT_MEDIABOX_CLIP)
+    return ''.join(_norm_signed(b[4]) for b in sorted(blocks, key=lambda b: (round(b[1], 1), b[0])) if b[6] == 0)
+
+def _block_order_exact(src_page, out_pages, edits, mupdf):
+    """True only when the output pages read block by block are exactly the source page read the same way with exactly
+    the selected Before->After edits: every source character (hyphens and signs included) in order, nothing added,
+    removed or substituted."""
+    actual = ''.join(_block_text(p, mupdf) for p in out_pages)
+    pairs = [(_norm_signed(e['before']), _norm_signed(e['after'])) for e in edits]
+    return len(actual) <= LIMITS['maxGroupChars'] and actual in _candidates(_block_text(src_page, mupdf), pairs)
+
 def _candidates(source, pairs):
     """Expected normalized page text after the exact Before->After edits; an ambiguous Before tries a few occurrences."""
     variants = [source]
@@ -271,6 +287,10 @@ def _check_edited(rep, src_page, out, group, edits, out_all, mupdf):
     # Original text gone from the entire output is definite loss; reordering, extraction quirks and
     # continuation header/footer copies are ambiguous warnings.
     vanished = any(len(c) >= MIN_LOST_CHUNK and c not in out_all for c in lost)
+    # Line-sorted extraction joins the lines of side-by-side columns, so a column that grew re-pairs its lines with the
+    # neighbour's and splits source runs that are all still there. That is only an ordering warning when the group read
+    # block by block is exactly the source with exactly the selected edits; any other difference stays definite.
+    if vanished and _block_order_exact(src_page, [out[o] for o in group], edits, mupdf): vanished = False
     rep.set('edited_text_order', 'failed' if vanished else 'warning', group)
 
 def _check_regional(rep, regions, s, src_page, out, group, ks, edits, located, models, mupdf, assumed):

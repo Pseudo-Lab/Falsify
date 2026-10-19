@@ -1,6 +1,6 @@
 /* Full-paper RED review, candidate selection and preservation-gated export. */
 (function(){
-  'use strict';const C=FalsifyDocumentRed,B=FalsifyLocalBridge,$=s=>document.querySelector(s);
+  'use strict';const C=FalsifyDocumentRed,H=FalsifyHarness,B=FalsifyLocalBridge,$=s=>document.querySelector(s);
   let generation=0,doc=null,file=null,candidates=[],response=null,job=null,jobLink=null,busy=false,request=null,binding=null;
   // Run records: one key per (response epoch, final snapshot) so unchanged auto/manual saves never duplicate.
   let epoch=0,exported=null,lastSaved=null,failure=null,guard={};const saved=new Map(),pending=new Map(),settings={level:$('#red-level').value,budget:$('#red-budget').value};
@@ -13,6 +13,9 @@
   const IMG=globalThis.FalsifyImageEditor?.mount?.({hold:imageHold})||null;
   const hash=async bytes=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes))).map(x=>x.toString(16).padStart(2,'0')).join('');
   const msg=(s,error=false)=>{const e=$('#red-progress');e.textContent=s;e.classList.toggle('error',error);};
+  // Persistent outcome for a response without candidates: status plus coverage/synthesis, never a generic empty state.
+  const EMPTY=$('#red-empty').textContent;
+  function emptyNote(){if(!response)return EMPTY;return '후보 없음 · '+(response.status==='abstain'?'모델이 유보했습니다':response.status==='refusal'?'모델이 거절했습니다':'모델이 후보를 내지 않았습니다')+' · '+H.outcomeText('red',response,response.provenance)+'. 자동 재시도하지 않았습니다.';}
   function jsonDownload(value,name){download(new TextEncoder().encode(JSON.stringify(value,null,2)),name,'application/json');}
   function download(bytes,name,type){const url=URL.createObjectURL(new Blob([bytes],{type}));const a=document.createElement('a');a.href=url;a.download=name;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);}
   // Every job/export binds one bridge link for its whole life (start, polls, cancel); the bridge refuses to switch while busy.
@@ -43,7 +46,7 @@
     document.dispatchEvent(new CustomEvent('falsify:document-state',{detail:doc?{name:doc.name,count:candidates.length,selected:count,busy}:null}));
   }
   function cancelCurrent(){const old=job,l=jobLink;job=null;jobLink=null;if(old&&l)void l.request('/api/red/jobs/'+encodeURIComponent(old)+'/cancel',{}).catch(()=>{});}
-  function clear(){generation++;cancelCurrent();analysisReset();IMG?.source(null);binding=null;doc=null;file=null;candidates=[];response=null;request=null;busy=false;invalidate();$('#document-red').hidden=true;$('#red-candidates').replaceChildren();$('#red-response').value='';$('#red-record-status').textContent='';$('#red-export').hidden=true;$('#red-consent').checked=false;$('#red-harness-consent').checked=false;$('#red-export-consent').checked=false;statusText('');msg('');controls();}
+  function clear(){generation++;cancelCurrent();analysisReset();IMG?.source(null);binding=null;doc=null;file=null;candidates=[];response=null;request=null;busy=false;invalidate();$('#document-red').hidden=true;$('#red-candidates').replaceChildren();$('#red-empty').textContent=EMPTY;$('#red-response').value='';$('#red-record-status').textContent='';$('#red-export').hidden=true;$('#red-consent').checked=false;$('#red-harness-consent').checked=false;$('#red-export-consent').checked=false;statusText('');msg('');controls();}
   document.addEventListener('falsify:document-clear',clear);
   // The shell asks before replacing/closing the source; cancelling the discard confirmation keeps everything.
   document.addEventListener('falsify:before-document-change',e=>{if(e.detail?.role==='red'&&!keepEdits())e.preventDefault();});
@@ -59,7 +62,7 @@
     finally{if(binding===self){binding=null;busy=false;controls();}}
   });
   function renderCandidates(){
-    const list=$('#red-candidates');list.replaceChildren();$('#red-empty').hidden=!!candidates.length;$('#red-export').hidden=!candidates.length;
+    const list=$('#red-candidates');list.replaceChildren();$('#red-empty').hidden=!!candidates.length;$('#red-empty').textContent=emptyNote();$('#red-export').hidden=!candidates.length;
     candidates.forEach((c,i)=>{
       const section=document.createElement('section');section.className='red-proposal';
       const choice=document.createElement('label');choice.className='check-row';const check=document.createElement('input');check.type='checkbox';check.checked=c.selected;
@@ -73,7 +76,7 @@
       check.addEventListener('change',()=>{c.selected=check.checked;changed();});area.addEventListener('input',()=>{c.after=area.value;c.edited=true;changed();});list.append(section);
     });controls();
   }
-  function applyResponse(res,origin,ask=false){const validated=C.validateResponse(doc,res);if(ask&&!keepEdits()){msg('응답 적용 취소: 기존 후보와 편집을 그대로 유지했습니다.');return;}invalidate();candidates=validated;response={...res,provenance:origin};renderCandidates();void save(null);msg(res.status==='refusal'?'모델이 거절했습니다. 우회하거나 자동 재시도하지 않습니다.':res.status==='abstain'?'모델이 유보했습니다. 후보를 강제로 만들지 않습니다.':validated.length+'개 후보 · 인용 위치 확인 완료, 과학적 타당성 미검증. '+(origin==='local-codex'?(res.coverage?.complete?'전체 추출 텍스트 전달 완료.':'전체 전달 미완료.'):'수동 응답의 실행·전체 전달 여부는 미검증.'));}
+  function applyResponse(res,origin,ask=false){const validated=C.validateResponse(doc,res);if(ask&&!keepEdits()){msg('응답 적용 취소: 기존 후보와 편집을 그대로 유지했습니다.');return;}invalidate();candidates=validated;response={...res,provenance:origin};renderCandidates();void save(null);msg((res.status==='refusal'?'모델이 거절했습니다. 우회하거나 자동 재시도하지 않습니다.':res.status==='abstain'?'모델이 유보했습니다. 후보를 강제로 만들지 않고 자동 재시도하지 않습니다.':validated.length+'개 후보 · 인용 위치 확인 완료, 과학적 타당성 미검증.')+' '+H.outcomeText('red',res,origin)+'.');}
   async function makeRequest(){const budget=Number($('#red-budget').value);if(!Number.isInteger(budget)||budget<1||budget>32)throw new Error('호출 예산은 1–32 사이 정수입니다.');return FalsifyLab.bind('red',C.request(doc,Number($('#red-level').value),budget));}
   // While a response is retained, re-download its bound request so later final snapshots keep the root's requestId; only a fresh start mints a new execution request.
   $('#red-request').addEventListener('click',async()=>{const current=generation;try{const next=response&&request?request:await makeRequest();if(current!==generation)return;request=next;jsonDownload(request,'falsify-document-red-request.json');msg('수동 전달용 요청과 harness를 저장했습니다. 실행·전송은 하지 않았습니다.');}catch(e){msg(e.message,true);}});
@@ -288,11 +291,11 @@
     const status=$('#red-record-status');if(!status)return;const k=currentKey(),id=saved.get(k),base=saved.get(key(null));let text='',error=false;
     if(response){if(pending.size)text='실행 결과를 이 브라우저에 기록하는 중입니다.';
       else if(failure&&(failure.key===null||failure.key===k||failure.key===key(null)&&!base)){error=true;text=failure.key===null?failure.message:'기록되지 않음: '+failure.message+' 결과는 화면에 남아 있습니다. 「RED 실행 결과 기록」으로 다시 시도하세요.';}
-      else if(id)text=note+'기록됨 · 실행 '+id.slice(0,8)+(k===key(null)?' · 모델 응답':' · 최종 선택·편집 After 포함')+(exported&&exported.key===k?' · 출력 파일 해시 포함':'')+'. 논문 추출문도 이 브라우저에 보관됩니다.';
-      else if(base)text='모델 응답은 실행 '+base.slice(0,8)+'로 기록됨 · 현재 선택·편집은 아직 기록되지 않았습니다. 완성본 다운로드 또는 「RED 실행 결과 기록」으로 저장하세요.';
+      else if(id)text=note+'기록됨 · 기록 ID '+id.slice(0,8)+(k===key(null)?' · 응답 원본':' · 최종 선택·편집 After 포함')+(exported&&exported.key===k?' · 출력 파일 해시 포함':'')+'. 논문 추출문도 이 브라우저에 보관됩니다.';
+      else if(base)text='응답 원본은 기록 ID '+base.slice(0,8)+'로 저장됨 · 현재 선택·편집은 아직 기록되지 않았습니다. 완성본 다운로드 또는 「RED 실행 결과 기록」으로 저장하세요.';
       else text='아직 기록되지 않았습니다.';}
     status.textContent=text;status.classList.toggle('error',error);
-    action('red-evaluate','검수에서 이 실행 평가',status,'text-button').hidden=!lastSaved||!response;
+    action('red-evaluate','검수에서 이 기록 평가',status,'text-button').hidden=!lastSaved||!response;
   }
   function renderHandoff(){
     // No handoff while the final snapshot is still being saved; a failed save hands off with an explicitly unrecorded relation.
