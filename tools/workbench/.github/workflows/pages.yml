@@ -24,6 +24,12 @@ jobs:
       - name: Browser contracts
         working-directory: app
         run: npm test
+      - name: Shared API dependencies
+        working-directory: cloud/api
+        run: npm ci --ignore-scripts
+      - name: Shared API contracts (local Worker and D1 only)
+        working-directory: cloud/api
+        run: npm test
       - name: Broker and document contracts (no paid models)
         run: python -m unittest discover -s app/tests -p 'test_*.py'
   verify-windows-launcher:

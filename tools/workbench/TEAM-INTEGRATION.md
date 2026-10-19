@@ -1,6 +1,6 @@
 # Workbench runner proposal
 
-This subtree contains an isolated source snapshot of the runner-developed **Falsify Paper Workbench 0.2.0-alpha.3** plus its
+This subtree contains an isolated source snapshot of the runner-developed **Falsify Paper Workbench 0.2.0-alpha.4** plus its
 quickstart-first Korean HTML usage guide. It does not replace the team's existing README, research plan, defect taxonomy,
 evaluation gates, corpus or licensing decisions. Inclusion in this proposal branch is not team approval, scientific validation
 or a benchmark score. RED, BLUE and human review are separate workflows.
@@ -41,8 +41,13 @@ appropriate static host, not assumed fully functional when `index.html` is doubl
 ## Source and scope
 
 - Upstream: https://github.com/Shinick-Han/falsify-workbench
-- Frozen application snapshot: `352cee83a0ec3d35a88d6df1bd3d6eb8a2735da5` (tag `v0.2.0-alpha.3`).
+- Frozen application snapshot: `d672e37dea55d8d475110a8bf99cccc43b917147` (tag `v0.2.0-alpha.4`).
 - The HTML guide and its focused test are a documentation-only overlay; its exact source commit and guide file hash are recorded in `INTEGRATION-SOURCE.json`.
+- Alpha4 includes optional invite-only team records and a deterministic wrapper profile builder. Static Pages and source
+  remain public; reading or writing the configured shared API requires an active invited-member session. See
+  `docs/team-access.md` for signup and operator-only invitation commands, and `docs/harness-wrapper.md` for program adapters.
+  Worker/D1 source and migration templates are included, not live data or operator credentials. Copying this subtree does
+  not deploy another backend. Wrapper execution needs an updated local companion, not merely a frontend refresh.
 - `LICENSE`, `NOTICE`, vendor notices and the original source layout are retained here. Workbench is AGPL-3.0-only; this does
   not relabel all code in the team repository. Native optional dependencies retain their own licenses and are not bundled.
 - No private research papers, changed papers, gold labels, harnesses, recordings, run/review backups, tokens, environments,

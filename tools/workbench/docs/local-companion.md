@@ -89,7 +89,7 @@ No account keys belong in the website, harness JSON, GitHub or the execution led
 - Only `127.0.0.1` is bound, never LAN addresses. Hosted pairing requires an explicit HTTPS origin and a process-local bearer token. Cross-origin token bootstrap, wildcard CORS, arbitrary shell endpoints and browser-stored tokens are not offered.
 - Browser trust is **origin-wide**: `https://shinick-han.github.io`, not only the `/falsify-workbench/` path. Only opt in if you trust the origin. Stop the broker to revoke its token; do not post token screenshots or use an untrusted copied website.
 - Paper extraction and records stay in your browser until you explicitly execute or export. Execution sends extracted text through your selected harness to its model provider. PDF export sends original bytes to your local companion. The public repo does not receive paper files, answer keys or experiment records.
-- Records are origin-local localStorage, not a shared database. Local and hosted sites have separate records. Move records only using explicit JSON backup/import; backups contain paper text and should stay private.
+- Local records remain origin-local localStorage. Local and hosted sites have separate local records. Full-ledger transfer uses explicit JSON backup/import; backups contain paper text and should stay private. The optional [invite-only team API](team-access.md) stores only selected uploads, not an automatic replacement or full sync of the local ledger.
 - RED and BLUE are independent. BLUE receives its paper, not RED's answer key; custom harnesses may violate blindness if they share state. This app does not guarantee OS-level input-only isolation.
 - The site is publicly accessible. Human review is not domain approval or scientific ground truth.
 

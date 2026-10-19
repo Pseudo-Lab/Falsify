@@ -39,7 +39,18 @@ def validate(value, role):
             raise ValueError('CLI 모델 이름은 영문·숫자·._:- 1–120자입니다.')
         if 'effort' in adapter and adapter['effort'] not in EFFORTS:
             raise ValueError('CLI effort는 low/medium/high입니다.')
-    elif kind == 'stdio':
+    elif kind == 'wrapper':
+        from harness_wrapper import validate_adapter
+        validate_adapter(adapter)
+    else: validate_transport(adapter)
+    if 'settings' in value and (not isinstance(value['settings'], dict) or len(json.dumps(value['settings'], ensure_ascii=False)) > 32000):
+        raise ValueError('자유 settings는 JSON 객체 32,000자 이내입니다. 비밀정보를 넣지 마세요.')
+    return dict(value)
+
+def validate_transport(adapter):
+    """The stdio/http adapter shapes, also reused as a wrapper target."""
+    kind = adapter.get('type')
+    if kind == 'stdio':
         from pathlib import Path
         if set(adapter) != {'type', 'executable', 'args'} or not isinstance(adapter['executable'], str) or not Path(adapter['executable']).is_absolute() or not Path(adapter['executable']).is_file():
             raise ValueError('로컬 adapter executable은 존재하는 절대 경로여야 합니다.')
@@ -52,10 +63,7 @@ def validate(value, role):
         parsed = urlsplit(url)
         if parsed.scheme != 'https' or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment:
             raise ValueError('외부 adapter는 자격증명·쿼리 없는 HTTPS URL만 허용합니다.')
-    else: raise ValueError('adapter type은 codex/claude/stdio/http입니다.')
-    if 'settings' in value and (not isinstance(value['settings'], dict) or len(json.dumps(value['settings'], ensure_ascii=False)) > 32000):
-        raise ValueError('자유 settings는 JSON 객체 32,000자 이내입니다. 비밀정보를 넣지 마세요.')
-    return dict(value)
+    else: raise ValueError('adapter type은 codex/claude/stdio/http/wrapper입니다.')
 
 def digest(value):
     return hashlib.sha256(json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
@@ -104,6 +112,9 @@ def backend(data, role, required, default_factory, claude_factory=None):
         return claude_factory(**limits, model=selected['model'], effort=selected['effort'])
     if data.get('executionConsent') is not True:
         raise ValueError('사용자 코드 실행 / 외부 전송에 대한 별도 동의가 필요합니다.')
+    if value['adapter']['type'] == 'wrapper':
+        from harness_wrapper import WrapperBackend
+        return WrapperBackend(value, required)
     from harness_adapter import AdapterBackend
     return AdapterBackend(value, required)
 

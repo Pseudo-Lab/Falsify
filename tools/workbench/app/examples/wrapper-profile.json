@@ -1,0 +1,54 @@
+{
+  "schema": "falsify.harness.v1",
+  "id": "legacylint-wrapper",
+  "name": "LegacyLint 2.3 (wrapper demo)",
+  "version": "1",
+  "role": "blue",
+  "instructions": "Deterministic legacy keyword rules wrapped for compatibility testing. Not a model review.",
+  "maxCalls": 8,
+  "adapter": {
+    "type": "wrapper",
+    "target": {
+      "type": "stdio",
+      "executable": "C:/ABSOLUTE/PATH/TO/python.exe",
+      "args": ["C:/ABSOLUTE/PATH/TO/falsify/app/examples/wrapper_legacy_demo.py", "--in", "invocation"]
+    },
+    "input": {"mode": "invocation"},
+    "output": {
+      "source": "stdout",
+      "format": "json",
+      "stageMaps": {
+        "scan": {
+          "status": {"$from": "/outcome"},
+          "summary": {"$from": "/digest"},
+          "evidence": {"$each": "/highlights", "template": {
+            "segmentId": {"$from": "/para"}, "quote": {"$from": "/text"}, "relation": {"$from": "/why"}}}
+        },
+        "selection": {
+          "status": {"$from": "/outcome"},
+          "targets": {"$each": "/picks", "template": {
+            "segmentId": {"$from": "/para"}, "anchor": {"$from": "/anchor"}, "reason": {"$from": "/why"}}}
+        },
+        "red": {
+          "status": {"$from": "/outcome"},
+          "candidates": {"$each": "/items", "template": {
+            "id": {"$from": "/ref"}, "segmentId": {"$from": "/para"}, "level": {"$from": "/tier"},
+            "before": {"$from": "/excerpt"}, "after": {"$from": "/rewrite"}, "rationale": {"$from": "/note"},
+            "evidence": {"$each": "/support", "template": {
+              "segmentId": {"$from": "/para"}, "quote": {"$from": "/text"}, "relation": {"$from": "/why"}}},
+            "uncertainty": {"$from": "/caveat"}}}
+        },
+        "blue": {
+          "status": {"$from": "/outcome"},
+          "findings": {"$each": "/items", "template": {
+            "id": {"$from": "/ref"}, "segmentId": {"$from": "/para"}, "quote": {"$from": "/excerpt"},
+            "rationale": {"$from": "/note"},
+            "evidence": {"$each": "/support", "template": {
+              "segmentId": {"$from": "/para"}, "quote": {"$from": "/text"}, "relation": {"$from": "/why"}}},
+            "uncertainty": {"$from": "/caveat"}}}
+        }
+      }
+    }
+  },
+  "settings": {"program": "LegacyLint/2.3", "programCommit": "REPLACE-WITH-YOUR-PROGRAM-COMMIT-HASH"}
+}

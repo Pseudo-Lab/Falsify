@@ -1,0 +1,25 @@
+/* Wrapper connection profile builder inside the Harness manager. Inherits the workbench tokens; no new visual language. */
+.harness-wrapper{margin:22px 0;padding:14px 0 4px;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.harness-wrapper>summary{cursor:pointer;font-weight:600;padding:4px 0}
+.harness-wrapper>summary:hover{text-decoration:underline;text-underline-offset:4px}
+.harness-wrapper>p{color:var(--muted);font-size:13px}
+.wrapper-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:22px 28px;margin:18px 0}
+.wrapper-group{border:0;padding:0;margin:0;min-width:0;display:grid;gap:12px;align-content:start}
+.wrapper-group legend{font-size:16px;font-weight:700;padding:0;margin-bottom:10px}
+.harness-wrapper .wrapper-field{display:block;font-size:12px;font-weight:600;min-width:0}
+.wrapper-field>span{display:block}
+.wrapper-field small{display:block;color:var(--muted);font-weight:400;font-size:13px;line-height:1.6;margin-top:5px;max-width:75ch;overflow-wrap:anywhere}
+.harness-wrapper input[type=text],.harness-wrapper select,.harness-wrapper textarea{display:block;width:100%;margin-top:6px;border:1px solid #8c949b;border-radius:4px;background:var(--paper);color:var(--ink);padding:10px;font-size:14px}
+.harness-wrapper textarea{min-height:0;resize:vertical;font-family:Consolas,monospace;font-size:13px;line-height:1.5}
+.harness-wrapper #wrapper-instructions{font-family:var(--font);font-size:14px;line-height:1.6}
+.harness-wrapper input::placeholder,.harness-wrapper textarea::placeholder{color:#6b737a}
+.harness-wrapper select option:disabled{color:#868e95}
+.wrapper-preview{margin:6px 0 0;padding:18px 20px;background:var(--surface);border-radius:12px;display:grid;gap:12px}
+.wrapper-preview h3{font-size:16px}
+.wrapper-preview .button-row{margin-top:0}
+.wrapper-note{font-size:13px;color:var(--ink)}
+.wrapper-checks{margin:0;padding-left:20px;font-size:13px}
+.wrapper-result{margin:0;max-height:320px;overflow:auto;background:var(--paper);border:1px solid var(--line);border-radius:4px;padding:12px;font-family:Consolas,monospace;font-size:13px;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere;font-variant-numeric:tabular-nums;scrollbar-color:#aeb6bc transparent}
+.harness-wrapper #wrapper-status{margin:12px 0}
+.harness-wrapper #wrapper-status.error{color:var(--red-ink)}
+@media(max-width:820px){.wrapper-grid{grid-template-columns:minmax(0,1fr)}.wrapper-preview{padding:16px}}

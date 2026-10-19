@@ -20,7 +20,7 @@
     return Object.freeze(out);}
   function capSnapshot(d){if(!d||typeof d!=='object'||Array.isArray(d)||typeof d.red!=='boolean'||typeof d.blue!=='boolean')return null;
     return Object.freeze({red:d.red,blue:d.blue,pdf:d.pdf===true,officeLayoutVerifiedExport:d.officeLayoutVerifiedExport===true,model:typeof d.model==='string'?d.model.slice(0,80):null,isolation:typeof d.isolation==='string'?d.isolation.slice(0,200):null,
-      cliSelection:d.cliSelection===true,cliAgents:d.cliSelection===true?agents(d.cliAgents):null,pdfEditor:pdfEditor(d.pdfEditor),paperAnalysis:paperAnalysis(d.paperAnalysis),imageEditor:imageEditor(d.imageEditor),workbenchVersion:workbenchVersion(d.workbenchVersion)});}
+      cliSelection:d.cliSelection===true,harnessWrapper:d.harnessWrapper===true,cliAgents:d.cliSelection===true?agents(d.cliAgents):null,pdfEditor:pdfEditor(d.pdfEditor),paperAnalysis:paperAnalysis(d.paperAnalysis),imageEditor:imageEditor(d.imageEditor),workbenchVersion:workbenchVersion(d.workbenchVersion)});}
   // Optional advisory PDF pre-analysis from a newer broker: exact descriptor or none. An older broker without it keeps every other path.
   const ANALYSIS_SCHEMA='falsify.pdf-analysis-summary.v1',WORKBENCH_VERSION=/^[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}(?:-[0-9A-Za-z]{1,16}(?:\.[0-9A-Za-z]{1,16}){0,3})?$/;
   function paperAnalysis(d){if(!d||typeof d!=='object'||Array.isArray(d)||Object.keys(d).length!==2||typeof d.available!=='boolean'||d.schema!==ANALYSIS_SCHEMA)return null;return Object.freeze({available:d.available,schema:ANALYSIS_SCHEMA});}

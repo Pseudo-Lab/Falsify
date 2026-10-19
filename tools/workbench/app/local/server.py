@@ -229,7 +229,7 @@ class Handler(BaseHTTPRequestHandler):
                 if editor: pdf = pdf_editor['available']
                 self.reply(200, {'red': True, 'blue': True, 'pdf': pdf, 'officeLayoutVerifiedExport': False,
                     'model': 'gpt-6.1-sol', 'isolation': 'read-only CLI restrictions; not OS-enforced input-only isolation',
-                    'cliSelection': True, 'cliAgents': cli_agents(), 'pdfEditor': pdf_editor,
+                    'cliSelection': True, 'harnessWrapper': True, 'cliAgents': cli_agents(), 'pdfEditor': pdf_editor,
                     'paperAnalysis': paper_analysis_service.capability(), 'imageEditor': image_edit_service.capability(),
                     'workbenchVersion': WORKBENCH_VERSION}); return
             with LOCK:

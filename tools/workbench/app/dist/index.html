@@ -3,15 +3,18 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="논문 파일을 브라우저에서 추출하고, 사용자 PC의 로컬 companion(127.0.0.1)과 페어링해 RED·BLUE를 독립 실행하거나 수동 JSON으로 교환하는 공개 작업대. 기록은 이 브라우저에만 저장됩니다.">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; worker-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' http://127.0.0.1:*; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta name="description" content="각자 PC의 CLI로 RED·BLUE를 독립 실행하고 사람 검수를 남기는 논문 작업대. 로컬 기록은 보존하며, 선택한 harness·실행·평가만 공동 기록 서버에 저장·공유합니다.">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; worker-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' http://127.0.0.1:* https://falsify-cloud-api.ai-gongbu.workers.dev; object-src 'none'; base-uri 'none'; form-action 'none'">
   <title>Falsify · Paper Workbench</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' fill='%23ffcc00'/%3E%3Cpath d='M11 10h20v5H17v5h11v5H17v10h-6z' fill='%23111315'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" href="document-red.css">
   <link rel="stylesheet" href="experiment-ledger.css">
+  <link rel="stylesheet" href="harness-wrapper.css">
+  <link rel="stylesheet" href="cloud-records.css">
   <link rel="stylesheet" href="image-editor.css">
   <script src="harness-core.js" defer></script>
+  <script src="harness-wrapper.js" defer></script>
   <script src="local-bridge.js" defer></script>
   <script src="experiment-ledger.js" defer></script>
   <script src="document-import.js" defer></script>
@@ -25,6 +28,8 @@
   <script src="document-red.js" defer></script>
   <script src="document-blue-core.js" defer></script>
   <script src="document-blue.js" defer></script>
+  <script src="cloud-config.js" defer></script>
+  <script src="cloud-records.js" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main">작업 영역으로 건너뛰기</a>

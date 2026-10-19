@@ -1,6 +1,7 @@
 __pycache__/
 *.pyc
 node_modules/
+.wrangler/
 .venv/
 .local/
 *.log

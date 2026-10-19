@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.2.0-alpha.4
+
+- Optional team records in Results: invite-only username/password accounts, private-by-default uploads, explicit team sharing,
+  immutable payload versions, owner-only revision-checked changes, and subjective reviews grouped by matching conditions.
+- Team harness preview remains separate from registration and local CLI execution. Local papers and records are not
+  automatically uploaded or replaced. Server records are client-reported, not execution attestations or scientific scores.
+- Worker/D1 source, bounded request and account quotas, salted scrypt password hashes and expiring hashed sessions.
+- Shared run summaries exclude private evidence and local IDs on the server, including when listing an owner's records.
+- Shared API reads require an active invited-member session. Operator-only invitation issuance/admission/revocation;
+  no public admin endpoint. Static GitHub Pages and source remain public, not private hosting.
+- Flexible wrapper profiles adapt existing stdio/HTTPS programs: prompt/JSON/template/extracted-text files as input,
+  JSON or a single fenced JSON block as output, deterministic pointer/field/array/stage mappings and preview-only builder.
+  Original binary PDFs, arbitrary prose interpretation and automatic README-to-wrapper generation are not included.
+  Wrapper execution requires a companion advertising support; registration never executes code. See docs/harness-wrapper.md.
+
+Requires a configured shared API. No email/GitHub identity verification, email password recovery, automatic complete
+cross-device ledger sync, model execution certification, or causal harness ranking. PDF editor remains 0.1.0-alpha.5.
+
 ## 0.2.0-alpha.3
 
 Source-only prerelease. See docs/release-alpha3.md. The separately configured PDF editor is 0.1.0-alpha.5.

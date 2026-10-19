@@ -1,0 +1,51 @@
+/* Shared records: a flat extension of the results work surface. Existing tokens only; no yellow, no shadows. */
+.cloud-auth label small{display:block;margin-top:2px;color:var(--muted);font-size:12px;font-weight:400}
+.cloud-records .section-heading{margin-bottom:12px}
+.cloud-records .section-heading h2{margin:0}
+.cloud-records .section-heading{flex-wrap:wrap;min-width:0}
+#cloud-connection{max-width:100%;white-space:normal;overflow-wrap:anywhere}
+.cloud-privacy{color:var(--muted);font-size:13px}
+.cloud-toolbar{display:flex;flex-wrap:wrap;align-items:flex-end;gap:10px 18px;margin:18px 0 6px}
+.cloud-tabs{display:inline-flex;border:1px solid #aeb6bc;border-radius:var(--radius);overflow:hidden}
+.cloud-tabs button{min-height:40px;padding:9px 15px;border:0;background:transparent;color:var(--ink);font-size:12px;font-weight:600;transition:background var(--motion) var(--ease),color var(--motion) var(--ease)}
+.cloud-tabs button+button{border-left:1px solid #aeb6bc}
+.cloud-tabs button[aria-pressed=false]:hover:not(:disabled){background:#e5e8e9}
+.cloud-tabs button[aria-pressed=true]{background:var(--ink);color:var(--paper)}
+.cloud-records label.cloud-kind{display:inline-flex;align-items:center;gap:12px;font-size:12px}
+.cloud-records .cloud-kind select{width:auto;min-width:150px;min-height:40px}
+.cloud-status{min-height:22px;margin:10px 0}
+.cloud-records .error,.cloud-status.error,#cloud-upload-status.error,#cloud-review-status.error{color:var(--red-ink)}
+.cloud-panel{margin:18px 0;padding-top:12px;border-top:1px solid var(--line)}
+.cloud-panel>summary{cursor:pointer;font-weight:600;padding:6px 0;min-height:32px}
+.cloud-panel[open]>summary{margin-bottom:8px}
+.cloud-panel dl,.cloud-record dl,.cloud-compose dl{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:6px 16px;margin:12px 0;font-size:13px}
+.cloud-panel dt,.cloud-record dt,.cloud-compose dt{color:var(--muted)}
+.cloud-panel dd,.cloud-record dd,.cloud-compose dd{margin:0;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
+.cloud-auth{display:grid;grid-template-columns:1fr 1fr;gap:12px 18px;max-width:720px;margin-top:12px}
+.cloud-auth .cloud-display,.cloud-auth .button-row{grid-column:1/-1}
+.cloud-records input[type=text],.cloud-records input[type=password]{width:100%;min-height:44px;margin-top:6px;padding:10px;border:1px solid #8c949b;border-radius:4px;background:var(--paper);color:var(--ink);font-weight:400}
+.cloud-display>summary{cursor:pointer;font-size:13px;color:var(--muted)}
+.cloud-list{margin-top:6px}
+.cloud-record{padding:16px 0;border-top:1px solid var(--line)}
+.cloud-record h3{margin:6px 0 0;font-size:14px;overflow-wrap:anywhere}
+.cloud-chips{display:flex;flex-wrap:wrap;gap:6px}
+.cloud-note{white-space:pre-wrap;background:var(--surface);padding:14px}
+.cloud-confirm{font-weight:600}
+.cloud-record .button-row{margin-top:10px}
+.cloud-compose{margin:22px 0;padding-top:16px;border-top:1px solid var(--ink)}
+.cloud-compose h3{margin:0}
+.cloud-preview{white-space:pre-wrap;overflow-wrap:anywhere;max-height:320px;overflow:auto;margin:8px 0;padding:14px;background:var(--surface);font-family:Consolas,monospace;font-size:13px;line-height:1.5}
+.cloud-preview:empty::before{content:'보낼 내용이 아직 없습니다.';color:var(--muted);font-family:var(--font)}
+.cloud-preview:focus-visible{outline:3px solid #246388}
+#cloud-upload .check-row,#cloud-review .check-row{display:flex;gap:10px;font-weight:600}
+.cloud-warning{font-size:13px}
+#cloud-compare-out caption{text-align:left;font-weight:600;padding:0 0 8px;caption-side:top}
+@media(max-width:700px){
+.cloud-auth{grid-template-columns:1fr}
+.cloud-toolbar{align-items:stretch;flex-direction:column}
+.cloud-tabs button{flex:1}
+.cloud-records label.cloud-kind{display:flex}
+.cloud-records .cloud-kind select{flex:1;width:auto;min-width:0}
+.cloud-panel dl,.cloud-record dl,.cloud-compose dl{grid-template-columns:1fr}
+.cloud-panel dt,.cloud-record dt,.cloud-compose dt{margin-top:6px}
+.cloud-records .button-row .button{width:100%}}

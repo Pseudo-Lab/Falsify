@@ -19,7 +19,7 @@
   function followLocation(){const next=fromHash(location.hash);if(next&&next!==view)navigate(next,false);}
   function signSpec(){
     if(view==='review')return {gate:'H1',title:'실행 결과를 사람이 평가하세요',detail:'기록된 RED / BLUE 실행을 골라 판정과 근거를 남깁니다.',label:'평가할 실행 선택',action:()=>focusTarget($('#evaluation-run'))};
-    if(view==='results')return {gate:'A1',title:'Harness별 기록을 비교하세요',detail:'같은 입력·조건별 실행과 최신 사람 평가를 봅니다.',label:'기록 표 보기',action:()=>$('#ledger-board')?.scrollIntoView({block:'start'})};
+    if(view==='results')return {gate:'A1',title:'기록을 저장하고 비교하세요',detail:'내 브라우저 기록과, 직접 공유한 공동 기록을 구분합니다.',label:'공유 기록으로 이동',action:()=>($('#cloud-records')||$('#ledger-board'))?.scrollIntoView({block:'start'})};
     if(view==='agents')return {gate:'C1',title:'Harness를 등록하고 관리하세요',detail:'기본 지침, 로컬 코드, 외부 HTTPS 서버를 같은 입출력 계약으로 등록합니다.',label:'Harness JSON 편집',action:()=>focusTarget($('#harness-editor'))};
     if(view==='blue')return {gate:'B1',title:'BLUE 검토 파일을 입력하세요',detail:'RED와 독립 실행합니다. 검토할 파일을 직접 고르세요.',label:'BLUE 파일 입력',action:()=>focusTarget($('#doc-blue-file'))};
     if(documentProgress){
