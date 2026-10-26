@@ -350,9 +350,9 @@ test('async: a held load of A is destroyed and a late open does not paint over B
 });
 
 test('output: replacing source during generated-byte digest never resurrects the old output',async()=>{
-  let started=false,release;
+  let started=false,release,digestFinished=false;
   const subtle={digest:async(algorithm,data)=>{
-    if(!started&&Buffer.from(data).includes(Buffer.from('MARKER-GEN'))){started=true;await new Promise(resolve=>{release=resolve;});}
+    if(!started&&Buffer.from(data).includes(Buffer.from('MARKER-GEN'))){started=true;await new Promise(resolve=>{release=resolve;});const result=await crypto.subtle.digest(algorithm,data);digestFinished=true;return result;}
     return crypto.subtle.digest(algorithm,data);
   }};
   const bytes=pdfBytes('MARKER-GEN'),generated=pdfFile(bytes,'a-generated.pdf');
@@ -363,7 +363,7 @@ test('output: replacing source during generated-byte digest never resurrects the
   v.get('paper-generate').click();await until(()=>started,'generated digest is pending');
   const b=pdfFile(pdfBytes('MARKER-B'),'b.pdf');v.file(b);
   await until(()=>v.ws.getSource()?.fileHash===sha(pdfBytes('MARKER-B')),'source B replaces A');
-  assert.equal(v.ws.getOutput(),null);release();await settle();
+  assert.equal(v.ws.getOutput(),null);release();await until(()=>digestFinished,'cancelled generated digest completed');
   assert.equal(v.ws.getOutput(),null,'old A must not become current B output');
   assert.equal(v.ws.getSource().file,b);
 });
@@ -477,11 +477,11 @@ test('confirmed imports apply once and saved drafts remain recoverable without a
   v.get('paper-workspace').dispatchEvent(undo);
   assert.equal(v.ws.getEditSnapshot().edits[0].after,'Beta');
   v.get('paper-draft-opt').checked=true;v.get('paper-draft-source').checked=true;
-  v.get('paper-draft-save').click();await settle();
+  v.get('paper-draft-save').click();await until(()=>v.storage.keys().some(k=>k.startsWith('falsify.paper-draft.v1.'))&&v.sourceBlobs.box.size===1,'draft and consented source saved');
   const reopened=mount({storage:v.storage,sourceBlobs:v.sourceBlobs,edits:real});
   assert.equal(reopened.get('paper-draft-restore').hidden,false);
   assert.equal(reopened.get('paper-draft-delete').disabled,false);
-  reopened.get('paper-draft-delete').click();await settle();
+  reopened.get('paper-draft-delete').click();await until(()=>!v.storage.keys().some(k=>k.startsWith('falsify.paper-draft.v1.'))&&v.sourceBlobs.box.size===0,'draft and consented source deleted');
   assert.equal(v.storage.keys().some(k=>k.startsWith('falsify.paper-draft.v1.')),false);
   assert.equal(v.sourceBlobs.box.size,0);
 });
@@ -553,19 +553,19 @@ test('draft: metadata asks for the matching PDF, and a consented blob stays loca
   const hash=v.ws.getSource().fileHash;
   v.edits.last.add({pageIndex:0,segmentId:'s0',before:'Alpha',after:'Beta',origin:'human',anchor:{start:0,end:5,occurrence:0}});
   v.get('paper-draft-opt').checked=true;v.get('paper-draft-opt').dispatchEvent(new Event('change'));
-  v.get('paper-draft-save').click();await settle();
+  v.get('paper-draft-save').click();await until(()=>v.storage.getItem('falsify.paper-draft.v1.'+hash)!==null,'metadata draft saved');
   assert.equal(v.sourceBlobs.box.size,0);
   assert.doesNotMatch(v.storage.getItem('falsify.paper-draft.v1.'+hash),/%PDF/);
   v.document.dispatchEvent(new CustomEvent('falsify:document-clear'));
   assert.match(v.get('paper-draft-status').textContent,/다시 선택/);assert.match(v.get('paper-draft-status').textContent,new RegExp(hash.slice(0,12)));
   const other=pdfFile(pdfBytes('MARKER-B'),'other.pdf');
   v.file(other);await until(()=>v.ws.getSource()&&v.ws.getSource().file===other,'other');
-  v.get('paper-draft-restore').click();await settle();
+  v.get('paper-draft-restore').click();await until(()=>/^초안에는 편집만 있습니다/.test(v.get('paper-draft-status').textContent),'metadata restore requests original');
   assert.equal(v.ws.getEditSnapshot().edits.length,0);assert.match(v.get('paper-draft-status').textContent,/다시 선택/);assert.equal(v.edits.restores,0);
   v.file(file);await until(()=>v.ws.getSource()&&v.ws.getSource().fileHash===hash,'reselect');
   v.get('paper-draft-source').checked=true;
   v.edits.last.add({pageIndex:0,segmentId:'s0',before:'Alpha',after:'Beta',origin:'human',anchor:{start:0,end:5,occurrence:0}});
-  v.get('paper-draft-save').click();await settle();
+  v.get('paper-draft-save').click();await until(()=>v.sourceBlobs.box.has(hash),'consented original source saved');
   assert.equal(v.sourceBlobs.box.get(hash).blob,file);assert.equal(v.sourceBlobs.box.get(hash).expiresAt-v.sourceBlobs.box.get(hash).savedAt,api.TTL);
   v.document.dispatchEvent(new CustomEvent('falsify:document-clear'));
   v.get('paper-draft-restore').click();
@@ -692,12 +692,12 @@ test('core: second alpha, CRLF, deletion, and resume keep the real edit id',asyn
   const savedId=snap.edits[0].id,savedRevision=snap.revision,savedAt=snap.edits[0].createdAt;
   v.clock.value+=1000;
   v.get('paper-draft-opt').checked=true;v.get('paper-draft-opt').dispatchEvent(new Event('change'));
-  v.get('paper-draft-save').click();await settle();
+  v.get('paper-draft-save').click();await until(()=>v.storage.getItem('falsify.paper-draft.v1.'+hash)!==null,'canonical edit draft saved');
   v.document.dispatchEvent(new CustomEvent('falsify:document-clear'));
   v.file(file);await until(()=>v.ws.getSource()&&v.ws.getSource().fileHash===hash,'reopened');
   v.document.dispatchEvent(new CustomEvent('falsify:document',{detail:{file,result:{segments}}}));
   await settle();
-  v.get('paper-draft-restore').click();await settle();
+  v.get('paper-draft-restore').click();await until(()=>/실행 취소 기록은 복구 이후부터/.test(v.get('paper-draft-status').textContent),'canonical edit draft restored');
   const restored=v.ws.getEditSnapshot();
   assert.equal(restored.edits[0].id,savedId);assert.equal(restored.revision,savedRevision);
   assert.equal(restored.canUndo,false);assert.equal(restored.edits[0].createdAt,savedAt);
@@ -716,7 +716,7 @@ test('download: an open PDF workspace skips the companion layout gate',async()=>
   vm.runInContext(RED,ctx,{filename:'document-red.js'});
   v.document.dispatchEvent(new CustomEvent('falsify:document',{detail:{file,result:{text:'Alpha',format:'PDF',segments:[{label:'PDF p. 1',text:'Alpha'}]}}}));
   await until(()=>v.get('document-red').hidden===false,'red bound');
-  v.get('red-export-consent').checked=true;v.get('red-download').click();await settle();
+  v.get('red-export-consent').checked=true;v.get('red-download').click();await until(()=>/현재 편집으로 생성/.test(v.get('red-export-status').textContent),'PDF workspace export handoff');
   assert.equal(calls.length,0);assert.match(v.get('red-export-status').textContent,/현재 편집으로 생성/);
   assert.equal(v.document.activeElement,v.get('paper-generate'));
   const txt={name:'note.txt',type:'text/plain',size:5,arrayBuffer:async()=>new TextEncoder().encode('Alpha').buffer};
@@ -860,7 +860,7 @@ test('table: explicit mode lazy-inspects, tight glyph anchor records human edit,
   v.get('paper-generate').click();await until(()=>calls.length===1,'legacy generation');assert.equal(calls[0].edits[0].anchor.occurrence,undefined);
   assert.equal(saved.anchor.occurrence,0,'core occurrence is local to its immutable alias');
   await until(()=>v.ws.getOutput(),'actual output');await until(()=>/셀 경계를 넘었습니다/.test(v.get('paper-generate-status').textContent),'overflow warning');assert.equal(v.ws.getOutput().file,generated);
-  await settle();buttons(v,'edit',saved.id)[0].click();assert.equal(v.get('paper-inline').hidden,false);
+  await until(()=>!v.get('paper-generate').disabled,'table generation finished');buttons(v,'edit',saved.id)[0].click();assert.equal(v.get('paper-inline').hidden,false);
   v.get('paper-undo').click();assert.equal(v.get('paper-inline').hidden,true);assert.equal(v.ws.getEditSnapshot().edits.length,0);
 });
 test('table actual engine: twelfth repeated value travels UI to generated bytes without changing other eleven',async()=>{
@@ -956,7 +956,7 @@ test('table: late responses cannot cross source, page, mode or revision and unsu
 test('table draft: explicit restore re-inspects only saved pages and deterministic source aliases; mismatch refuses whole restore',async()=>{
   const edits=require('../dist/paper-edits.js'),storage=memory(),file=pdfFile(pdfBytes('MARKER-A')),first=mount({edits,storage,tablePdf:tableMock()});
   first.file(file);await until(()=>!first.get('paper-mode-table').disabled,'first ready');first.get('paper-mode-table').click();await until(()=>tableButtons(first).length,'cells');tableButtons(first)[0].click();first.get('paper-inline-after').value='11';first.get('paper-inline-apply').click();
-  first.get('paper-draft-opt').checked=true;first.get('paper-draft-opt').dispatchEvent(new Event('change'));first.get('paper-draft-save').click();await settle();
+  first.get('paper-draft-opt').checked=true;first.get('paper-draft-opt').dispatchEvent(new Event('change'));first.get('paper-draft-save').click();await until(()=>storage.keys().some(k=>k.startsWith('falsify.paper-draft.v1.')),'table edit draft saved');
   const inspected=[],adapter=tableMock(),second=mount({edits,storage,tablePdf:tableMock({inspectPage:async args=>{inspected.push(args.pageIndex);return adapter.inspectPage(args);}})});second.file(file);await until(()=>second.ws.getEditSnapshot(),'second ready');
   assert.equal(inspected.length,0);assert.equal(second.ws.getEditSnapshot().edits.length,0);second.get('paper-draft-restore').click();await until(()=>second.ws.getEditSnapshot().edits.length===1,'restored cell');assert.deepEqual(inspected,[0]);assert.equal(second.ws.getEditSnapshot().edits[0].after,'11');
   const third=mount({edits,storage,tablePdf:tableMock({inspectPage:async args=>{const r=await adapter.inspectPage(args);r.cells[0].alias+='wrong';return r;}})});third.file(file);await until(()=>third.ws.getEditSnapshot(),'third ready');third.get('paper-draft-restore').click();await until(()=>/복구하지 않았습니다/.test(third.get('paper-draft-status').textContent),'restore refused');assert.equal(third.ws.getEditSnapshot().edits.length,0);
@@ -1074,23 +1074,26 @@ test('proposal aliases: exact same-page canonical aliases prefer the original wh
 });
 test('export intent: legacy source edits stay on MuPDF; only an exact unsupported long-room failure reflows the whole batch',async()=>{
   const bytes=pdfBytes('MARKER-GEN'),file=pdfFile(bytes,'edited.pdf'),result={file,sha256:sha(bytes),verification:{status:'warning'}};
-  const calls=[],flow=[],text='Latin words. Other text.';let failure=null;
-  const v=mount({paragraphPdf:paragraphMock(text,{prepare:async request=>{flow.push(request);return result;}}),exporter:{prepare:async request=>{calls.push(request);if(failure)throw failure;return result;}}});
+  const calls=[],flow=[],text='Latin words. Other text.';let failure=null,firstStarted=false,releaseFirst;
+  const firstGate=new Promise(resolve=>{releaseFirst=resolve;});
+  const v=mount({paragraphPdf:paragraphMock(text,{prepare:async request=>{flow.push(request);return result;}}),exporter:{prepare:async request=>{if(!calls.length){firstStarted=true;await firstGate;}calls.push(request);if(failure)throw failure;return result;}}});
   const source=pdfFile(pdfBytes('MARKER-A'));v.file(source);await until(()=>/문단을 클릭/.test(v.get('paper-before-status').textContent),'export intent source');
   v.document.dispatchEvent(new CustomEvent('falsify:document',{detail:{file:source,result:{segments:[{id:'raw0',pageIndex:0,text}]}}}));
   v.edits.last.add({segmentId:'raw0',pageIndex:0,before:'Latin',after:'Hello한국어',origin:'human'});
   v.edits.last.add({segmentId:'raw0',pageIndex:0,before:'Other',after:'Another replacement',origin:'human'});
-  assert.equal(v.ws.getEditSnapshot().edits.length,2);v.get('paper-generate').click();await settle();
+  assert.equal(v.ws.getEditSnapshot().edits.length,2);v.get('paper-generate').click();
+  await until(()=>firstStarted,'held legacy engine entered');assert.equal(v.ws.getOutput(),null);assert.equal(flow.length,0);releaseFirst();
+  await until(()=>calls.length===1&&v.ws.getOutput()&&!v.get('paper-generate').disabled,'legacy selection generation completed');
   assert.equal(calls.length,1);assert.equal(flow.length,0);assert.equal(v.ws.getOutput().verification.status,'warning');
   failure=Object.assign(new Error('no room'),{code:'unsupported',details:{edits:[{code:'long-after-no-room'}]}});
-  v.get('paper-generate').click();await settle();assert.equal(flow.length,1);
+  v.get('paper-generate').click();await until(()=>flow.length===1&&!v.get('paper-generate').disabled,'exact long-room fallback completed');assert.equal(flow.length,1);
   assert.deepEqual(flow[0].edits,calls[1].edits);assert.equal(flow[0].edits.length,2);assert.equal(flow[0].edits[0].after,'Hello한국어');
   for(const error of [
     {code:'aborted',details:{edits:[{code:'long-after-no-room'}]}},
     {code:'stale-source',details:{edits:[{code:'long-after-no-room'}]}},
     {code:'unsupported',details:{edits:[{code:'long-after-no-room'},{code:'ambiguous-anchor'}]}},
     {code:'unsupported',details:{edits:[{code:'anchor-mismatch'}]}}
-  ]){failure=Object.assign(new Error('guarded failure'),error);v.get('paper-generate').click();await settle();assert.equal(flow.length,1,'no fallback for '+JSON.stringify(error));}
+  ]){failure=Object.assign(new Error('guarded failure'),error);const expectedCalls=calls.length+1;v.get('paper-generate').click();await until(()=>calls.length===expectedCalls&&!v.get('paper-generate').disabled&&/생성하지 못했습니다|생성을 중단했습니다/.test(v.get('paper-generate-status').textContent),'guarded selection failure completed');assert.equal(flow.length,1,'no fallback for '+JSON.stringify(error));}
   assert.equal(v.ws.getOutput().file,file,'failure preserves the last real output');
 });
 test('proposal acceptance: a source-segment substring cannot overlap a canonical paragraph edit through an alias',async()=>{
@@ -1112,7 +1115,7 @@ test('export intent: an eight-item external rewrite batch with source-proven hyp
   const source=pdfFile(pdfBytes('MARKER-A'));v.file(source);await until(()=>v.ws.getSource()?.fileHash,'external source');
   v.document.dispatchEvent(new CustomEvent('falsify:document',{detail:{file:source,result:{segments:quotes.map((text,i)=>({id:'raw'+i,pageIndex:0,text}))}}}));
   const result=v.ws.acceptProposals(quotes.map((before,i)=>({segmentId:'raw'+i,before,after:'A full flowing replacement paragraph '+i+'.'})),{origin:'external-ai-import',confirmed:true});
-  assert.equal(result.applied,8);v.get('paper-generate').click();await settle();
+  assert.equal(result.applied,8);v.get('paper-generate').click();await until(()=>calls.length===1&&v.ws.getOutput()&&!v.get('paper-generate').disabled,'external rewrite generation completed');
   assert.equal(calls.length,1);assert.equal(calls[0].edits.length,8);assert.equal(calls[0].edits[0].before,'This prag-\nmatic approach.');
   assert.ok(calls[0].edits.every(e=>e.origin==='external-ai-import'));assert.equal(v.ws.getOutput().verification.status,'applied');
 });
