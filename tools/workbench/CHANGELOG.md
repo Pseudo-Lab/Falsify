@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.0-alpha.7
+
+- Native human review pairs RED before/after and recorded attack intent with all BLUE findings. Changed expressions are marked and quote overlaps displayed first without automatic scoring.
+- Per-finding and per-attack judgments/reasons persist with the existing append-only review history and JSON backup; old records remain supported.
+- RED-assisted review records its exposure and carries that disclosure into a shared review's overall note. Detailed per-finding/RED comparison remains local, not automatically shared.
+- Review requires no companion connection. The connection panel is hidden in this destination; desktop columns stack on small screens. RED-only/BLUE-only use stays independent.
+
 ## 0.2.0-alpha.6
 
 - Host-bound evidence references make repeated BLUE selection quotes unambiguous without weakening final grounding.

@@ -17,6 +17,7 @@
   <script src="harness-wrapper.js" defer></script>
   <script src="harness-profile.js" defer></script>
   <script src="local-bridge.js" defer></script>
+  <script src="review-workbench.js" defer></script>
   <script src="experiment-ledger.js" defer></script>
   <script src="document-import.js" defer></script>
   <script src="document-red-core.js" defer></script>
@@ -180,13 +181,13 @@
 
         <section class="view" id="view-review" hidden aria-labelledby="review-title">
           <section id="human-evaluation" class="document-red" aria-labelledby="review-title">
-            <div class="section-heading"><div><h2 id="review-title">검수</h2><p>실행 결과를 사람이 평가합니다. RED / BLUE 실행과 분리된 기록이며 승인이나 과학적 gold를 자동 확정하지 않습니다.</p></div></div>
+            <div class="section-heading"><div><h2 id="review-title">검수</h2><p>기록 하나를 고르고, RED의 변경과 BLUE의 지적을 나란히 비교하세요. RED / BLUE 중 한쪽만 검수할 수도 있습니다.</p></div></div>
             <label for="evaluation-run">평가할 실행<select id="evaluation-run"><option value="">RED / BLUE에서 결과를 먼저 기록하세요</option></select></label>
             <p id="evaluation-binding" class="muted"></p><div id="evaluation-output"></div>
-            <section id="evaluation-plan-section" hidden><h3>BLUE 변경 기록 대조 (선택)</h3><p>고정된 실행의 출력 파일 해시와 대조합니다. 인용 겹침은 탐지 성공 판정이 아닙니다. 여기의 계획·판정은 모델 요청에 포함되지 않습니다.</p><label for="evaluation-plan">RED 변경 계획 JSON<input id="evaluation-plan" type="file" accept=".json"></label><p id="evaluation-plan-status" role="status"></p><div id="evaluation-comparison"></div></section>
+            <section id="evaluation-plan-section" hidden><details><summary>RED 변경을 추가해서 함께 보기</summary><p>같은 파일의 RED 최종 기록은 자동으로 연결합니다. 없으면 수정본 다운로드 때 받은 변경 계획 JSON을 추가하세요. RED 정보와 사람 판정은 모델 입력에 보내지 않습니다.</p><label for="evaluation-plan">RED 변경 계획 JSON<input id="evaluation-plan" type="file" accept=".json"></label></details><p id="evaluation-plan-status" role="status"></p><div id="evaluation-comparison"></div></section>
             <form id="evaluation-form">
               <div class="ledger-fields"><label>평가자<input id="evaluation-reviewer" maxlength="120" required placeholder="이름 또는 식별자"></label><label>사례 / 실험 조건<input id="evaluation-case" maxlength="160" required placeholder="예: AMAS-L1 / C 의미 왜곡"></label><label>판정<select id="evaluation-verdict"><option value="uncertain">유보 / 판단 불가</option><option value="supported">근거 있는 행동</option><option value="unsupported">근거 부족 / 잘못된 행동</option><option value="mixed">일부 적절</option></select></label><label>전반적 품질 (1–5)<select id="evaluation-score"><option value="">미평가</option><option value="1">1 · 낮음</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5 · 높음</option></select></label></div>
-              <label for="evaluation-note">판정 근거 · 오탐/누락 · 검증 한계<textarea id="evaluation-note" rows="4" maxlength="3000" required placeholder="RED: 실제 논리 결함인가, 수정 범위는 적절한가? BLUE: 충돌 설명이 타당한가, 오탐·누락은 무엇인가?"></textarea></label>
+              <label for="evaluation-note">전체 검수 메모<textarea id="evaluation-note" rows="3" maxlength="3000" required placeholder="이번 검수에서 확인한 점이나 전문가에게 부탁할 점을 적으세요. 위 항목별 판정과 함께 저장됩니다."></textarea></label>
               <button class="button primary" id="evaluation-save" type="submit" disabled>검수 기록 추가</button><p id="evaluation-status" role="status" aria-live="polite"></p>
             </form><h3>검수 이력</h3><div id="evaluation-history"></div>
           </section>

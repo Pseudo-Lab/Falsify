@@ -179,7 +179,7 @@ Type is a single system sans stack chosen for Korean and Latin UI; no web font s
 
 ## Colors
 
-Terminal yellow and sign ink carry direction; cool neutrals carry everything else; one restrained red marks errors.
+Terminal yellow and sign ink carry direction; cool neutrals carry everything else; one restrained red marks errors and deleted review text.
 
 ### Primary
 
@@ -200,7 +200,7 @@ Terminal yellow and sign ink carry direction; cool neutrals carry everything els
 
 ### Semantic
 
-- **Error Red** (red-ink): error feedback text only (import, record, export and CLI errors). Never a fill.
+- **Error Red** (red-ink): error feedback text (import, record, export and CLI errors) and struck-through deletions in human review. Never a fill.
 - **Focus Blue** (focus): the global 3px keyboard focus outline.
 
 **The Directional Yellow Rule.** Yellow marks where you are, where to go next, or what is selected. It is never decoration, never a status color, never body text.
@@ -236,6 +236,8 @@ Terminal yellow and sign ink carry direction; cool neutrals carry everything els
 Desktop is a fixed 224px charcoal rail on the left and an app shell beside it: a 68px white top bar (location breadcrumb and a reset icon), the full-width wayfinding sign, then a content column capped at 1496px with 32px gutters (40px at 1600px and above). Work surfaces stack vertically with 24px between them.
 
 At 1120px the rail narrows to 188px and gutters tighten to 24px. At 820px the rail becomes a wrapping header: the RED/BLUE pair spans the row as two equal buttons under its group label, and review, results and harness sit below as three equal 52px tiles with icon over label; the top bar drops to 52px. At 700px paired columns (Before/After, settings, ledger fields) collapse to one column, work-surface padding drops to 18px and buttons in work surfaces go full width. At 540px the sign becomes a two-column grid (gate code, then message with the action beneath it) and gutters are 16px.
+
+The native human-review board keeps RED changes on the left and BLUE findings on the right, separated by a thin divider with a 28px gap. At 960px and below it stacks RED above BLUE with a 24px gap and a horizontal divider. The companion connection panel is hidden only while the review destination is visible. Other destinations retain their existing layout.
 
 Spacing uses the frontmatter steps: 8px compact gaps, 10px between controls, 12px label gaps, 18px between paired fields, 20-22px section gaps, 28px work-surface padding. Wide tables scroll inside their own region instead of hiding columns.
 
@@ -306,6 +308,16 @@ Each work surface opens with a 30px ink square holding the step code (1, 2, 3, o
 The RED export result is a hierarchy, not a paragraph: a 14px ink outcome line first, then the self-check line led by a status chip, then a bulleted list of engine notes in the inherited muted feedback text, with the single attention-level note set in ink at 600. When the export reports verification limits, they follow as a separate trailing line. Errors switch the whole block to Error Red.
 
 Engine metadata lives in the mist-filled mode note above the export actions, not in the result: engine name and version, an underlined source link when one is reported, then the capability limits appended inline at the end of the same note.
+
+### Native Human Review
+
+The review destination extends the same flat white work surface. A compact saved-run selector precedes the comparison; execution state, raw response, extracted text and hashes remain in native disclosures.
+
+- **RED changes:** before/after quotations mark the changed span with semantic `del` and `ins`. Deletions use Error Red and strikethrough; insertions use bold ink and underline. Recorded RED rationale supplies intent; an absent rationale is stated explicitly, and a user-edited final sentence retains the original proposal’s intent label.
+- **BLUE findings:** findings whose quotations overlap RED changes appear first; every remaining finding stays visible. Quote overlap is a navigation aid, never an automatic correctness judgment or detection score. Full explanation, evidence and uncertainty sit in a disclosure beneath each quotation.
+- **Human judgments:** each linked RED change has detected, missed, uncertain or pending choices; every BLUE finding has supported, unsupported, mixed, uncertain or pending choices. Each non-pending item requires its own reason. Native selects and textareas use the existing field style with a 44px minimum height; the overall judgment and optional quality score remain separate.
+- **Exposure:** showing RED changes marks the run as `red-assisted` for the current page session. Saved BLUE reviews carry `reviewContext.mode` and a visible note prefix identifying RED disclosure as non-blind; `blue-only` states that prior exposure elsewhere is unknown. RED comparison and human judgments remain outside model input.
+- **Records:** saving appends a local review without overwriting earlier judgments. Full ledger JSON backup and validated merge preserve item judgments and exposure metadata; older backups may omit those optional fields. Shared review conversion carries the overall summary and prefixed note, not the structured comparison, item judgments or exposure object; it does not replace the full local backup. Shared scores remain subjective human observations, not detection rates or verified execution claims.
 
 ## Do's and Don'ts
 

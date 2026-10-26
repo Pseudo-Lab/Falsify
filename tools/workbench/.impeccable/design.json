@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-10-12T01:27:57Z",
+  "generatedAt": "2026-10-26T05:37:06Z",
   "title": "Design System: Falsify Paper Workbench",
   "extensions": {
     "colorMeta": {
@@ -46,6 +46,7 @@
       { "name": "mobile", "value": "540px" },
       { "name": "single-column", "value": "700px" },
       { "name": "header-rail", "value": "820px" },
+      { "name": "review-stacked", "value": "960px" },
       { "name": "narrow-rail", "value": "1120px" },
       { "name": "wide", "value": "1600px" }
     ]
@@ -114,6 +115,13 @@
       "description": "Flat white numbered step container.",
       "html": "<section class=\"ds-surface\"><div class=\"ds-step-head\"><span class=\"ds-step-code\">1</span><div><h2>Input · paper file</h2><p>PDF · DOCX · TXT · max 25MiB.</p></div></div></section>",
       "css": ".ds-surface { background:#fff; padding:28px; border:1px solid #d9dde0; border-radius:6px; color:#111315; font-family:Segoe UI, Apple SD Gothic Neo, Malgun Gothic, Arial, sans-serif; font-size:14px; line-height:1.6; } .ds-surface:focus-within { border-color:#aeb6bc; } .ds-step-head { display:flex; align-items:flex-start; gap:14px; } .ds-step-head h2 { margin:0; font-size:22px; line-height:1.4; letter-spacing:-.02em; } .ds-step-head p { margin:4px 0 0; color:#5a626a; font-size:13px; } .ds-step-code { display:grid; place-items:center; width:30px; height:30px; flex-shrink:0; background:#111315; color:#fff; border-radius:4px; font-weight:700; font-variant-numeric:tabular-nums; }"
+    },
+    {
+      "name": "Native Human Review",
+      "kind": "custom",
+      "description": "Existing review destination: RED before/after with del/ins and recorded intent beside all BLUE findings, quote overlaps first without automatic scoring. Per-item judgments require reasons when non-pending. RED exposure is saved as reviewContext.mode plus a note prefix; local append-only reviews and full JSON backup preserve structured details, while shared conversion carries only the overall summary and note. Companion panel hides only in review; columns stack at 960px and below.",
+      "html": "<section class=\"ds-review-columns\" aria-label=\"Human review\"><section class=\"ds-review-column\"><h3>RED · Before / After</h3><blockquote>Before <del>removed span</del></blockquote><blockquote>After <ins>inserted span</ins></blockquote><p>Recorded intent</p><label>Judgment<select><option>Pending</option></select></label><label>Reason<textarea rows=\"2\"></textarea></label></section><section class=\"ds-review-column\"><h3>BLUE · Findings</h3><blockquote>Finding quotation</blockquote><details><summary>Explanation · evidence · limits</summary><p>Recorded evidence</p></details><label>Judgment<select><option>Pending</option></select></label><label>Reason<textarea rows=\"2\"></textarea></label></section></section>",
+      "css": ".ds-review-columns { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:28px; border-top:1px solid var(--line,#d9dde0); padding-top:22px; color:var(--ink,#111315); font-family:Segoe UI, Apple SD Gothic Neo, Malgun Gothic, Arial, sans-serif; font-size:14px; line-height:1.7; } .ds-review-column { min-width:0; overflow-wrap:anywhere; } .ds-review-column+.ds-review-column { border-left:1px solid var(--line,#d9dde0); padding-left:28px; } .ds-review-column h3 { font-size:18px; } .ds-review-column blockquote { background:var(--surface,#f3f4f4); } .ds-review-column del { color:var(--red-ink,#8e302b); text-decoration-thickness:1px; } .ds-review-column ins { color:var(--ink,#111315); font-weight:700; text-decoration-thickness:2px; text-underline-offset:4px; } .ds-review-column label { display:block; font-size:13px; font-weight:600; margin:16px 0 6px; } .ds-review-column select,.ds-review-column textarea { box-sizing:border-box; display:block; width:100%; min-height:44px; border:1px solid var(--field-stroke,#8c949b); border-radius:4px; padding:10px; background:var(--paper,#fff); color:var(--ink,#111315); font:inherit; line-height:1.6; } .ds-review-column textarea { resize:vertical; } .ds-review-column summary { cursor:pointer; min-height:32px; padding:4px 0; font-size:13px; text-decoration:underline; text-underline-offset:3px; } .ds-review-column select:focus-visible,.ds-review-column textarea:focus-visible,.ds-review-column summary:focus-visible { outline:3px solid #246388; outline-offset:4px; } @media(max-width:960px) { .ds-review-columns { grid-template-columns:1fr; gap:24px; } .ds-review-column+.ds-review-column { border-left:0; padding-left:0; border-top:1px solid var(--line,#d9dde0); padding-top:22px; } }"
     }
   ],
   "narrative": {

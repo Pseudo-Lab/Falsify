@@ -71,7 +71,7 @@ function world(stored){
   let state={status:'manual',connected:false,cap:null};
   // VM-realm objects are normalized to this realm so deepStrictEqual compares values only.
   const plain=x=>JSON.parse(JSON.stringify(x)),events=[];document.addEventListener('falsify:harness-change',e=>events.push(plain(e.detail)));
-  const ctx=vm.createContext({document,FalsifyHarness:H,FalsifyLocalBridge:{capabilities:()=>state.cap,state:()=>state},FalsifyDocumentRed:require('../dist/document-red-core.js'),FalsifyDocumentBlue:require('../dist/document-blue-core.js'),
+  const ctx=vm.createContext({document,FalsifyReview:require('../dist/review-workbench.js'),FalsifyHarness:H,FalsifyLocalBridge:{capabilities:()=>state.cap,state:()=>state},FalsifyDocumentRed:require('../dist/document-red-core.js'),FalsifyDocumentBlue:require('../dist/document-blue-core.js'),
     localStorage:{getItem:k=>store.get(k)??null,setItem:(k,v)=>store.set(k,v)},crypto:DELAY?slowCrypto(DELAY):globalThis.crypto,TextEncoder,CustomEvent,Event,URL,Blob,setTimeout,clearTimeout});
   // With delayed crypto the harness core is loaded in the page realm so its hash() uses the same slow digest.
   if(DELAY)vm.runInContext(fs.readFileSync(path.join(dist,'harness-core.js'),'utf8'),ctx,{filename:'harness-core.js'});

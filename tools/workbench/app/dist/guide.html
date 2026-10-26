@@ -66,7 +66,7 @@ pre,table{break-inside:avoid}
 <header class="sign">
 <div class="wrap">
 <h1>Falsify Paper Workbench 사용 안내</h1>
-<p>0.2.0-alpha.5 기준 · RED, BLUE, 검수는 서로 독립적으로 씁니다. 필요한 것만 고르세요.</p>
+<p>0.2.0-alpha.7 기준 · RED, BLUE, 검수는 서로 독립적으로 씁니다. 필요한 것만 고르세요.</p>
 <a class="open-app" href="https://shinick-han.github.io/falsify-branch-preview/">앱 열기 (이 브랜치의 Workbench 미리보기)</a>
 <p>이 안내 파일은 오프라인으로 열어도 됩니다. 앱은 위 공개 페이지나, 로컬 작업대 방식으로 companion을 실행 중일 때의 로컬 주소(기본 <code>http://127.0.0.1:7816/</code>)로 엽니다. 내려받은 <code>index.html</code>을 파일로 직접 여는 방식은 완전히 지원하지 않습니다.</p>
 </div>
@@ -78,7 +78,7 @@ pre,table{break-inside:avoid}
 <h2 id="quick-title">빠른 사용</h2>
 <h3>처음 한 번만 (companion이 필요할 때)</h3>
 <ol>
-<li>새로 받는다면 <code>git clone --branch feat/workbench-html-guide-20261012 https://github.com/Pseudo-Lab/Falsify.git</code> 후 <code>cd Falsify/tools/workbench</code>로 들어갑니다(main 브랜치에는 이 폴더가 없습니다). 이미 설치해 쓰던 폴더가 있으면 그대로 씁니다. Windows는 그 폴더에서 <code>start-companion.ps1</code>을 한 번 실행해 로컬 실행기(companion)를 준비합니다(첫 실행만 의존성 설치). macOS/Linux는 <a href="#launch">수동 실행</a>을 따릅니다.</li>
+<li>새로 받는다면 <code>git clone https://github.com/Shinick-Han/falsify-workbench.git</code> 후 <code>cd falsify-workbench</code>로 들어갑니다(공개 Workbench 소스 저장소). 이미 설치해 쓰던 폴더가 있으면 그대로 씁니다. Windows는 그 폴더에서 <code>start-companion.ps1</code>을 한 번 실행해 로컬 실행기(companion)를 준비합니다(첫 실행만 의존성 설치). macOS/Linux는 <a href="#launch">수동 실행</a>을 따릅니다.</li>
 <li>모델을 실행할 때만: 쓸 CLI 하나를 설치하고 로그인합니다: <code>codex login</code>, 또는 <code>claude</code> 실행 후 로그인. PDF 사전분석·내보내기만 한다면 건너뜁니다. 자세한 것은 <a href="#prereq">준비물과 설치</a>.</li>
 </ol>
 <h3>매번</h3>
@@ -104,7 +104,7 @@ pre,table{break-inside:avoid}
 <h3>검수 · 사람 평가</h3>
 <ol>
 <li><b class="ui">검수</b>에서 <b class="ui">평가할 실행</b>으로 저장된 실행을 고릅니다.</li>
-<li><b class="ui">평가자</b>, <b class="ui">판정</b>, <b class="ui">판정 근거 · 오탐/누락 · 검증 한계</b>를 쓰고 <b class="ui">검수 기록 추가</b>.</li>
+<li>BLUE 기록을 고르면 RED의 원문·수정문·공격 의도와 BLUE의 지적을 나란히 봅니다. 항목별 판정·이유를 적고, 아래 <b class="ui">평가자</b>와 <b class="ui">전체 검수 메모</b>를 채워 <b class="ui">검수 기록 추가</b>.</li>
 </ol>
 <h3>공동 기록 · 다른 사람의 Harness와 평가 나누기</h3>
 <ol>
@@ -168,8 +168,8 @@ pre,table{break-inside:avoid}
 <section id="launch" aria-labelledby="launch-title">
 <h2 id="launch-title">2. 소스 받기와 첫 실행</h2>
 <p>companion은 모델 실행, PDF 사전분석, PDF 편집·그림 교체 내보내기에만 필요합니다. 브라우저만으로 쓰는 수동 JSON 교환이나 검수만 한다면 이 장을 건너뜁니다. 팀 저장소의 main 브랜치에는 <code>tools/workbench</code>가 없으므로 새로 받을 때는 Workbench 브랜치를 지정합니다. 이미 설치해 쓰던 Workbench 폴더가 있으면 다시 받거나 <code>git pull</code>할 필요 없이 그 폴더를 그대로 쓰고, 원래 폴더를 지우거나 바꾸지 않습니다. 스크립트는 실행 전에 직접 읽어 보세요.</p>
-<pre><code>git clone --branch feat/workbench-html-guide-20261012 https://github.com/Pseudo-Lab/Falsify.git
-cd Falsify/tools/workbench
+<pre><code>git clone https://github.com/Shinick-Han/falsify-workbench.git
+cd falsify-workbench
 powershell -NoProfile -ExecutionPolicy Bypass -File .\start-companion.ps1</code></pre>
 <p>이 안내의 다른 명령에 나오는 <code>cd tools/workbench</code>는 저장소 루트(<code>Falsify</code>) 기준이며, 이미 <code>tools/workbench</code> 안에 있다면 <code>cd</code> 줄은 건너뜁니다. Windows의 <code>start-companion.ps1</code>과 클릭 실행 링크는 편의 기능이고, macOS/Linux는 아래 수동 실행으로 씁니다.</p>
 <ul>
@@ -194,7 +194,7 @@ python3 -m venv .venv
 <h2 id="connect-title">3. 연결 방식 세 가지</h2>
 <dl>
 <dt>공개 페이지 + 토큰 연결</dt>
-<dd><a href="https://shinick-han.github.io/falsify-workbench/">공개 Workbench</a>에서 <b class="ui">로컬 실행 연결</b> 패널을 엽니다. 터미널의 토큰 한 줄을 <b class="ui">페어링 토큰</b>에 붙여넣고 <b class="ui">토큰으로 연결</b>. 브라우저가 로컬 네트워크 접근을 물으면 이 사이트에만 허용합니다. 연결은 기능 확인만 하며 모델을 실행하지 않습니다. 포트를 바꿨다면 <b class="ui">수동 실행 · 포트 변경 · 연결 문제</b>에서 같은 번호로 맞춥니다.</dd>
+<dd><a href="https://shinick-han.github.io/falsify-branch-preview/">공개 Workbench</a>에서 <b class="ui">로컬 실행 연결</b> 패널을 엽니다. 터미널의 토큰 한 줄을 <b class="ui">페어링 토큰</b>에 붙여넣고 <b class="ui">토큰으로 연결</b>. 브라우저가 로컬 네트워크 접근을 물으면 이 사이트에만 허용합니다. 연결은 기능 확인만 하며 모델을 실행하지 않습니다. 포트를 바꿨다면 <b class="ui">수동 실행 · 포트 변경 · 연결 문제</b>에서 같은 번호로 맞춥니다.</dd>
 <dt>로컬 작업대 (토큰 불필요)</dt>
 <dd>한 번 <code>start-companion.ps1</code>로 의존성이 설치된 뒤, <code>tools/workbench</code> 폴더에서 <code>.\.venv\Scripts\python.exe app/local/server.py</code>를 <code>--web-origin</code> 없이 실행하고, 출력된 <code>http://127.0.0.1:&lt;포트&gt;/</code>를 엽니다. 같은 origin 세션이라 페어링이 필요 없습니다. 기록은 공개 페이지와 따로 저장됩니다.</dd>
 <dt>수동 JSON 교환 (연결 없음)</dt>
@@ -261,9 +261,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\start-companion.ps1 -NoIns
 <li><b class="ui">평가할 실행</b>에서 저장된 RED 또는 BLUE 실행을 고릅니다. 모델 원출력과 사람이 최종 선택·편집한 After는 구분되어 보입니다.</li>
 <li><b class="ui">평가자</b>, <b class="ui">사례 / 실험 조건</b>을 적습니다.</li>
 <li><b class="ui">판정</b>: <b class="ui">근거 있는 행동</b>, <b class="ui">근거 부족 / 잘못된 행동</b>, <b class="ui">일부 적절</b>, <b class="ui">유보 / 판단 불가</b>. 선택으로 <b class="ui">전반적 품질 (1–5)</b>.</li>
-<li><b class="ui">판정 근거 · 오탐/누락 · 검증 한계</b>는 필수입니다. <b class="ui">검수 기록 추가</b>는 이전 평가를 덮어쓰지 않고 <b class="ui">검수 이력</b>에 새로 쌓습니다.</li>
+<li>BLUE 기록은 지적마다 <b class="ui">이 지적은 타당한가요?</b>와 이유를 남길 수 있습니다. RED 공격별로 찾았는지·놓쳤는지도 별도로 판정합니다. 모르면 <b class="ui">확인필요</b>를 고릅니다. 판정한 항목은 이유가 필요하며, 미판정으로 남겨도 됩니다.</li>
+<li><b class="ui">전체 검수 메모</b>는 필수입니다. <b class="ui">검수 기록 추가</b>는 항목별 판정과 함께 이전 평가를 덮어쓰지 않고 <b class="ui">검수 이력</b>에 새로 쌓습니다. 이 내용은 브라우저 저장·전체 JSON 백업에 포함됩니다.</li>
 </ol>
-<p><b class="ui">BLUE 변경 기록 대조 (선택)</b>: BLUE 입력 파일의 SHA-256이 보존 검사 후 내보낸 RED 사본의 출력 해시와 일치하면 변경 위치를 대조해 보여 줍니다. 일치 기록이 없으면 <b class="ui">RED 변경 계획 JSON</b>을 직접 고를 수 있습니다. 인용이 겹친다고 탐지 성공은 아니며, 변경별 판정은 사람이 정합니다. 모델 호출·승인·gold로 자동 승격하지 않습니다.</p>
+<p><b class="ui">RED 변경을 추가해서 함께 보기</b>: BLUE 입력 파일의 SHA-256이 RED 최종 출력 해시와 일치하면 왼쪽에 원래 문장·바꾼 문장·원래 공격 의도를 보여 줍니다. 달라진 표현을 표시하고, 오른쪽에는 인용이 겹친 BLUE 지적부터 보여 줍니다. 인용 일치만으로 탐지 성공을 정하지 않습니다. 일치 기록이 없으면 다운로드 때 받은 <b class="ui">RED 변경 계획 JSON</b>을 직접 추가할 수 있습니다. 계획만으로 알 수 없는 공격 의도는 미기록으로 표시합니다. RED 없이 BLUE만 검수해도 됩니다.</p>
+<p>RED를 보면서 판정하면 <b class="ui">RED 공개 대조 · 블라인드 아님</b>이 기록됩니다. 공동 서버에 검수를 올릴 때도 전체 메모에 이 표기가 남습니다. 항목별 상세 판정·RED 대조문은 전체 로컬 JSON 백업에 보존하며, 현재 공동 기록에는 자동 업로드하지 않습니다. 사람 검수는 과학적 gold·팀 승인·정량 탐지율을 자동 확정하지 않으며 모델 입력에도 들어가지 않습니다.</p>
 </section>
 
 <section id="harness" aria-labelledby="harness-title">

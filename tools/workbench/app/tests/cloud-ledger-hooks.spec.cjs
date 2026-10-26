@@ -20,7 +20,7 @@ function ledger(stored){
   const get=id=>{if(!els.has(id))element('div').id=id;return els.get(id);};
   const document=new EventTarget();Object.assign(document,{readyState:'complete',createElement:element,querySelector:s=>s.startsWith('#')?get(s.slice(1)):null,querySelectorAll:()=>[],body:element('body')});
   for(const type of ['falsify:harness-change','falsify:harness-consent'])document.addEventListener(type,e=>events.push(type+':'+e.detail.role));
-  const ctx=vm.createContext({document,FalsifyHarness:H,FalsifyLocalBridge:{capabilities:()=>null,state:()=>({status:'manual',connected:false,cap:null})},FalsifyDocumentRed:R,FalsifyDocumentBlue:require('../dist/document-blue-core.js'),
+  const ctx=vm.createContext({document,FalsifyReview:require('../dist/review-workbench.js'),FalsifyHarness:H,FalsifyLocalBridge:{capabilities:()=>null,state:()=>({status:'manual',connected:false,cap:null})},FalsifyDocumentRed:R,FalsifyDocumentBlue:require('../dist/document-blue-core.js'),
     localStorage:{getItem:k=>store.get(k)??null,setItem:(k,v)=>{writes.push(k);store.set(k,v);}},crypto:globalThis.crypto,TextEncoder,CustomEvent,Event,URL,Blob,setTimeout,clearTimeout});
   vm.runInContext(fs.readFileSync(path.join(dist,'experiment-ledger.js'),'utf8'),ctx,{filename:'experiment-ledger.js'});
   return {get,lab:ctx.FalsifyLab,store,writes,events};
@@ -62,6 +62,46 @@ test('previewSharedHarness rejects invalid configs and mismatched hashes without
   const w=ledger();await w.lab.ready;const before=w.get('harness-editor').value;
   await assert.rejects(w.lab.previewSharedHarness({...shared,role:'gold'}));assert.equal(w.get('harness-preview').hidden,true);assert.equal(w.get('harness-editor').value,before);assert.ok(w.get('harness-status').classList.contains('error'));
   await assert.rejects(w.lab.previewSharedHarness(plain(shared),'0'.repeat(64)),/내용 해시/);assert.equal(w.get('harness-editor').value,before);assert.deepEqual(w.writes,[]);});
+
+async function reviewBlue(w,withRed=true){
+  const redDoc=await paper(),blueSegments=[{...segments[0],text:candidate.after},segments[1]],blueDoc={...redDoc,revision:'synthetic-blue',fileHash:'a'.repeat(64),sourceHash:await sha(blueSegments.map(s=>s.text).join('\n\n')),segments:blueSegments};
+  if(withRed){const req=plain(await w.lab.bind('red',R.request(redDoc,1,4)));await w.lab.record('red',redDoc,req,{schema:R.VERSION,revision:redDoc.revision,sourceHash:redDoc.sourceHash,status:'ok',candidates:[candidate]},'manual-unverified',{finalState:{outputFileHash:blueDoc.fileHash,verification:null,selected:[{id:candidate.id,segmentId:'s0',label:'p1',before:candidate.before,after:candidate.after,offset:0,edited:false}]}});}
+  const req=plain(await w.lab.bind('blue',require('../dist/document-blue-core.js').request(blueDoc,4)));
+  const response={schema:'falsify.document-blue.v1',revision:blueDoc.revision,sourceHash:blueDoc.sourceHash,status:'ok',findings:[{id:'F1',segmentId:'s0',quote:candidate.after,rationale:'Synthetic conflicting interpretation.',evidence:candidate.evidence,uncertainty:'Synthetic only.'}]};
+  const id=await w.lab.record('blue',blueDoc,req,response,'manual-unverified');await w.lab.review(id);return id;
+}
+test('native assisted review pairs exact RED output, persists item judgments and exposure, preserves raw response',async()=>{
+  const w=ledger();await w.lab.ready;const id=await reviewBlue(w),before=plain((await w.lab.cloudSnapshot()).runs.find(r=>r.id===id).response);
+  const tree=e=>[e.textContent,...e.children.filter(c=>c&&typeof c==='object').flatMap(tree)].join('\n');
+  assert.match(tree(w.get('evaluation-output')).replace(/\s+/g,' '),/원래 문장[\s\S]*Study does not show benefit\.[\s\S]*바꾼 문장[\s\S]*Study does show benefit\./);
+  assert.match(tree(w.get('evaluation-output')),/Synthetic contradiction/);
+  w.get('evaluation-patch-0').value='detected';w.get('evaluation-patch-0').dispatchEvent(new Event('change'));
+  w.get('evaluation-patch-note-0').value='Synthetic matching conflict.';w.get('evaluation-patch-note-0').dispatchEvent(new Event('input'));
+  w.get('evaluation-finding-0').value='supported';w.get('evaluation-finding-0').dispatchEvent(new Event('change'));
+  w.get('evaluation-finding-note-0').value='Synthetic source supports finding.';w.get('evaluation-finding-note-0').dispatchEvent(new Event('input'));
+  w.get('evaluation-reviewer').value='Synthetic reviewer';w.get('evaluation-case').value='Synthetic condition';w.get('evaluation-verdict').value='supported';w.get('evaluation-note').value='Synthetic overall note.';
+  w.get('evaluation-form').dispatchEvent(new Event('submit',{cancelable:true}));
+  const after=await w.lab.cloudSnapshot(),v=after.reviews[0];assert.equal(after.reviews.length,1);assert.equal(v.reviewContext.mode,'red-assisted');assert.equal(v.findingAssessments[0].verdict,'supported');assert.match(v.note,/RED 공개 대조 · 블라인드 아님/);assert.equal(v.comparison.assessments[0].note,'Synthetic matching conflict.');assert.deepEqual(plain(after.runs.find(r=>r.id===id).response),before);
+  const loaded=ledger([[KEY,w.store.get(KEY)]]);assert.deepEqual(plain((await loaded.lab.cloudSnapshot()).reviews),plain(after.reviews),'new optional review fields survive reload');
+  const core=await import('../dist/cloud-records-core.mjs');assert.match(core.reviewFromLocal(v,'00000000-0000-4000-8000-000000000001').note,/RED 공개 대조 · 블라인드 아님/,'share retains exposure in note without publishing private comparison');
+});
+test('BLUE-only review works independently and item judgments require reasons',async()=>{
+  const w=ledger();await w.lab.ready;await reviewBlue(w,false);w.get('evaluation-reviewer').value='Synthetic';w.get('evaluation-case').value='Synthetic';w.get('evaluation-verdict').value='uncertain';w.get('evaluation-note').value='Synthetic note';
+  w.get('evaluation-finding-0').value='unsupported';w.get('evaluation-finding-0').dispatchEvent(new Event('change'));w.get('evaluation-form').dispatchEvent(new Event('submit',{cancelable:true}));assert.equal((await w.lab.cloudSnapshot()).reviews.length,0,'no reason means no saved judgment');
+  w.get('evaluation-finding-note-0').value='Synthetic limitation.';w.get('evaluation-finding-note-0').dispatchEvent(new Event('input'));w.get('evaluation-form').dispatchEvent(new Event('submit',{cancelable:true}));const v=(await w.lab.cloudSnapshot()).reviews[0];assert.equal(v.comparison,null);assert.equal(v.reviewContext.mode,'blue-only');assert.equal(v.score,null);
+  const Review=require('../dist/review-workbench.js'),run=(await w.lab.cloudSnapshot()).runs.at(-1);assert.throws(()=>Review.validateExtras({...v,findingAssessments:[{id:'made-up',verdict:'pending',note:''}]},run));assert.throws(()=>Review.validateExtras({...v,reviewContext:{mode:'blind-certified'}},run));assert.throws(()=>Review.validateExtras({...v,findingAssessments:[{id:'F1',verdict:'unsupported',note:''}]},run));
+});
+test('invalid or cancelled RED plan replacement retains displayed comparison, judgments and save binding',async()=>{
+  const w=ledger();await w.lab.ready;await reviewBlue(w);const original=w.get('evaluation-patch-0');
+  w.get('evaluation-patch-note-0').value='Synthetic preserved reason';w.get('evaluation-patch-note-0').dispatchEvent(new Event('input'));
+  for(const file of [{size:1,text:async()=>'{bad json'},{size:200001,text:async()=>''},{size:50,text:async()=>JSON.stringify({schema:'falsify.document-edit-plan.v1',outputFileHash:'b'.repeat(64),selected:[]})}]){
+    w.get('evaluation-plan').files=[file];w.get('evaluation-plan').dispatchEvent(new Event('change'));await flush();assert.match(w.get('evaluation-plan-status').textContent,/기존 RED 대조와 판정을 유지/);assert.equal(w.get('evaluation-patch-0'),original);
+  }
+  w.get('evaluation-plan').files=[];w.get('evaluation-plan').dispatchEvent(new Event('change'));await flush();assert.match(w.get('evaluation-plan-status').textContent,/기존 RED 대조와 판정을 유지/);
+  original.value='uncertain';assert.doesNotThrow(()=>original.dispatchEvent(new Event('change')));
+  w.get('evaluation-reviewer').value='Synthetic reviewer';w.get('evaluation-case').value='Synthetic condition';w.get('evaluation-verdict').value='uncertain';w.get('evaluation-note').value='Synthetic replacement probe';w.get('evaluation-form').dispatchEvent(new Event('submit',{cancelable:true}));
+  const v=(await w.lab.cloudSnapshot()).reviews[0];assert.equal(v.comparison.assessments[0].note,'Synthetic preserved reason');assert.equal(v.comparison.assessments[0].verdict,'uncertain');assert.ok(v.comparison.sourceRunId);
+});
 
 (async()=>{let passed=0;for(const [name,fn] of tests){try{await fn();passed++;console.log('PASS '+name);}catch(e){console.error('FAIL '+name+'\n'+(e.stack||e));process.exitCode=1;}}
   console.log(JSON.stringify({passed,total:tests.length}));if(passed!==tests.length)process.exit(1);})();

@@ -41,3 +41,16 @@
 .harness-preview{margin:18px 0;padding-top:12px;border-top:1px solid var(--line)}
 .harness-preview code,.harness-library details code{overflow-wrap:anywhere}
 @media(max-width:700px){.ledger-meta dl,.harness-preview dl{grid-template-columns:1fr}.ledger-meta dt,.harness-preview dt{margin-top:6px}}
+.review-toolbar{padding:8px 0 20px}.review-toolbar h3{font-size:20px;line-height:1.45}.review-toolbar p{max-width:75ch}
+body:has(#view-review:not([hidden])) #local-bridge{display:none}
+.review-exposure{font-size:13px;font-weight:600;color:var(--muted)}
+.review-columns{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:28px;border-top:1px solid var(--line);padding-top:22px}
+.review-column{min-width:0}.review-column>h3{font-size:18px}.review-column>p{font-size:13px;color:var(--muted)}
+.review-column+.review-column{border-left:1px solid var(--line);padding-left:28px}
+.review-item{padding:22px 0;border-top:1px solid var(--line);overflow-wrap:anywhere}.review-item h4{font-size:16px;margin:0 0 16px}.review-item h5{font-size:13px;margin:18px 0 6px}
+.review-item p{font-size:14px;line-height:1.7;white-space:pre-wrap}.review-item label{display:block;font-size:13px;font-weight:600;margin:16px 0 6px}
+.review-item select,.review-item textarea{box-sizing:border-box;width:100%;min-height:44px;border:1px solid var(--field-stroke,#8c949b);border-radius:4px;padding:10px;background:var(--paper);color:var(--ink);font:inherit;line-height:1.6}
+.review-item textarea{resize:vertical}.review-item details{margin:14px 0}.review-item summary{cursor:pointer;min-height:32px;padding:4px 0;font-size:13px;text-decoration:underline;text-underline-offset:3px}
+.review-item blockquote{font-size:14px;line-height:1.7}.review-empty{padding:20px;background:var(--surface);line-height:1.7}
+.review-item del{color:var(--red-ink);text-decoration-thickness:1px}.review-item ins{color:var(--ink);font-weight:700;text-decoration-thickness:2px;text-underline-offset:4px}.review-change{font-weight:600}
+@media(max-width:960px){.review-columns{grid-template-columns:1fr;gap:24px}.review-column+.review-column{border-left:0;padding-left:0;border-top:1px solid var(--line);padding-top:22px}}
