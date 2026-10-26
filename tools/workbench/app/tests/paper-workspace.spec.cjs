@@ -749,6 +749,7 @@ test('output: object warnings and failed checks name the candidate without claim
   const row=()=>textOf(v.get('paper-edits'));
   assert.match(row(),/검증 warning · 주의 글꼴을 대체함 · 정보 After가 여러 줄로 바뀜/);
   assert.equal(v.ws.getEditSnapshot().edits[0].after,'Beta');
+  await until(()=>v.get('paper-after-stage').children.some(c=>c.marker==='GEN'),'warning output rendered');
   assert.doesNotMatch(v.get('paper-after-stage').children.find(c=>c.marker==='GEN').getAttribute('aria-label'),/font-substituted|글꼴|진단|warning/);
   assert.equal(v.get('paper-current-download').disabled,false);
   assert.equal(v.get('paper-current-download').textContent,'현재 생성본 다운로드');
