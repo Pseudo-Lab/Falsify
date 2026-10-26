@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.0-alpha.8
+
+- Confluence is the only remote archive: explicit team publication of selected experiments, Harnesses and detailed reviews.
+- Fetched records open in temporary native review without merging into original local storage; publish draft reviews explicitly to retain them.
+- Central user-delegated Atlassian OAuth, stateless bounded relay, immutable hash-checked attachments and legacy write retirement. Existing local and historical database records remain preserved.
+- Synthetic real-OAuth and independent-browser-origin roundtrips verified; original/edited PDF bytes are not included in JSON archives. See docs/release-alpha8.md.
+
 ## 0.2.0-alpha.7
 
 - Native human review pairs RED before/after and recorded attack intent with all BLUE findings. Changed expressions are marked and quote overlaps displayed first without automatic scoring.

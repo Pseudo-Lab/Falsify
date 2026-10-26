@@ -5,6 +5,7 @@ import { Buffer } from 'node:buffer';
 import { scrypt, timingSafeEqual } from 'node:crypto';
 import H from '../../../app/dist/harness-core.js';
 import { validatePayload, publicPayload, payloadHash } from '../../../app/dist/cloud-records-core.mjs';
+import { handleConfluence, matchConfluence, confluenceOnly, LEGACY_WRITES } from './confluence.mjs';
 
 const SCHEMA = 'falsify.cloud.v1';
 const MAX_BODY_BYTES = 256 * 1024;
@@ -53,6 +54,7 @@ const MESSAGES = {
   quota_exceeded: 'The record quota for this author is exhausted.',
   rate_limited: 'Too many requests; retry later.',
   not_configured: 'The records store is not configured.',
+  storage_moved: 'Remote records moved to the Falsify Confluence archive. This account or record write is no longer accepted.',
   internal_error: 'Internal error.',
 };
 
@@ -695,33 +697,43 @@ export default {
     const origin = request.headers.get('Origin');
     const config = settings(env);
     const allowed = origin !== null && config.origins.has(origin);
-    const matched = route(url.pathname);
+    const confluence = matchConfluence(url.pathname);
+    const matched = confluence ? null : route(url.pathname);
+    const logRoute = confluence?.template ?? matched?.template ?? 'unmatched';
     let response;
     try {
-      if (origin !== null && !allowed) throw fail(403, 'origin_not_allowed');
-      if (!matched) throw fail(404, 'not_found');
-      const methods = ROUTES[matched.template];
-      if (request.method === 'OPTIONS') {
-        response = new Response(null, {
-          status: 204,
-          headers: { 'Access-Control-Allow-Methods': ALLOW_METHODS, 'Access-Control-Allow-Headers': ALLOW_HEADERS, 'Access-Control-Max-Age': '600', 'Cache-Control': 'no-store' },
-        });
-      } else if (!Object.hasOwn(methods, request.method)) {
-        throw fail(405, 'method_not_allowed', { Allow: Object.keys(methods).join(', ') });
+      // The OAuth callback is a top-level navigation from Atlassian, not a frontend XHR.
+      if (!(confluence?.template === '/v1/confluence/auth/callback') && origin !== null && !allowed) throw fail(403, 'origin_not_allowed');
+      if (confluence) {
+        response = await handleConfluence({ request, env, url, match: confluence, settings: config });
+      } else if (!matched) {
+        throw fail(404, 'not_found');
       } else {
-        if (matched.id !== null && !UUID.test(matched.id)) throw fail(404, 'not_found');
-        response = await methods[request.method]({ request, env, url, id: matched.id, settings: config });
+        const methods = ROUTES[matched.template];
+        if (request.method === 'OPTIONS') {
+          response = new Response(null, {
+            status: 204,
+            headers: { 'Access-Control-Allow-Methods': ALLOW_METHODS, 'Access-Control-Allow-Headers': ALLOW_HEADERS, 'Access-Control-Max-Age': '600', 'Cache-Control': 'no-store' },
+          });
+        } else if (!Object.hasOwn(methods, request.method)) {
+          throw fail(405, 'method_not_allowed', { Allow: Object.keys(methods).join(', ') });
+        } else if (confluenceOnly(env) && LEGACY_WRITES.has(`${request.method} ${matched.template}`)) {
+          throw fail(410, 'storage_moved');
+        } else {
+          if (matched.id !== null && !UUID.test(matched.id)) throw fail(404, 'not_found');
+          response = await methods[request.method]({ request, env, url, id: matched.id, settings: config });
+        }
       }
     } catch (error) {
       if (!(error instanceof ApiError)) {
-        // Only the error class name is logged: messages can carry SQL or payload fragments.
-        console.error(JSON.stringify({ event: 'unhandled_error', route: matched?.template ?? 'unmatched', name: error?.name ?? 'unknown' }));
+        // Only the error class name is logged: messages can carry SQL, tokens or payload fragments.
+        console.error(JSON.stringify({ event: 'unhandled_error', route: logRoute, name: error?.name ?? 'unknown' }));
         error = fail(500, 'internal_error');
       }
       response = errorResponse(error);
     }
     // Logs carry the route template, method, status and timing only: no URL, ids, query, body, token or IP.
-    console.log(JSON.stringify({ event: 'request', method: request.method, route: matched?.template ?? 'unmatched', status: response.status, ms: Date.now() - started }));
+    console.log(JSON.stringify({ event: 'request', method: request.method, route: logRoute, status: response.status, ms: Date.now() - started }));
     return withCors(response, origin, allowed);
   },
 };

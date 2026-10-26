@@ -1,7 +1,8 @@
 'use strict';
 // Node VM regression for the shared-records section: synthetic DOM, stubbed fetch/storage/ledger hooks/core. No browser, network, server or model calls.
 const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
-const src=fs.readFileSync(path.resolve(__dirname,'../dist/cloud-records.js'),'utf8'),BASE='https://api.test',KEY='falsify.cloud-session.v1';
+// Retired account UI is retained outside the shipped site for migration regression coverage only.
+const src=fs.readFileSync(path.resolve(__dirname,'../legacy/cloud-records.js'),'utf8'),BASE='https://api.test',KEY='falsify.cloud-session.v1';
 const tests=[];const test=(name,fn)=>tests.push([name,fn]);
 const flush=async(n=20)=>{for(let i=0;i<n;i++)await new Promise(r=>setImmediate(r));};
 const until=async(f,label)=>{for(let i=0;i<300&&!f();i++)await new Promise(r=>setTimeout(r,5));assert.ok(f(),label);};
@@ -237,7 +238,7 @@ test('signed out, 내 기록 explains sign-in, focuses the username field and re
   assert.match(t.$('cloud-status').textContent,/내 기록은 로그인한 뒤 볼 수 있습니다/);assert.ok(t.$('cloud-status').classList.contains('error'));assert.equal(t.$('cloud-tab-shared').getAttribute('aria-pressed'),'true');assert.equal(t.$('cloud-tab-mine').getAttribute('aria-pressed'),'false');});
 
 test('styles: hover never repaints the active tab, the kind label keeps its gap, record titles are styled as h3',()=>{
-  const css=fs.readFileSync(path.resolve(__dirname,'../dist/cloud-records.css'),'utf8');
+  const css=fs.readFileSync(path.resolve(__dirname,'../legacy/cloud-records.css'),'utf8');
   for(const m of css.matchAll(/([^{}]*:hover[^{}]*)\{/g))if(m[1].includes('.cloud-tabs'))assert.match(m[1],/\[aria-pressed=false\]/,'tab hover is limited to inactive tabs');
   assert.match(css,/label\.cloud-kind\{[^}]*gap:12px/);assert.match(css,/\.cloud-record h3\{/);assert.ok(!/\.cloud-record h4/.test(css));});
 

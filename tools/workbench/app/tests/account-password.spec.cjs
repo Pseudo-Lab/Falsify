@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-const jsPath = process.env.FALSIFY_CLOUD_RECORDS || path.resolve(__dirname, '../dist/cloud-records.js');
+const jsPath = process.env.FALSIFY_CLOUD_RECORDS || path.resolve(__dirname, '../legacy/cloud-records.js');
 const cssPath = process.env.FALSIFY_CLOUD_RECORDS_CSS || path.join(path.dirname(jsPath), 'cloud-records.css');
 const src = fs.readFileSync(jsPath, 'utf8');
 const css = fs.readFileSync(cssPath, 'utf8');

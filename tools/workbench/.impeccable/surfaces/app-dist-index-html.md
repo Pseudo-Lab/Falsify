@@ -17,3 +17,6 @@ FORM: Extension of incumbent operating workspace; no replacement-world seed or a
 FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, DESIGN.md, and every shipping raster carrying its provenance
 
 Evidence: genuine private cold-shower RED/BLUE records, pending human judgments. Do not publish private screenshots or records. No marketing/performance claims. RED visibility persists as red-assisted review metadata and shared note prefix. No external network/model calls in the review module. Old backups supported. Existing split-flap disabled only for reduced-motion screenshots, not changed in product.
+
+## Confluence archive extension (2026-10-26)
+The existing Review/Results/Harness surfaces gain one compact Confluence-only archive section. Reuse airport tokens, dividers and wrapping button rows; preserve independent RED/BLUE actions. Explicit team consent precedes publication. A prominent temporary-view notice distinguishes remotely opened records from the unchanged local ledger and explains unsent review loss. Loading/permission/expiry/partial-write states never claim storage success. No new raster assets.

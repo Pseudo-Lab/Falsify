@@ -1,6 +1,8 @@
 # 계정 비밀번호와 세션
 
-공유 기록 패널에 로그인한 활성 팀 멤버가 자기 비밀번호를 바꾸거나, 자기 세션을 모두 끝낼 수 있다. 화면은 `app/dist/cloud-records.js`가 계정 패널 안에 붙인다. `index.html`은 바꾸지 않는다. API 계약과 가짜 예시는 `cloud/api/PASSWORD-SESSIONS.md`에 있다.
+> 이전 Workbench 계정 백엔드의 보존·이관 문서입니다. Confluence 전용 버전은 이 로그인 화면을 제공하지 않으며 기존 계정의 쓰기는 종료합니다. 기존 데이터는 자동 삭제하거나 팀에 공개하지 않습니다. 새 사용법은 [Confluence 아카이브 형식](confluence-archive-format.md)을 참고하세요.
+
+이전 버전의 활성 팀 멤버 계정 기능은 `app/legacy/cloud-records.js`에 보존했다. 새 정적 웹앱에는 배포하거나 불러오지 않는다. 이전 API 계약과 합성 예시는 `cloud/api/PASSWORD-SESSIONS.md`에 있다.
 
 ## 비밀번호 변경
 
