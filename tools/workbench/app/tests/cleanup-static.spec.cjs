@@ -1,7 +1,10 @@
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
 const dist=path.resolve(__dirname,'../dist'),html=fs.readFileSync(path.join(dist,'index.html'),'utf8');let passed=0;
 const check=(name,condition)=>{assert.ok(condition,name);passed++;};
-const scripts=[...html.matchAll(/<script src="([^"]+)"/g)].map(m=>m[1]);
+const scripts=[...html.matchAll(/<script src="([^"]+)"/g)].map(m=>m[1].split('?')[0]);
+const version=fs.readFileSync(path.join(__dirname,'../../VERSION'),'utf8').trim();
+const urls=[...html.matchAll(/(?:src|href)="([^"\s]+\?v=[^"\s]+)"/g)].map(m=>new URL(m[1],'https://local.invalid/'));
+check('changed entry assets use the current release version',urls.length>=5&&urls.every(u=>u.searchParams.get('v')===version));
 for(const source of scripts)check('linked script exists: '+source,fs.existsSync(path.join(dist,source)));
 const authored=fs.readdirSync(dist).filter(f=>f.endsWith('.js'));
 check('all authored browser modules are reachable',authored.every(f=>scripts.includes(f)));

@@ -47,7 +47,7 @@ check('quoted UI labels exist in the current app',()=>{
   const labels=[...html.matchAll(/<b class="ui">([\s\S]*?)<\/b>/g)].map(m=>strip(m[1]));
   assert.ok(labels.length>=60,'enough concrete labels');
   for(const l of new Set(labels))assert.ok(uiSources.includes(l),'label not in app: '+l);
-  for(const l of ['파일 입력','토큰으로 연결','선택 harness로 전체 검토','보존 검사 후 완성본 다운로드','변경 계획 JSON 저장','BLUE 독립 검토 시작','검수 기록 추가','그림 위치 목록 불러오기','새 harness 버전 등록','전체 기록 JSON 백업'])assert.ok(labels.includes(l),'required label '+l);
+  for(const l of ['파일 입력','토큰으로 연결','실행','보존 검사 후 완성본 다운로드','변경 계획 JSON 저장','실행','검수 기록 추가','그림 위치 목록 불러오기','새 harness 버전 등록','전체 기록 JSON 백업'])assert.ok(labels.includes(l),'required label '+l);
 });
 check('key alpha2 facts and boundaries',()=>{
   const t=strip(html);

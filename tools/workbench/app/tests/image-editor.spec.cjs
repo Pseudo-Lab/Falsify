@@ -199,7 +199,7 @@ test('panel: the separate text export and BLUE handoff are unaffected by image o
   w.get('image-download-pdf').click();await until(()=>w.downloads.length===before+1,'image pdf');assert.equal(w.get('red-handoff').hidden,false);});
 
 test('page: image modules load before RED, CSS is linked, the disclosure sits in the RED execute step outside pre-analysis',()=>{
-  const html=read('index.html'),order=[...html.matchAll(/<script src="([^"]+)"/g)].map(m=>m[1]);
+  const html=read('index.html'),order=[...html.matchAll(/<script src="([^"]+)"/g)].map(m=>m[1].split('?')[0]);
   assert.ok(order.indexOf('image-editor-core.js')>=0&&order.indexOf('image-editor-core.js')<order.indexOf('image-editor.js')&&order.indexOf('image-editor.js')<order.indexOf('document-red.js'));
   assert.ok(html.includes('<link rel="stylesheet" href="image-editor.css">'));const csp=html.match(/Content-Security-Policy" content="([^"]+)"/)[1];assert.match(csp,/img-src 'self' data:;/,'CSP unchanged: previews are data: URLs');
   const panel=html.match(/<details class="red-help image-edit" id="image-edit" hidden>[\s\S]*?<\/details>/)?.[0];assert.ok(panel);

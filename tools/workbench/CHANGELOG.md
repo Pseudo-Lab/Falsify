@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.0-alpha.10
+
+- Version the changed role, navigation and Confluence entry assets so browsers load the matching visual workflow implementation after an upgrade. Release packaging rejects stale asset version suffixes.
+- The alpha.9 visual workflow, OSS components, storage semantics and regression coverage remain unchanged.
+
 ## 0.2.0-alpha.9
 
 - Airport-style visual file intake: drop, paste or pick a paper; actual first-page PDF thumbnail; empty future stages collapse.

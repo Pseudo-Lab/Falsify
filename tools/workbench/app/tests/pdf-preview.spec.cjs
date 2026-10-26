@@ -161,7 +161,8 @@ test('markup: canvas-only preview with labelled controls; no iframe/object/embed
   assert.ok(section.includes('aria-labelledby="red-preview-title"'));assert.match(section,/id="red-preview-status"[^>]*role="status"[^>]*aria-live="polite"/);
   for(const id of ['prev','next','download'])assert.match(section,new RegExp('<button class="button secondary" type="button" id="red-preview-'+id+'" disabled>[^<]+</button>'));
   assert.doesNotMatch(HTML,/<iframe|<object|<embed/i);assert.ok(HTML.includes("object-src 'none'"));assert.match(section,/증명하지 않습니다/);
-  assert.ok(HTML.indexOf('src="document-preview.js"')<HTML.indexOf('src="document-red.js"'),'bundle loads before RED');
+  const order=[...HTML.matchAll(/<script src="([^"]+)"/g)].map(m=>m[1].split('?')[0]);
+  assert.ok(order.indexOf('document-preview.js')>=0&&order.indexOf('document-red.js')>=0&&order.indexOf('document-preview.js')<order.indexOf('document-red.js'),'bundle loads before RED');
   assert.doesNotMatch(BUNDLE,/https?:\/\/(?!127\.0\.0\.1)[a-z]/i,'no remote URL in the bundle');});
 
 // RED wiring: the real document-red.js with a mocked bridge, the real preview bundle and the mocked PDF.js.

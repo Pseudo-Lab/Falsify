@@ -192,7 +192,7 @@ test('panel: analysis failure leaves the exported copy, BLUE handoff and RED-onl
   assert.deepEqual(w.calls.map(c=>c.path),['/api/export','/api/paper/inspect']);assert.equal(w.get('red-download').disabled,false);});
 
 test('page: analysis core loads before the RED module and the panel sits in the RED execute step with an accessible status',()=>{
-  const html=fs.readFileSync(path.join(dist,'index.html'),'utf8'),order=[...html.matchAll(/<script src="([^"]+)"/g)].map(m=>m[1]);
+  const html=fs.readFileSync(path.join(dist,'index.html'),'utf8'),order=[...html.matchAll(/<script src="([^"]+)"/g)].map(m=>m[1].split('?')[0]);
   assert.ok(order.indexOf('paper-analysis-core.js')>=0&&order.indexOf('paper-analysis-core.js')<order.indexOf('document-red.js'));
   const panel=html.match(/<div class="red-analysis" id="red-analysis" hidden>.*?<\/details><\/div>/)?.[0];assert.ok(panel);assert.ok(html.indexOf('id="red-document-summary"')<html.indexOf('id="red-analysis"'));
   assert.match(panel,/<button class="button secondary" type="button" id="red-analyze" aria-describedby="red-analysis-note" disabled>PDF 사전분석<\/button>/);assert.match(panel,/id="red-analysis-status" class="form-feedback" role="status" aria-live="polite"/);

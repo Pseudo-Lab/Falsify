@@ -150,7 +150,7 @@ test('bridge keeps a valid companion instance and ignores an old payload',async(
 });
 test('shipped page loads the helper before the role modules and does not persist secrets there',()=>{
   const html=fs.readFileSync(path.join(dist,'index.html'),'utf8');
-  const order=[...html.matchAll(/<script src="([^"]+)"/g)].map(m=>m[1]);
+  const order=[...html.matchAll(/<script src="([^"]+)"/g)].map(m=>m[1].split('?')[0]);
   assert.ok(order.indexOf('pending-job.js')>order.indexOf('harness-core.js'));
   assert.ok(order.indexOf('pending-job.js')<order.indexOf('document-red.js'));
   assert.ok(order.indexOf('pending-job.js')<order.indexOf('document-blue.js'));

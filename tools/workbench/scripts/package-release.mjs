@@ -21,6 +21,9 @@ const companion = readFileSync(join(root, 'app/local/build_info.py'), 'utf8');
 if (pkg.version !== version || !companion.includes(`WORKBENCH_VERSION = '${version}'`)
     && !companion.includes(`WORKBENCH_VERSION='${version}'`)
     && !companion.includes(`WORKBENCH_VERSION = "${version}"`)) throw new Error('App, companion and release versions differ.');
+const entry = readFileSync(join(root, 'app/dist/index.html'), 'utf8');
+const assetVersions = [...entry.matchAll(/(?:src|href)="[^"\s]+\?v=([^"\s]+)"/g)].map(m => m[1]);
+if (!assetVersions.length || assetVersions.some(v => v !== version)) throw new Error('Update versioned entry asset URLs to the release VERSION.');
 const forbidden = /(?:^|\/)(?:\.venv|\.local|node_modules|\.pdf-editor\.local\.json|\.runtime[^/]*|output|tmp)(?:\/|$)|^experiments\/|\.(?:pdf|docx|wav|mp3|wasm)$/i;
 const tracked = git('ls-tree', '-r', '--name-only', commit).split('\n');
 // Vendored browser PDF.js WASM is licensed shipped source runtime, not our private editor candidate.
