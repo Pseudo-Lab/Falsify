@@ -3,6 +3,10 @@ param(
     [switch]$LocalOnly,
     [switch]$NoPdf,
     [switch]$NoInstall,
+    [switch]$Background,
+    [string]$PairChallenge = '',
+    [string]$PairState = '',
+    [string]$PairProof = '',
     [string]$PdfEditorRoot = $env:FALSIFY_PDF_EDITOR_ROOT,
     [string]$PdfEditorManifest = $env:FALSIFY_PDF_EDITOR_MANIFEST
 )
@@ -15,6 +19,21 @@ $serverPath = [System.IO.Path]::GetFullPath((Join-Path $projectDirectory 'app/lo
 $requestedWebOrigin = if ($LocalOnly) { $null } else { (Get-FalsifyConnectionConstants).WebOrigin }
 $alternatePort = if ($Port -lt 65535) { $Port + 1 } else { $Port - 1 }
 $keptAdvice = "It was kept running unchanged and nothing was set up. To change it, stop it in its own window (Ctrl+C) once its work is saved, then start again, or use another port, e.g. -Port $alternatePort or falsify://connect?port=$alternatePort, and enter the same port on the website."
+$haveAll = -not [string]::IsNullOrEmpty($PairChallenge) -and -not [string]::IsNullOrEmpty($PairState) -and -not [string]::IsNullOrEmpty($PairProof)
+$haveAny = -not [string]::IsNullOrEmpty($PairChallenge) -or -not [string]::IsNullOrEmpty($PairState) -or -not [string]::IsNullOrEmpty($PairProof)
+if ($haveAny -ne $haveAll -or ($haveAny -ne [bool]$Background)) { throw 'Rejected: one-time pairing requires -Background together with challenge, state and proof.' }
+if ($Background -and $LocalOnly) { throw 'Rejected: one-time pairing cannot use -LocalOnly.' }
+if ($Background) {
+    foreach ($part in @($PairChallenge, $PairState, $PairProof)) {
+        if ($part -notmatch '\A[A-Za-z0-9_-]{43}\z') { throw 'Rejected: pairing material is not a one-time nonce.' }
+    }
+}
+function Complete-BackgroundPairing([string]$SessionToken) {
+    if (-not $SessionToken -or -not (Register-FalsifyBrowserPairing -Port $Port -Token $SessionToken -Challenge $PairChallenge -State $PairState -Proof $PairProof)) {
+        throw 'The companion refused one-time pairing. No website credential was issued.'
+    }
+    Write-Host "Approved $((Get-FalsifyConnectionConstants).WebOrigin) for a short-lived reconnect on port $Port. The running companion was kept. The process token was not shown."
+}
 
 # Reusing a running companion: say so plainly and deliberately show its pairing token in this terminal only.
 function Show-ReusedCompanion([string]$Why, [AllowNull()][string]$WebOrigin, [string]$Token) {
@@ -49,6 +68,7 @@ try {
                 $requestedEditor = Resolve-FalsifyPdfEditorConfig -ProjectDirectory $projectDirectory -EditorRoot $PdfEditorRoot -EditorManifest $PdfEditorManifest -Disabled:$NoPdf
                 $mismatch = Get-FalsifyReuseMismatch -ExistingWebOrigin $instance.Json.webOrigin -RequestedWebOrigin $requestedWebOrigin -Occupant $occupant -RequestedEditor $requestedEditor
                 if ($mismatch) { throw "The Falsify companion on port $Port is busy with jobs or recent results, and $mismatch. $keptAdvice" }
+                if ($Background) { Complete-BackgroundPairing $token; return }
                 Show-ReusedCompanion 'It is busy with jobs or recent results, so it was reused instead of restarted.' $instance.Json.webOrigin $token
                 return
             }
@@ -58,6 +78,7 @@ try {
             $requestedEditor = Resolve-FalsifyPdfEditorConfig -ProjectDirectory $projectDirectory -EditorRoot $PdfEditorRoot -EditorManifest $PdfEditorManifest -Disabled:$NoPdf
             $mismatch = Get-FalsifyReuseMismatch -ExistingWebOrigin $occupant.WebOrigin -RequestedWebOrigin $requestedWebOrigin -Occupant $occupant -RequestedEditor $requestedEditor
             if ($mismatch) { throw "The Falsify companion on port $Port is an older version without automatic restart, and $mismatch. $keptAdvice" }
+            if ($Background) { Complete-BackgroundPairing $token; return }
             Show-ReusedCompanion 'It is an older version without automatic restart, so it was reused; stop it with Ctrl+C in its window to pick up updates.' $occupant.WebOrigin $token
             return
         } else {
@@ -128,6 +149,7 @@ try {
         if ($outcome -eq 'Busy') {
             $mismatch = Get-FalsifyReuseMismatch -ExistingWebOrigin $instance.Json.webOrigin -RequestedWebOrigin $requestedWebOrigin -Occupant $occupant -RequestedEditor $editorConfiguration
             if ($mismatch) { throw "The Falsify companion on port $Port became busy with jobs or recent results, and $mismatch. It was kept running unchanged. Stop it in its own window (Ctrl+C) once its work is saved, then start again, or use -Port $alternatePort." }
+            if ($Background) { Complete-BackgroundPairing $token; return }
             Show-ReusedCompanion 'It became busy with jobs or recent results, so it was reused instead of restarted.' $instance.Json.webOrigin $token
             return
         }
@@ -154,13 +176,42 @@ try {
         Write-Host 'PDF editing: legacy single-line mode. Configure a verified PDF editor locally for longer changes.'
     }
     if (-not $LocalOnly) { $brokerArguments += @('--web-origin', (Get-FalsifyConnectionConstants).WebOrigin) }
-    Write-Host 'Your own CLI login is used. Paste the pairing token printed below into the website yourself; it is never put in a link.'
-    Write-Host 'This window must remain open. Ctrl+C stops the companion.'
+    $brokerPython = $venvPython
+    if ($Background) {
+        $pythonw = Join-Path $venvDirectory 'Scripts/pythonw.exe'
+        if (Test-Path -LiteralPath $pythonw) { $brokerPython = $pythonw }
+        $brokerArguments += @('--token-display', 'hidden', '--pairing-dir', (Get-FalsifyPairingDirectory))
+        Write-Host 'Starting the companion in the background after local approval. The process token will not be shown.'
+    } else {
+        Write-Host 'Your own CLI login is used. Paste the pairing token printed below into the website yourself; it is never put in a link.'
+        Write-Host 'This window must remain open. Ctrl+C stops the companion.'
+    }
     Write-Host 'Only trust your selected harness code. The companion is not an OS sandbox.'
-    # The broker shares this terminal (-NoNewWindow); the launch lock is held only until it listens.
-    $broker = Start-Process -FilePath $venvPython -ArgumentList (Join-FalsifyNativeArguments -Arguments $brokerArguments) -NoNewWindow -PassThru
+    # Foreground shares this terminal. Background uses one hidden process and does not print the process token.
+    $brokerStart = @{
+        FilePath = $brokerPython
+        ArgumentList = (Join-FalsifyNativeArguments -Arguments $brokerArguments)
+        PassThru = $true
+    }
+    if ($Background) { $brokerStart.WindowStyle = 'Hidden' } else { $brokerStart.NoNewWindow = $true }
+    $broker = Start-Process @brokerStart
     $null = $broker.Handle
     $readiness = Wait-FalsifyBrokerReady -Process $broker -Port $Port -ServerPath $serverPath -TimeoutSeconds 120
+    if ($Background) {
+        if ($readiness -ne 'Ready') {
+            $logDir = Join-Path (Split-Path -Parent (Get-FalsifyPairingDirectory)) 'logs'
+            New-Item -ItemType Directory -Force -Path $logDir | Out-Null
+            $exitCode = if ($broker.HasExited) { [string]$broker.ExitCode } else { 'timeout' }
+            Add-Content -LiteralPath (Join-Path $logDir 'companion-errors.log') -Value ((Get-Date).ToUniversalTime().ToString('o') + " companion not ready on port $Port ($exitCode). No credential was issued.") -Encoding utf8
+            throw 'Companion did not become ready. The error was recorded without credentials. No website credential was issued.'
+        }
+        $session = Get-FalsifyCompanionToken -Port $Port
+        if (-not $session -or -not (Register-FalsifyBrowserPairing -Port $Port -Token $session -Challenge $PairChallenge -State $PairState -Proof $PairProof)) {
+            throw 'The companion refused one-time pairing. No website credential was issued.'
+        }
+        Write-Host "Approved $((Get-FalsifyConnectionConstants).WebOrigin) for a short-lived reconnect on port $Port. The process token was not shown. The companion is running in the background."
+        return
+    }
     if ($readiness -eq 'Exited') { $broker.WaitForExit(); throw "Companion stopped with an error before listening (exit code $($broker.ExitCode)). If the port is occupied, choose -Port $alternatePort; do not terminate another program." }
     if ($readiness -eq 'Timeout') { Write-Host "Companion has not confirmed port $Port yet; the launch lock is released and this window keeps running it." }
 } finally {

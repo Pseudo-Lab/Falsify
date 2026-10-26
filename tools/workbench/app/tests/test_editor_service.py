@@ -501,4 +501,141 @@ class MainTests(unittest.TestCase):
         self.assertEqual(code,0);self.assertIsInstance(created[0].pdf_editor,es.PdfEditorService)
         code,created=self.run_main(['--port','40125'],clean);self.assertEqual(code,0);self.assertIsNone(created[0].pdf_editor)
 
+def real_pdf(text):
+    import pymupdf
+    doc=pymupdf.open();page=doc.new_page(width=300,height=144);page.insert_text((72,72),text,fontsize=12)
+    raw=doc.tobytes();doc.close();return raw
+
+def draft_editor(candidate,failures,*,status='applied',wasm=WASM,output_sha=None,input_sha=None,self_status='failed',layout=False,report_ok=False,report_draft=True,stdout_draft=True,write_out=True,quality='failed'):
+    """Bridge stand-in: writes a real PDF and an honest failed report, leaving the source bytes alone."""
+    def run(args):
+        req=json.loads(Path(args['--request']).read_text(encoding='utf-8'))
+        directory=Path(args['--request']).parent
+        before=directory.joinpath('source.pdf').read_bytes()
+        digest=hashlib.sha256(candidate).hexdigest()
+        report={'ok':report_ok,'status':'self-check-passed' if report_ok else 'draft','draft':report_draft,'quality':quality,'layoutVerified':layout,'reflow':True,
+            'runtime':{'wasmSha256':wasm,'jsSha256':'a'*64,'manifestSha256':'b'*64,'runtimeKind':'candidate'},
+            'edits':[{'id':e['id'],'pageIndex':e['pageIndex'],'status':status} for e in req['edits']],'warnings':[],
+            'selfCheck':{'status':self_status,'ok':False,'independent':False,'method':'same-pdfium-text-geometry','failures':failures,'warnings':[]},
+            'pageCount':{'source':1,'output':1},'outputSha256':digest if output_sha is None else output_sha,
+            'inputSha256':req['inputSha256'] if input_sha is None else input_sha,'error':{'code':'SELF_CHECK_FAILED','message':'Saved-PDF self-check reported failures'}}
+        if write_out:Path(args['--out']).write_bytes(candidate)
+        Path(args['--report']).write_text(json.dumps(report))
+        run.source_after=directory.joinpath('source.pdf').read_bytes();run.source_before=before
+        body={'ok':False,'code':'SELF_CHECK_FAILED'}
+        if stdout_draft:body['draft']=True
+        return SimpleNamespace(returncode=1,stdout=(json.dumps(body)+'\n').encode())
+    return run
+
+class DraftPreserveTests(Base):
+    """Explicit draft:true keeps a readable failed PDF. Strict requests still refuse one."""
+    def pdf_data(self,source,**over):
+        body={'label':'PDF p. 1','before':'alpha beta','after':'alpha beta two'}
+        data=payload(file=base64.b64encode(source).decode(),fileHash=hashlib.sha256(source).hexdigest(),patches=[body],draft=True)
+        data.update(over);return data
+    def leftovers(self):return {p.name for p in Path(tempfile.gettempdir()).glob('falsify-editor-*')}
+    def test_capability_draft_follows_the_probe(self):
+        self.assertIs(es.unconfigured_capability()['draft'],False)
+        self.assertIs(self.service().capability()['draft'],False)
+        caps={'ok':True,'engine':'falsify-pdf-editor','version':'1','wasmSha256':WASM,'reflow':True,'pagination':False,'draft':True}
+        self.assertIs(self.service(caps=caps).capability()['draft'],True)
+    def test_strict_request_omits_draft_and_a_pass_stays_a_pass(self):
+        svc=self.service();svc.export(payload());self.assertNotIn('draft',self.runner.requests[-1])
+        passed=self.service().export(payload(draft=True))
+        self.assertIs(self.runner.requests[-1]['draft'],True)
+        self.assertNotIn('draft',passed['verification']);self.assertIs(passed['verification']['layoutVerified'],True)
+        self.assertEqual(passed['verification']['selfCheck']['status'],'passed')
+        with self.assertRaises(ValueError):self.service().export(payload(draft='yes'))
+        self.assertEqual(self.runner.calls,[])
+    def test_after_missing_real_pdf_preserves_candidate(self):
+        source,candidate=real_pdf('alpha beta stays'),real_pdf('alpha beta stays')
+        self.assertNotEqual(source,candidate)
+        run=draft_editor(candidate,[{'code':'after_missing','pageIndex':0,'id':'edit-1'}])
+        before=self.leftovers()
+        with patch.object(server,'handle_export',side_effect=AssertionError('legacy fallback')):
+            svc=es.PdfEditorService(self.config,runner=FakeRunner(edit=run))
+            result=svc.export(self.pdf_data(source))
+        self.assertEqual(base64.b64decode(result['file']),candidate)
+        self.assertEqual(result['sourceFileHash'],hashlib.sha256(source).hexdigest())
+        self.assertEqual(result['outputFileHash'],hashlib.sha256(candidate).hexdigest())
+        self.assertEqual(run.source_before,source);self.assertEqual(run.source_after,source)
+        import pymupdf
+        opened=pymupdf.open(stream=base64.b64decode(result['file']),filetype='pdf')
+        self.assertIn('alpha beta stays',opened[0].get_text());opened.close()
+        v=result['verification']
+        self.assertIs(v['draft'],True);self.assertEqual(v['quality'],'failed');self.assertIs(v['layoutVerified'],False)
+        self.assertEqual(v['selfCheck']['status'],'failed');self.assertEqual(v['error'],{'code':'SELF_CHECK_FAILED'})
+        self.assertEqual(v['edits'][0]['status'],'after-missing')
+        self.assertEqual(v['sourceBinding'],{'inputSha256':result['sourceFileHash'],'outputSha256':result['outputFileHash']})
+        self.assertEqual(v['runtime']['wasmSha256'],WASM)
+        self.assertNotEqual(v['selfCheck']['status'],'passed');self.assertNotIn('self-check-passed',json.dumps(v))
+        self.assertIn(v['independentQA'],('failed','warning','unavailable'))
+        self.assertFalse(svc.runner.tempdir.exists());self.assertEqual(svc.leftovers,[]);self.assertEqual(self.leftovers(),before)
+    def test_read_order_failure_preserves_candidate_without_success(self):
+        source,candidate=real_pdf('alpha beta stays'),real_pdf('beta alpha moved')
+        run=draft_editor(candidate,[{'code':'edited_page_text_or_order_mismatch','pageIndex':0}])
+        before=self.leftovers()
+        with patch.object(server,'handle_export',side_effect=AssertionError('legacy fallback')):
+            svc=es.PdfEditorService(self.config,runner=FakeRunner(edit=run))
+            result=svc.export(self.pdf_data(source))
+        self.assertEqual(base64.b64decode(result['file']),candidate)
+        self.assertEqual(run.source_after,source)
+        v=result['verification']
+        self.assertEqual(v['edits'][0]['status'],'applied')
+        self.assertIs(v['layoutVerified'],False);self.assertEqual(v['quality'],'failed');self.assertEqual(v['selfCheck']['status'],'failed')
+        self.assertFalse(svc.runner.tempdir.exists());self.assertEqual(svc.leftovers,[]);self.assertEqual(self.leftovers(),before)
+    def test_failed_independent_qa_still_returns_the_draft(self):
+        source,candidate=real_pdf('alpha beta stays'),real_pdf('alpha beta stays')
+        run=draft_editor(candidate,[{'code':'after_missing','pageIndex':0,'id':'edit-1'}])
+        quality=FakeQuality(qa_report('failed','edited_after_present',[1]))
+        svc=es.PdfEditorService(self.config,runner=FakeRunner(edit=run),quality=quality)
+        result=svc.export(self.pdf_data(source))
+        self.assertEqual(base64.b64decode(result['file']),candidate)
+        self.assertEqual(result['verification']['independentQA'],'failed')
+        self.assertIs(result['verification']['layoutVerified'],False)
+        self.assertFalse(svc.runner.tempdir.exists())
+    def test_strict_mode_still_drops_a_written_failure(self):
+        candidate=real_pdf('alpha beta stays')
+        run=draft_editor(candidate,[{'code':'after_missing','pageIndex':0,'id':'edit-1'}])
+        data=self.pdf_data(real_pdf('alpha beta stays'));data.pop('draft')
+        with patch.object(server,'handle_export',side_effect=AssertionError('legacy fallback')):
+            with self.assertRaises(ValueError) as ctx:self.service(edit=run).export(data)
+        self.assertIn('SELF_CHECK_FAILED',str(ctx.exception));self.assertNotIn('file',str(ctx.exception))
+        self.assertFalse(self.runner.tempdir.exists());self.assertEqual(self.runner.calls[-1] and 'draft' not in self.runner.requests[-1],True)
+    def test_defenses_refuse_a_bad_draft_and_leave_no_temp(self):
+        source,candidate=real_pdf('alpha beta stays'),real_pdf('alpha beta stays')
+        cases=[
+            ('hash',dict(output_sha='0'*64)),
+            ('wasm',dict(wasm='c'*64)),
+            ('binding',dict(input_sha='d'*64)),
+            ('missing',dict(write_out=False)),
+            ('rewritten',dict(report_ok=True,self_status='passed',layout=True)),
+            ('not-draft-stdout',dict(stdout_draft=False)),
+        ]
+        for name,kw in cases:
+            with self.subTest(name=name):
+                before=self.leftovers()
+                with patch.object(server,'handle_export',side_effect=AssertionError('legacy fallback')):
+                    with self.assertRaises(ValueError):es.PdfEditorService(self.config,runner=FakeRunner(edit=draft_editor(candidate,[{'code':'after_missing','id':'edit-1','pageIndex':0}],**kw))).export(self.pdf_data(source))
+                self.assertEqual(self.leftovers(),before)
+        junk=b'not-a-pdf'
+        with self.assertRaises(ValueError):es.PdfEditorService(self.config,runner=FakeRunner(edit=draft_editor(junk,[{'code':'after_missing','id':'edit-1','pageIndex':0}]))).export(self.pdf_data(source))
+    def test_existing_export_route_returns_the_draft_file(self):
+        source,candidate=real_pdf('alpha beta stays'),real_pdf('alpha beta stays')
+        svc=es.PdfEditorService(self.config,runner=FakeRunner(edit=draft_editor(candidate,[{'code':'after_missing','pageIndex':0,'id':'edit-1'}])),quality=FakeQuality())
+        httpd=server.ThreadingHTTPServer(('127.0.0.1',0),server.Handler);httpd.pdf_editor=svc
+        thread=threading.Thread(target=httpd.serve_forever,daemon=True);thread.start()
+        self.addCleanup(lambda:(httpd.shutdown(),httpd.server_close(),thread.join()))
+        port=httpd.server_port
+        origin=f'http://127.0.0.1:{port}'
+        conn=http.client.HTTPConnection('127.0.0.1',port,timeout=10)
+        body=json.dumps(self.pdf_data(source)).encode()
+        conn.request('POST','/api/export',body=body,headers={'Host':f'127.0.0.1:{port}','Origin':origin,'Authorization':'Bearer '+server.TOKEN,'Content-Type':'application/json','Content-Length':str(len(body))})
+        response=conn.getresponse();payload_out=json.loads(response.read());conn.close()
+        self.assertEqual(response.status,200)
+        self.assertEqual(base64.b64decode(payload_out['file']),candidate)
+        self.assertIs(payload_out['verification']['draft'],True)
+        self.assertEqual(payload_out['verification']['selfCheck']['status'],'failed')
+        self.assertFalse(svc.runner.tempdir.exists())
+
 if __name__=='__main__':unittest.main()

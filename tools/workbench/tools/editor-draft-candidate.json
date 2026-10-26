@@ -1,0 +1,59 @@
+{
+  "schema": "falsify.editor-draft-candidate.v1",
+  "editorRepository": "https://github.com/Shinick-Han/falsify-pdf-editor",
+  "base": "b2d6ff204fc00a540eed98097895aec3f08b8047",
+  "candidate": "7ef705ec4f239f7c3760366dd1e6d8b0e2d62bd6",
+  "range": "b2d6ff204fc00a540eed98097895aec3f08b8047..7ef705ec4f239f7c3760366dd1e6d8b0e2d62bd6",
+  "branch": "cursor/pdf-draft-preserve-4af9",
+  "workingTreeClean": true,
+  "changedFiles": [
+    "docs/WEB_BRIDGE.md",
+    "src/editor.mjs",
+    "src/web-bridge.mjs",
+    "test/draft-bridge.test.mjs",
+    "test/draft-preserve.test.mjs"
+  ],
+  "patch": {
+    "path": "tools/editor-draft-candidate.patch",
+    "format": "git format-patch --stdout",
+    "bytes": 33392,
+    "sha256": "d7f302a561f8d9b576588f288b8d9f14ba7f6f8000bec23028521c38f466e5c6"
+  },
+  "tests": {
+    "command": "node --test test/draft-preserve.test.mjs test/draft-bridge.test.mjs test/web-bridge.test.mjs test/core.test.mjs",
+    "tests": 54,
+    "pass": 49,
+    "fail": 0,
+    "cancelled": 0,
+    "skipped": 5,
+    "todo": 0,
+    "skips": [
+      {
+        "name": "prepareRuntime rejects pinned hash and app pin mismatches",
+        "reason": "pinned submodules unavailable"
+      },
+      {
+        "name": "prepareRuntime writes verified blobs and replaces only its own output",
+        "reason": "pinned submodules unavailable"
+      },
+      {
+        "name": "real engine: ambiguous Before is rejected without mutation",
+        "reason": "runtime not prepared"
+      },
+      {
+        "name": "real engine: short edit commits and the saved text changes",
+        "reason": "runtime not prepared"
+      },
+      {
+        "name": "capabilities load the real patched candidate manifest",
+        "reason": "FALSIFY_EDITOR_CANDIDATE_MANIFEST not set"
+      }
+    ],
+    "livePdfiumSelfCheck": false
+  },
+  "push": {
+    "remote": "https://github.com/Shinick-Han/falsify-pdf-editor.git",
+    "result": "rejected",
+    "httpStatus": 403
+  }
+}

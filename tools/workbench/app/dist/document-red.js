@@ -81,7 +81,13 @@
       check.addEventListener('change',()=>{c.selected=check.checked;changed();});area.addEventListener('input',()=>{c.after=area.value;c.edited=true;changed();});list.append(section);
     });controls();
   }
-  function applyResponse(res,origin,ask=false){const validated=C.validateResponse(doc,res);if(ask&&!keepEdits()){msg('응답 적용 취소: 기존 후보와 편집을 그대로 유지했습니다.');return;}invalidate();candidates=validated;response={...res,provenance:origin};renderCandidates();void save(null);msg((res.status==='refusal'?'모델이 거절했습니다. 우회하거나 자동 재시도하지 않습니다.':res.status==='abstain'?'모델이 유보했습니다. 후보를 강제로 만들지 않고 자동 재시도하지 않습니다.':validated.length+'개 후보 · 인용 위치 확인 완료, 과학적 타당성 미검증.')+' '+H.outcomeText('red',res,origin)+'.');}
+  const MODEL_ID=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$/;
+  // Validated proposals only. Manual JSON is not recorded as a model run; a broker result may carry its own model id.
+  function bridgeWorkspace(validated,origin){const ws=globalThis.FalsifyPaperWorkspace;if(!ws||typeof ws.acceptProposals!=='function'||!validated.length)return;
+    const modelRun=origin==='local-codex',hinted=modelRun&&typeof response?.model==='string'&&MODEL_ID.test(response.model)?response.model:undefined;
+    const proposals=validated.map(c=>({segmentId:c.segmentId,before:c.before,after:c.after,anchor:Number.isInteger(c.offset)?{start:c.offset,end:c.offset+c.before.length}:undefined}));
+    try{ws.acceptProposals(proposals,modelRun?{origin:'ai-proposal',...(hinted?{model:hinted}:{})}:{origin:'external-ai-import'});}catch{/* the validated RED response stays either way */}}
+  function applyResponse(res,origin,ask=false){const validated=C.validateResponse(doc,res);if(ask&&!keepEdits()){msg('응답 적용 취소: 기존 후보와 편집을 그대로 유지했습니다.');return;}invalidate();candidates=validated;response={...res,provenance:origin};renderCandidates();void save(null);bridgeWorkspace(validated,origin);msg((res.status==='refusal'?'모델이 거절했습니다. 우회하거나 자동 재시도하지 않습니다.':res.status==='abstain'?'모델이 유보했습니다. 후보를 강제로 만들지 않고 자동 재시도하지 않습니다.':validated.length+'개 후보 · 인용 위치 확인 완료, 과학적 타당성 미검증.')+' '+H.outcomeText('red',res,origin)+'.');}
   async function makeRequest(){const budget=Number($('#red-budget').value);if(!Number.isInteger(budget)||budget<1||budget>32)throw new Error('호출 예산은 1–32 사이 정수입니다.');return FalsifyLab.bind('red',C.request(doc,Number($('#red-level').value),budget));}
   // While a response is retained, re-download its bound request so later final snapshots keep the root's requestId; only a fresh start mints a new execution request.
   $('#red-request').addEventListener('click',async()=>{const current=generation;try{const next=response&&request?request:await makeRequest();if(current!==generation)return;request=next;jsonDownload(request,'falsify-document-red-request.json');msg('수동 전달용 요청과 harness를 저장했습니다. 실행·전송은 하지 않았습니다.');}catch(e){msg(e.message,true);}});
@@ -339,9 +345,23 @@
   function recovery(kind){if(!kind)return '';const keep=' 선택한 후보와 직접 편집한 After는 그대로 남아 있습니다.';
     if(kind==='reflow')return keep+' 긴 After의 재배치는 1단·회전 없음·잘림 없음인 최상위 본문 텍스트에서만 됩니다. 해당 후보 선택을 해제하거나 After를 직접 조정해 다시 시도하거나, 변경 계획 JSON만 저장할 수 있습니다. 엔진·연결 오류라면 위 연결 패널에서 companion을 다시 실행·연결하세요.';
     return keep+' 이 companion은 원래 줄 공간에 들어가는 변경만 지원합니다. 줄바꿈 재배치 엔진이 있는 companion으로 다시 연결하거나, 다른 후보를 고르거나, 변경 계획 JSON만 저장할 수 있습니다.';}
+  function workspacePdfOpen(){
+    const ws=globalThis.FalsifyPaperWorkspace;
+    if(!ws||typeof ws.getSource!=='function')return false;
+    let src=null;
+    try{src=ws.getSource();}catch{return false;}
+    const chosen=src&&src.file;
+    if(!chosen)return false;
+    return String(chosen.name||'').toLowerCase().endsWith('.pdf')||chosen.type==='application/pdf';
+  }
   $('#red-download').addEventListener('click',async()=>{
     if(busy||!doc||!$('#red-export-consent').checked)return;
     if(sourceFileRequired||!file){exportStatus('복구된 검토는 원본 파일을 다시 고르고 SHA-256이 같을 때만 내보냅니다.',true);return;}
+    if(doc.format==='PDF'&&workspacePdfOpen()){
+      exportStatus('PDF 작업대가 이 원본을 열고 있습니다. companion과 레이아웃 검증 없이, 위쪽 「현재 편집으로 생성」으로 생성본을 만든 뒤 그 파일을 받으세요.',true);
+      const gen=$('#paper-generate');if(gen&&typeof gen.focus==='function')gen.focus();
+      return;
+    }
     const current=generation,pdf=doc.format==='PDF'?pdfMode(B.capabilities()):null;busy=true;preview?.clear();controls();exportStatus(pdf?.kind==='reflow'?'선택 변경만 적용하고 재배치·자체검사 중':'선택 변경만 적용하고 보존 검사 중');
     try{const patches=C.patches(doc,candidates);let output,reported=null;
       // Same request body as before: only checked candidates' Before plus the user's current After; progress is staged text, never an invented percentage.

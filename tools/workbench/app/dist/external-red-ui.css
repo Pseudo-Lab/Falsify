@@ -1,0 +1,19 @@
+.external-red{background:var(--paper);color:var(--ink);border:1px solid var(--line);border-radius:12px;padding:20px;margin:22px 0}
+.external-red h2{font-size:22px;line-height:1.4;letter-spacing:-.02em;margin:0}
+.external-red h3{font-size:16px;line-height:1.5;margin:0}
+.external-red p{max-width:75ch;margin:8px 0;overflow-wrap:anywhere}
+.external-red .muted{color:var(--muted);font-size:13px}
+.external-red label{display:block;font-weight:600;margin-top:12px}
+.external-red input[type=text],.external-red textarea{display:block;width:100%;margin-top:6px;border:1px solid #8c949b;border-radius:4px;background:var(--paper);color:var(--ink);padding:10px;font:inherit;font-weight:400}
+.external-red textarea{min-height:140px;resize:vertical;line-height:1.6}
+.external-red .button-row{display:flex;flex-wrap:wrap;gap:10px;margin-top:12px}
+.external-red .external-red-proposal{border-top:1px solid var(--line);padding:16px 0}
+.external-red .external-red-before,.external-red .external-red-after,.external-red .external-red-diagnostic,.external-red .external-red-snippet{white-space:pre-wrap}
+.external-red .external-red-snippet{background:var(--surface);border-radius:4px;padding:8px;font-family:ui-monospace,monospace}
+.external-red .external-red-status.error{color:var(--red-ink)}
+.external-red .check-row{display:flex;gap:8px;align-items:flex-start;font-weight:400;margin-top:8px}
+.external-red .check-row input{width:17px;height:17px;margin-top:3px;accent-color:var(--ink);flex-shrink:0}
+@media(max-width:700px){
+.external-red{padding:16px}
+.external-red .button-row .button{width:100%}
+}

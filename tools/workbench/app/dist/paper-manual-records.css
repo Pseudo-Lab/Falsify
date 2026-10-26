@@ -1,0 +1,25 @@
+/* Manual provenance review on the existing airport review route. */
+.paper-manual-records{margin-top:28px;padding:0 0 8px;border-top:5px solid var(--ink);background:var(--paper);color:var(--ink);min-width:0}
+.paper-manual-kicker{display:flex;align-items:center;gap:12px;margin:0 0 12px;padding:10px 14px;background:var(--yellow);color:var(--ink);border-bottom:4px solid var(--ink);font-weight:700}
+.paper-manual-kicker span{display:grid;place-items:center;width:36px;height:36px;background:var(--ink);color:var(--paper);font-size:12px}
+.paper-manual-records h3,.paper-manual-records h4{margin:14px 0 8px;font-size:16px;letter-spacing:-0.02em}
+.paper-manual-records .muted,.paper-manual-status{color:var(--muted);font-size:13px;line-height:1.6}
+.paper-manual-status.error{color:var(--red-ink)}
+.paper-manual-records label{display:block;margin:12px 0;font-weight:600}
+.paper-manual-records input,.paper-manual-records select,.paper-manual-records textarea{display:block;width:100%;max-width:72ch;margin-top:6px;min-height:40px;padding:8px 10px;border:1px solid #8c949b;border-radius:4px;background:var(--paper);color:var(--ink);font:inherit}
+.paper-manual-records textarea{min-height:72px}
+.paper-manual-edit{padding:12px 0;border-top:1px solid var(--line)}
+.paper-manual-edit pre{white-space:pre-wrap;overflow-wrap:anywhere;margin:4px 0 10px;padding:10px 12px;background:var(--surface);color:var(--ink);border-left:4px solid var(--ink)}
+.paper-manual-label{margin:8px 0 0;font-size:12px;font-weight:700}
+.paper-manual-findings{margin-top:8px;padding:10px 12px;background:var(--surface);border:1px solid var(--line)}
+.paper-manual-share{margin-top:12px;padding:12px 14px;border:1px solid var(--line);background:var(--paper)}
+.paper-manual-share summary{cursor:pointer;min-height:40px;font-weight:700}
+.paper-manual-records .check-row{display:flex;gap:10px;align-items:flex-start;font-weight:600}
+.paper-manual-records .check-row input{width:auto;margin-top:4px}
+.paper-manual-records .button-row{display:flex;flex-wrap:wrap;gap:10px;margin:10px 0}
+.paper-manual-records button:focus-visible,.paper-manual-records input:focus-visible,.paper-manual-records select:focus-visible,.paper-manual-records textarea:focus-visible{outline:3px solid #246388;outline-offset:2px}
+#paper-manual-output{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;overflow-wrap:anywhere}
+@media(max-width:700px){
+.paper-manual-records .button-row{flex-direction:column}
+.paper-manual-records .button-row .button{width:100%}
+}

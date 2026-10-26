@@ -1,6 +1,8 @@
 <#
 Registers the per-user falsify:// protocol so the website's "connect" link can open
-open-connection.ps1 from THIS checkout in a visible PowerShell window. Run it once, yourself.
+open-connection.ps1 from THIS checkout. The registered host is hidden and exits. The approval
+dialog and the error log stay visible. A legacy exact -NoExit command for this launcher is
+upgraded. Manual start-companion.ps1 stays a foreground window. Run the installer once, yourself.
 Writes only HKCU\Software\Classes\falsify (no administrator rights, no startup entries,
 no services). Use -WhatIf to see the plan without changing anything.
 #>

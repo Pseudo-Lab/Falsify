@@ -10,7 +10,8 @@ const authored=fs.readdirSync(dist).filter(f=>f.endsWith('.js'));
 check('all authored browser modules are reachable',authored.every(f=>scripts.includes(f)));
 const ids=[...html.matchAll(/\bid="([^"]+)"/g)].map(m=>m[1]);check('static IDs are unique',ids.length===new Set(ids).size);
 const sources=authored.filter(f=>f!=='document-import.js').map(f=>fs.readFileSync(path.join(dist,f),'utf8')).join('\n');
-const legacy=['load-sample','paper-workspace','FalsifyCore','SAMPLE_PROFILES','generateRed','runBlue','connectAgent','exportDemo','connectorTimers','legacy-review','blue-mode','blue-outcome','activity-log'];
+// paper-workspace is now the independent PDF editor, not the removed AMAS demo.
+const legacy=['load-sample','FalsifyCore','SAMPLE_PROFILES','generateRed','runBlue','connectAgent','exportDemo','connectorTimers','legacy-review','blue-mode','blue-outcome','activity-log'];
 for(const name of legacy)check('legacy path removed: '+name,!html.includes(name)&&!sources.includes(name));
 for(const id of [...html.matchAll(/<symbol id="([^"]+)"/g)].map(m=>m[1]))check('SVG symbol is used: '+id,html.includes('href="#'+id+'"'));
 for(const f of ['styles.css','document-red.css','experiment-ledger.css']){const css=fs.readFileSync(path.join(dist,f),'utf8');check('legacy styles removed: '+f,!/\.(?:legacy-review|activity|comparison-arms|agent-row|reading-pane|blue-controls|difficulty)\b|#doc-blue-comparison/.test(css));}

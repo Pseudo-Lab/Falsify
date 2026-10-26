@@ -3,7 +3,9 @@
 Run from the original checkout: python app/local/server.py
 By default the hosted site cannot connect across origins to this server. With an explicit
 --web-origin https://<exact-origin> opt-in, that one origin may call the allowlisted API
-operations via CORS, still only with the bearer token printed to this terminal.
+operations via CORS. Manual mode still prints the process bearer token in this terminal.
+Click-pairing (--token-display hidden) does not print it and does not send it to the website:
+the launcher approves the fixed origin, then the browser redeems a separate short-lived credential.
 """
 import argparse
 import hashlib
@@ -28,6 +30,7 @@ import editor_service
 import paper_analysis_service
 import image_edit_service
 import harness_profile
+import pairing
 from build_info import WORKBENCH_VERSION
 from experiments.selfplay_codex import discover_codex
 
@@ -126,9 +129,13 @@ def parse_web_origin(value):
     return value
 
 def cors_route(method, path):
-    """Existing allowlisted API operations a configured web origin may reach."""
-    if method == 'GET': return path == '/api/capabilities' or re.fullmatch(r'/api/(red|blue)/jobs/.+', path) is not None
-    if method == 'POST': return path in ['/api/red/jobs', '/api/blue/jobs', '/api/export', '/api/paper/inspect', *IMAGE_ROUTES, PROFILE_ROUTE] or re.fullmatch(r'/api/(red|blue)/jobs/.+/cancel', path) is not None
+    """Allowlisted API operations a configured web origin may reach.
+
+    Pair redeem/status/revoke are included so the approved origin can finish one-time pairing.
+    Pair register, /api/session and launcher routes stay off this list.
+    """
+    if method == 'GET': return path in ('/api/capabilities', pairing.STATUS_PATH) or re.fullmatch(r'/api/(red|blue)/jobs/.+', path) is not None
+    if method == 'POST': return path in ['/api/red/jobs', '/api/blue/jobs', '/api/export', '/api/paper/inspect', *IMAGE_ROUTES, PROFILE_ROUTE, pairing.REDEEM_PATH, pairing.REVOKE_PATH] or re.fullmatch(r'/api/(red|blue)/jobs/.+/cancel', path) is not None
     return False
 
 def no_duplicates(items):
@@ -192,7 +199,13 @@ class Handler(BaseHTTPRequestHandler):
         if not self.host_ok(): return False
         origin = self.headers.get('Origin')
         if not self.cors_ok() and origin != self.origin and not (self.command == 'GET' and origin is None and self.headers.get('Sec-Fetch-Site') == 'same-origin'): return False
-        return hmac.compare_digest(self.headers.get('Authorization', ''), 'Bearer ' + TOKEN)
+        presented = self.headers.get('Authorization', '')
+        if hmac.compare_digest(presented, 'Bearer ' + TOKEN): return True
+        # Reconnect credentials authorize only CORS allowlisted routes, never same-origin bootstrap or the launcher.
+        if not self.cors_ok(): return False
+        store = getattr(self.server, 'pairing', None)
+        if store is None or not presented.startswith('Bearer ') or presented.count(' ') != 1: return False
+        return store.allows(presented[7:], self.web_origin, self.server.server_port)
     def server_closing(self):
         # Caller holds LOCK. Closing is permanent: requests accepted before shutdown never admit work afterwards,
         # even once server_close has released the restart reservation.
@@ -258,6 +271,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.reply(403, {'error': 'same_origin_browser_required'}); return
             self.reply(200, {'token': TOKEN, 'mode': 'loopback-only', 'model': 'gpt-6.1-sol'}); return
         if path == '/api/launcher/instance': self.launcher_instance(); return
+        if path == pairing.STATUS_PATH: pairing.handle_status(self); return
         if path.startswith('/api/'):
             if not self.authorized(): self.reply(403, {'error': 'unauthorized'}); return
             if path == '/api/capabilities':
@@ -291,7 +305,11 @@ class Handler(BaseHTTPRequestHandler):
         mime = 'application/javascript' if target.suffix in ['.js', '.mjs'] else mimetypes.guess_type(target)[0] or 'application/octet-stream'
         self.reply(200, target.read_bytes(), mime)
     def do_POST(self):
-        if unquote(urlsplit(self.path).path) == '/api/launcher/restart': self.launcher_restart(); return
+        path = unquote(urlsplit(self.path).path)
+        if path == '/api/launcher/restart': self.launcher_restart(); return
+        if path == pairing.REGISTER_PATH: pairing.handle_register(self); return
+        if path == pairing.REDEEM_PATH: pairing.handle_redeem(self); return
+        if path == pairing.REVOKE_PATH: pairing.handle_revoke(self); return
         if not self.authorized(): self.reply(403, {'error': 'unauthorized'}); return
         path = unquote(urlsplit(self.path).path)
         role = 'blue' if path.startswith('/api/blue/jobs') else 'red'
@@ -375,7 +393,9 @@ class Handler(BaseHTTPRequestHandler):
 
 def main():
     parser = argparse.ArgumentParser(); parser.add_argument('--port', type=int, default=7816)
-    parser.add_argument('--web-origin', help='opt-in: one exact https origin allowed to call the API with the pairing token')
+    parser.add_argument('--web-origin', help='opt-in: one exact https origin allowed to call the API')
+    parser.add_argument('--token-display', choices=('visible', 'hidden'), default='visible', help='visible prints the process token for manual paste; hidden is click-pairing')
+    parser.add_argument('--pairing-dir', help='private reconnect-key directory outside this checkout')
     parser.add_argument('--pdf-editor-root', help=f'opt-in: absolute falsify-pdf-editor module root (or {editor_service.ENV_ROOT})')
     parser.add_argument('--pdf-editor-manifest', help=f'absolute patched candidate-manifest.json (or {editor_service.ENV_MANIFEST})')
     parser.add_argument('--pdf-editor-source-root', help=f'absolute pinned editor app source root (or {editor_service.ENV_SOURCE_ROOT})')
@@ -386,17 +406,30 @@ def main():
     if args.web_origin is not None:
         try: web_origin = parse_web_origin(args.web_origin)
         except ValueError as error: parser.error(str(error))
+    if args.pairing_dir is not None and web_origin is None: parser.error('pairing directory requires --web-origin')
     try: editor_config = editor_service.config_from(args.pdf_editor_root, args.pdf_editor_manifest, args.pdf_editor_source_root, args.pdf_editor_node)
     except ValueError as error: parser.error(str(error))
+    pairing_store = None
+    if web_origin is not None:
+        try:
+            directory = Path(args.pairing_dir) if args.pairing_dir else pairing.default_pairing_dir()
+            pairing_store = pairing.PairingStore(directory).ensure_key()
+        except pairing.PairingError as error: parser.error('pairing store refused: ' + error.code)
     server = ThreadingHTTPServer(('127.0.0.1', args.port), Handler)
     server.daemon_threads = True
     server.web_origin = web_origin
+    server.pairing = pairing_store
     server.pdf_editor = editor_service.PdfEditorService(editor_config) if editor_config else None
     print(f'Falsify local: http://127.0.0.1:{args.port}/ (loopback only; Ctrl+C to stop)', flush=True)
     if server.pdf_editor:
         print('PDF editor: falsify-pdf-editor configured (capability probe runs in background; no legacy fallback)', flush=True)
         threading.Thread(target=server.pdf_editor.capability, daemon=True).start()
-    if web_origin:
+    if web_origin and args.token_display == 'hidden':
+        print(f'Web origin enabled: {web_origin}\n'
+            '  Click-pairing is active for this exact origin. The process token is not displayed\n'
+            '  and is never sent to the website. A short-lived reconnect credential is issued only\n'
+            '  after local approval. Manual paste remains available if you start again with the token visible.', flush=True)
+    elif web_origin:
         print(f'Web origin enabled: {web_origin}\n'
             '  Trust is origin-level, not path-level: every page on that origin (any repository or path\n'
             '  published under it) that holds the pairing token can run RED/BLUE jobs, PDF export,\n'

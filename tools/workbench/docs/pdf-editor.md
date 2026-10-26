@@ -46,10 +46,13 @@ word-spacing source patches); that runtime was verified on the maintainer host o
   Successes are cached; failures are retried after 15 s. `available` is true only after a
   successful probe. No filesystem paths are exposed.
 - `pdfEditor` = `{available, configured, engine:'falsify-pdf-editor', version, wasmSha256,
-  reflow, pagination, continuationStyle, limits, sourceUrl[, runtime][, error]}`. `reflow`/`pagination` are
+  reflow, pagination, continuationStyle, draft, limits, sourceUrl[, runtime][, error]}`. `reflow`/`pagination` are
   booleans; a module descriptor counts only when `.supported === true`. Until the editor
-  exports `EDITOR_CAPABILITIES`, reflow is true and pagination false. The legacy `pdf`
-  boolean reflects editor availability when configured.
+  exports `EDITOR_CAPABILITIES`, reflow is true and pagination false. `draft` is true
+  only when this bridge's `--capabilities` output says `draft: true` (an explicit
+  web-request opt-in that can keep a readable PDF after a failed self-check). It is
+  false for an unconfigured companion and for an older probe that does not advertise
+  it. The legacy `pdf` boolean reflects editor availability when configured.
 - `continuationStyle` is `null` unless the engine's `--capabilities` output declares
   `continuationStyle:{supported:true, policy:'source-number-suffix'}` and `pagination` is true;
   it is never inferred from pagination. When declared it is `{supported:true,
@@ -57,7 +60,7 @@ word-spacing source patches); that runtime was verified on the maintainer host o
   header/footer; standalone Arabic source number plus decimal suffix; originals unchanged).
   The engine's own scope string is not echoed, so no document text or path reaches the page.
 - Export: same wire format `{format:'PDF', fileHash, file, patches:[{label:'PDF p. N',
-  before, after, …}]}`. Unknown fields are rejected; labels must be exactly `PDF p. N`
+  before, after, …}]}` plus optional boolean `draft`. Unknown fields are rejected; labels must be exactly `PDF p. N`
   (N >= 1, no leading zero) and map to `pageIndex = N-1`; edit ids are `edit-<i>` by order.
   Before/After are passed exactly; number/citation/URL scope checks match the legacy path.
   Only edit spans reach the bridge request (no model, provider, harness, rationale or label).
@@ -84,7 +87,45 @@ word-spacing source patches); that runtime was verified on the maintainer host o
   success). Under an engine that declared the style, the UI then says the added-page
   header/footer/page-number state was not reported in a verifiable form (neither copied nor
   body-only); engines without the declared style keep the body-only continuation wording.
-- Any editor failure is a 400 error; there is no automatic fallback to the legacy path.
+- Any strict editor failure is a 400 error; there is no automatic fallback to the legacy path.
+
+## Explicit draft mode
+
+`draft` is an optional boolean on the existing `/api/export` body. Only `true` opts in.
+Absent and `false` keep the strict result above, and the bridge request then omits the
+field so an older engine still accepts it. A non-boolean is rejected before the editor
+runs. The companion does not select another executable, and it does not fall back to
+the legacy single-line path, a white overlay, or a raster rewrite.
+
+`true` is forwarded as the web-bridge field `draft: true` on schema
+`falsify-web-bridge-request/1`. The editor CLI does not accept that field and stays
+strict. When the bridge has already saved readable `%PDF-` bytes and the self-check
+status is `failed` or `error`, it writes those bytes, exits 1, and prints one object
+`{ok:false, code, draft:true}`. The report stays `ok: false` with `status: "draft"`,
+`quality` of `failed` or `error`, the machine `selfCheck.status`, `error.code`,
+per-edit statuses, `outputSha256`, `inputSha256` and the runtime digests. This
+service returns that file so a UI can download it with warnings. `layoutVerified`
+stays false, `selfCheck.status` is not rewritten to `passed`, and `verification.draft`
+is true only on this path. `verification.quality` is `failed` or `error`,
+`verification.error` is `{code}`, and `verification.sourceBinding` is
+`{inputSha256, outputSha256}`.
+
+An edit whose self-check failure is `after_missing` is not labeled `applied` or
+`noop`; the returned status is `after-missing`. A read-order failure such as
+`edited_page_text_or_order_mismatch` can keep the machine status `applied` when the
+After text is present, while the export itself stays unsuccessful. A report that
+claims `ok: true`, `layoutVerified: true` or a passed self-check is refused rather
+than relabeled. Independent MuPDF QA still runs. `failed` does not delete this
+draft download and is not rewritten to `passed`; strict exports still refuse it.
+
+These defenses still refuse the draft, delete the temp directory, and do not return
+a file: unreadable report or stdout, a missing or non-PDF output, an output over
+the size budget, an `outputSha256` or `inputSha256` mismatch, a WASM digest that
+is not the probed runtime, or a source file whose bytes changed. The caller's
+original bytes are only read. The temp directory (`source.pdf`, `request.json`,
+`output.pdf`, `report.json`) is removed after the bytes have been copied into the
+response. A failure before any PDF exists, including a pre-save read-order repair
+error, still produces no file.
 
 ## Independent per-output QA (MuPDF)
 

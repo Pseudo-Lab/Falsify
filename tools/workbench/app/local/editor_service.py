@@ -3,7 +3,11 @@
 Paths, the Node executable and the candidate manifest come only from server startup
 (--pdf-editor-* options or FALSIFY_PDF_EDITOR_* environment); nothing in an HTTP request
 selects them. When configured, export never falls back to the legacy single-line PyMuPDF
-path: an editor failure is reported as an error and no file is produced.
+path. A strict export reports an editor failure as an error and produces no file.
+An explicit boolean draft=true on the export body asks the web bridge to keep a
+readable PDF when the saved-file self-check failed. That file is returned with the
+check still failed. Nothing rewrites the report to passed, and there is still no
+legacy, white-overlay, or raster fallback.
 """
 import base64
 import hashlib
@@ -42,7 +46,7 @@ CONTINUATION_POLICY = 'source-number-suffix'
 CONTINUATION_SCOPE = ('text-only source-style header/footer; standalone Arabic source number plus decimal suffix; '
     'originals unchanged')
 MAX_COPIED_PAGES = 32
-EXPORT_KEYS = {'format', 'fileHash', 'file', 'patches'}
+EXPORT_KEYS = {'format', 'fileHash', 'file', 'patches', 'draft'}
 # Fields the current frontend sends per patch; only label/before/after reach the editor.
 PATCH_KEYS = {'label', 'before', 'after', 'id', 'segmentId', 'offset', 'edited'}
 # Minimal inherited environment: no NODE_OPTIONS, credentials or inherited editor overrides.
@@ -153,7 +157,7 @@ def _accepts_edit_plan(fn):
 
 def unconfigured_capability():
     return {'available': False, 'configured': False, 'engine': ENGINE, 'version': None, 'wasmSha256': None,
-        'reflow': False, 'pagination': False, 'continuationStyle': None, 'limits': None, 'sourceUrl': None}
+        'reflow': False, 'pagination': False, 'continuationStyle': None, 'draft': False, 'limits': None, 'sourceUrl': None}
 
 def default_runner(argv, *, cwd, env, timeout):
     flags = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
@@ -204,6 +208,41 @@ def _continuation_report(value, cap, layout_verified, added_pages, grown):
     if copied is None or not 0 < copied <= MAX_COPIED_PAGES or copied != added_pages or copied != grown: return None
     return {'policy': CONTINUATION_POLICY, 'applied': True, 'copiedPages': copied}
 
+def _preserves_draft(status, report, out):
+    """True when the bridge explicitly kept a readable PDF after a failed self-check.
+    A report that claims the check passed is not a draft and is not rewritten."""
+    if not isinstance(status, dict) or status.get('ok') is True or status.get('draft') is not True: return False
+    if not isinstance(report, dict) or report.get('ok') is True or report.get('draft') is not True: return False
+    if report.get('status') == 'self-check-passed' or report.get('layoutVerified') is True: return False
+    self_check = report.get('selfCheck') if isinstance(report.get('selfCheck'), dict) else None
+    if self_check is None or self_check.get('status') not in ('failed', 'error') or self_check.get('ok') is True: return False
+    try:
+        if not out.is_file() or out.stat().st_size < 5: return False
+        with open(out, 'rb') as handle: signature = handle.read(5)
+    except OSError: return False
+    return signature == b'%PDF-'
+
+def _draft_edit_rows(edits, report):
+    """Machine edit statuses. After text the self-check did not find is not labeled applied."""
+    reported = {}
+    for row in report.get('edits') if isinstance(report.get('edits'), list) else []:
+        if isinstance(row, dict) and isinstance(row.get('id'), str): reported.setdefault(row['id'], row)
+    failures = report.get('selfCheck', {}).get('failures') if isinstance(report.get('selfCheck'), dict) else []
+    missing = [item for item in failures if isinstance(item, dict) and item.get('code') == 'after_missing'] if isinstance(failures, list) else []
+    ids = {item.get('id') for item in missing if isinstance(item.get('id'), str)}
+    pages = {item.get('pageIndex') for item in missing if item.get('id') is None and type(item.get('pageIndex')) is int}
+    unlabeled = any(item.get('id') is None and item.get('pageIndex') is None for item in missing)
+    rows = []
+    for edit in edits:
+        row = reported.get(edit['id'], {})
+        status = row.get('status')
+        if not isinstance(status, str) or not re.fullmatch(r'[a-z][a-z-]{0,40}', status): status = 'unknown'
+        if unlabeled or edit['id'] in ids or edit['pageIndex'] in pages:
+            if status in ('applied', 'noop'): status = 'after-missing'
+        if status in ('passed', 'success', 'self-check-passed'): status = 'unknown'
+        rows.append({'label': edit['label'], 'id': edit['id'], 'pageIndex': edit['pageIndex'], 'status': status})
+    return rows
+
 def _page_map(value):
     """Bridge-sanitized sourcePageMap: [{sourcePageIndex, outputPageIndex, continuationPageIndices}]; else None."""
     if not isinstance(value, list) or not 1 <= len(value) <= 10000: return None
@@ -240,7 +279,8 @@ def validate_export(data):
         if not match: raise ValueError('PDF 원본 페이지 위치가 필요합니다.')
         # Exact Before/After as selected: no rewriting, trimming or auto-selection.
         edits.append({'id': f'edit-{index + 1}', 'pageIndex': int(match[1]) - 1, 'before': p['before'], 'after': p['after'], 'label': p['label']})
-    return raw, edits
+    if 'draft' in data and type(data['draft']) is not bool: raise ValueError('변경 형식 오류')
+    return raw, edits, data.get('draft') is True
 
 class PdfEditorService:
     def __init__(self, config, runner=None, clock=time.monotonic, retry_seconds=15, quality=None, planner=None):
@@ -292,7 +332,7 @@ class PdfEditorService:
         cap = {'available': True, 'configured': True, 'engine': ENGINE, 'version': str(info.get('version'))[:40],
             'wasmSha256': info['wasmSha256'], 'reflow': info.get('reflow') is True, 'pagination': pagination,
             'continuationStyle': _continuation_capability(info.get('continuationStyle'), pagination),
-            'limits': dict(LIMITS), 'sourceUrl': source_url,
+            'limits': dict(LIMITS), 'sourceUrl': source_url, 'draft': info.get('draft') is True,
             'runtime': {'jsSha256': _hex(runtime.get('jsSha256')), 'manifestSha256': _hex(runtime.get('manifestSha256')),
                 'runtimeKind': runtime.get('runtimeKind') if runtime.get('runtimeKind') in ['candidate', 'pinned'] else None,
                 'build': str(runtime.get('build'))[:80] if runtime.get('build') is not None else None}}
@@ -319,7 +359,7 @@ class PdfEditorService:
         except OSError: self.leftovers.append(str(directory))
 
     def export(self, data):
-        raw, edits = validate_export(data)
+        raw, edits, draft_mode = validate_export(data)
         cap = self.capability()
         if not cap['available']:
             raise ValueError(f"PDF 편집기를 사용할 수 없습니다 ({cap['error']['code']}): {cap['error']['message']} {NO_FALLBACK}")
@@ -332,6 +372,7 @@ class PdfEditorService:
             plan = self._edit_plan(paths['source'], data['fileHash'], edits)
             request = {'schema': REQUEST_SCHEMA, 'input': names['source'], 'inputSha256': data['fileHash'], 'reflow': cap['reflow'],
                 'edits': [{k: e[k] for k in ['id', 'pageIndex', 'before', 'after']} for e in edits]}
+            if draft_mode: request['draft'] = True
             with open(paths['request'], 'x', encoding='utf-8') as f: json.dump(request, f, ensure_ascii=False)
             argv = [node, str(self.bridge), '--request', str(paths['request']), '--out', str(paths['out']), '--report', str(paths['report'])]
             try: result = self.runner(argv, cwd=str(directory), env=self.env(), timeout=LIMITS['timeoutSeconds'])
@@ -345,6 +386,8 @@ class PdfEditorService:
             try: status = _single_json(result.stdout or b'')
             except (ValueError, UnicodeDecodeError): raise ValueError(f'PDF 편집기 응답 형식 오류. {NO_FALLBACK}') from None
             if result.returncode != 0 or status.get('ok') is not True:
+                if draft_mode and _preserves_draft(status, report, paths['out']):
+                    return self._result(data, edits, cap, report, paths['out'], paths['source'], plan, draft=True)
                 error = (report or {}).get('error') if isinstance((report or {}).get('error'), dict) else {}
                 code = next((c for c in [error.get('code'), status.get('code')] if isinstance(c, str) and CODE.fullmatch(c)), 'EDITOR_FAILED')
                 raise ValueError(f'PDF 편집기가 변경을 적용하지 못했습니다 ({code}).{_refusal_reasons(report)} {NO_FALLBACK}')
@@ -372,7 +415,7 @@ class PdfEditorService:
         try: return pdf_quality.sanitize(self.quality(*args, edit_plan=plan) if self._qa_takes_plan else self.quality(*args))
         except Exception: return pdf_quality.unavailable()
 
-    def _result(self, data, edits, cap, report, out, source, plan=None):
+    def _result(self, data, edits, cap, report, out, source, plan=None, draft=False):
         fail = lambda what: ValueError(f'PDF 편집기 결과 검증 실패: {what}. {NO_FALLBACK}')
         if report is None: raise fail('보고서 없음')
         if not out.is_file(): raise fail('출력 없음')
@@ -380,13 +423,22 @@ class PdfEditorService:
         output = out.read_bytes()
         output_hash = hashlib.sha256(output).hexdigest()
         if not output.startswith(b'%PDF-'): raise fail('출력 PDF 서명')
-        if report.get('ok') is not True or not isinstance(report.get('selfCheck'), dict) or report['selfCheck'].get('status') != 'passed': raise fail('자기 점검 미통과')
+        if draft:
+            self_check = report.get('selfCheck') if isinstance(report.get('selfCheck'), dict) else None
+            if report.get('ok') is True or report.get('draft') is not True or report.get('status') == 'self-check-passed' or report.get('layoutVerified') is True:
+                raise fail('초안 보고가 성공으로 표시됨')
+            if self_check is None or self_check.get('status') not in ('failed', 'error') or self_check.get('ok') is True: raise fail('초안 자기 점검 상태가 아님')
+            if report.get('inputSha256') != data['fileHash']: raise fail('원본 해시 바인딩 불일치')
+        else:
+            if report.get('ok') is not True or not isinstance(report.get('selfCheck'), dict) or report['selfCheck'].get('status') != 'passed': raise fail('자기 점검 미통과')
+            self_check = report['selfCheck']
         if report.get('outputSha256') != output_hash: raise fail('출력 해시 불일치')
         runtime = report.get('runtime') if isinstance(report.get('runtime'), dict) else {}
         if runtime.get('wasmSha256') != cap['wasmSha256']: raise fail('확인된 런타임과 다른 WASM')
-        applied = report.get('edits') if isinstance(report.get('edits'), list) else []
-        if [(e.get('id'), e.get('pageIndex'), e.get('status')) for e in applied if isinstance(e, dict)] != [(e['id'], e['pageIndex'], 'applied') for e in edits]:
-            raise fail('적용되지 않은 변경')
+        if not draft:
+            applied = report.get('edits') if isinstance(report.get('edits'), list) else []
+            if [(e.get('id'), e.get('pageIndex'), e.get('status')) for e in applied if isinstance(e, dict)] != [(e['id'], e['pageIndex'], 'applied') for e in edits]:
+                raise fail('적용되지 않은 변경')
         page_count = report.get('pageCount') if isinstance(report.get('pageCount'), dict) else {}
         input_pages, output_pages = _count(page_count.get('source')), _count(page_count.get('output'))
         added_pages = _count(report.get('addedPages'))
@@ -395,7 +447,6 @@ class PdfEditorService:
             **({'severity': w['severity']} if w.get('severity') in ['error', 'warning', 'info'] else {})}
             for w in (items if isinstance(items, list) else []) if isinstance(w, dict)]
         warnings = codes(report.get('warnings'))
-        self_check = report['selfCheck']
         # Layout verified only on the bridge's verdict AND a passed mandatory saved-file self-check
         # with no failures and no error-severity warnings; same-engine, not independent or scientific proof.
         layout_verified = (report.get('layoutVerified') is True and self_check.get('failures') == []
@@ -414,16 +465,23 @@ class PdfEditorService:
             'continuationStyle': _continuation_report(report.get('continuationStyle'), cap, layout_verified, added_pages, grown),
             'capabilities': {'reflow': cap['reflow'], 'pagination': cap['pagination']},
             'pages': output_pages,
-            'edits': [{'label': e['label'], 'id': e['id'], 'pageIndex': e['pageIndex'], 'status': 'applied'} for e in edits],
+            'edits': _draft_edit_rows(edits, report) if draft else [{'label': e['label'], 'id': e['id'], 'pageIndex': e['pageIndex'], 'status': 'applied'} for e in edits],
             'repairs': [{'pageIndex': r.get('pageIndex'), 'count': r.get('count')} for r in report.get('repairs', []) if isinstance(r, dict)] if isinstance(report.get('repairs'), list) else [],
             'warnings': warnings, 'diagnostics': diagnostics,
-            'selfCheck': {'status': 'passed', 'independent': False, 'method': self_check.get('method'), 'warnings': codes(self_check.get('warnings'))},
+            'selfCheck': {'status': self_check.get('status') if draft else 'passed', 'independent': False, 'method': self_check.get('method'), 'warnings': codes(self_check.get('warnings'))},
             'checkBoundary': CHECK_BOUNDARY,
             # Fixed counts only; the private plan's text hashes, styles and coordinates never leave the server.
             'editPlanSummary': paper_inventory.summarize(plan)}
         checks = self._independent(source, out, edits, verification['sourcePageMap'], {'source': input_pages, 'output': output_pages}, plan)
         verification['independentQA'], verification['independentChecks'] = checks['status'], checks
-        if checks['status'] == 'failed':
+        if checks['status'] == 'failed' and not draft:
             found = [f"{c['code']}" + (f" (출력 p. {', '.join(map(str, c['pages'][:10]))})" if c['pages'] else '') for c in checks['checks'] if c['status'] == 'failed']
             raise ValueError(f"{QA_FAILED.format(checks='; '.join(found))} {NO_FALLBACK}")
+        if draft:
+            err = report.get('error') if isinstance(report.get('error'), dict) else {}
+            code = err.get('code')
+            verification['draft'] = True
+            verification['quality'] = 'error' if self_check.get('status') == 'error' else 'failed'
+            verification['error'] = {'code': code if isinstance(code, str) and CODE.fullmatch(code) else 'SELF_CHECK_FAILED'}
+            verification['sourceBinding'] = {'inputSha256': data['fileHash'], 'outputSha256': output_hash}
         return {'file': base64.b64encode(output).decode('ascii'), 'sourceFileHash': data['fileHash'], 'outputFileHash': output_hash, 'verification': verification}

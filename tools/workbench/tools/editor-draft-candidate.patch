@@ -1,0 +1,661 @@
+From 7ef705ec4f239f7c3760366dd1e6d8b0e2d62bd6 Mon Sep 17 00:00:00 2001
+From: Cursor Agent <cursoragent@cursor.com>
+Date: Mon, 26 Oct 2026 10:33:14 +0000
+Subject: [PATCH] Preserve readable PDF bytes in explicit web draft mode.
+
+Strict CLI and bridge requests still drop a failed self-check. draft:true writes the already-saved PDF with honest failed quality, hashes, and no passed rewrite.
+---
+ docs/WEB_BRIDGE.md           |  30 +++++-
+ src/editor.mjs               |  47 ++++++++++
+ src/web-bridge.mjs           |  84 +++++++++++++++--
+ test/draft-bridge.test.mjs   | 162 ++++++++++++++++++++++++++++++++
+ test/draft-preserve.test.mjs | 177 +++++++++++++++++++++++++++++++++++
+ 5 files changed, 492 insertions(+), 8 deletions(-)
+ create mode 100644 test/draft-bridge.test.mjs
+ create mode 100644 test/draft-preserve.test.mjs
+
+diff --git a/docs/WEB_BRIDGE.md b/docs/WEB_BRIDGE.md
+index 7f59077..fb4dd17 100644
+--- a/docs/WEB_BRIDGE.md
++++ b/docs/WEB_BRIDGE.md
+@@ -16,8 +16,9 @@ with `id`, `pageIndex`, `before`, `after`. The input and request must be regular
+ files; source/request/output/report must differ; output and report cannot exist.
+ No harness, model, rationale, answer key, remote endpoint or executable is accepted.
+ 
+-The companion owns the temporary directory. Node writes output only after the
+-mandatory saved-document self-check passed. A sanitized report retains indices,
++The companion owns the temporary directory. Strict requests (no `draft` field,
++or `draft: false`) write the PDF only after the mandatory saved-document
++self-check passed. A sanitized report retains indices,
+ counts, diagnostic codes, runtime digests and source-page mapping, not text or
+ private paths. Public capability flags normalize `EDITOR_CAPABILITIES.pagination`
+ through `.supported === true`; they describe supported scope, not guaranteed
+@@ -40,6 +41,31 @@ self-check, with a positive count equal to the reported added-page count and
+ at most 32. Source edge text, font handles and private paths are never published
+ in this metadata. A missing capability keeps old companions compatible.
+ 
++## Explicit draft preservation
++
++`draft` is an optional boolean on `falsify-web-bridge-request/1`. Only `true`
++opts in. The CLI does not accept the field and remains strict: a failed
++self-check still writes no PDF.
++
++When `draft` is true and `editPdf` has already saved readable `%PDF-` bytes,
++a failed or errored self-check still writes those bytes and the report, then
++exits 1. Stdout is one object, `{ok:false, code, draft:true}`. The report keeps
++`ok: false`, `status: "draft"`, `quality` of `failed` or `error`, the machine
++`selfCheck.status`, `error.code`, per-edit statuses, `outputSha256`,
++`inputSha256` and the runtime digests. It is not rewritten to
++`self-check-passed` or `ok: true`. An edit whose After is absent
++(`after_missing`) is not left as `applied` or `noop`; its status is
++`after-missing`. A read-order failure such as
++`edited_page_text_or_order_mismatch` keeps the machine applied status when the
++After is present, while the export stays unsuccessful.
++
++Bytes are not invented. A failure before save, a missing file, or a payload
++that does not start with `%PDF-` still writes no output. Hash, runtime and
++source-hash checks stay with the companion. There is no fallback to another
++editor, white overlay or raster rewrite. `capabilities` advertises `draft: true`
++for this protocol; an older bridge rejects the unknown field instead of
++pretending the check passed.
++
+ Alpha.3 integration checks: 80 module tests executed, zero failures/skips in the
+ prepared coordinator environment; actual browser upload/edit/export produced
+ two continuation pages without model calls. Independent MuPDF, PDFium and pypdf
+diff --git a/src/editor.mjs b/src/editor.mjs
+index 5143132..e06796e 100644
+--- a/src/editor.mjs
++++ b/src/editor.mjs
+@@ -5,6 +5,7 @@
+ // must match exactly once on its page after whitespace normalization; there
+ // is no fuzzy relocation, implicit selection or shortening of After text.
+ // All pages are planned against unchanged snapshots before any commit.
++import { createHash } from "node:crypto";
+ import { loadRuntime } from "./runtime.mjs";
+ import { PAGINATION_CAPABILITY, PAGINATION_LIMITS, paginateOverflow } from "./pagination.mjs";
+ import {
+@@ -256,9 +257,49 @@ function captureConsole(keepText) {
+  * allowPagination (default true), maxNewPages (document-wide budget,
+  * default 8, at most 32), includeFlowText (default false: expected flow
+  * text is reported as sha256/length only),
++ * draft (default false; only the boolean true opts in),
+  * quality / engineFactory (test seams).
+  * Throws EditError on any definite failure; err.report carries diagnostics.
++ * Strict mode (draft not exactly true, including the CLI) still throws after
++ * a saved-file self-check failure and does not return those bytes.
++ * Draft mode returns the saved readable PDF with ok:false when the self-check
++ * fails or cannot run. It does not relabel that check as passed.
+  */
++const sha256Bytes = (bytes) => createHash("sha256").update(bytes).digest("hex");
++
++// A saved file is readable here only when it is non-empty PDF bytes. Draft mode
++// never invents a document and never treats another payload as a PDF.
++function readablePdf(pdf) {
++  return pdf instanceof Uint8Array && pdf.length >= 5 && pdf[0] === 0x25 && pdf[1] === 0x50 && pdf[2] === 0x44 && pdf[3] === 0x46 && pdf[4] === 0x2d;
++}
++
++// After text that the self-check did not find must not keep a success status.
++function withholdAbsentAfter(report) {
++  const failures = Array.isArray(report.selfCheck?.failures) ? report.selfCheck.failures : [];
++  const missing = failures.filter((f) => f && f.code === "after_missing");
++  if (!missing.length) return;
++  const ids = new Set(missing.map((f) => f.id).filter((id) => typeof id === "string"));
++  const pages = new Set(missing.filter((f) => f.id == null && Number.isInteger(f.pageIndex)).map((f) => f.pageIndex));
++  const unlabeled = ids.size === 0 && pages.size === 0;
++  for (const row of report.edits) {
++    if ((unlabeled || ids.has(row.id) || pages.has(row.pageIndex)) && (row.status === "applied" || row.status === "noop")) row.status = "after-missing";
++  }
++}
++
++// Honest draft: the saved bytes stay, the check is not rewritten to passed,
++// and the export itself is not labeled successful.
++function finishDraft(report, pdf, sourceBytes, code, message) {
++  report.ok = false;
++  report.status = "draft";
++  report.draft = true;
++  report.quality = report.selfCheck?.status === "error" ? "error" : "failed";
++  withholdAbsentAfter(report);
++  report.inputSha256 = sha256Bytes(sourceBytes);
++  report.outputSha256 = sha256Bytes(pdf);
++  report.error = { code, message };
++  return { pdf, report };
++}
++
+ export async function editPdf(request, options = {}) {
+   const { sourceBytes, edits, reflow } = validateRequest(request, options.limits ?? LIMITS);
+   const pg = paginationOptions(options);
+@@ -500,6 +541,7 @@ export async function editPdf(request, options = {}) {
+     check = await quality.inspectSavedPdf(engineFactory, sourceBytes, pdf, edits, { sourcePageMap, includeText: !!options.includeFlowText });
+   } catch (err) {
+     report.selfCheck = { status: "error", error: err?.code ?? err?.name ?? "Error" };
++    if (options.draft === true && readablePdf(pdf)) return finishDraft(report, pdf, sourceBytes, "SELF_CHECK_FAILED", "Saved-PDF self-check could not run");
+     throw fail("SELF_CHECK_FAILED", "Saved-PDF self-check could not run");
+   } finally {
+     report.selfCheckLog = qaCapture.restore();
+@@ -517,6 +559,11 @@ export async function editPdf(request, options = {}) {
+       textEqual: row.text_equal === true,
+     }));
+   const unapplied = report.edits.filter((r) => r.status !== "applied" && r.status !== "noop");
++  // Draft keeps the already-saved PDF when the self-check failed. Strict mode
++  // still throws and drops those bytes. A passing check is unchanged.
++  if (options.draft === true && check?.ok !== true && readablePdf(pdf)) {
++    return finishDraft(report, pdf, sourceBytes, "SELF_CHECK_FAILED", "Saved-PDF self-check reported failures");
++  }
+   if (unapplied.length) throw fail("EDIT_NOT_APPLIED", "Some requested edits were not applied", { ids: unapplied.map((r) => r.id) });
+   if (check?.ok !== true) throw fail("SELF_CHECK_FAILED", "Saved-PDF self-check reported failures");
+   if (added > 0 && sourcePageMap.every((m) => !m.continuationPageIndices.length || m.continuationStyle?.applied === true)) {
+diff --git a/src/web-bridge.mjs b/src/web-bridge.mjs
+index 1bedc86..3704f4a 100644
+--- a/src/web-bridge.mjs
++++ b/src/web-bridge.mjs
+@@ -7,7 +7,10 @@
+ // Stdout carries exactly one JSON object. Reports and capability output are
+ // sanitized: no filesystem paths, engine logs, document text or messages
+ // that could quote document content.
+-// Exit codes: 0 ok, 1 edit/self-check/runtime failure, 2 usage or request error.
++// Exit codes: 0 ok, 1 edit/self-check/runtime failure (draft:true may still
++// have written a readable PDF), 2 usage or request error.
++// Strict mode writes the PDF only after a passed self-check. The request
++// field draft:true is the only opt-in that also keeps those bytes on failure.
+ import { createHash } from "node:crypto";
+ import { closeSync, lstatSync, openSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+ import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+@@ -18,7 +21,7 @@ import { CANDIDATE_ENV, loadRuntime } from "./runtime.mjs";
+ export const ENGINE = "falsify-pdf-editor";
+ export const REQUEST_SCHEMA = "falsify-web-bridge-request/1";
+ export const BRIDGE_LIMITS = Object.freeze({ maxFileBytes: 25 * 1024 * 1024, maxEdits: 12, maxTextChars: 4000, maxRequestBytes: 512 * 1024 });
+-const REQUEST_KEYS = ["schema", "input", "inputSha256", "edits", "reflow"];
++const REQUEST_KEYS = ["schema", "input", "inputSha256", "edits", "reflow", "draft"];
+ const EDIT_KEYS = ["id", "pageIndex", "before", "after"];
+ const CODE_RE = /^[A-Z][A-Z0-9_]{0,63}$/;
+ const LOWER_CODE_RE = /^[a-z][a-z0-9_]{0,63}$/;
+@@ -133,6 +136,8 @@ export async function capabilities({ env = process.env, load = loadRuntime, mod
+     ...editorCapabilities(m),
+     limits: { ...BRIDGE_LIMITS, editorMaxFileBytes: m.LIMITS.maxFileBytes, editorMaxEdits: m.LIMITS.maxEdits },
+     sourceUrl: pkg.sourceUrl,
++    // Explicit request field `draft: true` can keep a readable PDF after a failed self-check.
++    draft: true,
+   };
+ }
+ 
+@@ -202,6 +207,7 @@ export function loadRequest(args) {
+   if (names.some((n) => same(n, req.input))) bad("input must differ from request, output and report");
+   if (!match(req.inputSha256, HEX64)) bad("inputSha256 must be a lowercase sha256");
+   if (typeof req.reflow !== "boolean") bad("reflow must be a boolean");
++  if ("draft" in req && typeof req.draft !== "boolean") bad("draft must be a boolean");
+   if (!Array.isArray(req.edits) || req.edits.length < 1 || req.edits.length > BRIDGE_LIMITS.maxEdits) bad(`edits must hold 1-${BRIDGE_LIMITS.maxEdits} entries`);
+   req.edits.forEach((e, i) => {
+     if (!e || typeof e !== "object" || Array.isArray(e)) bad(`Edit #${i} must be an object`);
+@@ -218,7 +224,14 @@ export function loadRequest(args) {
+   if (!ist.isFile() || ist.size < 1 || ist.size > BRIDGE_LIMITS.maxFileBytes) throw new BridgeError("INVALID_REQUEST", "Input PDF must be a regular file within the size budget");
+   const sourceBytes = new Uint8Array(readFileSync(inputPath));
+   if (sha256(sourceBytes) !== req.inputSha256) throw new BridgeError("INPUT_HASH_MISMATCH", "Input PDF does not match inputSha256");
+-  return { sourceBytes, edits: req.edits.map((e) => ({ id: e.id, pageIndex: e.pageIndex, before: e.before, after: e.after })), reflow: req.reflow };
++  return {
++    sourceBytes,
++    edits: req.edits.map((e) => ({ id: e.id, pageIndex: e.pageIndex, before: e.before, after: e.after })),
++    reflow: req.reflow,
++    // Absent and false stay on the strict path. Only an explicit true opts in.
++    draft: req.draft === true,
++    inputSha256: req.inputSha256,
++  };
+ }
+ 
+ const list = (v, pick) => (Array.isArray(v) ? v.slice(0, 256).map(pick) : []);
+@@ -288,6 +301,10 @@ export function sanitizeReport(report, extra = {}) {
+     pageCount: pc ? { source: int(pc.source), output: int(pc.output) } : null,
+     addedPages: count(r.pagination?.addedPages),
+     sourcePageMap: sourcePageMap(r),
++    ...(r.draft === true && r.ok !== true && sc.status !== "passed" ? {
++      draft: true,
++      quality: sc.status === "error" ? "error" : "failed",
++    } : {}),
+     ...(layoutVerified && r.pagination?.continuationStyle?.applied === true &&
+       r.pagination.continuationStyle.policy === "source-number-suffix" &&
+       count(r.pagination.continuationStyle.copiedPages) !== null &&
+@@ -301,6 +318,34 @@ export function sanitizeReport(report, extra = {}) {
+   };
+ }
+ 
++function readablePdf(pdf) {
++  return pdf instanceof Uint8Array && pdf.length >= 5 && pdf[0] === 0x25 && pdf[1] === 0x50 && pdf[2] === 0x44 && pdf[3] === 0x46 && pdf[4] === 0x2d;
++}
++
++// A failed self-check that still produced a readable PDF. A report that claims
++// success is not preserved and is not rewritten into a pass.
++function preservableDraft(loaded, result) {
++  if (loaded?.draft !== true) return false;
++  const r = result?.report;
++  if (!r || typeof r !== "object" || r.ok === true || r.status === "self-check-passed") return false;
++  const status = r.selfCheck?.status;
++  if (status !== "failed" && status !== "error") return false;
++  if (r.selfCheck?.ok === true) return false;
++  return readablePdf(result.pdf);
++}
++
++function withholdAbsentAfter(report) {
++  const failures = Array.isArray(report?.selfCheck?.failures) ? report.selfCheck.failures : [];
++  const missing = failures.filter((f) => f && f.code === "after_missing");
++  if (!missing.length || !Array.isArray(report.edits)) return;
++  const ids = new Set(missing.map((f) => f.id).filter((id) => typeof id === "string"));
++  const pages = new Set(missing.filter((f) => f.id == null && Number.isInteger(f.pageIndex)).map((f) => f.pageIndex));
++  const unlabeled = ids.size === 0 && pages.size === 0;
++  for (const row of report.edits) {
++    if (row && (unlabeled || ids.has(row.id) || pages.has(row.pageIndex)) && (row.status === "applied" || row.status === "noop")) row.status = "after-missing";
++  }
++}
++
+ function writeExclusive(path, bytes) {
+   const fd = openSync(path, "wx");
+   try {
+@@ -319,26 +364,53 @@ export async function main(argv, deps = {}) {
+       out(JSON.stringify(await capabilities({ env, load: deps.loadRuntime, mod: deps.editor })));
+       return 0;
+     }
+-    const req = loadRequest(args);
++    const loaded = loadRequest(args);
+     requireCandidate(env);
+     const edit = deps.editPdf ?? editor.editPdf;
+     const caps = editorCapabilities(deps.editor);
++    const editInput = { sourceBytes: loaded.sourceBytes, edits: loaded.edits, reflow: loaded.reflow };
+     let result;
+     try {
+-      result = await edit(req, {});
++      result = await edit(editInput, { draft: loaded.draft === true });
+     } catch (e) {
+       const report = sanitizeReport(e?.report, { error: sanitizeError(e), capabilities: caps });
+       writeExclusive(args.report, JSON.stringify(report) + "\n");
+       out(JSON.stringify({ ok: false, code: report.error.code }));
+       return e instanceof editor.EditError && e.code === "INVALID_REQUEST" ? 2 : 1;
+     }
++    if (preservableDraft(loaded, result)) {
++      withholdAbsentAfter(result.report);
++      result.report.ok = false;
++      result.report.draft = true;
++      result.report.status = "draft";
++      if (result.report.quality !== "failed" && result.report.quality !== "error") {
++        result.report.quality = result.report.selfCheck.status === "error" ? "error" : "failed";
++      }
++      const code = match(result.report.error?.code, CODE_RE) ?? "SELF_CHECK_FAILED";
++      const message = result.report.selfCheck?.status === "error" ? "Saved-PDF self-check could not run" : "Saved-PDF self-check reported failures";
++      const report = sanitizeReport(result.report, {
++        outputSha256: sha256(result.pdf),
++        inputSha256: loaded.inputSha256,
++        error: { code, message },
++        capabilities: caps,
++      });
++      if (report.ok === true || report.selfCheck?.status === "passed" || report.layoutVerified === true) {
++        writeExclusive(args.report, JSON.stringify(sanitizeReport(result.report, { error: { code: "SELF_CHECK_FAILED", message: "Saved-PDF self-check did not pass" }, capabilities: caps })) + "\n");
++        out(JSON.stringify({ ok: false, code: "SELF_CHECK_FAILED" }));
++        return 1;
++      }
++      writeExclusive(args.out, result.pdf);
++      writeExclusive(args.report, JSON.stringify(report) + "\n");
++      out(JSON.stringify({ ok: false, code, draft: true }));
++      return 1;
++    }
+     if (result?.report?.ok !== true || result?.report?.selfCheck?.status !== "passed" || !(result.pdf instanceof Uint8Array) || result.pdf.length === 0) {
+       const report = sanitizeReport(result?.report, { error: { code: "SELF_CHECK_FAILED", message: "Saved-PDF self-check did not pass" }, capabilities: caps });
+       writeExclusive(args.report, JSON.stringify(report) + "\n");
+       out(JSON.stringify({ ok: false, code: "SELF_CHECK_FAILED" }));
+       return 1;
+     }
+-    // Output is written only after the self-check passed.
++    // Strict output is written only after the self-check passed.
+     writeExclusive(args.out, result.pdf);
+     writeExclusive(args.report, JSON.stringify(sanitizeReport(result.report, { outputSha256: sha256(result.pdf), capabilities: caps })) + "\n");
+     out(JSON.stringify({ ok: true, code: "OK" }));
+diff --git a/test/draft-bridge.test.mjs b/test/draft-bridge.test.mjs
+new file mode 100644
+index 0000000..988717a
+--- /dev/null
++++ b/test/draft-bridge.test.mjs
+@@ -0,0 +1,162 @@
++// Web-bridge draft protocol. Injected editPdf only; the strict tests in
++// web-bridge.test.mjs stay on requests without the draft field.
++import assert from "node:assert/strict";
++import { createHash } from "node:crypto";
++import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
++import { tmpdir } from "node:os";
++import { join } from "node:path";
++import { test } from "node:test";
++import { EditError } from "../src/editor.mjs";
++import { CANDIDATE_ENV } from "../src/runtime.mjs";
++import { REQUEST_SCHEMA, main } from "../src/web-bridge.mjs";
++
++const sha = (b) => createHash("sha256").update(b).digest("hex");
++const ENV = { [CANDIDATE_ENV]: join(tmpdir(), "candidate-manifest.json") };
++const SOURCE = Buffer.from("%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n");
++const CANDIDATE = Buffer.from("%PDF-1.4\n1 0 obj<</Type/Catalog/PieceInfo<</Draft true>>>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\nDraftCandidate\n");
++
++function workspace(edit = (r) => r) {
++  const dir = mkdtempSync(join(tmpdir(), "fpe-draft-"));
++  writeFileSync(join(dir, "input.bin"), SOURCE);
++  const req = edit({
++    schema: REQUEST_SCHEMA,
++    input: "input.bin",
++    inputSha256: sha(SOURCE),
++    reflow: true,
++    edits: [{ id: "edit-1", pageIndex: 0, before: "alpha", after: "beta" }],
++  });
++  writeFileSync(join(dir, "request.json"), JSON.stringify(req));
++  const argv = ["--request", join(dir, "request.json"), "--out", join(dir, "output.pdf"), "--report", join(dir, "report.json")];
++  return { dir, argv, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
++}
++
++async function run(argv, deps) {
++  const lines = [];
++  const code = await main(argv, { env: ENV, stdout: (s) => lines.push(s), ...deps });
++  assert.equal(lines.length, 1);
++  return { code, out: JSON.parse(lines[0]) };
++}
++
++function failedReport(failures, status = "applied") {
++  return {
++    ok: false,
++    status: "failed",
++    draft: true,
++    quality: "failed",
++    reflow: true,
++    runtime: { wasmSha256: "1".repeat(64), jsSha256: "2".repeat(64), candidate: { manifestSha256: "5".repeat(64) } },
++    edits: [{ id: "edit-1", pageIndex: 0, status }],
++    selfCheck: { status: "failed", ok: false, method: "same-pdfium-text-geometry", failures, warnings: [] },
++    error: { code: "SELF_CHECK_FAILED", message: "Saved-PDF self-check reported failures" },
++  };
++}
++
++test("draft request writes the failed PDF and an honest report", async () => {
++  const ws = workspace((r) => ({ ...r, draft: true }));
++  try {
++    let seen;
++    const { code, out } = await run(ws.argv, {
++      editPdf: async (req, options) => {
++        seen = { req, options };
++        return { pdf: new Uint8Array(CANDIDATE), report: failedReport([{ code: "after_missing", pageIndex: 0, id: "edit-1" }]) };
++      },
++    });
++    assert.equal(code, 1);
++    assert.deepEqual(out, { ok: false, code: "SELF_CHECK_FAILED", draft: true });
++    assert.equal(seen.options.draft, true);
++    assert.equal(seen.req.draft, undefined);
++    assert.deepEqual(Buffer.from(seen.req.sourceBytes), SOURCE);
++    assert.deepEqual(readFileSync(join(ws.dir, "output.pdf")), CANDIDATE);
++    assert.deepEqual(readFileSync(join(ws.dir, "input.bin")), SOURCE);
++    const report = JSON.parse(readFileSync(join(ws.dir, "report.json"), "utf8"));
++    assert.equal(report.ok, false);
++    assert.equal(report.status, "draft");
++    assert.equal(report.draft, true);
++    assert.equal(report.quality, "failed");
++    assert.equal(report.layoutVerified, false);
++    assert.equal(report.selfCheck.status, "failed");
++    assert.equal(report.edits[0].status, "after-missing");
++    assert.equal(report.error.code, "SELF_CHECK_FAILED");
++    assert.equal(report.outputSha256, sha(CANDIDATE));
++    assert.equal(report.inputSha256, sha(SOURCE));
++    assert.equal(report.runtime.wasmSha256, "1".repeat(64));
++    assert.equal(JSON.stringify(report).includes("self-check-passed"), false);
++    assert.equal(JSON.stringify(report).includes("DraftCandidate"), false);
++    assert.deepEqual(readdirSync(ws.dir).sort(), ["input.bin", "output.pdf", "report.json", "request.json"]);
++  } finally {
++    ws.cleanup();
++    assert.equal(existsSync(ws.dir), false);
++  }
++});
++
++test("draft read-order failure keeps applied but not a passed check", async () => {
++  const ws = workspace((r) => ({ ...r, draft: true }));
++  try {
++    const { code } = await run(ws.argv, {
++      editPdf: async () => ({ pdf: new Uint8Array(CANDIDATE), report: failedReport([{ code: "edited_page_text_or_order_mismatch", pageIndex: 0 }]) }),
++    });
++    assert.equal(code, 1);
++    const report = JSON.parse(readFileSync(join(ws.dir, "report.json"), "utf8"));
++    assert.equal(report.ok, false);
++    assert.equal(report.quality, "failed");
++    assert.equal(report.edits[0].status, "applied");
++    assert.deepEqual(readFileSync(join(ws.dir, "output.pdf")), CANDIDATE);
++    assert.deepEqual(readFileSync(join(ws.dir, "input.bin")), SOURCE);
++  } finally {
++    ws.cleanup();
++  }
++});
++
++test("strict request and pre-save failure still write no PDF", async () => {
++  const strict = workspace();
++  try {
++    const { code, out } = await run(strict.argv, {
++      editPdf: async (_req, options) => {
++        assert.equal(options.draft, false);
++        return { pdf: new Uint8Array(CANDIDATE), report: failedReport([{ code: "after_missing", id: "edit-1", pageIndex: 0 }]) };
++      },
++    });
++    assert.equal(code, 1);
++    assert.equal(out.draft, undefined);
++    assert.equal(out.ok, false);
++    assert.equal(existsSync(join(strict.dir, "output.pdf")), false);
++  } finally {
++    strict.cleanup();
++  }
++  const early = workspace((r) => ({ ...r, draft: true }));
++  try {
++    const err = new EditError("MATCH_FAILED", "1 edit(s) could not be matched exactly once");
++    err.report = { ok: false, status: "failed", selfCheck: { status: "not-run" } };
++    const { code, out } = await run(early.argv, { editPdf: async () => { throw err; } });
++    assert.equal(code, 1);
++    assert.equal(out.code, "MATCH_FAILED");
++    assert.equal(existsSync(join(early.dir, "output.pdf")), false);
++  } finally {
++    early.cleanup();
++  }
++});
++
++test("a non-boolean draft is rejected before editPdf", async () => {
++  const ws = workspace((r) => ({ ...r, draft: "yes" }));
++  try {
++    const { code, out } = await run(ws.argv, { editPdf: async () => assert.fail("editPdf called") });
++    assert.equal(code, 2);
++    assert.equal(out.code, "INVALID_REQUEST");
++    assert.equal(existsSync(join(ws.dir, "output.pdf")), false);
++  } finally {
++    ws.cleanup();
++  }
++});
++
++test("draft does not keep a payload that is not a PDF", async () => {
++  const ws = workspace((r) => ({ ...r, draft: true }));
++  try {
++    const { code } = await run(ws.argv, {
++      editPdf: async () => ({ pdf: new Uint8Array(Buffer.from("not-a-pdf")), report: failedReport([{ code: "after_missing", id: "edit-1", pageIndex: 0 }]) }),
++    });
++    assert.equal(code, 1);
++    assert.equal(existsSync(join(ws.dir, "output.pdf")), false);
++  } finally {
++    ws.cleanup();
++  }
++});
+diff --git a/test/draft-preserve.test.mjs b/test/draft-preserve.test.mjs
+new file mode 100644
+index 0000000..e0e95b5
+--- /dev/null
++++ b/test/draft-preserve.test.mjs
+@@ -0,0 +1,177 @@
++// Draft preservation. Mock engine only: a failed self-check must keep the
++// already-saved PDF bytes when draft is exactly true, and must still throw
++// them away otherwise. No WASM, network, or real document text.
++import assert from "node:assert/strict";
++import { createHash } from "node:crypto";
++import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
++import { tmpdir } from "node:os";
++import { join } from "node:path";
++import { test } from "node:test";
++import { editPdf } from "../src/editor.mjs";
++import { loadRequest, main } from "../src/cli.mjs";
++
++const sha = (b) => createHash("sha256").update(b).digest("hex");
++
++function minimalPdf(text) {
++  const stream = `BT /F1 12 Tf 72 72 Td (${text}) Tj ET`;
++  const objects = [
++    "1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n",
++    "2 0 obj<</Type/Pages/Count 1/Kids[3 0 R]>>endobj\n",
++    "3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 300 144]/Contents 4 0 R/Resources<</Font<</F1 5 0 R>>>>>>endobj\n",
++    `4 0 obj<</Length ${stream.length}>>stream\n${stream}\nendstream\nendobj\n`,
++    "5 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>endobj\n",
++  ];
++  let body = "%PDF-1.4\n";
++  const offsets = [0];
++  for (const obj of objects) {
++    offsets.push(body.length);
++    body += obj;
++  }
++  const xrefAt = body.length;
++  let xref = "xref\n0 6\n0000000000 65535 f \n";
++  for (let i = 1; i <= 5; i++) xref += `${String(offsets[i]).padStart(10, "0")} 00000 n \n`;
++  body += `${xref}trailer<</Size 6/Root 1 0 R>>\nstartxref\n${xrefAt}\n%%EOF\n`;
++  return new Uint8Array(Buffer.from(body));
++}
++
++const CANDIDATE = minimalPdf("DraftCandidate");
++const SOURCE = minimalPdf("SourcePage");
++
++function mockEngine(saved) {
++  const calls = [];
++  let current = 0;
++  const eng = {
++    pageCount: 1,
++    loadPage: (i) => { current = i; calls.push(["loadPage", i]); },
++    normalizeFontsForEdit: () => calls.push(["normalize"]),
++    pageRegenHostile: () => false,
++    buildModel: () => [{ id: 1, editable: true, box: { x: 0, top: 100, w: 50, h: 9 }, lines: [{}], format: { id: 1 }, runs: [{ text: "alpha", rgba: 0 }] }],
++    commitParagraph: () => { calls.push(["commit", current]); return { id: 1, surgical: true, lines: [{}] }; },
++    save: () => { calls.push(["save"]); return saved; },
++    close: () => calls.push(["close"]),
++  };
++  return { calls, factory: async () => { calls.push(["open"]); return eng; } };
++}
++
++function quality(check) {
++  return {
++    capturePageLayout: () => ({ pi: 0 }),
++    repairPageLayout: () => ({ repairs: [], warnings: [] }),
++    inspectSavedPdf: async () => check,
++  };
++}
++
++const edit = { id: "a", pageIndex: 0, before: "alpha", after: "beta" };
++const request = () => ({ sourceBytes: new Uint8Array(SOURCE), edits: [{ ...edit }], reflow: true });
++
++test("strict self-check failure still throws the saved PDF away", async () => {
++  const engine = mockEngine(CANDIDATE);
++  const source = request();
++  const before = Buffer.from(source.sourceBytes);
++  await assert.rejects(
++    editPdf(source, { engineFactory: engine.factory, quality: quality({ ok: false, failures: [{ code: "after_missing", pageIndex: 0, id: "a" }], warnings: [] }) }),
++    (e) => e.code === "SELF_CHECK_FAILED" && e.report.selfCheck.status === "failed" && e.report.ok !== true && e.pdf === undefined,
++  );
++  assert.ok(engine.calls.some((c) => c[0] === "save"), "bytes were generated before the throw");
++  assert.deepEqual(Buffer.from(source.sourceBytes), before);
++  assert.equal(JSON.stringify(source).includes("DraftCandidate"), false);
++});
++
++test("draft mode preserves a readable PDF when After is missing", async () => {
++  const engine = mockEngine(CANDIDATE);
++  const source = request();
++  const before = Buffer.from(source.sourceBytes);
++  const { pdf, report } = await editPdf(source, {
++    draft: true,
++    engineFactory: engine.factory,
++    quality: quality({ ok: false, failures: [{ code: "after_missing", pageIndex: 0, id: "a" }], warnings: [] }),
++  });
++  assert.deepEqual(pdf, CANDIDATE);
++  assert.equal(report.ok, false);
++  assert.equal(report.status, "draft");
++  assert.equal(report.draft, true);
++  assert.equal(report.quality, "failed");
++  assert.equal(report.selfCheck.status, "failed");
++  assert.notEqual(report.selfCheck.ok, true);
++  assert.equal(report.status === "self-check-passed", false);
++  assert.equal(report.edits[0].status, "after-missing");
++  assert.equal(report.error.code, "SELF_CHECK_FAILED");
++  assert.equal(report.outputSha256, sha(pdf));
++  assert.equal(report.inputSha256, sha(source.sourceBytes));
++  assert.deepEqual(Buffer.from(source.sourceBytes), before);
++  assert.equal(JSON.stringify(report).includes("DraftCandidate"), false);
++  assert.equal(JSON.stringify(report).includes("SourcePage"), false);
++});
++
++test("draft mode preserves a read-order failure without a success label", async () => {
++  const engine = mockEngine(CANDIDATE);
++  const { pdf, report } = await editPdf(request(), {
++    draft: true,
++    engineFactory: engine.factory,
++    quality: quality({ ok: false, failures: [{ code: "edited_page_text_or_order_mismatch", pageIndex: 0 }], warnings: [] }),
++  });
++  assert.deepEqual(pdf, CANDIDATE);
++  assert.equal(report.ok, false);
++  assert.equal(report.quality, "failed");
++  assert.equal(report.selfCheck.status, "failed");
++  assert.equal(report.edits[0].status, "applied");
++  assert.equal(report.outputSha256, sha(CANDIDATE));
++});
++
++test("draft does not opt in from a non-boolean and does not keep a non-PDF", async () => {
++  const missing = mockEngine(CANDIDATE);
++  await assert.rejects(
++    editPdf(request(), { draft: "yes", engineFactory: missing.factory, quality: quality({ ok: false, failures: [{ code: "after_missing", id: "a", pageIndex: 0 }], warnings: [] }) }),
++    (e) => e.code === "SELF_CHECK_FAILED" && e.pdf === undefined,
++  );
++  const junk = new Uint8Array(Buffer.from("not-a-pdf"));
++  const engine = mockEngine(junk);
++  await assert.rejects(
++    editPdf(request(), { draft: true, engineFactory: engine.factory, quality: quality({ ok: false, failures: [{ code: "after_missing", id: "a", pageIndex: 0 }], warnings: [] }) }),
++    (e) => e.code === "SELF_CHECK_FAILED" && e.pdf === undefined,
++  );
++});
++
++test("draft preserves bytes when the self-check itself errors", async () => {
++  const engine = mockEngine(CANDIDATE);
++  const { pdf, report } = await editPdf(request(), {
++    draft: true,
++    engineFactory: engine.factory,
++    quality: {
++      capturePageLayout: () => ({ pi: 0 }),
++      repairPageLayout: () => ({ repairs: [], warnings: [] }),
++      inspectSavedPdf: async () => { throw new Error("inspect failed"); },
++    },
++  });
++  assert.deepEqual(pdf, CANDIDATE);
++  assert.equal(report.ok, false);
++  assert.equal(report.quality, "error");
++  assert.equal(report.selfCheck.status, "error");
++  assert.equal(report.error.code, "SELF_CHECK_FAILED");
++  assert.notEqual(report.selfCheck.status, "passed");
++});
++
++test("CLI stays strict and rejects the web draft field", async () => {
++  const dir = mkdtempSync(join(tmpdir(), "fpe-draft-cli-"));
++  try {
++    writeFileSync(join(dir, "in.pdf"), SOURCE);
++    const req = join(dir, "request.json");
++    writeFileSync(req, JSON.stringify({ input: "in.pdf", edits: [edit], reflow: true, draft: true }));
++    assert.throws(() => loadRequest(req), (e) => e.code === "INVALID_REQUEST");
++    writeFileSync(req, JSON.stringify({ input: "in.pdf", edits: [edit], reflow: true }));
++    const out = join(dir, "out.pdf");
++    const report = join(dir, "report.json");
++    const code = await main([req, "--out", out, "--report", report], {
++      stdout: () => {},
++      stderr: () => {},
++      editPdf: async () => ({ pdf: CANDIDATE, report: { ok: false, selfCheck: { status: "failed" } } }),
++    });
++    assert.equal(code, 1);
++    assert.equal(readFileSync(join(dir, "in.pdf")).equals(Buffer.from(SOURCE)), true);
++    let wrote = false;
++    try { readFileSync(out); wrote = true; } catch {}
++    assert.equal(wrote, false);
++  } finally {
++    rmSync(dir, { recursive: true, force: true });
++  }
++});
+-- 
+2.43.0
+

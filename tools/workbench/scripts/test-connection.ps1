@@ -84,6 +84,19 @@ $malformed += @(
 )
 foreach ($uri in $malformed) { Check ('rejects [{0}]' -f ($uri -replace "`r", '\r' -replace "`n", '\n')) (Test-Rejected $uri) }
 Check 'rejects null' (Test-Rejected $null)
+$nonceA = 'A' * 43; $nonceB = 'B' * 43; $nonceC = 'C' * 43
+$pairUri = "falsify://connect?port=7816&challenge=$nonceA&state=$nonceB&proof=$nonceC"
+$pairRoot = "falsify://connect/?port=65535&challenge=$nonceA&state=$nonceB&proof=$nonceC"
+$parsedPair = ConvertFrom-FalsifyConnectLink $pairUri
+Check 'pairing link keeps port and sets pairing' ($parsedPair.Port -eq 7816 -and $parsedPair.Pairing -eq $true -and $parsedPair.Challenge -ceq $nonceA)
+Check 'pairing root-slash link' ((ConvertFrom-FalsifyConnectLink $pairRoot).Port -eq 65535)
+Check 'port-only parser still rejects nonce links' (Test-Rejected $pairUri)
+Check 'pairing link rejects command suffix' (Test-Throws { ConvertFrom-FalsifyConnectLink ($pairUri + '&cmd=calc') })
+Check 'pairing link rejects token key' (Test-Throws { ConvertFrom-FalsifyConnectLink "falsify://connect?port=7816&token=abc&challenge=$nonceA&state=$nonceB&proof=$nonceC" })
+Check 'approval cancel is not launch' ((Get-FalsifyApprovalDecision -Origin 'https://shinick-han.github.io' -Choice 'no') -eq 'Cancel')
+Check 'approval without a choice asks' ((Get-FalsifyApprovalDecision -Origin 'https://shinick-han.github.io' -Choice '') -eq 'Ask')
+Check 'approval of another origin is refused' ((Get-FalsifyApprovalDecision -Origin 'https://evil.example' -Choice 'yes') -eq 'Refuse')
+Check 'approval yes is explicit' ((Get-FalsifyApprovalDecision -Origin 'https://shinick-han.github.io' -Choice 'yes') -eq 'Approve')
 
 # --- open-connection.ps1 fails closed before launching anything --------------------------
 $openScript = Join-Path $root 'open-connection.ps1'
@@ -101,6 +114,10 @@ $result = Invoke-Child @('-File', $openScript, 'falsify://connect?port=7817') $d
 Check 'open-connection valid link reaches launcher with typed port' ($result.ExitCode -eq 0 -and $result.Output -match 'DRY-RUN start-companion port=7817 ')
 $result = Invoke-Child @('-File', $openScript, 'falsify://connect/?port=7817') $dryRun
 Check 'open-connection ShellExecute root-slash link reaches launcher with typed port' ($result.ExitCode -eq 0 -and $result.Output -match 'DRY-RUN start-companion port=7817 ')
+$result = Invoke-Child @('-File', $openScript, $pairUri) @{ FALSIFY_CONNECT_DRY_RUN = '1'; FALSIFY_CONNECT_APPROVAL = 'no' }
+Check 'open-connection user cancel does not launch or print nonces' ($result.ExitCode -ne 0 -and $result.Output -match 'cancelled' -and $result.Output -notmatch [regex]::Escape($nonceA) -and $result.Output -notmatch 'DRY-RUN start-companion')
+$result = Invoke-Child @('-File', $openScript, $pairUri) @{ FALSIFY_CONNECT_DRY_RUN = '1'; FALSIFY_CONNECT_APPROVAL = 'yes' }
+Check 'open-connection approved pairing dry-run hides nonces' ($result.ExitCode -eq 0 -and $result.Output -match 'DRY-RUN start-companion port=7816 pairing=1 ' -and $result.Output -notmatch [regex]::Escape($nonceA))
 
 # --- Registered command quoting with spaces ----------------------------------------------
 $spacedDirectory = Join-Path ([System.IO.Path]::GetTempPath()) ('falsify launcher test ' + [guid]::NewGuid().ToString('N'))
@@ -111,7 +128,7 @@ try {
     Copy-Item -LiteralPath $openScript -Destination $percentDirectory
     $spacedScript = Join-Path $spacedDirectory 'open-connection.ps1'
     $command = New-FalsifyProtocolCommand -PowerShellPath $powerShell -ScriptPath $spacedScript
-    Check 'command exact format' ($command -ceq ('"' + $powerShell + '" -NoLogo -NoProfile -ExecutionPolicy Bypass -NoExit -File "' + $spacedScript + '" "%1"'))
+    Check 'command exact format' ($command -ceq ('"' + $powerShell + '" -NoLogo -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $spacedScript + '" "%1"'))
     Check 'command has no remote or eval surface' ($command -notmatch '(?i)http|-Command|-EncodedCommand|Invoke-|iex|\$\(')
     Add-Type -Namespace FalsifyTest -Name Native -MemberDefinition '[DllImport("shell32.dll", SetLastError = true, CharSet = CharSet.Unicode)] public static extern IntPtr CommandLineToArgvW(string cmd, out int count); [DllImport("kernel32.dll")] public static extern IntPtr LocalFree(IntPtr p);'
     function Split-CommandLine([string]$Line) {
@@ -119,13 +136,13 @@ try {
         try { 0..($count - 1) | ForEach-Object { [System.Runtime.InteropServices.Marshal]::PtrToStringUni([System.Runtime.InteropServices.Marshal]::ReadIntPtr($pointer, $_ * [IntPtr]::Size)) } }
         finally { $null = [FalsifyTest.Native]::LocalFree($pointer) }
     }
-    $prefix = @($powerShell, '-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-NoExit', '-File', $spacedScript)
+    $prefix = @($powerShell, '-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', $spacedScript)
     $argv = @(Split-CommandLine ($command.Replace('%1', 'falsify://connect?port=7816')))
     Check 'argv keeps spaced paths intact' (($argv -join '|') -ceq (($prefix + 'falsify://connect?port=7816') -join '|'))
     $argv = @(Split-CommandLine ($command.Replace('%1', 'falsify://connect/?port=7816')))
     Check 'argv keeps root-slash link as one argument' (($argv -join '|') -ceq (($prefix + 'falsify://connect/?port=7816') -join '|'))
     $argv = @(Split-CommandLine ($command.Replace('%1', 'falsify://connect?port=7816" -Command "calc')))
-    Check 'quote injection cannot add PowerShell options before -File' ((($argv[0..7]) -join '|') -ceq ($prefix -join '|'))
+    Check 'quote injection cannot add PowerShell options before -File' ((($argv[0..($prefix.Length - 1)]) -join '|') -ceq ($prefix -join '|'))
     $result = Invoke-Child @('-File', $spacedScript, 'falsify://connect?port=7816" -Command "calc') $dryRun
     Check 'quote injection becomes rejected script arguments' ($result.ExitCode -ne 0 -and $result.Output -notmatch 'DRY-RUN')
     $result = Invoke-Child @('-File', $spacedScript, 'falsify://connect?port=7818') $dryRun
@@ -162,7 +179,9 @@ $foreign = [pscustomobject]@{ UserKeyExists = $true; MachineKeyExists = $false; 
 Check 'install creates when absent' ((Get-FalsifyInstallDecision $absent $ownCommand).Action -eq 'Create')
 Check 'install refuses machine-wide owner' ((Get-FalsifyInstallDecision $machineOnly $ownCommand).Action -eq 'Refuse')
 Check 'install refuses foreign per-user owner' ((Get-FalsifyInstallDecision $foreign $ownCommand).Action -eq 'Refuse')
-Check 'install idempotent for own exact registration' ((Get-FalsifyInstallDecision (New-State) $ownCommand).Action -eq 'AlreadyInstalled')
+Check 'install idempotent for own exact registration' ((Get-FalsifyInstallDecision (New-State -Command $ownCommand) $ownCommand).Action -eq 'AlreadyInstalled')
+Check 'legacy NoExit command stays owned and upgrades to hidden exit' ((Test-FalsifyOwnedRegistration (New-State)) -and (Get-FalsifyInstallDecision (New-State) $ownCommand).Action -eq 'Update')
+Check 'new protocol command is hidden and exits' ($ownCommand -match '-WindowStyle Hidden -File "' -and $ownCommand -notmatch '-NoExit')
 Check 'install re-points own registration from moved checkout' ((Get-FalsifyInstallDecision (New-State -ScriptPath 'C:\Old Place\open-connection.ps1') $ownCommand).Action -eq 'Update')
 Check 'install refuses own registration when machine key appears' ((Get-FalsifyInstallDecision (New-State -Machine $true) $ownCommand).Action -eq 'Refuse')
 $tampered = @(
@@ -190,7 +209,7 @@ Check 'uninstall removes own registration from moved checkout' ((Get-FalsifyUnin
 function Get-RegistryFingerprint { (Get-FalsifyProtocolState | ConvertTo-Json -Depth 5 -Compress) }
 $before = Get-RegistryFingerprint
 $result = Invoke-Child @('-File', (Join-Path $root 'install-connection.ps1'), '-WhatIf')
-Check 'install -WhatIf shows fixed command' ($result.Output.Contains('-NoExit -File "' + $openScript + '" "%1"'))
+Check 'install -WhatIf shows fixed command' ($result.Output.Contains('-WindowStyle Hidden -File "' + $openScript + '" "%1"') -and $result.Output -notmatch '-NoExit')
 Check 'install -WhatIf leaves registry unchanged' ((Get-RegistryFingerprint) -ceq $before)
 $result = Invoke-Child @('-File', (Join-Path $root 'uninstall-connection.ps1'), '-WhatIf')
 Check 'uninstall -WhatIf leaves registry unchanged' ((Get-RegistryFingerprint) -ceq $before)
@@ -215,9 +234,11 @@ $sources = @{}
 foreach ($file in @('falsify-connection.psm1', 'companion-lifecycle.psm1', 'install-connection.ps1', 'open-connection.ps1', 'uninstall-connection.ps1', 'start-companion.ps1')) { $sources[$file] = Get-Content -LiteralPath (Join-Path $root $file) -Raw }
 $all = ($sources.Values -join "`n")
 $allCode = $all -replace '(?m)^\s*#.*$', ''
-# The one allowed Start-Process runs the broker inside the connection terminal itself (-NoNewWindow), never detached.
-$brokerLaunch = '$broker = Start-Process -FilePath $venvPython -ArgumentList (Join-FalsifyNativeArguments -Arguments $brokerArguments) -NoNewWindow -PassThru'
-Check 'only Start-Process is the in-terminal broker' (([regex]::Matches($allCode, 'Start-Process')).Count -eq 1 -and $sources['start-companion.ps1'].Contains($brokerLaunch))
+# The one allowed Start-Process is splatted. Foreground stays in this window; background is hidden and still this same call.
+$brokerLaunch = '$broker = Start-Process @brokerStart'
+Check 'only Start-Process is the broker' (([regex]::Matches($allCode, 'Start-Process')).Count -eq 1 -and $sources['start-companion.ps1'].Contains($brokerLaunch))
+Check 'foreground stays in the connection window' ($sources['start-companion.ps1'].Contains('$brokerStart.NoNewWindow = $true'))
+Check 'background is hidden only for approved pairing' ($sources['start-companion.ps1'].Contains("if (`$Background) { `$brokerStart.WindowStyle = 'Hidden' }"))
 Check 'no process termination' ($all -notmatch '(?i)Stop-Process|taskkill|\.Kill\(')
 Check 'no recursive registry delete' ($all -notmatch '(?i)Remove-Item[^\r\n]*-Recurse|Remove-ItemProperty|reg(\.exe)?\s+delete')
 Check 'no machine-wide writes' ($all -notmatch '(?i)(New-Item|Set-ItemProperty|Remove-Item)[^\r\n]*HKLM')

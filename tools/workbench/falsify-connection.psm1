@@ -36,6 +36,42 @@ function ConvertFrom-FalsifyConnectUri {
     return $port
 }
 
+# Port-only links stay on ConvertFrom-FalsifyConnectUri. A click-pairing link adds exactly three
+# nonces in fixed order. It still carries no bearer, password, command, model or origin.
+function ConvertFrom-FalsifyConnectLink {
+    param([AllowNull()][AllowEmptyString()][string]$Uri)
+    $rejected = 'Rejected: not a falsify://connect port link, with optional one-time challenge, state and proof.'
+    if ([string]::IsNullOrEmpty($Uri) -or $Uri.Length -gt 184) { throw $rejected }
+    $pair = [regex]::Match($Uri, '\Afalsify://connect/?\?port=([1-9][0-9]{3,4})&challenge=([A-Za-z0-9_-]{43})&state=([A-Za-z0-9_-]{43})&proof=([A-Za-z0-9_-]{43})\z', [System.Text.RegularExpressions.RegexOptions]::CultureInvariant)
+    if ($pair.Success) {
+        [int]$port = [int]::Parse($pair.Groups[1].Value, [System.Globalization.CultureInfo]::InvariantCulture)
+        if ($port -lt 1024 -or $port -gt 65535) { throw 'Rejected: port must be 1024-65535.' }
+        return [pscustomobject]@{ Port = $port; Challenge = $pair.Groups[2].Value; State = $pair.Groups[3].Value; Proof = $pair.Groups[4].Value; Pairing = $true }
+    }
+    try { [int]$portOnly = ConvertFrom-FalsifyConnectUri -Uri $Uri } catch { throw $rejected }
+    return [pscustomobject]@{ Port = $portOnly; Challenge = $null; State = $null; Proof = $null; Pairing = $false }
+}
+
+# Pure. Empty choice means the caller must show a visible dialog; it is not approval.
+function Get-FalsifyApprovalDecision {
+    param([Parameter(Mandatory)][string]$Origin, [AllowNull()][AllowEmptyString()][string]$Choice)
+    if ($Origin -cne $script:WebOrigin) { return 'Refuse' }
+    if ($Choice -ceq 'yes') { return 'Approve' }
+    if ($Choice -ceq 'no') { return 'Cancel' }
+    return 'Ask'
+}
+
+function Get-FalsifyPairingDirectory {
+    if (-not [string]::IsNullOrEmpty($env:FALSIFY_PAIRING_DIR)) { return $env:FALSIFY_PAIRING_DIR }
+    if ($env:OS -eq 'Windows_NT') {
+        $root = [Environment]::GetFolderPath('LocalApplicationData')
+        if ([string]::IsNullOrEmpty($root)) { throw 'Local application data is unavailable.' }
+        return (Join-Path $root 'falsify-workbench\pairing')
+    }
+    $base = if (-not [string]::IsNullOrEmpty($env:XDG_DATA_HOME)) { $env:XDG_DATA_HOME } else { Join-Path $HOME '.local/share' }
+    return (Join-Path $base 'falsify-workbench/pairing')
+}
+
 function Assert-FalsifyLocalPath {
     param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][string]$Label)
     if (-not [System.IO.Path]::IsPathRooted($Path) -or $Path -notmatch '\A[A-Za-z]:\\') { throw "$Label must be an absolute local drive path: $Path" }
@@ -52,13 +88,22 @@ function Resolve-FalsifyPowerShellPath {
 
 # The registered command line. Both paths are fixed and quoted; %1 is the only browser-supplied
 # token and is passed as one quoted script argument after -File (never as PowerShell code).
+# The click host is hidden and exits. Approval and failures use a visible dialog and the error log.
+# Manual start-companion.ps1 is a separate foreground window and is not this command.
 function New-FalsifyProtocolCommand {
     param([Parameter(Mandatory)][string]$PowerShellPath, [Parameter(Mandatory)][string]$ScriptPath)
     if ([System.IO.Path]::GetFileName($PowerShellPath) -notin @('powershell.exe', 'pwsh.exe')) { throw "Not a PowerShell executable: $PowerShellPath" }
     if ([System.IO.Path]::GetFileName($ScriptPath) -ne 'open-connection.ps1') { throw "Not the connect launcher: $ScriptPath" }
     Assert-FalsifyLocalPath -Path $PowerShellPath -Label 'PowerShell executable'
     Assert-FalsifyLocalPath -Path $ScriptPath -Label 'Launcher script'
-    return ('"{0}" -NoLogo -NoProfile -ExecutionPolicy Bypass -NoExit -File "{1}" "%1"' -f $PowerShellPath, $ScriptPath)
+    return ('"{0}" -NoLogo -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "{1}" "%1"' -f $PowerShellPath, $ScriptPath)
+}
+
+function Get-FalsifyOwnedProtocolCommands {
+    param([Parameter(Mandatory)][string]$PowerShellPath, [Parameter(Mandatory)][string]$ScriptPath)
+    $hidden = '"{0}" -NoLogo -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "{1}" "%1"' -f $PowerShellPath, $ScriptPath
+    $legacy = '"{0}" -NoLogo -NoProfile -ExecutionPolicy Bypass -NoExit -File "{1}" "%1"' -f $PowerShellPath, $ScriptPath
+    return @($hidden, $legacy)
 }
 
 # Read-only snapshot of the registry state that install/uninstall decisions are made from.
@@ -106,8 +151,8 @@ function Test-FalsifyOwnedRegistration {
     $command = $State.Subkeys['shell\open\command']
     if ($command.Count -ne 1 -or -not $command.ContainsKey('(default)')) { return $false }
     if ([string]::IsNullOrEmpty($root['FalsifyPowerShellPath']) -or [string]::IsNullOrEmpty($root['FalsifyScriptPath'])) { return $false }
-    $expected = '"{0}" -NoLogo -NoProfile -ExecutionPolicy Bypass -NoExit -File "{1}" "%1"' -f $root['FalsifyPowerShellPath'], $root['FalsifyScriptPath']
-    return ($command['(default)'] -ceq $expected)
+    $owned = Get-FalsifyOwnedProtocolCommands -PowerShellPath $root['FalsifyPowerShellPath'] -ScriptPath $root['FalsifyScriptPath']
+    return ($owned -contains $command['(default)'])
 }
 
 function Get-FalsifyInstallDecision {
@@ -149,6 +194,7 @@ function Get-FalsifyCliStatus {
     }
 }
 
-Export-ModuleMember -Function Get-FalsifyConnectionConstants, ConvertFrom-FalsifyConnectUri, Resolve-FalsifyPowerShellPath,
-    New-FalsifyProtocolCommand, Get-FalsifyProtocolState, Test-FalsifyOwnedRegistration, Get-FalsifyInstallDecision,
+Export-ModuleMember -Function Get-FalsifyConnectionConstants, ConvertFrom-FalsifyConnectUri, ConvertFrom-FalsifyConnectLink,
+    Get-FalsifyApprovalDecision, Get-FalsifyPairingDirectory, Resolve-FalsifyPowerShellPath,
+    New-FalsifyProtocolCommand, Get-FalsifyOwnedProtocolCommands, Get-FalsifyProtocolState, Test-FalsifyOwnedRegistration, Get-FalsifyInstallDecision,
     Get-FalsifyUninstallDecision, Test-FalsifyPortAvailable, Get-FalsifyCliStatus

@@ -1,0 +1,28 @@
+{
+  "schema": "falsify.browser-pdf.vendor.v1",
+  "engine": "mupdf.js",
+  "version": "1.28.1",
+  "license": "AGPL-3.0-or-later",
+  "npm": "https://www.npmjs.com/package/mupdf/v/1.28.1",
+  "source": "https://github.com/ArtifexSoftware/mupdf/releases/tag/1.28.1",
+  "correspondingSource": "https://cgit.ghostscript.com/mupdf.git/tag/?h=1.28.1",
+  "provenance": "Official npm browser/Node WASM and glue. Copied byte-for-byte from the installed mupdf@1.28.1 package. Not rebuilt from C sources and not a private falsify-pdf-editor candidate.",
+  "notUsed": [
+    "Shinick-Han/falsify-pdf-editor b2d6ff204fc00a540eed98097895aec3f08b8047 editcore: verified stream-order WASM is an untracked patched build, and the upstream PDFium binary is not a substitute",
+    "annotation-only FreeText, white overlay, raster-all-pages"
+  ],
+  "files": {
+    "mupdf.js": {
+      "sha256": "5d237eadcb9640584e0050f6f958e547887b7a54d80a04043e12be9420931076",
+      "bytes": 103250
+    },
+    "mupdf-wasm.js": {
+      "sha256": "25382abbfbf5c52191e5ac59e1412a0da88647fecfab0c1d797bb5948443eea4",
+      "bytes": 28861
+    },
+    "mupdf-wasm.wasm": {
+      "sha256": "5a30ef7b027f541ea8fc54e7c73f16414b0b59940741a12efe5e55f1fd0a99d7",
+      "bytes": 10409826
+    }
+  }
+}

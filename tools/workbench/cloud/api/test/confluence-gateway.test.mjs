@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { describe, test } from 'node:test';
 import harnessCore from '../../../app/dist/harness-core.js';
-import { archiveHash, validateArchive, buildHarnessArchive } from '../../../app/dist/review-bundle.mjs';
+import { archiveHash, validateArchive, buildHarnessArchive, buildPaperEditArchive } from '../../../app/dist/review-bundle.mjs';
 import worker from '../src/index.js';
 import {
   SESSION_HEADER,
@@ -1034,6 +1034,59 @@ describe('confluence gateway', { concurrency: false }, () => {
     const listed=await read(await gateway('/v1/confluence/archives',{headers:{Authorization:`Bearer ${minted.session}`},fetchImpl:upstream.fetchImpl}));
     assert.equal(listed.status,200);
     assert.equal(listed.json.items[0].title,built.title,'the team picker shows the human case title instead of only the storage hash');
+    assert.equal(upstream.calls.some(call => call.host !== 'api.atlassian.com' && call.host !== 'auth.atlassian.com'), false);
+  });
+
+  test('paper-edit archive round-trips with team consent and without a source PDF', async () => {
+    setReviewBundleForTests(null);
+    const outputHash = 'cd'.repeat(32);
+    const built = await buildPaperEditArchive({
+      id: 'pmr-synthetic-1',
+      createdAt: '2026-10-26T00:00:00.000Z',
+      sourceFileHash: 'ab'.repeat(32),
+      sourceName: 'synthetic.txt',
+      segments: [{ id: 's0', label: 'p1', text: 'Study does not show benefit.', pageIndex: 0 }],
+      edits: [{ id: 'e1', enabled: true, pageIndex: 0, segmentId: 's0', before: 'does not show', after: 'does show', origin: 'human', anchor: null }],
+      editRevision: 2,
+      output: { sha256: outputHash, revision: 2, verification: { applied: 1, unapplied: 0 } },
+      reviews: [{
+        id: 'rv1', createdAt: '2026-10-26T01:00:00.000Z', reviewer: 'Synthetic', caseLabel: 'manual',
+        verdict: 'supported', score: 4, note: 'Human reason only.',
+        alignment: { fileHash: outputHash, findingNotes: [{ id: 'F1', verdict: 'supported', note: 'Looked at the quote.' }] },
+        editRevision: 2, outputHash, stale: false,
+      }],
+    });
+    assert.equal(built.kind, 'paper-edit');
+    assert.equal(JSON.stringify(built).includes('%PDF-'), false);
+    assert.equal(JSON.stringify(built).includes('"harness"'), false);
+    const minted = await mint();
+    const auth = { 'Content-Type': 'application/json', Authorization: `Bearer ${minted.session}` };
+    const refused = mockUpstream();
+    const denied = await read(await gateway('/v1/confluence/archives', {
+      method: 'POST', headers: auth, body: { archive: built, teamShare: false }, fetchImpl: refused.fetchImpl,
+    }));
+    assert.equal(denied.status, 400);
+    assert.equal(denied.json.error.code, 'team_share_required');
+    assert.equal(refused.calls.some(call => call.path.includes('/wiki/')), false);
+    const upstream = mockUpstream();
+    const published = await read(await gateway('/v1/confluence/archives', {
+      method: 'POST', headers: auth, body: { archive: built, teamShare: true }, fetchImpl: upstream.fetchImpl,
+    }));
+    assert.equal(published.status, 201);
+    const validated = await validateArchive(JSON.parse(upstream.store.file));
+    const semantic = await archiveHash(validated);
+    assert.equal(published.json.archiveSha256, semantic);
+    assert.equal(validated.kind, 'paper-edit');
+    assert.match(upstream.store.summary, /Text and edits only/);
+    assert.match(upstream.store.summary, /no PDF/);
+    assert.equal(upstream.store.summary.includes('%PDF-'), false);
+    const readBack = await read(await gateway('/v1/confluence/archives/9001', {
+      headers: { Authorization: `Bearer ${minted.session}` }, fetchImpl: upstream.fetchImpl,
+    }));
+    assert.equal(readBack.status, 200);
+    assert.equal(readBack.json.archive.kind, 'paper-edit');
+    assert.equal(readBack.json.archive.data.record.edits[0].origin, 'human');
+    assert.equal(readBack.json.archiveSha256, semantic);
     assert.equal(upstream.calls.some(call => call.host !== 'api.atlassian.com' && call.host !== 'auth.atlassian.com'), false);
   });
 });

@@ -5,7 +5,7 @@
 Set-StrictMode -Version 2.0
 
 $script:LifecycleSchema = 'falsify-companion-lifecycle/1'
-$script:CompanionOptions = @('--port', '--web-origin', '--pdf-editor-root', '--pdf-editor-manifest', '--pdf-editor-source-root', '--pdf-editor-node')
+$script:CompanionOptions = @('--port', '--web-origin', '--token-display', '--pairing-dir', '--pdf-editor-root', '--pdf-editor-manifest', '--pdf-editor-source-root', '--pdf-editor-node')
 $script:DescriptorKeys = @('schema', 'pid', 'instanceId', 'serverPath', 'webOrigin', 'busy')
 
 if (-not ('FalsifyLifecycle.Native' -as [type])) {
@@ -215,6 +215,16 @@ function Test-FalsifyLegacyCompanion {
     return ($result.Status -eq 200 -and (Get-FalsifyJsonValue $result.Json 'red') -eq $true -and (Get-FalsifyJsonValue $result.Json 'blue') -eq $true)
 }
 
+# Posts the one-time nonces with the launcher header. The process token stays in the header and is not returned.
+function Register-FalsifyBrowserPairing {
+    param([Parameter(Mandatory)][int]$Port, [Parameter(Mandatory)][string]$Token, [Parameter(Mandatory)][string]$Challenge,
+          [Parameter(Mandatory)][string]$State, [Parameter(Mandatory)][string]$Proof)
+    if ($Challenge -notmatch '\A[A-Za-z0-9_-]{43}\z' -or $State -notmatch '\A[A-Za-z0-9_-]{43}\z' -or $Proof -notmatch '\A[A-Za-z0-9_-]{43}\z') { return $false }
+    $body = '{"schema":"falsify.pair-register.v1","challenge":"' + $Challenge + '","state":"' + $State + '","proof":"' + $Proof + '"}'
+    $result = Invoke-FalsifyLoopbackRequest -Port $Port -Method POST -Path '/api/pair/register' -Headers (Get-FalsifyLauncherHeaders $Token) -JsonBody $body
+    return ($result.Status -eq 200 -and (Get-FalsifyJsonValue $result.Json 'registered') -eq $true)
+}
+
 function Invoke-FalsifyCompanionRestart {
     param([Parameter(Mandatory)][int]$Port, [Parameter(Mandatory)][string]$Token, [Parameter(Mandatory)][string]$InstanceId)
     $body = [ordered]@{ schema = $script:LifecycleSchema; instanceId = $InstanceId } | ConvertTo-Json -Compress
@@ -302,5 +312,5 @@ function Wait-FalsifyBrokerReady {
 Export-ModuleMember -Function Split-FalsifyCommandLine, ConvertTo-FalsifyNativeArgument, Join-FalsifyNativeArguments, Test-FalsifyCompanionArgv,
     Resolve-FalsifyPortOccupant, Get-FalsifyPortOccupant, Test-FalsifySameOccupant, New-FalsifyLoopbackHttpClient, Invoke-FalsifyLoopbackRequest,
     Get-FalsifyCompanionToken, Get-FalsifyCompanionDescriptor, Test-FalsifyCompanionDescriptor, Test-FalsifyLegacyCompanion,
-    Invoke-FalsifyCompanionRestart, Get-FalsifyRestartOutcome, Get-FalsifyReuseMismatch, Get-FalsifyLauncherMutexName,
+    Invoke-FalsifyCompanionRestart, Register-FalsifyBrowserPairing, Get-FalsifyRestartOutcome, Get-FalsifyReuseMismatch, Get-FalsifyLauncherMutexName,
     Enter-FalsifyLauncherLock, Exit-FalsifyLauncherLock, Wait-FalsifyPortReleased, Wait-FalsifyBrokerReady

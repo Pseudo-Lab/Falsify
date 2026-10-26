@@ -133,7 +133,7 @@ $moduleSource = Get-Content -LiteralPath (Join-Path $root 'companion-lifecycle.p
 Check 'never terminates processes' (($startSource + $moduleSource) -notmatch '(?i)Stop-Process|taskkill|\.Kill\(|CloseMainWindow')
 $startCode = $startSource -replace '(?m)^\s*#.*$', ''
 $moduleCode = $moduleSource -replace '(?m)^\s*#.*$', ''
-Check 'broker is started only in this terminal' (([regex]::Matches($startCode, 'Start-Process')).Count -eq 1 -and $startCode -match 'Start-Process -FilePath \$venvPython [^\r\n]*-NoNewWindow -PassThru' -and $moduleCode -notmatch 'Start-Process')
+Check 'broker uses one launcher with foreground or hidden background mode' (([regex]::Matches($startCode, 'Start-Process')).Count -eq 1 -and $startCode -match 'Start-Process @brokerStart' -and $startCode -match '\$brokerStart\.WindowStyle = ''Hidden''' -and $startCode -match '\$brokerStart\.NoNewWindow = \$true' -and $moduleCode -notmatch 'Start-Process')
 Check 'launch lock released in finally' ($startSource -match '\}\s*finally\s*\{\s*Exit-FalsifyLauncherLock')
 Check 'broker foreground wait happens after the lock is released' ($startSource.LastIndexOf('Exit-FalsifyLauncherLock') -lt $startSource.IndexOf('WaitForExit(500)'))
 Check 'native HTTP disables redirects and proxies' ($moduleSource -match 'AllowAutoRedirect = \$false' -and $moduleSource -match 'UseProxy = \$false' -and $moduleSource -match 'client\.Timeout = ')

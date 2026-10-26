@@ -95,6 +95,13 @@
         native.addEventListener('change',paint);new MutationObserver(paint).observe(native,{childList:true,attributes:true,attributeFilter:['disabled'],subtree:true});paint();
       }
     }
+    function manualSign(){
+      const title=$('#sign-title');
+      if(!title||title.textContent!=='RED 실행 설정을 확인하세요')return;
+      title.textContent='원본에서 직접 고치세요';
+      const detail=$('#sign-detail');if(detail)detail.textContent='쪽을 보고 글자를 고칩니다. AI 실행과 외부 제안은 선택입니다.';
+      const label=$('#sign-action-label');if(label)label.textContent='원본 편집으로';
+    }
     function render(role,detail){
       const s=state[role];if(detail!==undefined)Object.assign(s,detail||{name:'',busy:false,hasResult:false});
       const sections=steps[role];if(!sections?.length)return;
@@ -103,13 +110,31 @@
       sections[1]?.classList.toggle('visual-waiting',!hasFile);sections[2]?.classList.toggle('visual-waiting',!hasResult&&!s.busy);
       sections[0]?.classList.toggle('visual-done',hasFile);sections[1]?.classList.toggle('visual-current',hasFile&&!hasResult);sections[2]?.classList.toggle('visual-current',hasResult);
       const start=$(role==='red'?'#red-start':'#doc-blue-start'),connected=FalsifyLocalBridge?.state()?.connected;
-      let note=s.busy?'검토 중':!hasFile?'먼저 논문을 놓아주세요.':!connected?'내 PC를 연결하면 실행할 수 있습니다.':start?.disabled?'실행 동의와 도구 설정을 확인해주세요.':'';
+      let note='';
+      if(s.busy)note='검토 중';
+      else if(!hasFile)note='먼저 논문을 놓아주세요.';
+      else if(role==='red'&&!hasResult)note='원본 쪽에서 직접 고칠 수 있습니다. AI 실행은 선택입니다.';
+      else if(!connected)note='내 PC를 연결하면 실행할 수 있습니다.';
+      else if(start?.disabled)note='실행 동의와 도구 설정을 확인해주세요.';
       if(s.note&&s.note.textContent!==note)s.note.textContent=note;
+      manualSign();
     }
     document.addEventListener('falsify:document-state',e=>render('red',e.detail));
     document.addEventListener('falsify:blue-state',e=>render('blue',e.detail));
     document.addEventListener('falsify:local-bridge',()=>{render('red');render('blue');});
     for(const role of ['red','blue']){const start=$(role==='red'?'#red-start':'#doc-blue-start');if(start)new MutationObserver(()=>render(role)).observe(start,{attributes:true,attributeFilter:['disabled']});render(role);}
+    manualSign();
+    const signTitle=$('#sign-title');
+    if(signTitle)new MutationObserver(()=>manualSign()).observe(signTitle,{childList:true,characterData:true,subtree:true});
+    const signAction=$('#sign-action');
+    if(signAction)signAction.addEventListener('click',event=>{
+      if($('#sign-title')?.textContent!=='원본에서 직접 고치세요')return;
+      event.stopImmediatePropagation();
+      const target=$('#paper-before-stage')||$('#paper-workspace');
+      if(!target)return;
+      if(typeof target.scrollIntoView==='function')target.scrollIntoView({block:'center'});
+      if(typeof target.focus==='function')target.focus({preventScroll:true});
+    },true);
 
     // The PC connection is a compact appliance, with the unchanged setup available on demand.
     const bridge=$('#local-bridge');if(bridge){
@@ -163,6 +188,7 @@
     const cloud=await globalThis.FalsifyConfluenceStore?.ready;
     const reviewPanel=$('#confluence-panel-review');if(reviewPanel)$('#evaluation-run').closest('label').after(reviewPanel);
     const harnessPanel=$('#confluence-panel-harness');if(harnessPanel&&manager)manager.querySelector('h2').after(harnessPanel);
+    const aiSummary=document.querySelector('#red-ai-optional > summary');if(aiSummary&&!aiSummary.querySelector('svg'))aiSummary.prepend(icon('bot'));
     document.documentElement.classList.add('visual-ready');
     return {render,choose,cloud};
   })();

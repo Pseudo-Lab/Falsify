@@ -552,8 +552,9 @@ function withSession(response, ctx) {
 }
 
 function summaryHtml(archive, archiveSha256) {
+  const manual = archive.kind === 'paper-edit' ? ' Text and edits only. The source PDF binary is not stored.' : '';
   return '<p>Falsify team archive (' + escapeHtml(archive.kind) + '). Title ' + escapeHtml(archive.title) + '. Id ' + escapeHtml(archive.id)
-    + '. SHA-256 ' + escapeHtml(archiveSha256) + '.</p><p>The lossless record is the attachment named ' + escapeHtml(archiveSha256)
+    + '. SHA-256 ' + escapeHtml(archiveSha256) + '.' + manual + '</p><p>The lossless record is the attachment named ' + escapeHtml(archiveSha256)
     + '.json. This page is only a short summary. JSON only; no PDF is stored. This is not a model execution or a performance result.</p>';
 }
 
@@ -597,7 +598,7 @@ async function normalizeArchive(archive) {
     if (error instanceof GatewayError) throw error;
     fail(422, 'invalid_archive');
   }
-  if (!normalized || normalized.schema !== 'falsify.confluence-archive.v1' || !['experiment', 'harness'].includes(normalized.kind)) fail(422, 'invalid_archive');
+  if (!normalized || normalized.schema !== 'falsify.confluence-archive.v1' || !['experiment', 'harness', 'paper-edit'].includes(normalized.kind)) fail(422, 'invalid_archive');
   if (typeof normalized.id !== 'string' || !normalized.id || normalized.id.length > 200 || /[\u0000-\u001f]/.test(normalized.id)) fail(422, 'invalid_archive');
   if (typeof normalized.title !== 'string' || !normalized.title.trim() || normalized.title.length > 500 || /[\u0000-\u001f\u007f]/.test(normalized.title)) fail(422, 'invalid_archive');
   if (!normalized.data || typeof normalized.data !== 'object' || Array.isArray(normalized.data)) fail(422, 'invalid_archive');

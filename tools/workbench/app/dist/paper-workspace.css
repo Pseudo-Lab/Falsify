@@ -1,0 +1,43 @@
+/* Single-page RED reader. Tokens stay on the airport palette. PDF.js text-layer
+   positioning is the small interoperability set its TextLayer inline styles require. */
+.paper-workspace{position:relative;margin-top:18px;padding-top:16px;border-top:1px solid var(--line)}
+.paper-workspace h3,.paper-workspace h4{margin:0}
+.paper-workspace .muted,.paper-workspace .form-feedback{max-width:75ch}
+.paper-toolbar,.paper-workspace .button-row{flex-wrap:wrap;align-items:center}
+.paper-page-label{font-variant-numeric:tabular-nums;min-width:4.5em;text-align:center}
+.paper-page-jump{display:inline-flex;gap:6px;align-items:center;font-weight:600}
+.paper-page-jump input{width:4.5em}
+.paper-compare{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px;margin:12px 0}
+.paper-pane{min-width:0}
+.paper-pane h4{font-size:13px;margin-bottom:8px}
+.paper-stage{max-width:100%;max-height:min(70vh,720px);overflow:auto;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);min-height:120px}
+.paper-stage:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+.paper-page{position:relative;margin:0 auto}
+.paper-canvas{display:block;background:var(--paper);border:1px solid var(--line)}
+.paper-text-layer{position:absolute;inset:0;overflow:clip;line-height:1;transform-origin:0 0;z-index:1;caret-color:var(--ink)}
+.paper-text-layer :is(span,br){color:transparent;position:absolute;white-space:pre;cursor:text;transform-origin:0 0}
+.paper-text-layer span[data-i]{--scale-x:1;--rotate:0deg;font-size:calc(var(--text-scale-factor,1) * var(--font-height));transform:rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--total-scale-factor))}
+.paper-text-layer ::selection{background:var(--yellow)}
+.paper-after-label{font-size:13px;font-weight:600;margin:0 0 8px}
+.paper-inline{margin:12px 0;padding:12px 0;border-top:1px solid var(--line)}
+.paper-inline.is-open{position:absolute;z-index:5;width:min(360px,calc(100% - 16px));margin:0;padding:12px;background:var(--paper);border:1px solid var(--line);border-radius:var(--radius)}
+.paper-inline.is-open.is-docked{position:fixed;left:8px;right:8px;bottom:8px;top:auto;width:auto}
+.paper-inline-before{white-space:pre-wrap;background:var(--surface);padding:10px 12px;border-radius:var(--radius)}
+.paper-inline label{font-weight:600}
+.paper-edits{list-style:none;margin:8px 0 16px;padding:0}
+.paper-edits li{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:10px 0;border-top:1px solid var(--line)}
+.paper-edit-origin,.paper-edit-cause{color:var(--muted);font-size:12px}
+.paper-edit-cause.is-failed{color:var(--red-ink)}
+.paper-output-hash{display:block;font-family:Consolas,monospace;font-size:12px;color:var(--muted);overflow-wrap:anywhere;word-break:break-all}
+.paper-share,.paper-draft,.paper-proposals{margin-top:12px;padding-top:12px;border-top:1px solid var(--line)}
+.paper-draft .check-row{display:flex;gap:10px;align-items:flex-start;margin:8px 0}
+.paper-workspace svg{width:16px;height:16px;flex:0 0 auto}
+.paper-workspace .button{min-height:40px}
+#paper-workspace-status.error,#paper-before-status.error,#paper-after-status.error,#paper-edit-status.error,#paper-generate-status.error,#paper-draft-status.error,#paper-proposal-status.error{color:var(--red-ink)}
+@media(max-width:700px){
+.paper-compare{grid-template-columns:minmax(0,1fr)}
+.paper-toolbar{flex-wrap:wrap}
+.paper-workspace .button-row button{width:100%}
+.paper-stage{max-height:min(70vh,720px)}
+.paper-inline.is-open{position:fixed;left:8px;right:8px;bottom:8px;top:auto;width:auto}
+}

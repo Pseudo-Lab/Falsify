@@ -130,7 +130,7 @@ check('error copy is fixed text; server codes map to fixed messages; bridge expo
   for(const k of Object.keys(P.DOWNGRADES))assert.ok(P.DOWNGRADES[k].length>5,k);
   const fs=require('node:fs'),path=require('node:path'),src=fs.readFileSync(path.join(__dirname,'../dist/local-bridge.js'),'utf8');assert.ok(src.includes('harness\\/profile\\/propose'));
   const js=fs.readFileSync(path.join(__dirname,'../dist/harness-profile.js'),'utf8');assert.ok(!/innerHTML|insertAdjacentHTML|outerHTML|eval\(|new Function/.test(js));
-  assert.ok(fs.readFileSync(path.join(__dirname,'../dist/index.html'),'utf8').includes('<script src="harness-profile.js" defer></script>'));
+  assert.match(fs.readFileSync(path.join(__dirname,'../dist/index.html'),'utf8'),/<script src="harness-profile\.js(?:\?v=[^"]+)?" defer><\/script>/);
   // The wrapper intro no longer claims the whole panel makes no model calls now that the AI draft panel is nested in it.
   const wrapperSrc=fs.readFileSync(path.join(__dirname,'../dist/harness-wrapper.js'),'utf8');assert.ok(wrapperSrc.includes('수동 빌더 자체는 등록 · 실행 · 설치 · 모델 호출을 하지 않으며'));assert.ok(wrapperSrc.includes('「AI 초안 요청」을 직접 누를 때'));
   assert.ok(!/manual_mapping:'[^']*구조화되지 않은 출력이라/.test(js));});

@@ -36,7 +36,7 @@ function labStub(extraRuns=[]){
   return {calls,db,before,unchanged:()=>JSON.stringify(db)===before,ready:Promise.resolve(),
     cloudSnapshot:async()=>{calls.push('snapshot'); return JSON.parse(JSON.stringify(db));},
     reviewSnapshot:async(id)=>{calls.push(['reviewSnapshot',id]); const snap=JSON.parse(JSON.stringify(db)); if(labStub.unsent) snap.reviews=snap.reviews.concat([{id:'unsent-1',runId:id,note:'UNSENT_REVIEW_MARKER',findingAssessments:[{id:'F9',verdict:'pending'}],reviewContext:{mode:'blue-only'}}]); return snap;},
-    openArchive:async(archive)=>{calls.push(['open',archive.kind,archive.kind==='harness'?archive.data&&archive.data.hash:archive.data&&archive.data.selectedRunId]); if(labStub.fail) throw Error('임시 열람을 열지 못했습니다. 로컬 기록은 그대로입니다.'); if(archive.kind==='harness') return {kind:'harness',hash:archive.data.hash}; return {kind:'experiment',runId:archive.data.selectedRunId};},
+    openArchive:async(archive)=>{const ref=archive.kind==='harness'?archive.data&&archive.data.hash:archive.kind==='paper-edit'?archive.id:archive.data&&archive.data.selectedRunId; calls.push(['open',archive.kind,ref]); if(labStub.fail) throw Error('임시 열람을 열지 못했습니다. 로컬 기록은 그대로입니다.'); if(archive.kind==='harness') return {kind:'harness',hash:archive.data.hash}; if(archive.kind==='paper-edit') return {kind:'paper-edit',id:archive.id}; return {kind:'experiment',runId:archive.data.selectedRunId};},
     closeArchive:async()=>{calls.push('closeArchive');},
     restoreArchive:async()=>{calls.push('restore'); throw Error('persistent restore');},
     review:async(id)=>{calls.push(['review',id]); return true;},
@@ -54,6 +54,7 @@ function codecStub(){
       last={schema:'falsify.confluence-archive.v1',kind:'experiment',id:selectedRunId,title:'Synthetic '+((included.find(r=>r.id===selectedRunId)||{}).role||'run'),data:{schema:'falsify.review-bundle.v1',selectedRunId,ledger:{schema:'falsify.experiment-ledger.v1',harnesses:(snapshot.harnesses||[]).filter(h=>included.some(r=>r.harnessHash===h.hash)),runs:included,reviews:reviews.filter(v=>want.has(v.runId))}}};
       return JSON.parse(JSON.stringify(last));},
     buildHarnessArchive:async(record)=>{calls.push(['buildHarness',record.hash]); last={schema:'falsify.confluence-archive.v1',kind:'harness',id:record.hash,title:record.config.name,data:{config:record.config,hash:record.hash}}; return JSON.parse(JSON.stringify(last));},
+    buildPaperEditArchive:async(record)=>{calls.push(['buildPaper',record&&record.id]); last={schema:'falsify.confluence-archive.v1',kind:'paper-edit',id:record.id,title:'Synthetic paper',data:{schema:'falsify.paper-edit-record.v1',record:{id:record.id},reviews:record.reviews||[]}}; return JSON.parse(JSON.stringify(last));},
     validateArchive:async(archive)=>{calls.push(['validate',archive.kind]); if(archive.schema!=='falsify.confluence-archive.v1'||!archive.kind) throw Error('bad archive'); last=JSON.parse(JSON.stringify(archive)); return JSON.parse(JSON.stringify(last));},
     archiveHash:async()=>HASH};}
 function caps(over={}){return {provider:'confluence',configured:true,siteUrl:'https://falsify.atlassian.net',spaceKey:'Falsify',spaceId:'65737',maxArchiveBytes:6*1024*1024,...over};}
@@ -499,6 +500,28 @@ test('team drawer connects from its own click and stale library preparation cann
   await until(()=>t.calls.some(c=>c.path==='/v1/confluence/archives'&&c.method==='GET'),'read after OAuth');assert.equal(t.calls.some(c=>c.path==='/v1/confluence/archives'&&c.method==='POST'),false);
   let release;const lab=labStub(),original=lab.cloudSnapshot;lab.cloudSnapshot=()=>new Promise(r=>{release=r;});const b=setup({lab});const cloud=await b.ready;
   const preparing=cloud.requestHarnessShare(H);b.$('confluence-review-disconnect').disabled=false;b.$('confluence-review-disconnect').click();release(await original());assert.equal(await preparing,false);assert.equal(b.$('confluence-harness-share').disabled,true);assert.ok(lab.unchanged());
+});
+
+test('paper-edit uses the existing team session, keeps local ledger bytes, and does not retry an unknown write',async()=>{
+  const api=teamApi(); const t=setup({routes:api.routes}); await t.ready; await connect(t); const app=await t.ready; const ledger=t.store.get(LEDGER_KEY);
+  await assert.rejects(app.publishPaperEdit({id:'pmr-1',reviews:[]},{}),/동의/);
+  await assert.rejects(app.publishPaperEdit({id:'pmr-1',reviews:[]},{teamShare:false}),/동의/);
+  assert.equal(t.calls.some(c=>c.method==='POST'&&c.path==='/v1/confluence/archives'),false);
+  const published=await app.publishPaperEdit({id:'pmr-1',reviews:[]},{teamShare:true});
+  assert.equal(published.stored,true); assert.equal(published.pageId,'1001');
+  const posts=t.calls.filter(c=>c.method==='POST'&&c.path==='/v1/confluence/archives');
+  assert.equal(posts.length,1); assert.equal(posts[0].body.teamShare,true); assert.equal(posts[0].body.archive.kind,'paper-edit');
+  assert.equal(t.codec.calls.some(c=>c[0]==='buildPaper'&&c[1]==='pmr-1'),true);
+  assert.equal(t.lab.calls.includes('record')||t.lab.calls.includes('bind'),false);
+  t.$('confluence-review-load').click(); await until(()=>/Synthetic paper/.test(t.$('confluence-review-list').textContent),'paper list');
+  openSaved(t,'confluence-review-list'); await until(()=>t.lab.calls.some(c=>c[0]==='open'&&c[1]==='paper-edit'&&c[2]==='pmr-1')&&t.location.hash==='#review','opened manual archive');
+  assert.match(t.$('confluence-review-status').textContent,/텍스트와 편집만/);
+  assert.equal(t.store.get(LEDGER_KEY),ledger);
+  let unknown=0; const failing=teamApi();
+  const broken=setup({routes:(method,path,init)=>{if(method==='POST'&&path==='/v1/confluence/archives'){unknown++; return {status:502,body:{error:{code:'write_unknown'}}}}; return failing.routes(method,path,init);}});
+  await broken.ready; await connect(broken);
+  await assert.rejects((await broken.ready).publishPaperEdit({id:'pmr-2',reviews:[]},{teamShare:true}),/다시 보내지/);
+  assert.equal(unknown,1); assert.equal(broken.store.get(LEDGER_KEY).includes('keep-local'),true);
 });
 
 (async()=>{let failed=0; for(const [name,fn] of tests){try{await fn(); console.log('ok - '+name);}catch(e){failed++; console.error('not ok - '+name+'\n'+(e.stack||e));}}

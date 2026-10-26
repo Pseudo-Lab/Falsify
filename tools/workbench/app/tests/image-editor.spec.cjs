@@ -201,7 +201,7 @@ test('panel: the separate text export and BLUE handoff are unaffected by image o
 test('page: image modules load before RED, CSS is linked, the disclosure sits in the RED execute step outside pre-analysis',()=>{
   const html=read('index.html'),order=[...html.matchAll(/<script src="([^"]+)"/g)].map(m=>m[1].split('?')[0]);
   assert.ok(order.indexOf('image-editor-core.js')>=0&&order.indexOf('image-editor-core.js')<order.indexOf('image-editor.js')&&order.indexOf('image-editor.js')<order.indexOf('document-red.js'));
-  assert.ok(html.includes('<link rel="stylesheet" href="image-editor.css">'));const csp=html.match(/Content-Security-Policy" content="([^"]+)"/)[1];assert.match(csp,/img-src 'self' data:;/,'CSP unchanged: previews are data: URLs');
+  assert.match(html,/<link rel="stylesheet" href="image-editor\.css(?:\?v=[^"]+)?">/);const csp=html.match(/Content-Security-Policy" content="([^"]+)"/)[1];assert.match(csp,/img-src 'self' data:;/,'CSP unchanged: previews are data: URLs');
   const panel=html.match(/<details class="red-help image-edit" id="image-edit" hidden>[\s\S]*?<\/details>/)?.[0];assert.ok(panel);
   assert.ok(html.indexOf('id="red-analysis"')<html.indexOf('id="image-edit"')&&html.indexOf('id="image-edit"')<html.indexOf('id="red-level"'));assert.ok(!html.match(/<div class="red-analysis"[\s\S]*?<\/details><\/div>/)[0].includes('image-'));
   for(const id of ['image-list','image-status','image-png','image-before','image-after','image-consent','image-export','image-download-pdf','image-download-report'])assert.ok(panel.includes('id="'+id+'"'),id);
