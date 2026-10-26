@@ -90,7 +90,7 @@ pre,table{break-inside:avoid}
 <h3>RED · 실험용 변경 사본 만들기</h3>
 <ol>
 <li><b class="ui">파일 입력</b>으로 논문을 올리고 <b class="ui">추출 결과 확인</b>에서 텍스트를 봅니다.</li>
-<li><b class="ui">공격 단계</b>와 CLI·<b class="ui">모델 ID</b>·<b class="ui">effort</b>를 고르고 전송 동의를 체크한 뒤 <b class="ui">선택 harness로 전체 검토</b>.</li>
+<li><b class="ui">공격 단계</b>와 CLI·<b class="ui">모델 ID</b>·<b class="ui">effort</b>를 고르고 전송 동의를 체크한 뒤 <b class="ui">실행</b>.</li>
 <li>후보는 처음에 모두 미선택입니다. 쓸 후보만 체크하고 필요하면 After를 직접 고칩니다.</li>
 <li>실험용 사본 동의를 체크하고 <b class="ui">보존 검사 후 완성본 다운로드</b>, 그리고 <b class="ui">변경 계획 JSON 저장</b>. 계획 JSON은 BLUE에 주지 않습니다.</li>
 </ol>
@@ -98,7 +98,7 @@ pre,table{break-inside:avoid}
 <h3>BLUE · 독립 검토</h3>
 <ol>
 <li><b class="ui">BLUE 검토 파일</b>에 아무 시험용 문서나 올립니다. RED를 먼저 할 필요가 없습니다.</li>
-<li>BLUE용 harness와 CLI를 고르고 동의한 뒤 <b class="ui">BLUE 독립 검토 시작</b>. 결과는 <b class="ui">결과 · BLUE 지적</b>에 나옵니다.</li>
+<li>BLUE용 harness와 CLI를 고르고 동의한 뒤 <b class="ui">실행</b>. 결과는 <b class="ui">결과 · BLUE 지적</b>에 나옵니다.</li>
 </ol>
 <p>연결 없이 쓰려면 2단계 대신 <b class="ui">수동 JSON 교환 (로컬 연결 없이)</b>으로 요청·응답 JSON을 주고받습니다(<a href="#connect">연결 방식</a>).</p>
 <h3>검수 · 사람 평가</h3>
@@ -108,10 +108,10 @@ pre,table{break-inside:avoid}
 </ol>
 <h3>공동 기록 · 다른 사람의 Harness와 평가 나누기</h3>
 <ol>
-<li><b class="ui">Confluence에 연결</b>을 눌러 Falsify 공간에 접근할 수 있는 Atlassian 계정으로 연결합니다. Workbench 별도 가입이나 비밀번호는 사용하지 않습니다. companion·CLI 연결과는 별개입니다.</li>
-<li>공유할 실험 또는 Harness 하나를 고르고 전송 범위를 확인합니다. <b class="ui">Confluence에 팀 공유</b>는 Falsify 팀원에게 공개한다는 뜻입니다. 다른 로컬 기록과 과거 개인 기록은 자동으로 올리지 않습니다.</li>
-<li>다른 브라우저에서도 연결 후 <b class="ui">팀 기록 불러오기</b>로 관련 RED·BLUE와 항목별 검수를 임시로 엽니다. 모델을 다시 실행하거나 브라우저에 영구 복사하지 않습니다. 새 검수는 다시 팀 공유해야 보관됩니다. 새로고침·연결 해제·닫기 또는 최대 12시간 후에는 임시 기록과 미공유 메모가 사라집니다.</li>
-<li>공유 Harness는 편집기에서 미리보기한 뒤 직접 검토·등록합니다. 불러오기만으로 등록·실행되지 않습니다. 현재 아카이브는 추출문·응답·검수 JSON이며 원본·수정 PDF 바이트는 보관하지 않습니다.</li>
+<li><b class="ui">팀 기록</b>을 눌러 Falsify 공간에 접근할 수 있는 Atlassian 계정으로 연결합니다. Workbench 별도 가입이나 비밀번호는 사용하지 않습니다. companion·CLI 연결과는 별개입니다.</li>
+<li>공유할 실험을 고르거나 내 도구의 저장 버튼을 누릅니다. 공개 범위를 확인하고 <b class="ui">공개하고 저장</b>을 누르세요. <b class="ui">팀에 저장</b>는 Falsify 팀원에게 공개한다는 뜻입니다. 다른 로컬 기록과 과거 개인 기록은 자동으로 올리지 않습니다.</li>
+<li>다른 브라우저에서도 연결 후 <b class="ui">팀 기록</b>로 관련 RED·BLUE와 항목별 검수를 임시로 엽니다. 모델을 다시 실행하거나 브라우저에 영구 복사하지 않습니다. 새 검수는 다시 팀 공유해야 보관됩니다. 새로고침·연결 해제·닫기 또는 최대 12시간 후에는 임시 기록과 미공유 메모가 사라집니다.</li>
+<li>공유 Harness는 미리보기한 뒤 <b class="ui">내 도구에 추가</b>로 등록합니다. 불러오기만으로 등록·실행되지 않습니다. 현재 아카이브는 추출문·응답·검수 JSON이며 원본·수정 PDF 바이트는 보관하지 않습니다.</li>
 </ol>
 </section>
 
@@ -209,7 +209,7 @@ python3 -m venv .venv
 <li><strong>선택 사전분석</strong>: PDF라면 연결 후 <b class="ui">PDF 사전분석</b>을 누를 수 있습니다. 모델을 부르지 않고 쪽·객체 수와 텍스트 배치 상태만 참고용으로 보여 줍니다. 편집 허가나 품질 판정이 아닙니다.</li>
 <li><strong>설정</strong>: <b class="ui">공격 단계</b>에서 <b class="ui">L1 · 명시적 모순</b>, <b class="ui">L2 · 필요한 조건 누락</b>, <b class="ui">L3 · 근거 없는 해석</b> 중 하나를 고릅니다. Harness 선택 아래 <b class="ui">CLI</b>(<b class="ui">Harness 지정값</b>, <b class="ui">Codex CLI</b>, <b class="ui">Claude Code CLI</b>), <b class="ui">모델 ID</b>, <b class="ui">effort</b>(low/medium/high)를 고릅니다. 모델 목록은 입력 제안일 뿐입니다.</li>
 <li><strong>예산</strong>: <b class="ui">고급 설정 · 최대 모델 호출</b>(1–32)과 harness의 호출 상한 중 작은 값이 실제 상한입니다. 긴 추출문은 여러 묶음으로 나뉘어 전달되며, 전체를 전달할 예산이 모자라면 모델을 부르기 전에 시작하지 않습니다.</li>
-<li><strong>실행</strong>: 전체 추출 텍스트 전송 동의를 체크하고 <b class="ui">선택 harness로 전체 검토</b>. <b class="ui">검토 취소</b>는 결과를 버립니다. 이미 시작된 CLI 호출은 최대 180초까지 이어질 수 있습니다.</li>
+<li><strong>실행</strong>: 전체 추출 텍스트 전송 동의를 체크하고 <b class="ui">실행</b>. <b class="ui">검토 취소</b>는 결과를 버립니다. 이미 시작된 CLI 호출은 최대 180초까지 이어질 수 있습니다.</li>
 <li><strong>후보 선택</strong>: <b class="ui">결과 · 후보 선택과 사본</b>에서 각 후보의 Before(원본 인용)와 After를 읽습니다. 처음에는 모두 미선택이며, After는 직접 고칠 수 있습니다. After를 바꾸면 이전 다운로드의 검증은 무효가 됩니다. 현재 기본 텍스트 경로에서는 Before에 있는 숫자 토큰, 대괄호 인용(<code>[12]</code> 등), URL을 After에서 그대로 유지해야 하며, 바꾸면 "이번 범위에서는 수치·대괄호 인용·URL을 변경할 수 없습니다."로 거부됩니다.</li>
 <li><strong>저장</strong>: 실험용 사본 동의 후 <b class="ui">보존 검사 후 완성본 다운로드</b>. 검사에 실패하면 다운로드가 막힙니다. <b class="ui">변경 계획 JSON 저장</b>은 변경 근거를 따로 남기며 <strong>BLUE에 넣지 않습니다</strong>. 계획은 검수에서만 대조합니다. PDF는 <b class="ui">다운로드한 사본 미리보기</b>로 받은 바이트를 다시 확인해 그려 볼 수 있습니다(화면 확인용).</li>
 </ol>
@@ -249,7 +249,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\start-companion.ps1 -NoIns
 <ul>
 <li><strong>독립 입력</strong>: <b class="ui">BLUE 검토 파일</b>에 수정 사본, 원본, 대조군 등 어떤 시험 파일이든 직접 고릅니다(PDF, TXT, MD, DOCX, ODT, HTML). RED 없이 써도 됩니다. RED 계획·정답·검수 기록은 모델 입력에 넣지 않습니다.</li>
 <li><strong>텍스트만 읽음</strong>: 현재 BLUE는 추출한 <strong>텍스트만</strong> 받습니다. 그림·도표 이미지와 수식 렌더링은 보지 않습니다. 그림을 바꾼 사본에서 BLUE가 아무것도 찾지 못해도 BLUE의 품질이나 회피 성공의 증거가 아닙니다.</li>
-<li><strong>실행</strong>: BLUE용 harness와 <b class="ui">CLI</b>·<b class="ui">모델 ID</b>·<b class="ui">effort</b>를 고르고(RED와 별개), 전송 동의 후 <b class="ui">BLUE 독립 검토 시작</b>. 문서에 제목·저자·출처가 남아 있을 수 있습니다.</li>
+<li><strong>실행</strong>: BLUE용 harness와 <b class="ui">CLI</b>·<b class="ui">모델 ID</b>·<b class="ui">effort</b>를 고르고(RED와 별개), 전송 동의 후 <b class="ui">실행</b>. 문서에 제목·저자·출처가 남아 있을 수 있습니다.</li>
 <li><strong>긴 문서</strong>: 한 묶음이면 원문 전체를 한 번에 보냅니다. 여러 묶음(N개)이면 묶음 읽기 N회 + 재확인 대상 선택 1회 + 최종 판단 1회, 총 N+2회가 필요하며 예산이 모자라면 시작하지 않습니다. 재확인은 모델이 고른 <strong>일부 원문 구간</strong>(최대 8곳)만 다시 읽는 것이지 PDF 전체를 다시 읽는 것이 아닙니다.</li>
 <li><strong>결과</strong>: <b class="ui">결과 · BLUE 지적</b>에 지적과 원문 인용이 나옵니다. "전체 추출 텍스트 전달 완료"는 텍스트를 다 보냈다는 뜻일 뿐 정확도나 결함 전수 탐지를 뜻하지 않습니다. 유보·거절은 그대로 표시하고 자동 재시도하지 않습니다. 저장은 자동이며, 실패하면 <b class="ui">BLUE 실행 결과 기록</b>으로 다시 시도합니다.</li>
 </ul>
@@ -388,13 +388,13 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\start-companion.ps1 -NoIns
 <h3>RED만 쓰기</h3>
 <ol>
 <li>직접 만든 짧은 시험용 TXT를 <b class="ui">RED 논문 파일</b>에 올립니다.</li>
-<li><b class="ui">L1 · 명시적 모순</b>, <b class="ui">Codex CLI</b>를 고르고 동의 후 <b class="ui">선택 harness로 전체 검토</b>.</li>
+<li><b class="ui">L1 · 명시적 모순</b>, <b class="ui">Codex CLI</b>를 고르고 동의 후 <b class="ui">실행</b>.</li>
 <li>후보 하나만 체크하고 After를 다듬은 뒤 <b class="ui">보존 검사 후 완성본 다운로드</b>와 <b class="ui">변경 계획 JSON 저장</b>.</li>
 </ol>
 <h3>BLUE만 쓰기 (다른 harness)</h3>
 <ol>
 <li><b class="ui">Harness</b>에서 위 stdio 예시를 경로만 고쳐 등록합니다.</li>
-<li>BLUE에서 그 harness를 고르고 아무 시험 PDF를 <b class="ui">BLUE 검토 파일</b>에 올린 뒤, 코드 실행 동의와 함께 <b class="ui">BLUE 독립 검토 시작</b>.</li>
+<li>BLUE에서 그 harness를 고르고 아무 시험 PDF를 <b class="ui">BLUE 검토 파일</b>에 올린 뒤, 코드 실행 동의와 함께 <b class="ui">실행</b>.</li>
 <li>예시 wrapper는 abstain하므로 결과는 유보입니다. 이는 정상이며 탐지 실패가 아닙니다. 자기 모델 pipeline으로 바꿔 씁니다.</li>
 </ol>
 <h3>이어서 쓰기 (선택)</h3>

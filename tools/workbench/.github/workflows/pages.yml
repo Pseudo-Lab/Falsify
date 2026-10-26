@@ -24,6 +24,17 @@ jobs:
       - name: Browser contracts
         working-directory: app
         run: npm test
+      - name: Isolated visual workflow browser dependencies
+        working-directory: app
+        run: |
+          npm ci --ignore-scripts
+          npx playwright install --with-deps chromium
+      - name: File intake and human verdict browser regression (synthetic only)
+        run: |
+          python -m http.server 7851 --bind 127.0.0.1 --directory app/dist > "$RUNNER_TEMP/falsify-ui.log" 2>&1 &
+          ui_server_pid=$!
+          trap 'kill "$ui_server_pid"' EXIT
+          npm run test:browser --prefix app
       - name: Portable BLUE sources (offline only)
         run: |
           python app/examples/evidence_blue_v033/build_profile.py

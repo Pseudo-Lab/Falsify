@@ -1,0 +1,49 @@
+/* Refinement of the incumbent airport surfaces. All symbols come from Lucide. */
+.visual-drop{display:block;position:relative;border:2px dashed var(--border-strong,#aeb6bc);border-radius:var(--radius);background:var(--paper);margin:18px 0 8px;transition:border-color 160ms,background-color 160ms}
+.visual-drop:hover,.visual-drop:focus-within,.visual-drop.drop-valid{border-color:var(--ink);background:var(--surface)}
+.visual-drop.drop-invalid{border-color:var(--red-ink)}
+.visual-file-label{position:relative!important;display:flex!important;align-items:center;justify-content:center;gap:26px;min-height:216px;width:100%;max-width:none!important;padding:28px!important;margin:0!important;cursor:pointer}
+.visual-file-input{position:absolute!important;inset:0;width:100%!important;height:100%;opacity:0;cursor:pointer;margin:0!important}
+.visual-file-copy{display:grid;gap:8px;min-width:0;max-width:52ch}
+.visual-file-title{font-size:22px;line-height:1.4;overflow-wrap:anywhere}
+.visual-file-meta{font-size:13px;font-weight:400;color:var(--muted)}
+.visual-paper{flex:0 0 88px;min-height:112px;display:grid;place-items:center;background:var(--paper);border:1px solid var(--line)}
+.visual-paper>svg{width:42px;height:42px}.visual-paper canvas{display:block;width:88px;max-height:126px;object-fit:contain}
+.visual-drop.has-file{border-style:solid}.visual-drop.has-file .visual-file-label{min-height:168px;justify-content:flex-start}
+.visual-drop+.form-feedback:empty,#import-status:empty{display:none}
+.visual-details{margin:12px 0;color:var(--ink)}.visual-details>summary{cursor:pointer;font-size:13px;font-weight:600;padding:9px 0;min-height:40px}
+.visual-details[open]>summary{margin-bottom:10px}.visual-details:focus-within>summary{color:var(--ink)}
+.visual-route{display:flex;align-items:center;gap:18px;margin:0 0 20px;color:var(--muted)}.visual-route svg{width:26px;height:26px}.visual-route svg:nth-child(even){width:18px}
+.visual-ready .visual-step.visual-waiting{padding-top:16px;padding-bottom:16px;background:transparent;border-color:var(--line)}
+.visual-ready .visual-waiting>:not(.step-head){display:none!important}
+.visual-ready .visual-waiting .step-head{margin:0}.visual-ready .visual-waiting .step-head h2{font-size:16px;color:var(--muted)}
+.visual-step.visual-current{border-color:var(--border-strong,#aeb6bc)}
+.visual-step.visual-done .step-head .step-code{background:var(--surface);color:var(--ink)}
+.visual-ready .step-code>svg{width:21px;height:21px}
+.visual-ready .visual-step .step-head p{display:none}
+.visual-run{display:inline-flex;align-items:center;gap:12px;min-height:52px;padding-left:22px!important;padding-right:26px!important}
+.visual-run>svg{width:26px;height:26px}.visual-next{min-height:20px;margin-top:8px;color:var(--muted);font-size:13px}
+.button:has(>svg),.text-button:has(>svg){display:inline-flex;align-items:center;justify-content:center;gap:8px}
+.visual-tool{display:flex;align-items:center;gap:14px;width:100%;padding:16px;border:1px solid var(--border-strong,#aeb6bc);border-radius:var(--radius);background:var(--paper);color:var(--ink);text-align:left;font-weight:700}
+.visual-tool>svg{width:28px;height:28px}.visual-tool:hover{background:var(--surface)}.visual-tool>svg:last-child{width:18px;height:18px;margin-left:auto}
+.visual-tool-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;max-height:330px;overflow:auto}
+.visual-tool-choice{display:flex;align-items:center;gap:12px;padding:14px;min-height:58px;text-align:left;background:var(--paper);color:var(--ink);border:1px solid var(--line);border-radius:var(--radius)}
+.visual-tool-choice[aria-pressed=true]{border:2px solid var(--ink);padding:13px}.visual-tool-choice:hover{background:var(--surface)}
+.visual-connection{padding:0!important;border:1px solid var(--line)!important;background:var(--paper)}
+.visual-connection-details>summary{display:flex;align-items:center;gap:12px;padding:14px 22px;cursor:pointer;list-style:none}
+.visual-connection-details>summary::-webkit-details-marker{display:none}.visual-pc-state{margin-left:auto;color:var(--muted);font-size:13px}.visual-connection-body{padding:0 22px 22px}
+.visual-connection .step-head{display:none}.visual-connection-details[open]>summary{border-bottom:1px solid var(--line);margin-bottom:16px}
+.visual-ready #harness-library>article{position:relative;padding:20px 0 20px 42px;border-bottom:1px solid var(--line)}
+.visual-ready #harness-library>article>svg{position:absolute;left:0;top:22px;width:26px;height:26px}
+.visual-ready #harness-library h4{font-size:15px}.visual-ready #harness-library>article>p{font-size:13px;color:var(--muted);overflow-wrap:anywhere}
+.visual-ready #harness-library .button-row{margin-top:12px}.visual-ready #harness-library details p{white-space:pre-wrap;overflow-wrap:anywhere;max-height:320px;overflow:auto}
+.visual-ready .connection-plan{margin-top:24px}
+.visual-verdicts{display:flex;flex-wrap:wrap;gap:7px;margin:8px 0 16px}
+.visual-field-label{display:block;font-weight:600}
+.visual-verdict{display:flex;align-items:center;justify-content:center;gap:6px;min-height:44px;padding:8px 12px;background:var(--paper);color:var(--ink);border:1px solid var(--line);border-radius:var(--radius);font-size:13px}
+.visual-verdict[aria-pressed=true]{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+.visual-verdict:hover{border-color:var(--ink)}.visual-verdict svg{width:18px;height:18px}
+.visual-ready #evaluation-form>.ledger-fields{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+.visual-ready #evaluation-form>.visual-details label{display:block;margin:12px 0}
+@media(max-width:700px){.visual-file-label{flex-direction:column;gap:16px;padding:24px!important;min-height:250px;text-align:center}.visual-drop.has-file .visual-file-label{flex-direction:row;min-height:150px;text-align:left}.visual-file-title{font-size:18px}.visual-tool-list{grid-template-columns:1fr}.visual-route{gap:14px}.visual-tool{padding:14px}.visual-ready #harness-library>article{padding-left:36px}.visual-ready #evaluation-form>.ledger-fields{grid-template-columns:1fr}}
+@media(prefers-reduced-motion:reduce){.visual-drop{transition:none}}

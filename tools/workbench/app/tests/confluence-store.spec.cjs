@@ -115,7 +115,7 @@ async function connect(t,token=TOKEN){
   t.window.dispatchEvent(ev); await until(()=>/팀 공간에 연결했습니다/.test(t.$('confluence-review-status').textContent),'connected');
 }
 function arm(t,id='blue-1'){t.$('evaluation-run').value=id; t.$('evaluation-run').change(); t.$('confluence-review-consent').checked=true; t.$('confluence-review-consent').change();}
-function openSaved(t,listId){const btn=t.$(listId).find(n=>n.tagName==='BUTTON'&&n.textContent==='이 보관 열기'); assert.ok(btn,'open button'); btn.click();}
+function openSaved(t,listId){const btn=t.$(listId).find(n=>n.tagName==='BUTTON'&&n.textContent==='열기'); assert.ok(btn,'open button'); btn.click();}
 
 test('index loads Confluence controls only and cloud-config names that provider',()=>{
   const html=fs.readFileSync(path.resolve(__dirname,'../dist/index.html'),'utf8');
@@ -132,12 +132,14 @@ test('startup does not upload, and the local ledger tools stay on the results bo
   assert.equal(t.$('view-results').children[1].id,'confluence-panel-results');
   assert.equal(t.$('ledger-export').textContent,'전체 기록 JSON 백업');
   assert.equal(t.$('ledger-import').id,'ledger-import');
-  for(const id of ['confluence-review-connect','confluence-review-share','confluence-review-load','confluence-results-connect','confluence-harness-connect']) assert.equal(t.$(id).textContent, id.endsWith('connect')?'Confluence에 연결':id.endsWith('share')?'Confluence에 팀 공유':'팀 기록 불러오기');
+  for(const id of ['confluence-review-connect','confluence-review-share','confluence-review-load','confluence-results-connect','confluence-harness-connect']) assert.equal(t.$(id).textContent, id.endsWith('connect')?'팀 연결':id.endsWith('share')?'공개하고 저장':'팀 기록');
   assert.equal([...t.body.walk()].some(n=>n.type==='password'||/api.?key|비밀번호|비공개\/공유|username/i.test(n.textContent+n.id)),false);
   assert.match(t.$('confluence-panel-review').textContent,/원본 PDF/);
   const banners=[...t.body.walk()].filter(n=>n.classList.contains('confluence-temporary')).map(n=>n.textContent);
   assert.ok(banners.length>=3);
-  for(const text of banners) assert.match(text,/팀 기록은 Confluence에 보관.*기존 로컬 기록과 백업은 유지/);
+  for(const text of banners) assert.equal(text,'');
+  assert.ok([...t.body.walk()].filter(n=>n.classList.contains('confluence-temporary')).every(n=>n.hidden),'no remote-view warning before a view is open');
+  assert.match(t.$('confluence-panel-review').textContent,/기존 로컬 기록과 백업은 유지/);
   assert.equal(t.$('confluence-review-close-temp').textContent,'임시 열람 닫기'); assert.equal(t.$('confluence-review-close-temp').hidden,true);
   assert.ok(!/면제|정책상 허용|exempt/i.test(t.body.textContent));
   assert.ok(!/과학적 결론이 아닙니다/.test('')&&!/gold|정확도 검증|온라인 표시/.test(t.body.textContent));
@@ -266,7 +268,7 @@ test('unknown write, conflict, oversize, permission and empty list are actionabl
   mode='oversize'; const postsBefore=t.calls.filter(c=>c.path==='/v1/confluence/archives'&&c.method==='POST').length; arm(t); t.$('confluence-review-share').click(); await until(()=>/UTF-8 크기 한도/.test(t.$('confluence-review-status').textContent),'oversize');
   assert.equal(t.calls.filter(c=>c.path==='/v1/confluence/archives'&&c.method==='POST').length,postsBefore,'oversize is not posted');
   assert.ok(t.body.textContent.length<100000,'oversized archive is not rendered');
-  mode='empty'; t.$('confluence-review-load').click(); await until(()=>/표시할 보관이 없습니다/.test(t.$('confluence-review-status').textContent),'empty');
+  mode='empty'; t.$('confluence-review-load').click(); await until(()=>/팀 서랍이 비어 있습니다/.test(t.$('confluence-review-list').textContent),'empty');
   mode='cursor'; t.$('confluence-review-load').click(); await until(()=>/따라가지 않았습니다/.test(t.$('confluence-review-status').textContent),'cursor');
   assert.equal(t.calls.some(c=>c.url.includes('evil.example')),false); assert.ok(!t.body.textContent.includes('evil.example'));
   assert.equal(t.lab.unchanged(),true);
@@ -477,6 +479,26 @@ test('styles keep the airport tokens and do not paint an online lamp',()=>{
   const css=fs.readFileSync(path.resolve(__dirname,'../dist/confluence-store.css'),'utf8');
   assert.match(css,/var\(--line\)/); assert.match(css,/var\(--muted\)/); assert.match(css,/#246388/); assert.match(css,/var\(--red-ink\)/);
   assert.ok(!/box-shadow|#[0-9a-f]*[fF][fF][cC][cC]00|#0f0|online/i.test(css));
+});
+
+test('library share targets an exact hash without changing either execution selection or posting on prepare',async()=>{
+  const t=setup();await t.ready;await connect(t);t.$('red-harness').value='red-unchanged';t.$('blue-harness').value=H;
+  const cloud=await t.ready;assert.equal(await cloud.requestHarnessShare('b'.repeat(64)),true);
+  assert.equal(t.$('red-harness').value,'red-unchanged');assert.equal(t.$('blue-harness').value,H);
+  assert.equal(t.calls.filter(c=>c.path==='/v1/confluence/archives'&&c.method==='POST').length,0);
+  assert.equal(t.$('confluence-harness-share').disabled,true,'explicit team consent still required');
+  assert.match(t.$('confluence-panel-harness').textContent,/Synthetic RED/);
+  t.$('confluence-harness-consent').checked=true;t.$('confluence-harness-consent').change();t.$('confluence-harness-share').click();
+  await until(()=>t.calls.some(c=>c.path==='/v1/confluence/archives'&&c.method==='POST'),'exact selected publication');
+  const post=t.calls.find(c=>c.path==='/v1/confluence/archives'&&c.method==='POST');assert.equal(post.body.archive.id,'b'.repeat(64));assert.equal(post.body.teamShare,true);
+  assert.equal(t.$('red-harness').value,'red-unchanged');assert.equal(t.$('blue-harness').value,H);assert.ok(t.lab.unchanged());
+});
+test('team drawer connects from its own click and stale library preparation cannot survive disconnect',async()=>{
+  const t=setup();await t.ready;t.$('confluence-review-load').click();await until(()=>t.opened.length===1&&t.calls.some(c=>c.path.endsWith('/auth/start')),'drawer starts OAuth');
+  const nonce=t.calls.find(c=>c.path.endsWith('/auth/start')).body.nonce,ev=new Event('message');ev.origin=ORIGIN;ev.source=t.opened[0];ev.data={type:'falsify.confluence.session.v1',nonce,session:TOKEN,expiresAt:FUTURE};t.window.dispatchEvent(ev);
+  await until(()=>t.calls.some(c=>c.path==='/v1/confluence/archives'&&c.method==='GET'),'read after OAuth');assert.equal(t.calls.some(c=>c.path==='/v1/confluence/archives'&&c.method==='POST'),false);
+  let release;const lab=labStub(),original=lab.cloudSnapshot;lab.cloudSnapshot=()=>new Promise(r=>{release=r;});const b=setup({lab});const cloud=await b.ready;
+  const preparing=cloud.requestHarnessShare(H);b.$('confluence-review-disconnect').disabled=false;b.$('confluence-review-disconnect').click();release(await original());assert.equal(await preparing,false);assert.equal(b.$('confluence-harness-share').disabled,true);assert.ok(lab.unchanged());
 });
 
 (async()=>{let failed=0; for(const [name,fn] of tests){try{await fn(); console.log('ok - '+name);}catch(e){failed++; console.error('not ok - '+name+'\n'+(e.stack||e));}}

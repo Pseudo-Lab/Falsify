@@ -73,10 +73,10 @@
     const lab=deps.lab??globalThis.FalsifyLab, win=deps.window??globalThis.window, loc=deps.location??globalThis.location;
     const base=parseBase(cfg.apiBase), gatewayOrigin=base?new URL(base).origin:'';
     const misconfigured=cfg.provider!=='confluence'||!base;
-    const state={session:null,stamp:0,pending:null,inflight:null,temp:null,caps:null,busy:false,expiring:false,expiryFailed:false,cacheDeadline:0,cursor:null,items:[],banner:{text:'',error:false}};
+    const state={session:null,stamp:0,pending:null,inflight:null,temp:null,caps:null,busy:false,expiring:false,expiryFailed:false,cacheDeadline:0,cursor:null,items:[],harnessTarget:null,browseAfterAuth:false,banner:{text:'',error:false}};
     const CACHE_FAILURE='이 브라우저에 연결 정보를 저장하지 못했습니다. 연결되었다고 보지 않습니다. 브라우저 저장 공간을 확인한 뒤 다시 연결하세요. 로컬 기록은 그대로입니다.';
     const panels=[];
-    let harnessPick=null,teamTimer=0;
+    let harnessPick=null,teamTimer=0,targetEpoch=0;
 
     function teamExpired(){return !state.expiryFailed&&!!(state.cacheDeadline&&Date.now()>=state.cacheDeadline||state.temp&&Date.now()>=state.temp.expiresAt);}
     function armTeamTimer(){
@@ -94,20 +94,24 @@
       const connected=!!state.session&&Date.parse(state.session.expiresAt)>Date.now();
       const blocked=state.busy||state.expiring;
       for(const p of panels){
-        if(p.tempNotice) p.tempNotice.textContent=state.temp?'임시 열람 중 · 새 검수는 Confluence에 팀 공유해야 보관됩니다. 새로고침·연결 해제·닫기 또는 최대 12시간 후 임시 기록이 사라집니다.':'팀 기록은 Confluence에 보관합니다. 불러온 사례는 임시로 열며, 기존 로컬 기록과 백업은 유지합니다.';
-        p.connection.textContent=misconfigured?'원격 보관 설정이 Confluence가 아니어서 꺼 두었습니다. 로컬 기록은 그대로입니다.':connected?'Falsify Confluence 팀 공간에 연결됨 · 이 표시는 모델 실행이나 과학적 결론이 아닙니다.':'원격 연결 없음 · 로컬 기록만 사용';
+        if(p.tempNotice){p.tempNotice.hidden=!state.temp;p.tempNotice.textContent=state.temp?'임시 열람 중 · 새 검수는 팀에 저장한 뒤 닫아주세요. 새로고침·연결 해제·최대 12시간 후 임시 내용이 사라집니다.':'';}
+        p.connection.textContent=misconfigured?'팀 보관 설정 필요':connected?'팀 연결됨':'내 브라우저에만 보관 중';
         p.connect.disabled=blocked||misconfigured;
+        p.connect.hidden=connected;
         p.disconnect.disabled=!(connected||state.pending||state.inflight);
-        p.load.disabled=blocked||misconfigured||!connected;
+        p.load.disabled=blocked||misconfigured;
         p.more.hidden=!state.cursor;
         p.more.disabled=blocked||!state.cursor;
         if(p.closeTemp){p.closeTemp.hidden=!state.temp; p.closeTemp.disabled=blocked||!state.temp;}
         const key=consentIdentity(p.mode);
+        if(p.prepare)p.prepare.disabled=blocked||misconfigured||!key;
+        if(p.target){const selected=document.querySelector('#evaluation-run')?.selectedOptions?.[0];p.target.textContent=p.mode==='harness'?(state.harnessTarget?.name||'선택한 '+(harnessPick?.value==='red'?'RED':'BLUE')+' 도구'):(selected?.textContent||'검수할 기록을 먼저 고르세요.');}
         p.share.disabled=blocked||misconfigured||!connected||!p.consent.checked||!key||key!==p.consentFor;
         p.consent.disabled=blocked||misconfigured||!connected;
       }
     }
     function targetId(mode){
+      if(mode==='harness'&&state.harnessTarget)return state.harnessTarget.role+':'+state.harnessTarget.hash;
       if(mode==='harness'){const role=harnessPick&&(harnessPick.value==='red'||harnessPick.value==='blue')?harnessPick.value:'blue'; const node=document.querySelector('#'+role+'-harness'); const hash=node&&typeof node.value==='string'?node.value.trim():''; return /^[a-f0-9]{64}$/.test(hash)?role+':'+hash:'';}
       const node=document.querySelector('#evaluation-run'); const id=node&&typeof node.value==='string'?node.value.trim():''; return id&&id.length<=160?id:'';
     }
@@ -273,7 +277,7 @@
         if(ok&&state.session) say('Falsify Confluence 팀 공간에 연결했습니다. 고른 기록은 동의 뒤에만 팀 전체에 공유됩니다. 로컬 원장은 올리지 않았습니다.');
         else say(CACHE_FAILURE, true);
       }catch{state.session=null; try{storage.removeItem(SESSION_KEY);}catch{} if(stamp===state.stamp) say(CACHE_FAILURE, true);}
-      finally{if(stamp===state.stamp) release();}
+      finally{if(stamp===state.stamp){release();if(state.session&&state.browseAfterAuth){state.browseAfterAuth=false;void loadList(false);}}}
     }
     async function closeTemporary(){
       if(!state.temp||state.busy) return;
@@ -290,7 +294,7 @@
     async function disconnect(){
       const popup=state.inflight, pendingPopup=state.pending?.popup;
       state.stamp++; state.busy=false; clearPending(); closePopup(popup); if(pendingPopup&&pendingPopup!==popup) closePopup(pendingPopup); state.inflight=null;
-      state.session=null; try{storage.removeItem(SESSION_KEY);}catch{}
+      state.session=null;state.browseAfterAuth=false;state.harnessTarget=null;targetEpoch++; try{storage.removeItem(SESSION_KEY);}catch{}
       state.temp=null; clearConsent('review'); clearConsent('harness'); clearRemoteView();
       let closeNote='임시 열람을 닫았습니다.';
       if(typeof lab?.closeArchive==='function'){try{await lab.closeArchive();}catch{closeNote='임시 열람을 닫지 못했습니다.';}}
@@ -346,20 +350,22 @@
         if(stamp!==state.stamp) return;
         if(data.stored!==true||typeof data.pageId!=='string'||!PAGE_ID.test(data.pageId)||data.archiveSha256!==hash) throw local('보관을 마쳤는지 확인하지 못했습니다. 자동으로 다시 보내지 않습니다. 팀 기록 불러오기로 읽어 확인하세요. 로컬 기록은 그대로입니다.');
         say((data.alreadyExisted?'같은 보관이 이미 Falsify 팀 공간에 있습니다. 새로 실행하지 않았습니다. ':'Falsify 팀 공간에 JSON 보관을 올렸습니다. ')+'원본 PDF 파일을 저장한 것은 아닙니다. 팀 전원이 읽을 수 있습니다. 로컬 기록은 그대로입니다.');
+        if(panel.confirmation){panel.confirmation.open=false;panel.confirmation.hidden=true;}
       }catch(e){if(stamp===state.stamp) say(failure(e,'write'), true);}
       finally{if(stamp===state.stamp) release();}
     }
     function itemView(item){
       const link=allowedPageUrl(item.webUrl);
-      const row=el('article',{className:'confluence-item','data-page-id':item.pageId}, el('h3',{textContent:String(item.title||'제목 없음').slice(0,180)}), el('p',{className:'muted',textContent:'팀 보관 · JSON · 실행 검증 아님'}));
+      const row=el('article',{className:'confluence-item','data-page-id':item.pageId}, el('h3',{textContent:String(item.title||'제목 없음').slice(0,180)}));
       if(link) row.append(el('a',{href:link,target:'_blank',rel:'noopener noreferrer',textContent:'Confluence에서 보기'}));
       else if(item.webUrl) row.append(el('p',{className:'muted',textContent:'페이지 주소가 Falsify 사이트가 아니어서 링크를 숨겼습니다.'}));
-      const open=el('button',{type:'button',className:'button secondary',textContent:'이 보관 열기'});
+      const open=el('button',{type:'button',className:'button secondary',textContent:'열기'});
+      const symbol=globalThis.FalsifyVisual?.icon?.('folder-open');if(symbol)open.append(symbol);
       open.addEventListener('click',()=>openArchive(item.pageId));
       row.append(el('div',{className:'button-row'}, open));
       return row;
     }
-    function renderItems(){for(const p of panels) p.list.replaceChildren(...(state.items.length?state.items.map(itemView):[el('p',{className:'muted',textContent:state.items.loaded?'이 팀 공간에 표시할 보관이 없습니다.':'아직 팀 목록을 불러오지 않았습니다. 불러오기는 업로드하지 않습니다.'})]));}
+    function renderItems(){for(const p of panels){p.list.replaceChildren(...(state.items.length?state.items.map(itemView):[el('p',{className:'muted',textContent:state.items.loaded?'팀 서랍이 비어 있습니다.':'팀 기록을 열어보세요.'})]));if(p.drawer){p.drawer.hidden=!state.items.loaded;p.drawer.open=!!state.items.loaded;}}}
     async function loadList(append){
       if(state.busy||misconfigured) return;
       if(!state.session){say('팀 기록을 보려면 먼저 Confluence에 연결하세요. 목록은 업로드하지 않습니다.', true); return;}
@@ -380,7 +386,7 @@
         armTeamTimer();
         if(typeof data.nextCursor==='string'&&data.nextCursor){if(!CURSOR.test(data.nextCursor)){state.cursor=null; renderItems(); throw local('다음 목록 주소가 허용된 형식이 아니어서 따라가지 않았습니다. 이미 받은 목록은 그대로 둡니다.');} state.cursor=data.nextCursor;} else state.cursor=null;
         renderItems();
-        say('팀 보관 '+state.items.length+'건을 표시합니다.'+(state.cursor?' 다음 페이지는 더 불러오기를 누를 때만 받습니다.':'')+(skipped.length?' 형식이 맞지 않는 '+skipped.length+'건은 열지 않았습니다.':'')+(state.items.length?'':' 이 팀 공간에 표시할 보관이 없습니다.')+' JSON 목록이며 원본 PDF가 아닙니다.');
+        say('팀 기록 '+state.items.length+'개'+(state.cursor?' · 다음 기록도 있습니다.':'')+(skipped.length?' · 형식이 맞지 않는 '+skipped.length+'건 제외':''));
       }catch(e){if(stamp===state.stamp) say(failure(e,'read'), true);}
       finally{if(stamp===state.stamp) release();}
     }
@@ -427,11 +433,12 @@
     function mountPanel(host,mode){
       if(!host||host.querySelector('[data-confluence-mode="'+mode+'"]')) return;
       const consent=el('input',{type:'checkbox',id:'confluence-'+mode+'-consent'});
-      const consentText=el('span',{textContent:'지금 고른 기록만 Falsify 팀 전원이 읽는 데 동의합니다. 비공개 보관은 없습니다. 논문 추출문, 모델 원응답, 아직 보내지 않은 검수가 포함될 수 있습니다. 원본 PDF 파일이 아니라 JSON이며, 로그인만으로 원장 전체가 올라가지 않습니다. 모델을 실행하지 않습니다.'});
-      const connectBtn=el('button',{type:'button',id:'confluence-'+mode+'-connect',className:'button primary',textContent:'Confluence에 연결'});
+      const consentText=el('span',{textContent:'이 기록을 팀원 모두에게 공개합니다.'});
+      const connectBtn=el('button',{type:'button',id:'confluence-'+mode+'-connect',className:'button secondary',textContent:'팀 연결'});
       const disconnectBtn=el('button',{type:'button',id:'confluence-'+mode+'-disconnect',className:'button secondary',textContent:'이 브라우저 연결 끊기'});
-      const shareBtn=el('button',{type:'button',id:'confluence-'+mode+'-share',className:'button primary',textContent:'Confluence에 팀 공유'});
-      const loadBtn=el('button',{type:'button',id:'confluence-'+mode+'-load',className:'button secondary',textContent:'팀 기록 불러오기'});
+      const shareBtn=el('button',{type:'button',id:'confluence-'+mode+'-share',className:'button primary',textContent:'공개하고 저장'});
+      const loadBtn=el('button',{type:'button',id:'confluence-'+mode+'-load',className:'button secondary',textContent:'팀 기록'});
+      const prepare=el('button',{type:'button',id:'confluence-'+mode+'-prepare',className:'button secondary',textContent:'팀에 저장'});
       const moreBtn=el('button',{type:'button',id:'confluence-'+mode+'-more',className:'button secondary',hidden:true,textContent:'다음 팀 기록'});
       const closeTempBtn=el('button',{type:'button',id:'confluence-'+mode+'-close-temp',className:'button secondary',hidden:true,textContent:'임시 열람 닫기'});
       const connection=el('p',{id:'confluence-'+mode+'-connection',className:'confluence-connection'});
@@ -439,27 +446,35 @@
       const list=el('div',{id:'confluence-'+mode+'-list',className:'confluence-list'});
       const intro=mode==='harness'?'선택한 등록 Harness 정의만 팀 공간에 올립니다. 실행하거나 자동 등록하지 않습니다.':mode==='results'?'검수 화면에서 고른 실행과 그 사람 검수를 팀 공간에 올립니다. 결과표의 로컬 백업은 그대로입니다.':'지금 고른 실행과 사람 검수를 팀 공간에 올립니다. RED와 BLUE는 있는 쪽만 포함됩니다.';
       const tempNotice=el('p',{className:'confluence-temporary'});
+      const target=el('p',{className:'confluence-target'});
+      const confirmation=el('details',{className:'confluence-save',hidden:true});
+      const cancelSave=el('button',{type:'button',className:'button secondary',textContent:'취소'});
+      cancelSave.addEventListener('click',()=>{confirmation.hidden=true;confirmation.open=false;consent.checked=false;panel.consentFor='';paint();});
+      confirmation.append(el('summary',{textContent:'저장할 기록'}),target,el('p',{className:'muted',textContent:'Falsify 팀 서랍에 보관합니다. 원본 PDF 파일은 포함되지 않습니다.'}),connectBtn,el('label',{className:'check-row'},consent,consentText),el('div',{className:'button-row'},shareBtn,cancelSave));
+      const drawer=el('details',{className:'confluence-drawer'},el('summary',{textContent:'팀 서랍'}),list,moreBtn);
+      const settings=el('details',{className:'confluence-settings'},el('summary',{textContent:'연결 · 저장 범위'}));
+      settings.append(el('p',{className:'muted',textContent:'보관은 Confluence 팀 전체 공유입니다. '+intro+' JSON에 논문 추출문·모델 원응답·Harness·검수가 포함됩니다. 원본 PDF 파일은 포함되지 않습니다. 불러온 기록은 임시 열람이며 새로고침·닫기·연결 해제 또는 최대 12시간 후 사라집니다. 새 검수는 팀에 저장하기 전에는 원격 보관되지 않습니다. 기존 로컬 기록과 백업은 유지합니다. 연결만으로 업로드하거나 모델을 실행하지 않습니다.'}),el('div',{className:'button-row'},disconnectBtn));
       const kids=[
-        el('h3',{id:'confluence-'+mode+'-title',textContent:'Falsify Confluence 팀 보관'}),
+        el('div',{className:'confluence-toolbar'},el('h3',{id:'confluence-'+mode+'-title',textContent:'팀 서랍'}),el('div',{className:'button-row'},loadBtn,prepare,closeTempBtn)),
         tempNotice,
-        el('p',{className:'muted',textContent:'원격 저장은 Falsify Confluence 팀 공간 하나입니다. 작업대 가입과 보관 범위 선택은 없습니다. '+intro+' 첫 보관은 JSON입니다. 추출문이 들어 있어도 원본 PDF 바이트를 저장한 것이 아닙니다. 보내지 않은 사람 검수는 Confluence에 팀 공유를 누르기 전에는 저장되지 않습니다.'}),
         connection,
-        el('div',{className:'button-row'}, connectBtn, disconnectBtn)
       ];
-      if(mode==='harness'){harnessPick=el('select',{id:'confluence-harness-role'}, el('option',{value:'blue',textContent:'BLUE 선택 Harness'}), el('option',{value:'red',textContent:'RED 선택 Harness'})); harnessPick.value='blue'; kids.push(el('label',{textContent:'올릴 Harness'}, harnessPick));}
-      kids.push(el('label',{className:'check-row'}, consent, consentText), el('div',{className:'button-row'}, shareBtn, loadBtn, moreBtn, closeTempBtn), status, list);
+      if(mode==='harness'){harnessPick=el('select',{id:'confluence-harness-role'}, el('option',{value:'blue',textContent:'BLUE 선택 Harness'}), el('option',{value:'red',textContent:'RED 선택 Harness'})); harnessPick.value='blue';settings.append(el('label',{textContent:'실행 화면의 선택 도구로 되돌리기'},harnessPick));}
+      kids.push(status,confirmation,drawer,settings);
       const section=el('section',{id:'confluence-panel-'+mode,className:'confluence-store','data-confluence-mode':mode,'data-provider':'confluence','aria-labelledby':'confluence-'+mode+'-title'}, ...kids);
       host.append(section);
-      const panel={mode,consent,consentFor:'',connect:connectBtn,disconnect:disconnectBtn,share:shareBtn,load:loadBtn,more:moreBtn,closeTemp:closeTempBtn,connection,status,list,tempNotice};
+      const panel={mode,consent,consentFor:'',connect:connectBtn,disconnect:disconnectBtn,share:shareBtn,load:loadBtn,more:moreBtn,closeTemp:closeTempBtn,connection,status,list,tempNotice,prepare,target,confirmation,drawer};
       panels.push(panel);
       consent.addEventListener('change',()=>{panel.consentFor=consent.checked?consentIdentity(mode):''; paint();});
       connectBtn.addEventListener('click',connect);
       disconnectBtn.addEventListener('click',disconnect);
       shareBtn.addEventListener('click',()=>share(mode));
-      loadBtn.addEventListener('click',()=>loadList(false));
+      loadBtn.addEventListener('click',()=>{if(!state.session||Date.parse(state.session.expiresAt)<=Date.now()){state.browseAfterAuth=true;void connect();}else void loadList(false);});
+      prepare.addEventListener('click',()=>{confirmation.hidden=false;confirmation.open=true;paint();if(!state.session||Date.parse(state.session.expiresAt)<=Date.now())connectBtn.focus?.();else consent.focus?.();});
       moreBtn.addEventListener('click',()=>loadList(true));
       closeTempBtn.addEventListener('click',()=>closeTemporary());
-      if(mode==='harness'&&harnessPick) harnessPick.addEventListener('change',()=>{clearConsent('harness'); paint();});
+      if(mode==='harness'&&harnessPick) harnessPick.addEventListener('change',()=>{targetEpoch++;state.harnessTarget=null;clearConsent('harness'); paint();});
+      for(const [b,name] of [[loadBtn,'folder-open'],[prepare,'users'],[shareBtn,'upload'],[connectBtn,'plug'],[closeTempBtn,'x']]){const symbol=globalThis.FalsifyVisual?.icon?.(name);if(symbol)b.append(symbol);}
     }
 
     win.addEventListener('message',onMessage);
@@ -470,7 +485,18 @@
     mountPanel(document.querySelector('#harness-manager')||document.querySelector('#view-agents'),'harness');
     if(misconfigured) say('원격 보관은 Falsify Confluence만 사용합니다. 설정이 없거나 다른 저장소를 가리키면 연결하지 않습니다. 로컬 백업은 기록판에 그대로 있습니다.', true);
     paint(); renderItems();
-    return {restore,paint};
+    async function requestHarnessShare(hash){
+      if(state.busy||state.expiring||misconfigured)return false;
+      const epoch=++targetEpoch,stamp=state.stamp;
+      try{
+        const snapshot=await lab.cloudSnapshot(),record=snapshot.harnesses.find(h=>h.hash===hash);
+        if(epoch!==targetEpoch||stamp!==state.stamp)return false;
+        if(!record||!['red','blue'].includes(record.config?.role))throw local('저장할 도구를 찾지 못했습니다.');
+        state.harnessTarget={hash:record.hash,role:record.config.role,name:record.config.name+' · v'+record.config.version};clearConsent('harness');
+        const p=panels.find(p=>p.mode==='harness');p.confirmation.hidden=false;p.confirmation.open=true;paint();showView('agents');p.target.scrollIntoView?.({block:'center'});if(!state.session||Date.parse(state.session.expiresAt)<=Date.now()){p.connect.closest?.('details')?.setAttribute('open','');p.connect.focus?.();}else p.consent.focus?.();return true;
+      }catch(e){say(failure(e,'write'),true);return false;}
+    }
+    return {restore,paint,requestHarnessShare};
   }
 
   let mounted=null;

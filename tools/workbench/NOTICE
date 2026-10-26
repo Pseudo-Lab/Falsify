@@ -16,3 +16,12 @@ Browser parsing dependencies retain their notices in app/dist/vendor.
 Python and CLI dependencies are not bundled and retain their own licenses.
 Uploaded papers, user harnesses and experiment records are not distributed
 with this application and are not relicensed by this notice.
+
+Visual workflow components:
+- GoogleChromeLabs file-drop-element 1.0.1 (Apache-2.0), unchanged vendored runtime and source.
+  https://github.com/GoogleChromeLabs/file-drop
+  Full notice: app/dist/vendor/LICENSE-FILE-DROP.txt
+- Selected Lucide SVG icons, pinned source receipt in app/vendor-sources/visual-components.json.
+  ISC and inherited Feather MIT terms: app/dist/vendor/LICENSE-LUCIDE.txt
+  https://github.com/lucide-icons/lucide
+No Squoosh analytics, codecs or ScratchJr/Excalidraw runtime is included.

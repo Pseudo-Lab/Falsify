@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.0-alpha.9
+
+- Airport-style visual file intake: drop, paste or pick a paper; actual first-page PDF thumbnail; empty future stages collapse.
+- Selected Harness shelf, large play control, compact PC connection, library-first tools and per-item team save without changing either execution selection.
+- Team drawer starts user-delegated connection when needed. Explicit destination/consent gates publication; technical details are disclosed on demand.
+- Symbolic human verdicts delegate to existing validated records. A real-browser regression covers overall label activation, independent RED/BLUE input, multi-file refusal and responsive layouts.
+- Reused GoogleChromeLabs file-drop 1.0.1 and pinned Lucide SVG sources with license/provenance receipts. No new frontend framework. See docs/release-alpha9.md.
+
 ## 0.2.0-alpha.8
 
 - Confluence is the only remote archive: explicit team publication of selected experiments, Harnesses and detailed reviews.

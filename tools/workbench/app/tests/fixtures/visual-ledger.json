@@ -1,0 +1,365 @@
+{
+  "schema": "falsify.experiment-ledger.v1",
+  "harnesses": [
+    {
+      "config": {
+        "schema": "falsify.harness.v1",
+        "id": "builtin-red",
+        "name": "기본 RED",
+        "version": "1",
+        "role": "red",
+        "instructions": "Focus on explicit internal contradictions and quote the exact supporting evidence.",
+        "maxCalls": 8
+      },
+      "hash": "205ed589a1d3c35adf3a5f203ffcfa76f2650ebdad5ab1df8bd3e22f919b86d3"
+    },
+    {
+      "config": {
+        "schema": "falsify.harness.v1",
+        "id": "builtin-blue",
+        "name": "기본 BLUE",
+        "version": "1",
+        "role": "blue",
+        "instructions": "Focus on explicit internal contradictions and quote the exact supporting evidence.",
+        "maxCalls": 8
+      },
+      "hash": "05b4886a785f7e3d592d3132166415885465a9f6ebc617d8a1babc95a3c8eaed"
+    }
+  ],
+  "runs": [
+    {
+      "role": "red",
+      "revision": "synthetic-red",
+      "fileHash": "ca738a1abbe9febaace70771f94aa2b428810a94ac7a27da969f317f98996d20",
+      "sourceHash": "ca738a1abbe9febaace70771f94aa2b428810a94ac7a27da969f317f98996d20",
+      "segments": [
+        {
+          "id": "s0",
+          "label": "p1",
+          "text": "Alpha does not show benefit in the cohort."
+        },
+        {
+          "id": "s1",
+          "label": "p2",
+          "text": "Only an association was observed in winter."
+        },
+        {
+          "id": "s2",
+          "label": "p3",
+          "text": "The sample excluded untreated controls."
+        },
+        {
+          "id": "s3",
+          "label": "p4",
+          "text": "Follow-up stopped before the endpoint."
+        },
+        {
+          "id": "s4",
+          "label": "p5",
+          "text": "Authors call the result conclusive."
+        }
+      ],
+      "harness": {
+        "schema": "falsify.harness.v1",
+        "id": "builtin-red",
+        "name": "기본 RED",
+        "version": "1",
+        "role": "red",
+        "instructions": "Focus on explicit internal contradictions and quote the exact supporting evidence.",
+        "maxCalls": 8
+      },
+      "harnessHash": "205ed589a1d3c35adf3a5f203ffcfa76f2650ebdad5ab1df8bd3e22f919b86d3",
+      "maxCalls": 4,
+      "level": 1,
+      "model": "manual-model-unverified",
+      "provenance": "manual-unverified",
+      "response": {
+        "schema": "falsify.document-red.v1",
+        "revision": "synthetic-red",
+        "sourceHash": "ca738a1abbe9febaace70771f94aa2b428810a94ac7a27da969f317f98996d20",
+        "status": "ok",
+        "candidates": [
+          {
+            "id": "c1",
+            "segmentId": "s0",
+            "level": 1,
+            "before": "Alpha does not show benefit in the cohort.",
+            "after": "Alpha does show benefit in the cohort.",
+            "rationale": "Synthetic contradiction.",
+            "evidence": [
+              {
+                "segmentId": "s1",
+                "quote": "Only an association was observed in winter.",
+                "relation": "Synthetic qualification."
+              }
+            ],
+            "uncertainty": "Synthetic fixture only."
+          }
+        ],
+        "harness": {
+          "schema": "falsify.harness.v1",
+          "id": "builtin-red",
+          "name": "기본 RED",
+          "version": "1",
+          "role": "red",
+          "instructions": "Focus on explicit internal contradictions and quote the exact supporting evidence.",
+          "maxCalls": 8
+        },
+        "harnessHash": "205ed589a1d3c35adf3a5f203ffcfa76f2650ebdad5ab1df8bd3e22f919b86d3",
+        "model": "gpt-6.1-sol",
+        "coverage": {
+          "complete": true,
+          "completedChunks": 1,
+          "chunks": 1,
+          "calls": 2
+        }
+      },
+      "sourceName": "synthetic-storage-fixture.txt",
+      "format": "TXT",
+      "requestId": "synthetic-red-exec",
+      "createdAt": "2026-10-26T00:00:00.000Z",
+      "id": "root-run"
+    },
+    {
+      "role": "red",
+      "revision": "synthetic-red",
+      "fileHash": "ca738a1abbe9febaace70771f94aa2b428810a94ac7a27da969f317f98996d20",
+      "sourceHash": "ca738a1abbe9febaace70771f94aa2b428810a94ac7a27da969f317f98996d20",
+      "segments": [
+        {
+          "id": "s0",
+          "label": "p1",
+          "text": "Alpha does not show benefit in the cohort."
+        },
+        {
+          "id": "s1",
+          "label": "p2",
+          "text": "Only an association was observed in winter."
+        },
+        {
+          "id": "s2",
+          "label": "p3",
+          "text": "The sample excluded untreated controls."
+        },
+        {
+          "id": "s3",
+          "label": "p4",
+          "text": "Follow-up stopped before the endpoint."
+        },
+        {
+          "id": "s4",
+          "label": "p5",
+          "text": "Authors call the result conclusive."
+        }
+      ],
+      "harness": {
+        "schema": "falsify.harness.v1",
+        "id": "builtin-red",
+        "name": "기본 RED",
+        "version": "1",
+        "role": "red",
+        "instructions": "Focus on explicit internal contradictions and quote the exact supporting evidence.",
+        "maxCalls": 8
+      },
+      "harnessHash": "205ed589a1d3c35adf3a5f203ffcfa76f2650ebdad5ab1df8bd3e22f919b86d3",
+      "maxCalls": 4,
+      "level": 1,
+      "model": "manual-model-unverified",
+      "provenance": "manual-unverified",
+      "response": {
+        "schema": "falsify.document-red.v1",
+        "revision": "synthetic-red",
+        "sourceHash": "ca738a1abbe9febaace70771f94aa2b428810a94ac7a27da969f317f98996d20",
+        "status": "ok",
+        "candidates": [
+          {
+            "id": "c1",
+            "segmentId": "s0",
+            "level": 1,
+            "before": "Alpha does not show benefit in the cohort.",
+            "after": "Alpha does show benefit in the cohort.",
+            "rationale": "Synthetic contradiction.",
+            "evidence": [
+              {
+                "segmentId": "s1",
+                "quote": "Only an association was observed in winter.",
+                "relation": "Synthetic qualification."
+              }
+            ],
+            "uncertainty": "Synthetic fixture only."
+          }
+        ],
+        "harness": {
+          "schema": "falsify.harness.v1",
+          "id": "builtin-red",
+          "name": "기본 RED",
+          "version": "1",
+          "role": "red",
+          "instructions": "Focus on explicit internal contradictions and quote the exact supporting evidence.",
+          "maxCalls": 8
+        },
+        "harnessHash": "205ed589a1d3c35adf3a5f203ffcfa76f2650ebdad5ab1df8bd3e22f919b86d3",
+        "model": "gpt-6.1-sol",
+        "coverage": {
+          "complete": true,
+          "completedChunks": 1,
+          "chunks": 1,
+          "calls": 2
+        }
+      },
+      "sourceName": "synthetic-storage-fixture.txt",
+      "format": "TXT",
+      "requestId": "synthetic-red-exec",
+      "createdAt": "2026-10-26T00:01:00.000Z",
+      "id": "snap-run",
+      "finalState": {
+        "selected": [
+          {
+            "id": "c1",
+            "segmentId": "s0",
+            "label": "p1",
+            "before": "Alpha does not show benefit in the cohort.",
+            "after": "Alpha does show benefit in the cohort.",
+            "offset": 0,
+            "edited": false
+          }
+        ],
+        "outputFileHash": "74f1806b72b6a9f5029224f13c11bc07c0df4729185c0809f676b6e2730f331a",
+        "verification": {
+          "synthetic": true
+        }
+      },
+      "snapshotOf": "root-run"
+    },
+    {
+      "id": "blue-run",
+      "createdAt": "2026-10-26T00:02:00.000Z",
+      "role": "blue",
+      "revision": "synthetic-blue",
+      "fileHash": "74f1806b72b6a9f5029224f13c11bc07c0df4729185c0809f676b6e2730f331a",
+      "sourceHash": "74f1806b72b6a9f5029224f13c11bc07c0df4729185c0809f676b6e2730f331a",
+      "segments": [
+        {
+          "id": "s0",
+          "label": "p1",
+          "text": "Alpha does show benefit in the cohort."
+        },
+        {
+          "id": "s1",
+          "label": "p2",
+          "text": "Only an association was observed in winter."
+        },
+        {
+          "id": "s2",
+          "label": "p3",
+          "text": "The sample excluded untreated controls."
+        },
+        {
+          "id": "s3",
+          "label": "p4",
+          "text": "Follow-up stopped before the endpoint."
+        },
+        {
+          "id": "s4",
+          "label": "p5",
+          "text": "Authors call the result conclusive."
+        }
+      ],
+      "harness": {
+        "schema": "falsify.harness.v1",
+        "id": "builtin-blue",
+        "name": "기본 BLUE",
+        "version": "1",
+        "role": "blue",
+        "instructions": "Focus on explicit internal contradictions and quote the exact supporting evidence.",
+        "maxCalls": 8
+      },
+      "harnessHash": "05b4886a785f7e3d592d3132166415885465a9f6ebc617d8a1babc95a3c8eaed",
+      "maxCalls": 4,
+      "level": null,
+      "model": "manual-model-unverified",
+      "provenance": "manual-unverified",
+      "response": {
+        "schema": "falsify.document-blue.v1",
+        "revision": "synthetic-blue",
+        "sourceHash": "74f1806b72b6a9f5029224f13c11bc07c0df4729185c0809f676b6e2730f331a",
+        "status": "ok",
+        "findings": [
+          {
+            "id": "F1",
+            "segmentId": "s0",
+            "quote": "Alpha does show benefit in the cohort.",
+            "rationale": "Synthetic finding 1.",
+            "evidence": [
+              {
+                "segmentId": "s0",
+                "quote": "Alpha does show bene",
+                "relation": "Synthetic support."
+              }
+            ],
+            "uncertainty": "Synthetic only."
+          },
+          {
+            "id": "F2",
+            "segmentId": "s1",
+            "quote": "Only an association was observed in winter.",
+            "rationale": "Synthetic finding 2.",
+            "evidence": [
+              {
+                "segmentId": "s1",
+                "quote": "Only an association ",
+                "relation": "Synthetic support."
+              }
+            ],
+            "uncertainty": "Synthetic only."
+          },
+          {
+            "id": "F3",
+            "segmentId": "s2",
+            "quote": "The sample excluded untreated controls.",
+            "rationale": "Synthetic finding 3.",
+            "evidence": [
+              {
+                "segmentId": "s2",
+                "quote": "The sample excluded ",
+                "relation": "Synthetic support."
+              }
+            ],
+            "uncertainty": "Synthetic only."
+          },
+          {
+            "id": "F4",
+            "segmentId": "s3",
+            "quote": "Follow-up stopped before the endpoint.",
+            "rationale": "Synthetic finding 4.",
+            "evidence": [
+              {
+                "segmentId": "s3",
+                "quote": "Follow-up stopped be",
+                "relation": "Synthetic support."
+              }
+            ],
+            "uncertainty": "Synthetic only."
+          },
+          {
+            "id": "F5",
+            "segmentId": "s4",
+            "quote": "Authors call the result conclusive.",
+            "rationale": "Synthetic finding 5.",
+            "evidence": [
+              {
+                "segmentId": "s4",
+                "quote": "Authors call the res",
+                "relation": "Synthetic support."
+              }
+            ],
+            "uncertainty": "Synthetic only."
+          }
+        ]
+      },
+      "sourceName": "synthetic-storage-fixture.txt",
+      "format": "TXT"
+    }
+  ],
+  "reviews": []
+}

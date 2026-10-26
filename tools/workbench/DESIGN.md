@@ -338,3 +338,7 @@ The review destination extends the same flat white work surface. A compact saved
 - **Don't** introduce a step-by-step case wizard or progress bar that chains RED, BLUE and review.
 - **Don't** use color alone for state; status always has text.
 - **Don't** ship a web font or a second display face.
+
+## Visual workflow components (alpha.9)
+
+Preserve the airport world. Large paper-object intake uses GoogleChromeLabs file-drop with an actual PDF thumbnail when available. Collapsed future steps preserve the independent role workflow. A selected tool opens a local shelf, while adapter/model/code settings stay in disclosures. The Harness library precedes authoring; per-item team save prepares an exact content hash without modifying execution selection. Team folder and users/upload symbols distinguish browsing from explicit publication. Native human-verdict controls delegate to the existing select and reason validators. Lucide supplies consistent SVGs; no new raster assets or frontend framework.

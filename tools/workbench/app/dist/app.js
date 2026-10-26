@@ -5,7 +5,7 @@
   const views={workbench:'논문 실험 / RED',blue:'논문 실험 / BLUE',review:'검수',results:'결과 기록',agents:'Harness'};
   const routes={workbench:'red',blue:'blue',review:'review',results:'results',agents:'harness'};
   const fromHash=hash=>Object.keys(routes).find(key=>'#'+routes[key]===hash)||null;
-  let view=fromHash(location.hash)||'workbench',documentProgress=null,flapTimer;
+  let view=fromHash(location.hash)||'workbench',documentProgress=null,blueProgress=null,flapTimer;
   let importEpoch=0,importController=null,importedDocument=null,importedFile=null;
 
   function focusTarget(element){if(!element)return;element.scrollIntoView({block:'center'});element.focus({preventScroll:true});}
@@ -19,13 +19,19 @@
   function followLocation(){const next=fromHash(location.hash);if(next&&next!==view)navigate(next,false);}
   function signSpec(){
     if(view==='review')return {gate:'H1',title:'실행 결과를 사람이 평가하세요',detail:'기록된 RED / BLUE 실행을 골라 판정과 근거를 남깁니다.',label:'평가할 실행 선택',action:()=>focusTarget($('#evaluation-run'))};
-    if(view==='results')return {gate:'A1',title:'기록을 저장하고 비교하세요',detail:'내 브라우저 기록과, 직접 공유한 공동 기록을 구분합니다.',label:'공유 기록으로 이동',action:()=>($('#cloud-records')||$('#ledger-board'))?.scrollIntoView({block:'start'})};
-    if(view==='agents')return {gate:'C1',title:'Harness를 등록하고 관리하세요',detail:'기본 지침, 로컬 코드, 외부 HTTPS 서버를 같은 입출력 계약으로 등록합니다.',label:'Harness JSON 편집',action:()=>focusTarget($('#harness-editor'))};
-    if(view==='blue')return {gate:'B1',title:'BLUE 검토 파일을 입력하세요',detail:'RED와 독립 실행합니다. 검토할 파일을 직접 고르세요.',label:'BLUE 파일 입력',action:()=>focusTarget($('#doc-blue-file'))};
+    if(view==='results')return {gate:'A1',title:'기록을 저장하고 비교하세요',detail:'내 브라우저 기록과 팀 서랍의 기록을 확인합니다.',label:'팀 기록 열기',action:()=>$('#confluence-results-load')?.click()};
+    if(view==='agents')return {gate:'C1',title:'도구를 골라 사용하세요',detail:'내 도구를 사용하거나 팀 서랍에서 가져옵니다.',label:'내 도구 보기',action:()=>$('#harness-library')?.scrollIntoView({block:'start'})};
+    if(view==='blue'){
+      if(blueProgress?.busy)return {gate:'B1',title:'BLUE 검토 중입니다',detail:blueProgress.name,label:'진행 상태 보기',action:()=>focusTarget($('#doc-blue-progress'))};
+      if(blueProgress?.hasResult)return {gate:'B1',title:'BLUE 결과를 확인하세요',detail:blueProgress.name,label:'결과 보기',action:()=>$('#doc-blue-findings').closest('.role-step').scrollIntoView({block:'start'})};
+      if(blueProgress?.name)return {gate:'B1',title:'논문을 검토할 준비가 됐습니다',detail:blueProgress.name,label:'실행으로',action:()=>$('#doc-blue-start').closest('.role-step').scrollIntoView({block:'start'})};
+      return {gate:'B1',title:'BLUE 검토 파일을 입력하세요',detail:'검토할 논문을 직접 고르세요.',label:'BLUE 파일 입력',action:()=>focusTarget($('#doc-blue-file'))};
+    }
     if(documentProgress){
       const p=documentProgress,detail=p.name+' · '+p.count+'개 후보'+(p.count?' · '+(p.selected||0)+'개 선택':'');
       if(p.busy)return {gate:'R1',title:'RED 검토 중입니다',detail,label:'진행 상태 보기',action:()=>$('#red-progress').scrollIntoView({block:'center'})};
       if(p.count)return {gate:'R1',title:'후보를 선택하고 편집하세요',detail,label:'후보로 이동',action:()=>focusTarget($('#red-candidates input')||$('#red-result-step'))};
+      if(p.hasResult)return {gate:'R1',title:'RED 결과를 확인하세요',detail,label:'결과 보기',action:()=>$('#red-result-step').scrollIntoView({block:'start'})};
       return {gate:'R1',title:'RED 실행 설정을 확인하세요',detail,label:'실행 설정으로',action:()=>focusTarget($('#document-red'))};
     }
     return {gate:'R1',title:'논문 파일을 입력하세요',detail:'RED는 입력 파일에서 근거 있는 해석 왜곡 후보를 준비합니다.',label:'RED 파일 입력',action:()=>focusTarget($('#paper-file'))};
@@ -97,6 +103,7 @@
   $('#import-clear').addEventListener('click',()=>{if(confirmDocumentChange('clear'))clearImport();});
   $('#import-segment').addEventListener('change',showSegment);
   document.addEventListener('falsify:document-state',event=>{documentProgress=event.detail;render();});
+  document.addEventListener('falsify:blue-state',event=>{blueProgress=event.detail;render();});
   document.addEventListener('click',event=>{
     const button=event.target.closest('button');if(!button||button.disabled)return;
     if(button.dataset.view)navigate(button.dataset.view);
