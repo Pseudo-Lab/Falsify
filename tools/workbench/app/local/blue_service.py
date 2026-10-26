@@ -3,6 +3,7 @@ import json
 from harness import resolve, guidance, backend, model_label, builtin, record
 from red_service import (CodexBackend, ClaudeBackend, strict_object, STRING, EVIDENCE, SCAN,
                          evidence_check, validate_request as validate_document)
+from blue_evidence_refs import build_evidence_refs, is_evidence_ref_id, resolve_evidence_ref
 
 VERSION = 'falsify.document-blue.v1'
 STATUS = {'type': 'string', 'enum': ['ok', 'abstain', 'refusal']}
@@ -90,9 +91,12 @@ def segment_index(segments, budget):
             entries.append(entry)
         if len(entries) == len(parts) or size == 0: return entries, len(entries) < len(parts)
 
-def validate_targets(selection, source, visible):
+def validate_targets(selection, source, visible, catalog=None, delivered_spans=()):
     """visible: segmentId -> texts the selection pass actually received (index previews, validated note
-    quotes). An anchor must be copied from those, not merely exist somewhere in the undisclosed source."""
+    quotes). An evidence-ref id is resolved only from the host catalog sent with this call.
+    Any other anchor must be copied from those texts and occur once in the segment.
+    A repeated literal is rejected; the first occurrence is never chosen."""
+    catalog = catalog or {}
     if selection['status'] != 'ok' and selection['targets']:
         raise ValueError('유보/거절 응답에는 재독 대상이 없어야 합니다.')
     if not isinstance(selection['targets'], list) or len(selection['targets']) > MAX_TARGETS:
@@ -101,14 +105,20 @@ def validate_targets(selection, source, visible):
     for t in selection['targets']:
         if t['segmentId'] not in source: raise ValueError('BLUE 재독 대상 문단 ID가 입력에 없습니다.')
         text = source[t['segmentId']]
-        if not t['anchor'].strip() or len(t['anchor']) > MAX_ANCHOR or text.count(t['anchor']) != 1:
-            raise ValueError('BLUE 재독 기준 인용이 해당 문단에 없거나 중복됩니다.')
-        if not any(t['anchor'] in v for v in visible.get(t['segmentId'], ())):
-            raise ValueError('BLUE 재독 기준 인용이 선택 단계에 전달된 미리보기/스캔 인용에 없습니다.')
+        if is_evidence_ref_id(t['anchor']):
+            offset, anchor = resolve_evidence_ref(t['anchor'], t['segmentId'], text, visible.get(t['segmentId'], ()),
+                                                   catalog, delivered_spans)
+        else:
+            if not t['anchor'].strip() or len(t['anchor']) > MAX_ANCHOR or text.count(t['anchor']) != 1:
+                raise ValueError('BLUE 재독 기준 인용이 해당 문단에 없거나 중복됩니다.')
+            if not any(t['anchor'] in v for v in visible.get(t['segmentId'], ())):
+                raise ValueError('BLUE 재독 기준 인용이 선택 단계에 전달된 미리보기/스캔 인용에 없습니다.')
+            # count == 1, so find is the only offset and not a multi-match fallback.
+            offset, anchor = text.find(t['anchor']), t['anchor']
         if not t['reason'].strip() or len(t['reason']) > MAX_REASON: raise ValueError('BLUE 재독 사유 제한 초과')
-        key = (t['segmentId'], text.find(t['anchor']))
+        key = (t['segmentId'], offset, len(anchor))
         if key not in seen:
-            seen.add(key); targets.append({'segmentId': key[0], 'offset': key[1], 'anchor': t['anchor']})
+            seen.add(key); targets.append({'segmentId': t['segmentId'], 'offset': offset, 'anchor': anchor})
     return targets
 
 def reread_windows(targets, segments, budget):
@@ -214,23 +224,39 @@ def run_review(data, progress, cancelled, backend_factory=CodexBackend, claude_f
         if len(note['summary']) > 2500: raise ValueError('BLUE 요약 제한 초과')
         evidence_check(note['evidence'], source, 600)
         notes.append(note)
-    head = (policy + 'Evidence reread selection. The chunk notes are lossy summaries and may omit qualifiers. '
+    head = (policy + 'Evidence reread selection. Chunk notes are lossy and may omit qualifiers. '
         f'Choose up to {MAX_TARGETS} places whose RAW supplied text must be reread before the final judgment, '
-        'including cross-section conditions (e.g. Methods/Results qualifiers, limitations) that the notes may have omitted. '
-        'Each target needs a segmentId that exists in segmentIndex and an anchor: an exact substring occurring once in '
-        f'that segment (<={MAX_ANCHOR} chars), copied from an index preview or a note quote. The raw window is centred '
-        f'on the anchor. Give a short reason (<={MAX_REASON} chars). Never invent IDs or text. '
-        'An ok response must select at least one target; without reread evidence the review abstains. ')
-    base = {'allChunkNotes': notes, 'indexTruncated': False, 'segmentIndex': []}
+        'including cross-section conditions (Methods/Results qualifiers, limitations) the notes may have omitted. '
+        'evidenceRefs lists only exact text already in this prompt. Each id binds one source span [start,end) '
+        'and before/after context from that delivered text. A repeated literal has one id per offset; '
+        'set anchor to the id of the intended span and segmentId to the ref segmentId. '
+        f'Reason <={MAX_REASON} chars. Never invent ids or text. '
+        'evidenceRefsTruncated means later spans were omitted and cannot be selected. '
+        'An ok response must select at least one target; otherwise the review abstains. ')
+    base = {'allChunkNotes': notes, 'indexTruncated': False, 'segmentIndex': [],
+            'evidenceRefsTruncated': False, 'evidenceRefs': []}
     room = MAX_PROMPT - len(head + json.dumps(base, ensure_ascii=False)) - 16
     if room < 0: raise ValueError('BLUE 재독 선택 프롬프트가 상한을 넘습니다. 호출하지 않습니다.')
     index, cut = segment_index(data['segments'], min(INDEX_BUDGET, room))
-    selection = invoke(head + json.dumps({**base, 'indexTruncated': cut, 'segmentIndex': index}, ensure_ascii=False),
-        SELECTION, 'selecting')
+    quotes = [(e['segmentId'], e['quote']) for n in notes for e in n['evidence']]
+    payload = {**base, 'indexTruncated': cut, 'segmentIndex': index}
+    bare = len(head + json.dumps(payload, ensure_ascii=False))
+    refs, refs_cut, spans = build_evidence_refs(data['segments'], index, quotes, max(0, MAX_PROMPT - bare - 16 + 2))
+    payload['evidenceRefs'] = refs
+    payload['evidenceRefsTruncated'] = refs_cut
+    prompt = head + json.dumps(payload, ensure_ascii=False)
+    if len(prompt) > MAX_PROMPT and payload['evidenceRefs']:
+        # Fitting is exact for the refs array; this only covers the index-size approximation.
+        payload['evidenceRefs'] = []
+        payload['evidenceRefsTruncated'] = True
+        prompt = head + json.dumps(payload, ensure_ascii=False)
+    if len(prompt) > MAX_PROMPT:
+        raise ValueError('BLUE 재독 선택 프롬프트가 상한을 넘습니다. 호출하지 않습니다.')
+    selection = invoke(prompt, SELECTION, 'selecting')
     visible = {}
     for e in index: visible.setdefault(e['segmentId'], []).append(e['preview'])
-    for e in (e for n in notes for e in n['evidence']): visible.setdefault(e['segmentId'], []).append(e['quote'])
-    targets = validate_targets(selection, source, visible)
+    for sid, quote in quotes: visible.setdefault(sid, []).append(quote)
+    targets = validate_targets(selection, source, visible, {r['id']: r for r in payload['evidenceRefs']}, spans)
     if selection['status'] != 'ok':
         return finish(selection['status'], [], len(chunks), reread_record('incomplete'))
     if not targets:  # never a summary-only final judgment

@@ -222,11 +222,13 @@ test('a record planted during hashing is not overwritten',async()=>{
   assert.equal(planted.ok,false);assert.equal(planted.blocked,'corrupt');assert.equal(storage.dump(),'{');
 });
 
+let htmlWrites=0;
 function element(id){
   const e=new EventTarget();
   Object.assign(e,{id,disabled:false,hidden:false,checked:false,value:'',textContent:'',children:[],files:[],className:'',
     classList:{toggle(){}},replaceChildren(){},append(){},after(){},remove(){},click(){this.dispatchEvent(new Event('click'));},
     getClientRects:()=>[],addEventListener(t,f){EventTarget.prototype.addEventListener.call(this,t,f);}});
+  Object.defineProperty(e,'innerHTML',{set(){htmlWrites++;},get(){return e.textContent||'';}});
   return e;
 }
 function vmStorage(){const m=new Map();return {getItem:k=>m.has(k)?m.get(k):null,setItem:(k,v)=>m.set(k,String(v)),removeItem:k=>m.delete(k),raw:m};}
@@ -318,18 +320,47 @@ async function bluePage(storage,hooks){
   const document=new EventTarget();
   Object.assign(document,{querySelector:s=>s.startsWith('#')?get(s.slice(1)):null,querySelectorAll:()=>[],createElement:tag=>element(tag),body:element('body')});
   get('doc-blue-budget').value='4';
-  const calls=[];
+  const calls=[],downloads=[];
   const cap={red:true,blue:true,pdf:false,companionInstance:INSTANCE};
-  const bridge={busy(){},state:()=>({status:'paired',connected:true,cap}),capabilities:()=>cap,session:()=>({request:async(p,body)=>{calls.push({path:p,body});return hooks.reply(p,body,calls);}})};
+  const net={connected:true};
+  const bridge={busy(){},state:()=>({status:net.connected?'paired':'manual',connected:net.connected,cap}),capabilities:()=>cap,session:()=>({request:async(p,body)=>{calls.push({path:p,body});return hooks.reply(p,body,calls);}})};
   const lab={busy(){},allowed:()=>true,ready:Promise.resolve(),bind:async(role,r)=>({...r,harness:H.builtin(role)}),record:async()=>'run-1'};
   const importer={extract:async()=>({text:'The claim is absolute.',format:'TXT',warnings:[],segments:[{label:'p',text:'The claim is absolute.'}]})};
-  const ctx=vm.createContext({document,crypto:globalThis.crypto,localStorage:storage,FalsifyDocumentBlue:Blue,FalsifyHarness:H,FalsifyLocalBridge:bridge,FalsifyLab:lab,FalsifyImport:importer,TextEncoder,TextDecoder,CustomEvent,Event,AbortController,URL:{createObjectURL:()=>'blob:1',revokeObjectURL(){}},Blob,File,setTimeout,clearTimeout,confirm:()=>true,Uint8Array,Array,Promise,Error,Map,JSON,Number,String,Object,console});
+  const ctx=vm.createContext({document,crypto:globalThis.crypto,localStorage:storage,FalsifyDocumentBlue:Blue,FalsifyHarness:H,FalsifyLocalBridge:bridge,FalsifyLab:lab,FalsifyImport:importer,TextEncoder,TextDecoder,CustomEvent,Event,AbortController,URL:{createObjectURL(blob){downloads.push(blob);return 'blob:'+downloads.length;},revokeObjectURL(){}},Blob,File,setTimeout,clearTimeout,confirm:()=>true,Uint8Array,Array,Promise,Error,Map,JSON,Number,String,Object,console});
   vm.runInContext(fs.readFileSync(path.join(dist,'pending-job.js'),'utf8'),ctx,{filename:'pending-job.js'});
   vm.runInContext(fs.readFileSync(path.join(dist,'document-blue.js'),'utf8'),ctx,{filename:'document-blue.js'});
-  return {get,calls,async load(){get('doc-blue-file').files=[{name:'notes.txt',arrayBuffer:async()=>new TextEncoder().encode('The claim is absolute.').buffer}];get('doc-blue-file').dispatchEvent(new Event('change'));
+  return {get,calls,downloads,disconnect(){net.connected=false;document.dispatchEvent(new CustomEvent('falsify:local-bridge'));},poke(){document.dispatchEvent(new CustomEvent('falsify:local-bridge'));},async load(){get('doc-blue-file').files=[{name:'notes.txt',arrayBuffer:async()=>new TextEncoder().encode('The claim is absolute.').buffer}];get('doc-blue-file').dispatchEvent(new Event('change'));
     for(let i=0;i<50&&!/추출 완료/.test(get('doc-blue-progress').textContent);i++)await new Promise(r=>setTimeout(r,5));
     assert.match(get('doc-blue-progress').textContent,/추출 완료/);}};
 }
+const CITE='BLUE 재독 기준 인용이 해당 문단에 없거나 중복됩니다.';
+function storedBlue(storage){return JSON.parse(storage.raw.get(P.storageKey('blue')));}
+function matchedJob(storage,state,extra={}){const record=storedBlue(storage);return {id:record.requestId,role:'blue',state,sourceHash:record.sourceHash,revision:record.revision,harnessHash:record.harnessHash,companionInstance:record.companionInstance,requestBytesDigest:record.requestBytesDigest,progress:{completedCalls:1,requiredCalls:1,phase:'reread'},...extra};}
+function jobPosts(calls){return calls.filter(c=>c.path==='/api/blue/jobs');}
+async function until(fn,label){for(let i=0;i<80&&!fn();i++)await new Promise(r=>setTimeout(r,25));assert.ok(fn(),label);}
+test('optional serverFailure keeps older records and stores only a bounded safe phrase',async()=>{
+  const storage=blueMemory();
+  const held=await P.hold({role:'blue',request:request(doc(),'blue'),doc:doc(),companionInstance:INSTANCE,storage,hashHarness,now:10});
+  assert.equal(held.ok,true);assert.equal(Object.hasOwn(held.record,'serverFailure'),false);
+  await P.note(held.record,{postReceipt:'accepted',disposition:'failed',finishedAt:10},storage);
+  assert.equal(P.read('blue',storage).record.serverFailure,undefined);
+  const noisy=CITE+' <img src=x onerror=alert(1)>';
+  const noted=await P.note(P.read('blue',storage).record,{serverFailure:'Bearer abc '+noisy},storage);
+  assert.equal(noted.ok,true);assert.equal(noted.record.serverFailure.includes('Bearer'),false);assert.equal(noted.record.serverFailure.includes(CITE),true);assert.equal(noted.record.serverFailure.includes('<img src=x onerror=alert(1)>'),true);
+  assert.equal(storage.getItem(P.storageKey('blue')).includes('Bearer abc'),false);
+  const clipped=await P.note(noted.record,{serverFailure:'y'.repeat(301)},storage);
+  assert.equal(clipped.ok,true);assert.equal(clipped.record.serverFailure,'y'.repeat(300));assert.equal(storage.getItem(P.storageKey('blue')).includes('y'.repeat(301)),false);
+  const older=JSON.parse(storage.getItem(P.storageKey('blue')));delete older.serverFailure;storage.setItem(P.storageKey('blue'),JSON.stringify(older));
+  assert.equal(P.read('blue',storage).status,'record');assert.equal(P.read('blue',storage).record.serverFailure,undefined);
+  const poisoned=JSON.parse(storage.getItem(P.storageKey('blue')));poisoned.serverFailure='Bearer zzz';storage.setItem(P.storageKey('blue'),JSON.stringify(poisoned));
+  assert.equal(P.read('blue',storage).status,'corrupt');
+  assert.equal(P.safeRequest({request:{token:'x'}}),null);
+  assert.equal(P.safeFailure(CITE),CITE);
+  const box=blueMemory(),base=await P.hold({role:'blue',request:request(doc(),'blue'),doc:doc(),companionInstance:INSTANCE,storage:box,hashHarness,now:11});
+  await P.note(base.record,{postReceipt:'accepted'},box);
+  const mismatched=await P.recover({role:'blue',storage:box,companionInstance:INSTANCE,hashHarness,validate:(d,res)=>Blue.validateResponse(d,res),getJob:async()=>job(base.record,'failed',{error:CITE,id:'rev-1:other'})});
+  assert.equal(mismatched.status,'request-mismatch');assert.equal(mismatched.error,undefined);assert.equal(JSON.stringify(mismatched).includes(CITE),false);
+});
 test('BLUE page recovers a completed job with GET only and a double-click posts once',async()=>{
   const storage=vmStorage();let failPost=true;
   const page=await bluePage(storage,{reply:async(p)=>{if(p==='/api/blue/jobs'&&failPost)throw new Error('post failed');return {id:'unused'};}});
@@ -369,6 +400,109 @@ test('BLUE page recovers a completed job with GET only and a double-click posts 
   const bluePosts=rapid.calls.filter(c=>c.path==='/api/blue/jobs');
   assert.equal(bluePosts.length,1);
   assert.equal(JSON.parse(open.raw.get(P.storageKey('blue'))).requestId,bluePosts[0].body.requestId);
+});
+test('BLUE failure stays visible across live poll, reload, and connection and does not post again',async()=>{
+  htmlWrites=0;
+  const storage=vmStorage();
+  const cite=CITE+' <img src=x onerror=alert(1)>';
+  let step='run';
+  const page=await bluePage(storage,{reply:async(p,body)=>{
+    if(p==='/api/blue/jobs')return {id:body.requestId};
+    if(String(p).endsWith('/cancel'))throw new Error('cancel was not requested');
+    if(step==='run'){step='fail';return matchedJob(storage,'running');}
+    if(step==='fail')return matchedJob(storage,'failed',{error:cite});
+    if(step==='foreign')return matchedJob(storage,'failed',{id:'other-request',error:'SHOULD-NOT-APPEAR'});
+    if(step==='cancelled')return matchedJob(storage,'cancelled',{error:cite});
+    throw new Error('unexpected '+step+' '+p);
+  }});
+  await page.load();page.get('doc-blue-consent').checked=true;page.get('doc-blue-start').click();
+  await until(()=>/BLUE 검토 중/.test(page.get('doc-blue-progress').textContent)&&!page.get('doc-blue-progress').textContent.includes(CITE),'running is not a failure');
+  await until(()=>page.get('doc-blue-failure').textContent.includes(cite),'failed poll shows the server phrase');
+  assert.equal(page.get('doc-blue-progress').textContent.includes(cite),true);
+  assert.equal(page.get('doc-blue-progress').textContent.includes('같은 역할의 대기 기록이 남아 있습니다'),false);
+  assert.equal(page.get('doc-blue-failure').textContent.includes('같은 역할의 대기 기록이 남아 있습니다'),false);
+  assert.equal(htmlWrites,0);assert.equal(jobPosts(page.calls).length,1);
+  const saved=storedBlue(storage),requestSnap=JSON.stringify(saved.request);
+  assert.equal(saved.disposition,'failed');assert.equal(saved.serverFailure,cite);assert.equal(saved.request.segments[0].text,'The claim is absolute.');
+  assert.equal(JSON.stringify(saved).includes('Bearer'),false);
+  step='foreign';page.poke();
+  await until(()=>page.get('doc-blue-progress').textContent.includes('바꾸지 않았습니다'),'foreign poll');
+  assert.equal(page.get('doc-blue-failure').textContent.includes(cite),true);
+  assert.equal(page.get('doc-blue-failure').textContent.includes('SHOULD-NOT-APPEAR'),false);
+  assert.equal(page.get('doc-blue-progress').textContent.includes('SHOULD-NOT-APPEAR'),false);
+  assert.equal(jobPosts(page.calls).length,1);
+  const afterPoll=page.calls.length;page.disconnect();await new Promise(r=>setTimeout(r,40));
+  assert.equal(page.calls.length,afterPoll);assert.equal(page.get('doc-blue-failure').textContent.includes(cite),true);
+  page.get('doc-blue-start').click();await new Promise(r=>setTimeout(r,30));
+  assert.equal(jobPosts(page.calls).length,1);assert.equal(JSON.stringify(storedBlue(storage).request),requestSnap);
+  const before=page.downloads.length;
+  page.get('doc-blue-failure-diagnostic').click();page.get('doc-blue-failure-request').click();
+  await new Promise(r=>setTimeout(r,20));
+  assert.equal(page.downloads.length,before+2);
+  const diagnostic=JSON.parse(await page.downloads[before].text()),exported=JSON.parse(await page.downloads[before+1].text());
+  assert.deepEqual(Object.keys(diagnostic).sort(),['companionInstance','disposition','fileHash','harnessHash','postReceipt','requestBytesDigest','requestFingerprint','requestId','revision','role','schema','serverFailure','sourceHash']);
+  assert.equal(diagnostic.serverFailure,cite);assert.equal(JSON.stringify(diagnostic).includes('SHOULD-NOT-APPEAR'),false);assert.equal(JSON.stringify(diagnostic).includes('Bearer'),false);
+  assert.deepEqual(exported,JSON.parse(requestSnap));assert.equal(JSON.stringify(exported).includes('"token"'),false);
+  let reloadStep='same';
+  const reloaded=await bluePage(storage,{reply:async(p)=>{
+    assert.notEqual(p,'/api/blue/jobs');
+    if(reloadStep==='same')return matchedJob(storage,'failed',{error:cite});
+    return matchedJob(storage,'failed',{id:'other-request',error:'SHOULD-NOT-APPEAR'});
+  }});
+  await until(()=>reloaded.get('doc-blue-failure').textContent.includes(cite),'reload keeps the phrase');
+  assert.equal(jobPosts(reloaded.calls).length,0);assert.equal(reloaded.get('doc-blue-failure').textContent.includes('같은 역할의 대기 기록이 남아 있습니다'),false);
+  reloadStep='foreign';reloaded.poke();
+  await until(()=>reloaded.get('doc-blue-progress').textContent.includes('바꾸지 않았습니다'),'reload foreign poll');
+  assert.equal(reloaded.get('doc-blue-failure').textContent.includes(cite),true);assert.equal(reloaded.get('doc-blue-progress').textContent.includes('SHOULD-NOT-APPEAR'),false);
+  assert.equal(JSON.stringify(storedBlue(storage).request),requestSnap);assert.equal(jobPosts(reloaded.calls).length,0);
+  page.get('doc-blue-pending-discard').click();
+  await until(()=>page.get('doc-blue-progress').textContent.includes('버렸습니다'),'discarded');
+  assert.equal(storage.raw.has(P.storageKey('blue')),false);assert.equal(jobPosts(page.calls).length,1);assert.equal(page.calls.some(c=>String(c.path).endsWith('/cancel')),false);
+  assert.equal(page.get('doc-blue-failure').textContent.includes(CITE),false);
+  step='cancelled';page.get('doc-blue-start').click();
+  await until(()=>jobPosts(page.calls).length===2,'discard then one explicit post');
+  await until(()=>page.get('doc-blue-progress').textContent.includes('BLUE 취소'),'cancelled label');
+  assert.equal(page.get('doc-blue-failure').textContent.includes(CITE),false);assert.equal(page.get('doc-blue-progress').textContent.includes('BLUE 실패'),false);
+  assert.equal(jobPosts(page.calls).length,2);assert.equal(storedBlue(storage).disposition,'cancelled');assert.equal(storedBlue(storage).serverFailure,undefined);
+});
+test('a mismatched BLUE failure does not display or store the server phrase',async()=>{
+  const storage=vmStorage();
+  const page=await bluePage(storage,{reply:async(p,body)=>{
+    if(p==='/api/blue/jobs')return {id:body.requestId};
+    const record=storedBlue(storage);
+    return {id:'other-request',role:'blue',state:'failed',error:CITE+' <img src=x>',sourceHash:record.sourceHash,revision:record.revision,harnessHash:record.harnessHash,companionInstance:record.companionInstance,requestBytesDigest:record.requestBytesDigest};
+  }});
+  await page.load();page.get('doc-blue-consent').checked=true;page.get('doc-blue-start').click();
+  await until(()=>page.get('doc-blue-progress').textContent.includes('식별이 저장한 요청과 달라'),'mismatch message');
+  assert.equal(page.get('doc-blue-progress').textContent.includes(CITE),false);
+  assert.equal(page.get('doc-blue-failure').textContent.includes(CITE),false);
+  assert.equal(jobPosts(page.calls).length,1);assert.equal(storedBlue(storage).serverFailure,undefined);assert.notEqual(storedBlue(storage).disposition,'failed');
+  const snap=JSON.stringify(storedBlue(storage).request);
+  page.get('doc-blue-start').click();await new Promise(r=>setTimeout(r,30));
+  assert.equal(jobPosts(page.calls).length,1);assert.equal(JSON.stringify(storedBlue(storage).request),snap);
+});
+test('unknown BLUE receipt survives reload and does not show a foreign server phrase',async()=>{
+  const storage=vmStorage();
+  const page=await bluePage(storage,{reply:async(p)=>{
+    if(p==='/api/blue/jobs')throw new Error('post failed');
+    const record=storedBlue(storage);
+    return {id:'other-request',role:'blue',state:'failed',error:CITE+' <script>alert(1)</script>',sourceHash:record.sourceHash,revision:record.revision,harnessHash:record.harnessHash,companionInstance:record.companionInstance,requestBytesDigest:record.requestBytesDigest};
+  }});
+  await page.load();page.get('doc-blue-consent').checked=true;page.get('doc-blue-start').click();
+  await until(()=>page.get('doc-blue-failure').textContent.includes('BLUE 상태 미확인'),'unknown');
+  assert.equal(page.get('doc-blue-progress').textContent.includes(CITE),false);assert.equal(page.get('doc-blue-failure').textContent.includes('<script>'),false);
+  assert.equal(jobPosts(page.calls).length,1);assert.equal(storedBlue(storage).postReceipt,'unknown');
+  const snap=JSON.stringify(storedBlue(storage).request);
+  page.get('doc-blue-start').click();await new Promise(r=>setTimeout(r,30));
+  assert.equal(jobPosts(page.calls).length,1);
+  page.poke();await new Promise(r=>setTimeout(r,40));
+  assert.equal(page.get('doc-blue-failure').textContent.includes('BLUE 상태 미확인'),true);
+  assert.equal(page.get('doc-blue-failure').textContent.includes(CITE),false);assert.equal(page.get('doc-blue-progress').textContent.includes(CITE),false);
+  assert.equal(jobPosts(page.calls).length,1);assert.equal(JSON.stringify(storedBlue(storage).request),snap);
+  const reloaded=await bluePage(storage,{reply:async()=>{throw new Error('socket');}});
+  await until(()=>reloaded.get('doc-blue-failure').textContent.includes('BLUE 상태 미확인'),'reload unknown');
+  assert.equal(jobPosts(reloaded.calls).length,0);assert.equal(reloaded.get('doc-blue-failure').textContent.includes(CITE),false);
+  assert.equal(JSON.stringify(storedBlue(storage).request),snap);
 });
 (async()=>{let passed=0;for(const [name,fn] of tests){try{await fn();passed++;console.log('PASS '+name);}catch(e){console.error('FAIL '+name);console.error(e);process.exitCode=1;}}
   console.log(JSON.stringify({passed,failed:tests.length-passed}));if(passed!==tests.length)process.exit(1);})();

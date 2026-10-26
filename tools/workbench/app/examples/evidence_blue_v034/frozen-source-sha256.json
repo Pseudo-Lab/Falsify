@@ -1,0 +1,18 @@
+{
+  "base": "ef6c9678bb0258b182d1f7ecb22e2c70ff7b436d",
+  "normalization": "CRLF to LF for text source only; runtime bundle hashes remain exact bytes",
+  "files": {
+    "app/examples/evidence_blue/core.py": "cfed0a4acca3c8a34be4b3e75e2ef41e3bcde75ddfe83448a9d120664873cd3f",
+    "app/examples/evidence_blue/corpus.json": "02dcd3b8e007c23e9abe75e769c7abc6826f93f298d492c6d75a56f964ce4f3f",
+    "app/examples/evidence_blue_v031/core.py": "efaf9978481193bbf88ad8410c489d3720f81a9e29e9c7a66160d7d20fa31b13",
+    "app/examples/evidence_blue_v031/literature.py": "bf9afc3c7deded72e4c0fe00861289dbfa9868ae76d94adb06daf86ef57359ff",
+    "app/examples/evidence_blue_v031/profile-template.json": "e1bd20e58cefa5c1ceb12d824a20dec9f9bfea55b492ecd14b74ed2005fb5cf6",
+    "app/examples/evidence_blue_v033/README.md": "7e0a46196cdb1106d6e529f54f0902cd806b4f23d376ef32ab18f7d6585487c2",
+    "app/examples/evidence_blue_v033/build_profile.py": "7e899d462f7a6e0f3d9688c625b53cb424c37e6dab95cc64bd169131829fe98c",
+    "app/examples/evidence_blue_v033/core.py": "a1b8fee3d66d67969adf3a88de079b75d5768028dda40a7e73b4187198a92e15",
+    "app/examples/evidence_blue_v033/reanchor.py": "107eea74c7ff46f81bbae244eb49f6f5e6dd7208233190135fb287559aabacc9",
+    "app/examples/evidence_blue_v033/runner.py": "feca1c5c458b06462ff0712f95c6a35f6c743b306a90388775b6ed92785110e3",
+    "app/examples/evidence_blue_v033/test_integration.py": "651bd552cd5737489ddfdae9b4392ba3b791e0d49c0e51cd7a26d202d5d96690",
+    "app/examples/evidence_blue_v033/test_reanchor.py": "d61de82a25c17a5fbc3124196838582eab483e68a1d1000217e204d15779e09c"
+  }
+}

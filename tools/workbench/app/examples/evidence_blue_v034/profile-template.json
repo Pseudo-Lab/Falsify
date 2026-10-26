@@ -1,0 +1,41 @@
+{
+  "schema": "falsify.harness.v1",
+  "id": "shinick-blue-evidence-external-v034",
+  "name": "BLUE Evidence v0.3.4 · 실험 · 외부 문헌 + 독립·교차검토",
+  "version": "0.3.4",
+  "role": "blue",
+  "maxCalls": 8,
+  "instructions": "통계와 방법론 독립 검토 후 새 세션에서 교차 검토합니다. 문서 내부 지적과 외부 문헌 근거 지적을 구분하고 실제 조회한 출처를 인용하세요. 검색 미발견을 결함으로 단정하지 마세요. 근거는 제공받은 논문에서 정확하게 복사하세요.",
+  "adapter": {
+    "type": "stdio",
+    "executable": "INSTALL_PY",
+    "args": [
+      "INSTALL_RUNNER"
+    ]
+  },
+  "settings": {
+    "scope": "document-plus-external-literature",
+    "bundleSha256": "GENERATED_AT_INSTALL",
+    "internalMaxCalls": 4,
+    "model": "claude-opus-5-5",
+    "effort": "medium",
+    "externalLookup": {
+      "enabled": true,
+      "providers": [
+        "crossref",
+        "europepmc"
+      ]
+    },
+    "experimental": true,
+    "helper": "app/local/blue_evidence_refs.py",
+    "helperSha256": "GENERATED_AT_INSTALL",
+    "inheritedSources": {},
+    "privacy": "최종 검토에서 모델이 만든 통계/방법론 검색어 각 1개(최대180자)를 공개 Crossref/Europe PMC API로 전송합니다. 전체 PDF는 해당 API에 업로드하지 않습니다. 비공개·민감 원문에는 사용하지 마세요. 모델 처리에는 기존 Claude 구독을 사용합니다.",
+    "budgetDisclosure": "최종 단계 모델 최대4회: 검색계획1 + 전문가2병렬 + 교차검토1. API GET 최대4회(재시도 없음). 다중청크 scan/selection은 각1모델 호출. 앱 호출 예산과 내부 모델 호출 수는 다릅니다. 어댑터 총150초 예산.",
+    "auditDirectory": "INSTALL_AUDIT_DIR",
+    "diagnosticVersion": "0.3.4",
+    "auditSchema": "falsify.blue-evidence-audit.v0.3.4",
+    "limitations": "실험 0.3.4. PC별 설치 경로. 번들은 v033이 해시하는 실행 코드와 blue_service.py, blue_evidence_refs.py를 함께 묶는다. 헬퍼가 바뀌면 번들 해시가 바뀐다. 전략·모델·호출·시간·스키마·근거 검사는 v033과 같다. 모델 도구 사용은 금지. 외부 조회는 메타데이터/초록만. 그림판독·재분석·도메인승인·OS격리·정확도 개선 입증이 아니다.",
+    "predecessor": "BLUE Evidence v0.3.3 id shinick-blue-evidence-external-v033. 이전 코드·profile·실험 결과는 유지한다. 0.3.4는 별도 id이며 v033 번들 함수는 헬퍼를 포함하지 않은 채로 둔다."
+  }
+}

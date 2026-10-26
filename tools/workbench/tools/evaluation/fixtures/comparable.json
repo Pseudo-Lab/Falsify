@@ -1,0 +1,515 @@
+{
+  "schema": "falsify.controlled-blue-prep.v1",
+  "strategy": {
+    "id": "synthetic-blue-fixed",
+    "version": "0.3.3",
+    "bundleSha256": "d0f2897e4b705bd794ded542c83fc5b55fbec5ddc584651a4523042f6fefe7ed",
+    "portable": {
+      "schema": "falsify.harness.v1",
+      "id": "synthetic-blue-fixed",
+      "name": "Synthetic BLUE fixed",
+      "version": "0.3.3",
+      "role": "blue",
+      "instructions": "Review only the supplied synthetic text. Do not use an answer key.",
+      "maxCalls": 8,
+      "adapter": {
+        "type": "stdio",
+        "executable": "portable-python",
+        "args": [
+          "portable-runner.py",
+          "--diagnostic",
+          "0.3.3"
+        ]
+      },
+      "settings": {
+        "strategy": "fixed-synthetic",
+        "model": "claude-opus-5-5",
+        "bundleSha256": "d0f2897e4b705bd794ded542c83fc5b55fbec5ddc584651a4523042f6fefe7ed",
+        "internalMaxCalls": 4,
+        "scope": "document-only-synthetic"
+      }
+    },
+    "pathMap": {
+      "/opt/synthetic/original-python": "portable-python",
+      "/opt/synthetic/original-python-runner.py": "portable-runner.py",
+      "/opt/synthetic/e1-python": "portable-python",
+      "/opt/synthetic/e1-python-runner.py": "portable-runner.py",
+      "/opt/synthetic/h1-python": "portable-python",
+      "/opt/synthetic/h1-python-runner.py": "portable-runner.py"
+    },
+    "machineSettingKeys": [
+      "auditDirectory"
+    ]
+  },
+  "fixed": {
+    "requestedModel": "claude-opus-5-5",
+    "maxCalls": 8,
+    "internalMaxCalls": 4,
+    "goldVersion": "synthetic-fixture-1",
+    "protocolVersion": "falsify.document-blue.v1",
+    "caseLabel": "synthetic-controlled-blue"
+  },
+  "arms": {
+    "ORIGINAL": {
+      "sourceHash": "880fed69db9fe9afbd0743b02db539758e1b09e11622c741229b6656a333138b",
+      "fileHash": "98a5d9681e6be869ec81e711a9b3e1107adfa34ba19fa263b1f4c4ba2bcddd0e",
+      "revision": "rev-original"
+    },
+    "E1": {
+      "sourceHash": "baa7738ab80cbe5497b0626555caf33b1924ebd27429fd14627789ab402b4a4f",
+      "fileHash": "0296ff135b71ce3bb3342af2d42a2019eaf805a11a2e0dfb54e0749631323620",
+      "revision": "rev-e1"
+    },
+    "H1": {
+      "sourceHash": "11e7d98734dee515efcdd549cc7fa59f34f4734f5d45b1d841d4654b4829b2d5",
+      "fileHash": "3aa147e49a7f7cbe8e0ec8b66f3474a709eeb63bf23657efb8b84e0238239f75",
+      "revision": "rev-h1"
+    }
+  },
+  "trials": [
+    {
+      "id": "original-r1",
+      "arm": "ORIGINAL",
+      "repeat": 1,
+      "provenance": "local-codex",
+      "harness": {
+        "schema": "falsify.harness.v1",
+        "id": "synthetic-blue-fixed",
+        "name": "Synthetic BLUE fixed",
+        "version": "0.3.3",
+        "role": "blue",
+        "instructions": "Review only the supplied synthetic text. Do not use an answer key.",
+        "maxCalls": 8,
+        "adapter": {
+          "type": "stdio",
+          "executable": "/opt/synthetic/original-python",
+          "args": [
+            "/opt/synthetic/original-python-runner.py",
+            "--diagnostic",
+            "0.3.3"
+          ]
+        },
+        "settings": {
+          "strategy": "fixed-synthetic",
+          "model": "claude-opus-5-5",
+          "bundleSha256": "d0f2897e4b705bd794ded542c83fc5b55fbec5ddc584651a4523042f6fefe7ed",
+          "internalMaxCalls": 4,
+          "scope": "document-only-synthetic",
+          "auditDirectory": "/opt/synthetic/original-audits"
+        }
+      },
+      "job": {
+        "id": "req-original-1",
+        "state": "completed",
+        "role": "blue",
+        "sourceHash": "880fed69db9fe9afbd0743b02db539758e1b09e11622c741229b6656a333138b",
+        "fileHash": "98a5d9681e6be869ec81e711a9b3e1107adfa34ba19fa263b1f4c4ba2bcddd0e",
+        "revision": "rev-original",
+        "harnessHash": "ab5200feba677b4aa5e77aca19d6c5071ba6a142ac02ea51be788e6f9cfddc3b",
+        "requestBytesDigest": "6c43e610b975899a4beeb9b52a9ac443d61e344bc1f06d484ad842c72452226e",
+        "companionInstance": "ci1.c305bc3aad692c05a1d32444a43cbae052ea473b6944cedc6f1e13e0e8b414ca"
+      },
+      "request": {
+        "schema": "falsify.document-blue.v1",
+        "revision": "rev-original",
+        "requestId": "req-original-1",
+        "sourceHash": "880fed69db9fe9afbd0743b02db539758e1b09e11622c741229b6656a333138b",
+        "segments": [
+          {
+            "id": "s1",
+            "label": "Synthetic",
+            "text": "Synthetic alpha states the count is two."
+          }
+        ],
+        "maxCalls": 8,
+        "consent": true,
+        "executionConsent": true,
+        "harness": {
+          "schema": "falsify.harness.v1",
+          "id": "synthetic-blue-fixed",
+          "name": "Synthetic BLUE fixed",
+          "version": "0.3.3",
+          "role": "blue",
+          "instructions": "Review only the supplied synthetic text. Do not use an answer key.",
+          "maxCalls": 8,
+          "adapter": {
+            "type": "stdio",
+            "executable": "/opt/synthetic/original-python",
+            "args": [
+              "/opt/synthetic/original-python-runner.py",
+              "--diagnostic",
+              "0.3.3"
+            ]
+          },
+          "settings": {
+            "strategy": "fixed-synthetic",
+            "model": "claude-opus-5-5",
+            "bundleSha256": "d0f2897e4b705bd794ded542c83fc5b55fbec5ddc584651a4523042f6fefe7ed",
+            "internalMaxCalls": 4,
+            "scope": "document-only-synthetic",
+            "auditDirectory": "/opt/synthetic/original-audits"
+          }
+        }
+      },
+      "result": {
+        "schema": "falsify.document-blue.v1",
+        "revision": "rev-original",
+        "sourceHash": "880fed69db9fe9afbd0743b02db539758e1b09e11622c741229b6656a333138b",
+        "status": "ok",
+        "findings": [
+          {
+            "id": "f1",
+            "segmentId": "s1",
+            "quote": "Synthetic alpha states the count is two.",
+            "rationale": "Synthetic rationale for a fixture finding.",
+            "uncertainty": "Synthetic uncertainty. Not a scientific judgment.",
+            "evidence": [
+              {
+                "segmentId": "s1",
+                "quote": "Synthetic alpha states the count is two.",
+                "relation": "Synthetic relation between the fixture quote and itself."
+              }
+            ]
+          }
+        ],
+        "harnessHash": "ab5200feba677b4aa5e77aca19d6c5071ba6a142ac02ea51be788e6f9cfddc3b",
+        "model": "custom-stdio-model-unverified",
+        "harness": {
+          "schema": "falsify.harness.v1",
+          "id": "synthetic-blue-fixed",
+          "name": "Synthetic BLUE fixed",
+          "version": "0.3.3",
+          "role": "blue",
+          "instructions": "Review only the supplied synthetic text. Do not use an answer key.",
+          "maxCalls": 8,
+          "adapter": {
+            "type": "stdio",
+            "executable": "/opt/synthetic/original-python",
+            "args": [
+              "/opt/synthetic/original-python-runner.py",
+              "--diagnostic",
+              "0.3.3"
+            ]
+          },
+          "settings": {
+            "strategy": "fixed-synthetic",
+            "model": "claude-opus-5-5",
+            "bundleSha256": "d0f2897e4b705bd794ded542c83fc5b55fbec5ddc584651a4523042f6fefe7ed",
+            "internalMaxCalls": 4,
+            "scope": "document-only-synthetic",
+            "auditDirectory": "/opt/synthetic/original-audits"
+          }
+        },
+        "coverage": {
+          "complete": true,
+          "calls": 1,
+          "chunks": 1,
+          "completedChunks": 1
+        }
+      },
+      "rawResponseSha256": "6ccaa15c70352c49e3feb6e9c244084c89bfbc44ffd7c0246a05f02315ca634a",
+      "model": {
+        "requested": "claude-opus-5-5",
+        "verified": null
+      },
+      "calls": null,
+      "cost": null
+    },
+    {
+      "id": "e1-r1",
+      "arm": "E1",
+      "repeat": 1,
+      "provenance": "local-codex",
+      "harness": {
+        "schema": "falsify.harness.v1",
+        "id": "synthetic-blue-fixed",
+        "name": "Synthetic BLUE fixed",
+        "version": "0.3.3",
+        "role": "blue",
+        "instructions": "Review only the supplied synthetic text. Do not use an answer key.",
+        "maxCalls": 8,
+        "adapter": {
+          "type": "stdio",
+          "executable": "/opt/synthetic/e1-python",
+          "args": [
+            "/opt/synthetic/e1-python-runner.py",
+            "--diagnostic",
+            "0.3.3"
+          ]
+        },
+        "settings": {
+          "strategy": "fixed-synthetic",
+          "model": "claude-opus-5-5",
+          "bundleSha256": "d0f2897e4b705bd794ded542c83fc5b55fbec5ddc584651a4523042f6fefe7ed",
+          "internalMaxCalls": 4,
+          "scope": "document-only-synthetic",
+          "auditDirectory": "/opt/synthetic/e1-audits"
+        }
+      },
+      "job": {
+        "id": "req-e1-1",
+        "state": "completed",
+        "role": "blue",
+        "sourceHash": "baa7738ab80cbe5497b0626555caf33b1924ebd27429fd14627789ab402b4a4f",
+        "fileHash": "0296ff135b71ce3bb3342af2d42a2019eaf805a11a2e0dfb54e0749631323620",
+        "revision": "rev-e1",
+        "harnessHash": "545382a33d4c8b4d2f9891941bf8105ee8a573ab1a50b60be929a8289d3f0954",
+        "requestBytesDigest": "38a82d6172ef40fc4bbd03b573cc6dc6f0a3fbdb676020c5a30500004ef5b4c6",
+        "companionInstance": "ci1.ded311449868ca5b8e17f73ce1cefe7d649028c16f818e56eb53412332d109a2"
+      },
+      "request": {
+        "schema": "falsify.document-blue.v1",
+        "revision": "rev-e1",
+        "requestId": "req-e1-1",
+        "sourceHash": "baa7738ab80cbe5497b0626555caf33b1924ebd27429fd14627789ab402b4a4f",
+        "segments": [
+          {
+            "id": "s1",
+            "label": "Synthetic",
+            "text": "Synthetic epsilon states the count is four."
+          }
+        ],
+        "maxCalls": 8,
+        "consent": true,
+        "executionConsent": true,
+        "harness": {
+          "schema": "falsify.harness.v1",
+          "id": "synthetic-blue-fixed",
+          "name": "Synthetic BLUE fixed",
+          "version": "0.3.3",
+          "role": "blue",
+          "instructions": "Review only the supplied synthetic text. Do not use an answer key.",
+          "maxCalls": 8,
+          "adapter": {
+            "type": "stdio",
+            "executable": "/opt/synthetic/e1-python",
+            "args": [
+              "/opt/synthetic/e1-python-runner.py",
+              "--diagnostic",
+              "0.3.3"
+            ]
+          },
+          "settings": {
+            "strategy": "fixed-synthetic",
+            "model": "claude-opus-5-5",
+            "bundleSha256": "d0f2897e4b705bd794ded542c83fc5b55fbec5ddc584651a4523042f6fefe7ed",
+            "internalMaxCalls": 4,
+            "scope": "document-only-synthetic",
+            "auditDirectory": "/opt/synthetic/e1-audits"
+          }
+        }
+      },
+      "result": {
+        "schema": "falsify.document-blue.v1",
+        "revision": "rev-e1",
+        "sourceHash": "baa7738ab80cbe5497b0626555caf33b1924ebd27429fd14627789ab402b4a4f",
+        "status": "ok",
+        "findings": [],
+        "harnessHash": "545382a33d4c8b4d2f9891941bf8105ee8a573ab1a50b60be929a8289d3f0954",
+        "model": "custom-stdio-model-unverified",
+        "harness": {
+          "schema": "falsify.harness.v1",
+          "id": "synthetic-blue-fixed",
+          "name": "Synthetic BLUE fixed",
+          "version": "0.3.3",
+          "role": "blue",
+          "instructions": "Review only the supplied synthetic text. Do not use an answer key.",
+          "maxCalls": 8,
+          "adapter": {
+            "type": "stdio",
+            "executable": "/opt/synthetic/e1-python",
+            "args": [
+              "/opt/synthetic/e1-python-runner.py",
+              "--diagnostic",
+              "0.3.3"
+            ]
+          },
+          "settings": {
+            "strategy": "fixed-synthetic",
+            "model": "claude-opus-5-5",
+            "bundleSha256": "d0f2897e4b705bd794ded542c83fc5b55fbec5ddc584651a4523042f6fefe7ed",
+            "internalMaxCalls": 4,
+            "scope": "document-only-synthetic",
+            "auditDirectory": "/opt/synthetic/e1-audits"
+          }
+        },
+        "coverage": {
+          "complete": true,
+          "calls": 1,
+          "chunks": 1,
+          "completedChunks": 1
+        }
+      },
+      "rawResponseSha256": "fffe7ac30853a7939b01673f595bafa8167224f06731db8bc6f2b45cd3e56bfb",
+      "model": {
+        "requested": "claude-opus-5-5",
+        "verified": null
+      },
+      "calls": null,
+      "cost": null
+    },
+    {
+      "id": "h1-r1",
+      "arm": "H1",
+      "repeat": 1,
+      "provenance": "local-codex",
+      "harness": {
+        "schema": "falsify.harness.v1",
+        "id": "synthetic-blue-fixed",
+        "name": "Synthetic BLUE fixed",
+        "version": "0.3.3",
+        "role": "blue",
+        "instructions": "Review only the supplied synthetic text. Do not use an answer key.",
+        "maxCalls": 8,
+        "adapter": {
+          "type": "stdio",
+          "executable": "/opt/synthetic/h1-python",
+          "args": [
+            "/opt/synthetic/h1-python-runner.py",
+            "--diagnostic",
+            "0.3.3"
+          ]
+        },
+        "settings": {
+          "strategy": "fixed-synthetic",
+          "model": "claude-opus-5-5",
+          "bundleSha256": "d0f2897e4b705bd794ded542c83fc5b55fbec5ddc584651a4523042f6fefe7ed",
+          "internalMaxCalls": 4,
+          "scope": "document-only-synthetic",
+          "auditDirectory": "/opt/synthetic/h1-audits"
+        }
+      },
+      "job": {
+        "id": "req-h1-1",
+        "state": "completed",
+        "role": "blue",
+        "sourceHash": "11e7d98734dee515efcdd549cc7fa59f34f4734f5d45b1d841d4654b4829b2d5",
+        "fileHash": "3aa147e49a7f7cbe8e0ec8b66f3474a709eeb63bf23657efb8b84e0238239f75",
+        "revision": "rev-h1",
+        "harnessHash": "b5bd1805b27f55923c15fefb8964222c461c272d741e1c512ef21aed656fe6ce",
+        "requestBytesDigest": "519dc7a87b781f09512037d9cec5f3f743c8e4e9e8f5c6055c96e576ac4c5056",
+        "companionInstance": "ci1.37fef3f5d06a35a12f3a47fe8c51755540fe7f59d1df1b4f65fff6723d22f9fe"
+      },
+      "request": {
+        "schema": "falsify.document-blue.v1",
+        "revision": "rev-h1",
+        "requestId": "req-h1-1",
+        "sourceHash": "11e7d98734dee515efcdd549cc7fa59f34f4734f5d45b1d841d4654b4829b2d5",
+        "segments": [
+          {
+            "id": "s1",
+            "label": "Synthetic",
+            "text": "Synthetic eta states the count is five."
+          }
+        ],
+        "maxCalls": 8,
+        "consent": true,
+        "executionConsent": true,
+        "harness": {
+          "schema": "falsify.harness.v1",
+          "id": "synthetic-blue-fixed",
+          "name": "Synthetic BLUE fixed",
+          "version": "0.3.3",
+          "role": "blue",
+          "instructions": "Review only the supplied synthetic text. Do not use an answer key.",
+          "maxCalls": 8,
+          "adapter": {
+            "type": "stdio",
+            "executable": "/opt/synthetic/h1-python",
+            "args": [
+              "/opt/synthetic/h1-python-runner.py",
+              "--diagnostic",
+              "0.3.3"
+            ]
+          },
+          "settings": {
+            "strategy": "fixed-synthetic",
+            "model": "claude-opus-5-5",
+            "bundleSha256": "d0f2897e4b705bd794ded542c83fc5b55fbec5ddc584651a4523042f6fefe7ed",
+            "internalMaxCalls": 4,
+            "scope": "document-only-synthetic",
+            "auditDirectory": "/opt/synthetic/h1-audits"
+          }
+        }
+      },
+      "result": {
+        "schema": "falsify.document-blue.v1",
+        "revision": "rev-h1",
+        "sourceHash": "11e7d98734dee515efcdd549cc7fa59f34f4734f5d45b1d841d4654b4829b2d5",
+        "status": "abstain",
+        "findings": [],
+        "harnessHash": "b5bd1805b27f55923c15fefb8964222c461c272d741e1c512ef21aed656fe6ce",
+        "model": "custom-stdio-model-unverified",
+        "harness": {
+          "schema": "falsify.harness.v1",
+          "id": "synthetic-blue-fixed",
+          "name": "Synthetic BLUE fixed",
+          "version": "0.3.3",
+          "role": "blue",
+          "instructions": "Review only the supplied synthetic text. Do not use an answer key.",
+          "maxCalls": 8,
+          "adapter": {
+            "type": "stdio",
+            "executable": "/opt/synthetic/h1-python",
+            "args": [
+              "/opt/synthetic/h1-python-runner.py",
+              "--diagnostic",
+              "0.3.3"
+            ]
+          },
+          "settings": {
+            "strategy": "fixed-synthetic",
+            "model": "claude-opus-5-5",
+            "bundleSha256": "d0f2897e4b705bd794ded542c83fc5b55fbec5ddc584651a4523042f6fefe7ed",
+            "internalMaxCalls": 4,
+            "scope": "document-only-synthetic",
+            "auditDirectory": "/opt/synthetic/h1-audits"
+          }
+        },
+        "coverage": {
+          "complete": true,
+          "calls": 1,
+          "chunks": 1,
+          "completedChunks": 1
+        }
+      },
+      "rawResponseSha256": "1d9a1f8fb0a0af912142cbf7225896ed59d92788eaa31448e4b7d15a509a882c",
+      "model": {
+        "requested": "claude-opus-5-5",
+        "verified": null
+      },
+      "calls": null,
+      "cost": null
+    }
+  ],
+  "reviews": [
+    {
+      "id": "rev-original-1",
+      "trialId": "original-r1",
+      "reviewer": "synthetic-reviewer",
+      "caseLabel": "synthetic-controlled-blue",
+      "protocolVersion": "falsify.document-blue.v1",
+      "verdict": "mixed",
+      "score": 3,
+      "note": "Synthetic human note. This is not scientific gold and not a detection rate.",
+      "judgments": [
+        {
+          "goldId": "g-alpha",
+          "findingId": "f1",
+          "judgment": "matched"
+        }
+      ]
+    }
+  ],
+  "gold": {
+    "version": "synthetic-fixture-1",
+    "scientificGold": false,
+    "items": [
+      {
+        "id": "g-alpha",
+        "segmentId": "s1",
+        "quote": "Synthetic alpha states the count is two."
+      }
+    ]
+  }
+}

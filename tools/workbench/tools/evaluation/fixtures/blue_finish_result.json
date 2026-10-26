@@ -1,0 +1,51 @@
+{
+  "schema": "falsify.document-blue.v1",
+  "revision": "rev-original",
+  "sourceHash": "373fc710ae8e0fa1f08f1e35fae89c0c98407c46dea32c555249572d774d9395",
+  "status": "ok",
+  "findings": [],
+  "harness": {
+    "schema": "falsify.harness.v1",
+    "id": "synthetic-blue-fixed",
+    "name": "Synthetic BLUE fixed",
+    "version": "0.3.3",
+    "role": "blue",
+    "instructions": "Review only the supplied synthetic text. Do not use an answer key.",
+    "maxCalls": 8,
+    "adapter": {
+      "type": "codex",
+      "model": "gpt-6.1-sol",
+      "effort": "medium"
+    },
+    "settings": {
+      "strategy": "fixed-synthetic",
+      "model": "gpt-6.1-sol",
+      "bundleSha256": "d0f2897e4b705bd794ded542c83fc5b55fbec5ddc584651a4523042f6fefe7ed",
+      "internalMaxCalls": 4,
+      "scope": "document-only-synthetic"
+    }
+  },
+  "harnessHash": "5519598ced0bb5950e5f8e818a2234d027bd8f33bff39bb27706668ab1ce0a35",
+  "model": "gpt-6.1-sol",
+  "cliSelection": {
+    "provider": "codex",
+    "model": "gpt-6.1-sol",
+    "effort": "medium"
+  },
+  "coverage": {
+    "complete": true,
+    "calls": 1,
+    "chunks": 1,
+    "completedChunks": 1,
+    "reread": {
+      "status": "not-needed",
+      "selectedSegments": [],
+      "deliveredChars": 0,
+      "truncated": false,
+      "meaning": "단일 청크: 한 번의 호출에 전체 추출 원문이 그대로 전달되어 별도 재독이 필요 없음."
+    },
+    "rereadWindows": [],
+    "meaning": "전체 추출 텍스트 전달 완료. 다중 청크의 종합 판단은 인용 요약과 선택된 원문 재독 창(coverage.reread) 기반이며 결함 전수 탐지 보증 아님."
+  },
+  "isolation": "application payload separation; custom harness isolation/tools/model not verified; not OS input-only isolation"
+}

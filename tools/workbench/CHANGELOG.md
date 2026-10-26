@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.0-alpha.6
+
+- Host-bound evidence references make repeated BLUE selection quotes unambiguous without weakening final grounding.
+- Matched BLUE failures remain visible across reload, with explicit request/diagnostic export and discard guidance.
+- Experimental BLUE Evidence v0.3.4 uses a self-contained source bundle and preserves immutable inherited audit records.
+- Offline controlled-comparison preparation distinguishes machine configuration, strategy, failures and unreviewed findings.
+- Source ZIP preservation checks work without Git history. Human gold, full comparison UI and another-PC validation remain pending.
+
+See docs/release-alpha6.md for verification and limitations.
+
 ## 0.2.0-alpha.5
 
 - Password change/revoke-all sessions; exact-request RED/BLUE reload recovery and same-page double-click admission.

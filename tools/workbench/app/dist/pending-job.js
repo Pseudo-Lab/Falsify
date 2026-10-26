@@ -41,6 +41,20 @@
     for(const item of Array.isArray(value)?value:Object.values(value))secrets(item,depth+1);
   }
   function clone(value){return JSON.parse(JSON.stringify(value));}
+  function safeFailure(value){
+    if(typeof value!=='string')return null;
+    let s=value.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g,'');
+    s=s.replace(/Bearer\s+\S+/gi,'[redacted]');
+    s=s.replace(/\b(?:authorization|password|secret|session|token)\b\s*[:=]\s*\S+/gi,'[redacted]');
+    s=s.replace(/[ \t\n\r\f\v]+/g,' ').trim();
+    if(!s)return null;
+    return s.slice(0,300);
+  }
+  function safeRequest(record){
+    if(!record||typeof record!=='object'||!record.request||typeof record.request!=='object')return null;
+    let copy;try{copy=clone(record.request);secrets(copy,0);}catch{return null;}
+    return copy;
+  }
   function segments(list){
     if(!Array.isArray(list)||!list.length||list.length>8000)return null;
     const out=[];
@@ -78,6 +92,8 @@
     if(typeof x.revision!=='string'||x.revision.length<1||x.revision.length>160||x.revision!==x.request.revision||x.sourceHash!==x.request.sourceHash)return false;
     if(!segments(x.request.segments)||typeof x.name!=='string'||x.name.length>160||typeof x.format!=='string'||x.format.length>40)return false;
     if(x.role==='blue'&&Object.keys(x.request).some(k=>!BLUE_KEYS.includes(k)))return false;
+    // Optional, added only after a matched failure. Older records omit it and stay valid.
+    if(Object.hasOwn(x,'serverFailure')&&(typeof x.serverFailure!=='string'||x.serverFailure.length<1||x.serverFailure.length>300||x.serverFailure!==safeFailure(x.serverFailure)))return false;
     return true;
   }
   function blocking(found){
@@ -143,6 +159,7 @@
     const next={...found.record,request:found.record.request};
     if(Object.hasOwn(patch,'postReceipt')){if(!RECEIPTS.includes(patch.postReceipt))return {ok:false,status:'rejected',message:'접수 상태가 올바르지 않습니다.'};next.postReceipt=patch.postReceipt;}
     if(Object.hasOwn(patch,'disposition')){if(!DISPOSITIONS.includes(patch.disposition))return {ok:false,status:'rejected',message:'대기 상태가 올바르지 않습니다.'};next.disposition=patch.disposition;}
+    if(Object.hasOwn(patch,'serverFailure')){const safe=safeFailure(patch.serverFailure);if(!safe)return {ok:false,status:'rejected',message:'서버 실패 문구를 보관하지 못했습니다. 기록은 바꾸지 않았습니다.'};next.serverFailure=safe;}
     if(next.disposition==='open'||next.disposition==='running'){next.finishedAt=null;next.expiresAt=null;}
     else if(Object.hasOwn(patch,'finishedAt')){if(!Number.isFinite(patch.finishedAt))return {ok:false,status:'rejected',message:'완료 시각이 올바르지 않습니다.'};next.finishedAt=patch.finishedAt;next.expiresAt=patch.finishedAt+RETENTION_MS;}
     else if(next.finishedAt==null)return {ok:false,status:'rejected',message:'끝난 작업의 시각이 없습니다. 기록은 바꾸지 않았습니다.'};
@@ -192,7 +209,7 @@
     if(mismatch)return {status:mismatch,record,gets:1};
     const doc=docFrom(record);
     if(body.state==='running')return {status:'still-running',record,gets:1,job:body,doc};
-    if(body.state==='failed')return {status:'failed',record,gets:1,job:body,doc,error:typeof body.error==='string'?body.error.slice(0,300):'실패'};
+    if(body.state==='failed')return {status:'failed',record,gets:1,job:body,doc,error:safeFailure(body.error)||'실패'};
     if(body.state==='cancelled')return {status:'cancelled',record,gets:1,job:body,doc};
     if(body.state==='completed'){
       try{if(typeof options.validate!=='function')fail('invalid-result','검증기가 없습니다.');options.validate(doc,body.result);}
@@ -232,7 +249,7 @@
     };
     return base[outcome&&outcome.status]||base.unavailable;
   }
-  const api=Object.freeze({SCHEMA,RETENTION_MS,RETENTION,REQUEST_ID,storageKey,canonical,read,hold,note,discard,recover,matches:(record,body)=>!!record&&bound(record,body)===null,text,docFrom});
+  const api=Object.freeze({SCHEMA,RETENTION_MS,RETENTION,REQUEST_ID,storageKey,canonical,read,hold,note,discard,recover,matches:(record,body)=>!!record&&bound(record,body)===null,text,docFrom,safeFailure,safeRequest});
   if(typeof module==='object'&&module.exports){module.exports=api;return;}
   root.FalsifyPendingJobs=api;
 })(typeof globalThis==='object'?globalThis:this);
