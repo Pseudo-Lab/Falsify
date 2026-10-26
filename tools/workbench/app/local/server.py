@@ -6,6 +6,7 @@ By default the hosted site cannot connect across origins to this server. With an
 operations via CORS, still only with the bearer token printed to this terminal.
 """
 import argparse
+import hashlib
 import hmac
 import json
 import mimetypes
@@ -21,11 +22,12 @@ from urllib.parse import urlsplit, unquote
 from red_service import run_review, validate_request
 from preserve import handle_export
 from blue_service import run_review as run_blue_review, validate_request as validate_blue_request
-from harness import CLI_AGENTS, EFFORTS
+from harness import CLI_AGENTS, EFFORTS, resolve
 import cli_backend
 import editor_service
 import paper_analysis_service
 import image_edit_service
+import harness_profile
 from build_info import WORKBENCH_VERSION
 from experiments.selfplay_codex import discover_codex
 
@@ -36,6 +38,45 @@ LOCK = threading.Lock()
 ACTIVE = threading.BoundedSemaphore(1)
 LIFECYCLE_SCHEMA = 'falsify-companion-lifecycle/1'
 RESULT_RETENTION = 3600
+
+def companion_instance_descriptor(instance_id):
+    """Public per-process identity for reload checks. Not the launcher restart secret."""
+    raw = instance_id.encode('utf-8')
+    digest = hashlib.sha256(b'falsify.companion-instance.v1\n' + raw).hexdigest()
+    if instance_id in digest:
+        digest = hashlib.sha256(b'falsify.companion-instance.refold.v1\n' + digest.encode('ascii')).hexdigest()
+    descriptor = 'ci1.' + digest
+    if instance_id in descriptor:
+        raise RuntimeError('companion instance descriptor collided with the launcher id')
+    return descriptor
+
+def job_binding(data, role, instance_id):
+    """Fields a reload GET must echo. Hashes only; not the pairing secret or the file bytes."""
+    _, harness_hash = resolve(data, role)
+    source, revision = data.get('sourceHash'), data.get('revision')
+    if not isinstance(source, str) or not isinstance(revision, str) or not isinstance(harness_hash, str):
+        raise ValueError('작업 식별이 없습니다.')
+    return {'sourceHash': source, 'revision': revision, 'harnessHash': harness_hash,
+            'companionInstance': companion_instance_descriptor(instance_id)}
+
+def request_bytes_digest(raw):
+    """SHA-256 of the exact HTTP body bytes, computed before JSON parsing.
+    This is not the sorted idempotency fingerprint and not the browser canonical checksum."""
+    if not isinstance(raw, (bytes, bytearray)) or not raw:
+        raise ValueError('요청 바이트가 없습니다.')
+    return hashlib.sha256(bytes(raw)).hexdigest()
+
+def public_job(job):
+    hidden = ('cancel', 'fingerprint', 'created', 'finished')
+    return {k: v for k, v in job.items() if k not in hidden}
+
+def drop_expired_jobs(now=None):
+    """Finished jobs leave memory after RESULT_RETENTION. A running job has no finished time and stays."""
+    now = time.monotonic() if now is None else now
+    for key in list(JOBS):
+        old = JOBS[key]
+        if old.get('finished', float('inf')) < now - RESULT_RETENTION:
+            del JOBS[key]
 
 class ThreadingHTTPServer(_NativeThreadingHTTPServer):
     """On Windows SO_REUSEADDR lets a later bind take over a live listener; claim the port exclusively instead.
@@ -68,6 +109,7 @@ def busy_locked(server):
     return False, True
 CORS_HEADERS = {'authorization', 'content-type'}
 IMAGE_ROUTES = ('/api/paper/images', '/api/paper/images/export')
+PROFILE_ROUTE = '/api/harness/profile/propose'
 HOST_LABEL = re.compile(r'[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?')
 
 def parse_web_origin(value):
@@ -86,7 +128,7 @@ def parse_web_origin(value):
 def cors_route(method, path):
     """Existing allowlisted API operations a configured web origin may reach."""
     if method == 'GET': return path == '/api/capabilities' or re.fullmatch(r'/api/(red|blue)/jobs/.+', path) is not None
-    if method == 'POST': return path in ['/api/red/jobs', '/api/blue/jobs', '/api/export', '/api/paper/inspect', *IMAGE_ROUTES] or re.fullmatch(r'/api/(red|blue)/jobs/.+/cancel', path) is not None
+    if method == 'POST': return path in ['/api/red/jobs', '/api/blue/jobs', '/api/export', '/api/paper/inspect', *IMAGE_ROUTES, PROFILE_ROUTE] or re.fullmatch(r'/api/(red|blue)/jobs/.+/cancel', path) is not None
     return False
 
 def no_duplicates(items):
@@ -231,13 +273,15 @@ class Handler(BaseHTTPRequestHandler):
                     'model': 'gpt-6.1-sol', 'isolation': 'read-only CLI restrictions; not OS-enforced input-only isolation',
                     'cliSelection': True, 'harnessWrapper': True, 'cliAgents': cli_agents(), 'pdfEditor': pdf_editor,
                     'paperAnalysis': paper_analysis_service.capability(), 'imageEditor': image_edit_service.capability(),
-                    'workbenchVersion': WORKBENCH_VERSION}); return
+                    'harnessProfileProposal': harness_profile.capability(),
+                    'workbenchVersion': WORKBENCH_VERSION,
+                    'companionInstance': companion_instance_descriptor(self.server.instance_id)}); return
             with LOCK:
                 role = 'blue' if path.startswith('/api/blue/jobs/') else 'red'
                 prefix = '/api/' + role + '/jobs/'
                 job = JOBS.get(path.removeprefix(prefix)) if path.startswith(prefix) else None
                 if job and job['role'] != role: job = None
-                response = {k: v for k, v in job.items() if k not in ['cancel', 'fingerprint', 'created', 'finished']} if job else None
+                response = public_job(job) if job else None
             self.reply(200 if response else 404, response or {'error': 'not_found'}); return
         if self.headers.get('Sec-Fetch-Site') == 'cross-site': self.reply(403, {'error': 'cross_site_denied'}); return
         if path == '/': path = '/index.html'
@@ -252,7 +296,7 @@ class Handler(BaseHTTPRequestHandler):
         path = unquote(urlsplit(self.path).path)
         role = 'blue' if path.startswith('/api/blue/jobs') else 'red'
         prefix = '/api/' + role + '/jobs'
-        if path not in ['/api/red/jobs', '/api/blue/jobs', '/api/export', '/api/paper/inspect', *IMAGE_ROUTES] and not (path.startswith(prefix + '/') and path.endswith('/cancel')):
+        if path not in ['/api/red/jobs', '/api/blue/jobs', '/api/export', '/api/paper/inspect', *IMAGE_ROUTES, PROFILE_ROUTE] and not (path.startswith(prefix + '/') and path.endswith('/cancel')):
             self.reply(404, {'error': 'operation_not_allowed'}); return
         try:
             if self.headers.get('Content-Type') != 'application/json': raise ValueError('application/json 필요')
@@ -261,6 +305,7 @@ class Handler(BaseHTTPRequestHandler):
             if not 1 <= size <= limit: raise ValueError('본문 크기 제한 초과')
             raw = self.rfile.read(size)
             if len(raw) != size: raise ValueError('본문 수신 중단')
+            body_digest = request_bytes_digest(raw) if path in ('/api/red/jobs', '/api/blue/jobs') else None
             data = json.loads(raw.decode('utf-8'), object_pairs_hook=no_duplicates, parse_constant=lambda _: (_ for _ in ()).throw(ValueError('nonfinite JSON')))
             if not isinstance(data, dict): raise ValueError('JSON 객체 필요')
             if path.endswith('/cancel'):
@@ -297,13 +342,23 @@ class Handler(BaseHTTPRequestHandler):
                 except image_edit_service.ImageEditError as error: self.reply(error.status, error.payload()); return
                 finally: ACTIVE.release()
                 self.reply(200, result); return
+            if path == PROFILE_ROUTE:
+                # Explicit-click profile draft: validated before admission, gated like inspect (not a JOB), one prompt-only CLI
+                # call; the proposed executable is never run here. Fixed error codes only.
+                request = harness_profile.validate_request(data)
+                with LOCK: admitted = not self.server_closing() and ACTIVE.acquire(blocking=False)
+                if not admitted: self.reply(409, {'error': 'companion_busy'}); return
+                try: result = harness_profile.propose(request)
+                except harness_profile.ProposalError as error: self.reply(error.status, error.payload()); return
+                finally: ACTIVE.release()
+                self.reply(200, result); return
             (validate_blue_request if role == 'blue' else validate_request)(data)
+            binding = job_binding(data, role, self.server.instance_id)
+            # Idempotency stays the parsed, key-sorted fingerprint. requestBytesDigest is the pre-parse wire hash.
             fingerprint = json.dumps(data, sort_keys=True, ensure_ascii=False)
             request_id = data['requestId']
             with LOCK:
-                for key in list(JOBS):
-                    old = JOBS[key]
-                    if old.get('finished', float('inf')) < time.monotonic() - 3600: del JOBS[key]
+                drop_expired_jobs()
                 existing = JOBS.get(request_id)
                 if existing:
                     if existing['role'] != role or existing['fingerprint'] != fingerprint: raise ValueError('같은 요청 ID의 내용이 달라졌습니다.')
@@ -311,7 +366,7 @@ class Handler(BaseHTTPRequestHandler):
                 if len(JOBS) >= 16: raise ValueError('메모리 작업 제한. 완료 후 서버를 재시작하세요.')
                 if self.server_closing() or not ACTIVE.acquire(blocking=False): self.reply(409, {'error': '이미 실행 중입니다. 재시도는 자동 호출되지 않습니다.'}); return
                 job = {'id': request_id, 'role': role, 'state': 'running', 'progress': {'completedCalls': 0}, 'cancel': threading.Event(),
-                    'fingerprint': fingerprint, 'created': time.monotonic()}
+                    'fingerprint': fingerprint, 'requestBytesDigest': body_digest, 'created': time.monotonic(), **binding}
                 JOBS[request_id] = job
                 threading.Thread(target=work, args=(job, data), daemon=True).start()
             self.reply(202, {'id': request_id, 'state': 'running'})

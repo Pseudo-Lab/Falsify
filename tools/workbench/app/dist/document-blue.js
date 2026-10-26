@@ -1,6 +1,10 @@
 (function(){
   'use strict';const C=FalsifyDocumentBlue,B=FalsifyLocalBridge,$=s=>document.querySelector(s);
   let generation=0,doc=null,result=null,findings=[],request=null,busy=false,job=null,jobLink=null,abort=null;
+  const P=globalThis.FalsifyPendingJobs||null;let recovering=false;
+  function shippedHelper(){try{const nodes=document.scripts?[...document.scripts]:[];return nodes.some(s=>{const src=String(s&&(typeof s.getAttribute==='function'?s.getAttribute('src'):s.src)||'');return src==='pending-job.js'||src.endsWith('/pending-job.js');});}catch{return false;}}
+  function helperReady(){return !!(P&&typeof P.hold==='function'&&typeof P.note==='function'&&typeof P.read==='function'&&typeof P.matches==='function'&&typeof P.recover==='function');}
+  function expectsHelper(){return !!(P||shippedHelper());}
   // relation is operator-only metadata (RED handoff run ID); it never enters the BLUE request packet.
   let relation=null,epoch=0,savedId=null,saving=false,failure=null;
   const hash=async bytes=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes))).map(x=>x.toString(16).padStart(2,'0')).join('');
@@ -48,9 +52,94 @@
   $('#doc-blue-budget').addEventListener('change',()=>{generation++;if(doc)doc.revision=crypto.randomUUID();invalidate();controls();msg('예산 변경: 이전 응답을 무효화했습니다.');});
   $('#doc-blue-request').addEventListener('click',async()=>{if(!doc||busy)return;const current=generation;try{const next=result&&request?request:await makeRequest();if(current!==generation)return;request=next;saveJSON(request,'falsify-document-blue-request.json');msg('논문과 BLUE harness 요청 저장. 모델은 호출하지 않았습니다. RED 계획·검수 기록은 포함하지 않습니다.');}catch(e){msg(e.message,true);}});
   $('#doc-blue-apply').addEventListener('click',async()=>{if(!doc||busy)return;const current=generation;try{const raw=$('#doc-blue-response').value;if(raw.length>150000)throw new Error('응답 길이 제한 초과');const next=request||await makeRequest();if(current!==generation)return;request=next;apply(JSON.parse(raw),'manual-unverified');}catch(e){msg('응답 적용 차단: '+e.message,true);}});
-  $('#doc-blue-start').addEventListener('click',async()=>{if(!doc||busy||!$('#doc-blue-consent').checked||!FalsifyLab.allowed('blue'))return;const current=generation;busy=true;invalidate();controls();
+  async function holdBlue(next){
+    const instance=B.capabilities()?.companionInstance||null;
+    const held=await P.hold({role:'blue',request:next,doc,companionInstance:instance,hashHarness:h=>FalsifyHarness.hash(h)});
+    if(!held.ok)throw new Error(held.message);
+    return held;
+  }
+  async function postBlue(l,held){
+    request=held.record.request;
+    const wire=JSON.stringify(request);
+    if(await hash(new TextEncoder().encode(wire))!==held.record.requestBytesDigest)throw new Error('직렬화한 요청 바이트가 대기 기록과 달라 보내지 않았습니다.');
+    let started;try{started=await l.request('/api/blue/jobs',request);}catch(err){await P.note(held.record,{postReceipt:'unknown'});throw err;}
+    if(!started||started.id!==request.requestId){await P.note(held.record,{postReceipt:'unknown'});throw new Error('서버가 저장한 요청 ID와 다른 작업을 돌려줘 그 작업을 이어받지 않았습니다.');}
+    await P.note(held.record,{postReceipt:'accepted'});return started;
+  }
+  async function watchBlue(current,l,strict){
+    while(current===generation&&job){
+      const data=await l.request('/api/blue/jobs/'+encodeURIComponent(job));if(current!==generation||!job)return;
+      if(strict){const found=P.read('blue');if(found.status!=='record'||found.record.requestId!==job||!P.matches(found.record,data))throw new Error('조회한 작업의 식별이 저장한 요청과 달라 적용하지 않았습니다.');}
+      if(data.state==='completed'){apply(data.result,'local-codex');if(strict){const found=P.read('blue');if(found.status==='record')await P.note(found.record,{disposition:'completed',finishedAt:Date.now()});}break;}
+      if(['failed','cancelled'].includes(data.state)){if(strict){const found=P.read('blue');if(found.status==='record'){await P.note(found.record,{disposition:data.state==='failed'?'failed':'cancelled',finishedAt:Date.now()});showPendingBlue({status:data.state==='failed'?'failed':'cancelled',record:found.record});}}throw new Error(data.error||'BLUE 취소됨');}
+      if(strict){const found=P.read('blue');if(found.status==='record'&&found.record.disposition!=='running')await P.note(found.record,{disposition:'running'});}
+      msg('BLUE 검토 중 · '+(data.progress.completedCalls||0)+' / '+(data.progress.requiredCalls||'?')+'회 완료'+phase(data.progress.phase));await new Promise(r=>setTimeout(r,1500));
+    }
+  }
+  function showPendingBlue(outcome){
+    msg(P.text(outcome),outcome.status!=='still-running');
+    const keep=!!outcome&&outcome.status&&outcome.status!=='absent'&&outcome.status!=='completed'&&outcome.status!=='still-running';
+    let b=$('#doc-blue-pending-discard');
+    if(keep&&!b){b=document.createElement('button');b.type='button';b.id='doc-blue-pending-discard';b.className='button secondary';b.textContent='이 대기 작업 버리기';$('#doc-blue-progress').after(b);
+      b.addEventListener('click',()=>{generation++;cancel();const done=P.discard('blue',{acknowledge:true});b.hidden=true;busy=false;msg(done.ok?P.text({status:'discarded'}):done.message,!done.ok);controls();});}
+    if(b)b.hidden=!keep;
+  }
+  function adoptBlue(stored){
+    doc={revision:stored.revision,sourceHash:stored.sourceHash,fileHash:stored.fileHash,format:stored.format,name:stored.name,segments:stored.segments.map(s=>({id:s.id,label:s.label,text:s.text}))};
+    relation=null;$('#doc-blue-summary').textContent=(doc.name||'복구된 BLUE 입력')+' · 추출 텍스트만 복구됨';
+  }
+  async function probeBlue(id){
+    const l=B.session();if(!l)return {httpStatus:0,body:null};
+    try{return {httpStatus:200,body:await l.request('/api/blue/jobs/'+encodeURIComponent(id))};}
+    catch(e){const m=String(e&&e.message||'');
+      if(m.includes('401')||m.includes('403')||m.includes('인증을 거부'))return {httpStatus:403,body:null};
+      if(m.includes('404')||m.includes('not_found')||m.includes('찾을 수 없습니다'))return {httpStatus:404,body:null};
+      return {httpStatus:0,body:null};}
+  }
+  async function resumeBlue(outcome){
+    const l=B.session();if(!l){showPendingBlue({status:'unpaired',record:outcome.record});return;}
+    adoptBlue(outcome.doc);request=outcome.record.request;
+    if(outcome.record.postReceipt!=='accepted')await P.note(outcome.record,{postReceipt:'accepted'});
+    const current=generation;busy=true;job=outcome.record.requestId;jobLink=l;controls();msg(P.text(outcome));
+    try{await watchBlue(current,l,true);}catch(e){if(current===generation)msg(e.message+' 자동 재시도하지 않습니다.',true);}
+    finally{if(current===generation){busy=false;job=null;jobLink=null;controls();}}
+  }
+  function showRecoveredBlue(outcome){adoptBlue(outcome.doc);request=outcome.record.request;apply(outcome.result,'local-codex');msg(P.text(outcome));}
+  async function recoverBlue(){
+    if(!helperReady()||recovering||busy)return;
+    const found=P.read('blue');if(found.status==='absent')return;
+    if(doc){if(found.status==='record'&&doc.sourceHash===found.record.sourceHash&&doc.fileHash===found.record.fileHash&&doc.revision===found.record.revision&&(job||found.record.disposition==='completed'))return;showPendingBlue(found.status==='record'?{status:'unresolved',record:found.record}:found);return;}
+    if(!B.state().connected){showPendingBlue(found.status==='record'?{status:'unpaired',record:found.record}:found);return;}
+    recovering=true;
+    try{
+      const outcome=await P.recover({role:'blue',companionInstance:B.capabilities()?.companionInstance||null,hashHarness:h=>FalsifyHarness.hash(h),validate:(d,res)=>C.validateResponse(d,res),getJob:probeBlue});
+      if(!outcome||outcome.status==='absent')return;
+      if(outcome.status==='still-running'){await resumeBlue(outcome);return;}
+      if(outcome.status==='completed'){showRecoveredBlue(outcome);const rec=P.read('blue');if(rec.status==='record')await P.note(rec.record,{disposition:'completed',finishedAt:Date.now()});return;}
+      if((outcome.status==='failed'||outcome.status==='cancelled')&&outcome.record)await P.note(outcome.record,{disposition:outcome.status,finishedAt:Date.now()});
+      showPendingBlue(outcome);
+    }finally{recovering=false;}
+  }
+  $('#doc-blue-start').addEventListener('click',async()=>{if(!doc||busy||!$('#doc-blue-consent').checked||!FalsifyLab.allowed('blue'))return;const current=generation;
+    if(expectsHelper()){
+      if(!helperReady()){msg('대기 기록 도우미가 없거나 손상되어 실행하지 않았습니다. 요청을 보내지 않습니다.',true);return;}
+      busy=true;controls();
+      let l,held=null;
+      try{l=link();const next=await makeRequest();if(current!==generation)return;held=await holdBlue(next);}
+      catch(e){if(current===generation)msg(e.message+' 자동 재시도하지 않습니다.',true);}
+      finally{if(!held){busy=false;controls();}}
+      if(current!==generation){busy=false;controls();return;}
+      if(!held)return;
+      invalidate();request=held.record.request;controls();
+      try{msg('전체 텍스트 호출 예산 확인 후 선택 BLUE harness를 실행합니다.');const started=await postBlue(l,held);if(current!==generation){void l.request('/api/blue/jobs/'+encodeURIComponent(started.id)+'/cancel',{}).catch(()=>{});return;}job=started.id;jobLink=l;controls();await watchBlue(current,l,true);}
+      catch(e){if(current===generation)msg(e.message+' 자동 재시도하지 않습니다.',true);}finally{if(current===generation){busy=false;job=null;jobLink=null;controls();}}
+      return;
+    }
+    // UNSHIPPED_TEST_ISOLATION: document-blue.js loaded with neither pending-job.js nor the shipped script tag.
+    // Standalone page VMs keep this direct POST. index.html always includes the helper and never uses this branch.
+    busy=true;invalidate();controls();
     try{const l=link();request=await makeRequest();if(current!==generation)return;msg('전체 텍스트 호출 예산 확인 후 선택 BLUE harness를 실행합니다.');const started=await l.request('/api/blue/jobs',request);if(current!==generation){void l.request('/api/blue/jobs/'+encodeURIComponent(started.id)+'/cancel',{}).catch(()=>{});return;}job=started.id;jobLink=l;controls();
-      while(current===generation&&job){const data=await l.request('/api/blue/jobs/'+encodeURIComponent(job));if(current!==generation||!job)return;if(data.state==='completed'){apply(data.result,'local-codex');break;}if(['failed','cancelled'].includes(data.state))throw new Error(data.error||'BLUE 취소됨');msg('BLUE 검토 중 · '+(data.progress.completedCalls||0)+' / '+(data.progress.requiredCalls||'?')+'회 완료'+phase(data.progress.phase));await new Promise(r=>setTimeout(r,1500));}
+      await watchBlue(current,l,false);
     }catch(e){if(current===generation)msg(e.message+' 자동 재시도하지 않습니다.',true);}finally{if(current===generation){busy=false;job=null;jobLink=null;controls();}}});
   $('#doc-blue-cancel').addEventListener('click',()=>{generation++;cancel();busy=false;invalidate();controls();msg('취소 요청. 진행 중 호출은 최대 180초까지 실행될 수 있으며 응답은 폐기합니다.');});
   $('#doc-blue-record').addEventListener('click',()=>{if(!doc||!result||busy)return;if(savedId){renderRecord('변경이 없어 다시 기록하지 않았습니다. ');return;}void saveRecord();});
@@ -71,5 +160,5 @@
     b.hidden=!savedId||!result;
   }
   function connection(){const s=B.state();$('#doc-blue-connection').textContent=s.status==='checking'?'로컬 실행 상태 확인 중':s.connected?(s.cap?.blue?(s.status==='paired'?'페어링된 로컬 broker':'로컬 broker')+' · 선택 harness 사용 · 실행 CLI·모델은 아래 Harness 선택을 따릅니다'+(s.cap.cliSelection?'':' · 이 companion은 기본 Codex CLI(새 일회성 세션)만 지원 (CLI 선택은 최신 companion 필요)'):'실제 BLUE 연결 없음: 최신 코드로 로컬 서버를 재시작하세요.'):'로컬 broker 연결 없음 · 파일 추출과 수동 JSON 교환만 가능합니다. 위 연결 패널을 확인하세요.';}
-  document.addEventListener('falsify:local-bridge',()=>{connection();controls();});connection();controls();
+  document.addEventListener('falsify:local-bridge',()=>{connection();controls();if(helperReady())void recoverBlue();});connection();controls();if(helperReady())void recoverBlue();
 })();

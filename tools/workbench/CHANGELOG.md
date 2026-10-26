@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.0-alpha.5
+
+- Password change/revoke-all sessions; exact-request RED/BLUE reload recovery and same-page double-click admission.
+- Portable BLUE Evidence v0.3.3 sources and per-PC profile generation with explicit external-literature opt-in.
+- Quick-first hosted HTML guide, account/recovery documentation, and PDF Editor alpha.6 compatibility.
+- Source-only distribution excludes private records, machine profiles and patched editor WASM.
+
+See docs/release-alpha5.md for verification and limitations.
+
 ## 0.2.0-alpha.4
 
 - Optional team records in Results: invite-only username/password accounts, private-by-default uploads, explicit team sharing,

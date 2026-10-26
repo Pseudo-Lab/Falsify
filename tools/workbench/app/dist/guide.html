@@ -66,7 +66,7 @@ pre,table{break-inside:avoid}
 <header class="sign">
 <div class="wrap">
 <h1>Falsify Paper Workbench 사용 안내</h1>
-<p>alpha4 기준 · RED, BLUE, 검수는 서로 독립적으로 씁니다. 필요한 것만 고르세요.</p>
+<p>0.2.0-alpha.5 기준 · RED, BLUE, 검수는 서로 독립적으로 씁니다. 필요한 것만 고르세요.</p>
 <a class="open-app" href="https://shinick-han.github.io/falsify-branch-preview/">앱 열기 (이 브랜치의 Workbench 미리보기)</a>
 <p>이 안내 파일은 오프라인으로 열어도 됩니다. 앱은 위 공개 페이지나, 로컬 작업대 방식으로 companion을 실행 중일 때의 로컬 주소(기본 <code>http://127.0.0.1:7816/</code>)로 엽니다. 내려받은 <code>index.html</code>을 파일로 직접 여는 방식은 완전히 지원하지 않습니다.</p>
 </div>
@@ -115,6 +115,15 @@ pre,table{break-inside:avoid}
 </ol>
 </section>
 
+<section id="release-alpha5">
+<h2>이번 버전에서 달라진 사용법</h2>
+<h3>실행 중 새로고침</h3>
+<p>같은 브라우저와 같은 companion이 살아 있으면 저장된 작업 ID로 결과를 조회합니다. 모델을 다시 실행하지 않습니다. 서버가 재시작되거나 요청이 다르면 복구 불가 상태를 표시합니다. RED 파일 다운로드에는 원본을 다시 골라 같은 파일인지 확인해야 합니다. 추출 논문 텍스트는 이 브라우저에 보관하며 원본 파일 바이트와 연결 토큰은 pending 기록에 넣지 않습니다.</p>
+<h3>계정 관리</h3>
+<p>공유 기록에서 현재 비밀번호로 비밀번호를 변경하거나 모든 세션을 종료할 수 있습니다. 성공하면 다시 로그인하세요. 결과가 불명확하면 자동으로 재요청하지 않습니다. <a href="https://github.com/Pseudo-Lab/Falsify/blob/feat/workbench-html-guide-20261012/tools/workbench/docs/account-operations.md">계정 사용 안내</a></p>
+<h3>BLUE Evidence v0.3.3</h3>
+<p>다른 사람의 프로필만 복사해서는 실행기가 설치되지 않습니다. 각 PC에서 소스를 설치하고 프로필을 생성해 등록하세요. 구독 로그인·문헌 조회 범위·호출 수는 <a href="https://github.com/Pseudo-Lab/Falsify/blob/feat/workbench-html-guide-20261012/tools/workbench/docs/blue-evidence.md">PC별 BLUE 설치 안내</a>에서 확인할 수 있습니다.</p>
+</section>
 <nav id="toc" class="toc" aria-labelledby="toc-title">
 <h2 id="toc-title">자세한 안내 차례</h2>
 <ol>

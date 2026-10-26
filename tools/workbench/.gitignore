@@ -11,3 +11,6 @@ app/local-test-output/
 app/.sites/
 app/.openai/
 .pdf-editor.local.json
+
+# Generated, machine-specific harness profiles stay on each user PC.
+app/examples/evidence_blue*/profile.json

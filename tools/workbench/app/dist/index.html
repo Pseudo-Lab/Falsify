@@ -15,6 +15,7 @@
   <link rel="stylesheet" href="image-editor.css">
   <script src="harness-core.js" defer></script>
   <script src="harness-wrapper.js" defer></script>
+  <script src="harness-profile.js" defer></script>
   <script src="local-bridge.js" defer></script>
   <script src="experiment-ledger.js" defer></script>
   <script src="document-import.js" defer></script>
@@ -25,6 +26,7 @@
   <script src="document-preview.js" defer></script>
   <script src="image-editor-core.js" defer></script>
   <script src="image-editor.js" defer></script>
+  <script src="pending-job.js" defer></script>
   <script src="document-red.js" defer></script>
   <script src="document-blue-core.js" defer></script>
   <script src="document-blue.js" defer></script>
@@ -196,7 +198,7 @@
           <aside class="connection-plan"><h3>선택 harness 실행 경로</h3><ol><li><strong>웹 작업대 (공개 페이지 또는 로컬)</strong><span>논문 추출·전송/실행 동의·앱 호출 예산</span></li><li><strong>인증된 loopback broker (127.0.0.1)</strong><span>공개 페이지는 페어링 토큰+허용 origin으로만 호출 · RED/BLUE/PDF 및 등록 harness 계약 처리</span></li><li><strong>Codex / Claude CLI · stdio wrapper · HTTPS</strong><span>기본은 이 PC에 로그인된 Codex CLI(도구 제한). CLI 선택을 지원하는 companion에서는 RED·BLUE마다 Codex/Claude CLI·모델·effort를 고르며, 선택은 새 harness 내용 해시로 기록됩니다. 다른 실행기는 신뢰한 stdio wrapper로 등록 · 사용자 코드/서버의 내부 실행 경계는 미검증</span></li></ol><p>공개 페이지는 상단 연결 패널에서 내 PC의 companion과 페어링하며, 사용자가 시작한 RED/BLUE 실행만 보냅니다. 연결 없이 쓰려면 companion 폴더에서 <code>python app/local/server.py</code> 실행 후 <a class="text-link" data-bridge-local href="http://127.0.0.1:7816/" target="_blank" rel="noopener noreferrer">로컬 작업대 열기</a>, 또는 수동 JSON 교환을 쓰세요.</p><p class="muted">기본 BLUE Codex만 새 일회성 세션입니다. 앱은 OS 샌드박스가 아니며 사용자 harness가 과거 상태를 공유하지 않도록 직접 관리해야 합니다. 모델 출력과 사람 검수·팀 승인은 별개입니다. shell 문자열·API 키 입력·승인 자동 생성은 제공하지 않습니다.</p></aside>
         </section>
 
-        <footer class="page-foot"><span>Falsify · Paper document-consistency workbench</span><a class="source-link" id="source-link" href="https://github.com/Shinick-Han/falsify-workbench" target="_blank" rel="noopener noreferrer">소스 코드 · AGPL-3.0-only</a></footer>
+        <footer class="page-foot"><span>Falsify · Paper document-consistency workbench</span><a class="source-link" href="./guide.html" target="_blank" rel="noopener noreferrer">사용 설명서</a><a class="source-link" id="source-link" href="https://github.com/Shinick-Han/falsify-workbench" target="_blank" rel="noopener noreferrer">소스 코드 · AGPL-3.0-only</a></footer>
       </div>
     </main>
   </div>

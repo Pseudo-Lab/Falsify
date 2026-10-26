@@ -2,7 +2,7 @@
 (function(root){
   'use strict';
   const HOST='127.0.0.1',DEFAULT_PORT=7816,WEB_ORIGIN='https://shinick-han.github.io';
-  const PATH=/^\/api\/(?:capabilities|export|paper\/(?:inspect|images(?:\/export)?)|(?:red|blue)\/jobs(?:\/[A-Za-z0-9%._~-]+(?:\/cancel)?)?)$/;
+  const PATH=/^\/api\/(?:capabilities|export|paper\/(?:inspect|images(?:\/export)?)|harness\/profile\/propose|(?:red|blue)\/jobs(?:\/[A-Za-z0-9%._~-]+(?:\/cancel)?)?)$/;
   // Strict decimal port only; host and scheme are never user input.
   function parsePort(value){const s=String(value??'').trim();if(s==='')return DEFAULT_PORT;if(!/^[1-9][0-9]{3,4}$/.test(s))return null;const n=Number(s);return n>=1024&&n<=65535?n:null;}
   function validToken(t){return typeof t==='string'&&t.length>=16&&t.length<=512&&/^[A-Za-z0-9._~+/-]+=*$/.test(t);}
@@ -18,15 +18,23 @@
       out.push(Object.freeze({id:a.id,name:typeof a.name==='string'&&a.name.trim()?a.name.slice(0,60):a.id,installed:typeof a.installed==='boolean'?a.installed:null,defaultModel:typeof a.defaultModel==='string'&&MODEL.test(a.defaultModel)?a.defaultModel:null,
         models:Object.freeze((Array.isArray(a.models)?a.models:[]).filter(m=>typeof m==='string'&&MODEL.test(m)).slice(0,40)),efforts:Object.freeze((Array.isArray(a.efforts)?a.efforts:EFFORTS).filter(e=>EFFORTS.includes(e)))}));}
     return Object.freeze(out);}
+  // Public per-process companion identity. Not the launcher restart secret and not a pairing secret.
+  function companionInstance(v){return typeof v==='string'&&/^ci1\.[0-9a-f]{64}$/.test(v)?v:null;}
   function capSnapshot(d){if(!d||typeof d!=='object'||Array.isArray(d)||typeof d.red!=='boolean'||typeof d.blue!=='boolean')return null;
     return Object.freeze({red:d.red,blue:d.blue,pdf:d.pdf===true,officeLayoutVerifiedExport:d.officeLayoutVerifiedExport===true,model:typeof d.model==='string'?d.model.slice(0,80):null,isolation:typeof d.isolation==='string'?d.isolation.slice(0,200):null,
-      cliSelection:d.cliSelection===true,harnessWrapper:d.harnessWrapper===true,cliAgents:d.cliSelection===true?agents(d.cliAgents):null,pdfEditor:pdfEditor(d.pdfEditor),paperAnalysis:paperAnalysis(d.paperAnalysis),imageEditor:imageEditor(d.imageEditor),workbenchVersion:workbenchVersion(d.workbenchVersion)});}
+      cliSelection:d.cliSelection===true,harnessWrapper:d.harnessWrapper===true,cliAgents:d.cliSelection===true?agents(d.cliAgents):null,pdfEditor:pdfEditor(d.pdfEditor),paperAnalysis:paperAnalysis(d.paperAnalysis),imageEditor:imageEditor(d.imageEditor),harnessProfileProposal:profileProposal(d.harnessProfileProposal),workbenchVersion:workbenchVersion(d.workbenchVersion),companionInstance:companionInstance(d.companionInstance)});}
   // Optional advisory PDF pre-analysis from a newer broker: exact descriptor or none. An older broker without it keeps every other path.
   const ANALYSIS_SCHEMA='falsify.pdf-analysis-summary.v1',WORKBENCH_VERSION=/^[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}(?:-[0-9A-Za-z]{1,16}(?:\.[0-9A-Za-z]{1,16}){0,3})?$/;
   function paperAnalysis(d){if(!d||typeof d!=='object'||Array.isArray(d)||Object.keys(d).length!==2||typeof d.available!=='boolean'||d.schema!==ANALYSIS_SCHEMA)return null;return Object.freeze({available:d.available,schema:ANALYSIS_SCHEMA});}
   // Optional single-occurrence image replacement from a newer broker: exact descriptor or none, like pre-analysis.
   const IMAGE_SCHEMA='falsify.image-list.v1';
   function imageEditor(d){if(!d||typeof d!=='object'||Array.isArray(d)||Object.keys(d).length!==2||typeof d.available!=='boolean'||d.schema!==IMAGE_SCHEMA)return null;return Object.freeze({available:d.available,schema:IMAGE_SCHEMA});}
+  // Optional AI connection-profile drafting from a newer broker: exact descriptor or none, like pre-analysis.
+  const PROFILE_SCHEMA='falsify.harness-profile-proposal.v1';
+  // providers lists the CLIs the companion drafts with (Claude only today); unknown names drop the whole descriptor.
+  function profileProposal(d){if(!d||typeof d!=='object'||Array.isArray(d)||Object.keys(d).length!==3||typeof d.available!=='boolean'||d.schema!==PROFILE_SCHEMA)return null;
+    const p=d.providers;if(!Array.isArray(p)||!p.length||p.length>2||new Set(p).size!==p.length||!p.every(v=>v==='claude'||v==='codex'))return null;
+    return Object.freeze({available:d.available,schema:PROFILE_SCHEMA,providers:Object.freeze([...p])});}
   function workbenchVersion(v){return typeof v==='string'&&v.length<=40&&WORKBENCH_VERSION.test(v)?v:null;}
   const HEX64=/^[0-9a-f]{64}$/,ENGINE_VERSION=/^[0-9A-Za-z][0-9A-Za-z.+_-]{0,39}$/,LIMIT_KEY=/^[A-Za-z][A-Za-z0-9]{0,31}$/,SOURCE_PATH=/^\/Shinick-Han\/[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._~-]+)*\/?$/;
   // Engine source link is display-only: https://github.com/Shinick-Han/... with no credentials, port, query or fragment.
@@ -170,7 +178,7 @@
     disconnectEl?.addEventListener('click',()=>bridge.disconnect());
   }
 
-  if(typeof module==='object'&&module.exports){module.exports={create,mount,parsePort,validToken,command,launcher,launchUri,pdfEditor,paperAnalysis,imageEditor,workbenchVersion,INSTALL,DEFAULT_PORT,IMAGE_ERRORS,IMAGE_REASONS};return;}
+  if(typeof module==='object'&&module.exports){module.exports={create,mount,parsePort,validToken,command,launcher,launchUri,pdfEditor,paperAnalysis,imageEditor,profileProposal,workbenchVersion,companionInstance,INSTALL,DEFAULT_PORT,IMAGE_ERRORS,IMAGE_REASONS};return;}
   const bridge=create({fetch:(...args)=>root.fetch(...args),location:root.location,emit:detail=>root.document.dispatchEvent(new CustomEvent('falsify:local-bridge',{detail}))});
   root.FalsifyLocalBridge=bridge;mount(bridge,root.document);
 })(typeof window==='object'?window:globalThis);

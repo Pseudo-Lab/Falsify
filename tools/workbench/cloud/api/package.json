@@ -1,11 +1,11 @@
 {
   "name": "falsify-cloud-api",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Falsify shared records v1: Cloudflare Worker + D1 API with username/password accounts.",
   "type": "module",
   "scripts": {
-    "test": "node --test test/api.test.mjs",
+    "test": "node --test test/*.test.mjs",
     "dev": "wrangler dev",
     "build:check": "wrangler deploy --dry-run --outdir .wrangler/dry-run"
   },

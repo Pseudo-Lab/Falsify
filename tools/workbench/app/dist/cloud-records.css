@@ -23,6 +23,11 @@
 .cloud-panel dd,.cloud-record dd,.cloud-compose dd{margin:0;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
 .cloud-auth{display:grid;grid-template-columns:1fr 1fr;gap:12px 18px;max-width:720px;margin-top:12px}
 .cloud-auth .cloud-display,.cloud-auth .button-row{grid-column:1/-1}
+#cloud-password-form{margin-top:16px;padding-top:12px;border-top:1px solid var(--line)}
+#cloud-password-form>h3{margin:0;font-size:14px}
+#cloud-password-form>p,#cloud-password-form>h3{grid-column:1/-1}
+#cloud-revoke{margin-top:16px;padding-top:12px;border-top:1px solid var(--line)}
+#cloud-revoke>p{margin:0 0 8px;font-size:13px}
 .cloud-records input[type=text],.cloud-records input[type=password]{width:100%;min-height:44px;margin-top:6px;padding:10px;border:1px solid #8c949b;border-radius:4px;background:var(--paper);color:var(--ink);font-weight:400}
 .cloud-display>summary{cursor:pointer;font-size:13px;color:var(--muted)}
 .cloud-list{margin-top:6px}

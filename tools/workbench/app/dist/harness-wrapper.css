@@ -23,3 +23,13 @@
 .harness-wrapper #wrapper-status{margin:12px 0}
 .harness-wrapper #wrapper-status.error{color:var(--red-ink)}
 @media(max-width:820px){.wrapper-grid{grid-template-columns:minmax(0,1fr)}.wrapper-preview{padding:16px}}
+/* AI profile draft and manual span mapping: same tokens, nested inside the wrapper builder. */
+.harness-profile{margin:18px 0}
+.harness-profile .wrapper-grid{margin:6px 0}
+.profile-review,.profile-manual-work{display:grid;gap:12px}
+.profile-subhead{font-size:14px;font-weight:700;margin:6px 0 0}
+.profile-evidence q,.profile-entries q{font-family:Consolas,monospace;font-size:13px;overflow-wrap:anywhere}
+.profile-entries li{display:flex;flex-wrap:wrap;gap:4px 6px;align-items:baseline}
+.profile-entries code{font-family:Consolas,monospace;font-size:13px}
+.profile-manual{background:var(--paper);border:1px solid var(--line)}
+.harness-profile #profile-raw{min-height:160px}

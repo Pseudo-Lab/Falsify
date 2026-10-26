@@ -21,17 +21,21 @@
   // '' keeps the feature off; anything but a plain https origin/path is refused instead of guessed.
   function parseBase(value){if(value===undefined||value===null||value==='')return '';if(typeof value!=='string')return null;try{const u=new URL(value);if(u.protocol!=='https:'||u.username||u.password||u.search||u.hash||value.trim()!==value)return null;return u.origin+u.pathname.replace(/\/+$/,'');}catch{return null;}}
   // Fixed copy only: server bodies are never shown, so a proxy error page cannot reach the screen.
+  function safeErrorCode(text){try{const data=JSON.parse(text);const code=data&&typeof data==='object'&&data.error&&data.error.code;return typeof code==='string'&&/^[a-z0-9_]{1,64}$/.test(code)?code:'';}catch{return '';}}
   function explain(err,ctx){const s=err?.status,write=ctx==='write'||ctx==='register';
     if(err?.code==='local')return err.message;
-    if(err?.code==='timeout')return write?'서버 응답이 15초 안에 오지 않았습니다. 반영됐는지 알 수 없으니 다시 보내기 전에 내 기록을 불러와 확인하세요.':'서버 응답이 15초 안에 오지 않았습니다. 잠시 후 다시 불러오세요.';
-    if(err?.code==='network')return '공유 서버에 연결하지 못했습니다. 네트워크를 확인하세요. 로컬 기록은 그대로입니다.';
+    if(err?.code==='timeout'||err?.code==='network'){
+      if(ctx==='password'||ctx==='revoke')return '서버 응답을 확인하지 못했습니다. 같은 요청을 자동으로 다시 보내지 않습니다. 비밀번호나 세션이 이미 바뀌었을 수 있으니 다시 로그인해 확인하세요. 입력은 저장하지 않았습니다. 로컬 기록은 그대로입니다.';
+      if(err.code==='timeout')return write?'서버 응답이 15초 안에 오지 않았습니다. 반영됐는지 알 수 없으니 다시 보내기 전에 내 기록을 불러와 확인하세요.':'서버 응답이 15초 안에 오지 않았습니다. 잠시 후 다시 불러오세요.';
+      return '공유 서버에 연결하지 못했습니다. 네트워크를 확인하세요. 로컬 기록은 그대로입니다.';}
+    if(s===401&&ctx==='password'&&err?.errorCode==='invalid_credentials')return '현재 비밀번호가 맞지 않습니다. 입력은 지웠고 이 브라우저의 세션 토큰은 그대로 둡니다. 비밀번호는 저장하지 않습니다.';
     if(s===401)return ctx==='login'?'사용자 이름 또는 비밀번호가 맞지 않습니다.':'로그인이 필요하거나 세션이 끝났습니다. 다시 로그인하세요. 로컬 기록은 그대로입니다.';
-    if(s===403)return ctx==='register'?'초대 코드가 맞지 않거나 만료·회수·사용된 코드입니다. 운영자에게 새 초대 코드를 받으세요. 입력한 코드는 지웠습니다.':ctx==='login'?'이 계정은 활성 팀 멤버가 아니라 로그인할 수 없습니다. 초대 가입 전에 만든 계정이거나 멤버 자격이 해제됐을 수 있으니 운영자에게 확인하세요.':ctx==='read'?MEMBER_DENIED:'이 기록을 바꿀 권한이 없거나 팀 멤버 자격이 확인되지 않습니다. 다시 로그인해 확인하세요.';
-    if(s===404)return '기록을 찾을 수 없습니다. 삭제됐거나 비공개입니다.';
+    if(s===403)return ctx==='register'?'초대 코드가 맞지 않거나 만료·회수·사용된 코드입니다. 운영자에게 새 초대 코드를 받으세요. 입력한 코드는 지웠습니다.':ctx==='login'?'이 계정은 활성 팀 멤버가 아니라 로그인할 수 없습니다. 초대 가입 전에 만든 계정이거나 멤버 자격이 해제됐을 수 있으니 운영자에게 확인하세요.':ctx==='password'?'팀 멤버 자격이 확인되지 않아 비밀번호를 바꾸지 않았습니다. 입력은 지웠고 저장하지 않습니다.':ctx==='read'?MEMBER_DENIED:'이 기록을 바꿀 권한이 없거나 팀 멤버 자격이 확인되지 않습니다. 다시 로그인해 확인하세요.';
+    if(s===404)return ctx==='password'?'이 서버에는 비밀번호 변경이 없습니다. 서버 업데이트가 필요합니다. 입력은 지웠고 이 브라우저의 세션 토큰은 그대로 둡니다. 비밀번호는 저장하지 않습니다.':ctx==='revoke'?'이 서버에는 모든 세션 종료가 없습니다. 서버 업데이트가 필요합니다. 이 브라우저의 세션 토큰은 그대로 둡니다.':'기록을 찾을 수 없습니다. 삭제됐거나 비공개입니다.';
     if(s===409||s===412)return ctx==='register'?'이미 쓰는 사용자 이름입니다. 초대 코드는 쓰이지 않았으니 다른 이름과 함께 코드를 다시 붙여 넣으세요.':'다른 곳에서 먼저 바뀌었습니다. 다시 불러온 뒤 시도하세요.';
-    if(s===413)return '보내는 내용이 서버 크기 제한(256KiB)을 넘습니다.';
+    if(s===413)return ctx==='password'?'비밀번호 요청이 서버 크기 제한을 넘습니다. 입력은 지웠습니다.':'보내는 내용이 서버 크기 제한(256KiB)을 넘습니다.';
     if(s===429)return '요청이 너무 많습니다. 잠시 후 다시 시도하세요.';
-    if(s===400||s===422)return ctx==='register'?'서버가 가입 요청 형식을 받아들이지 않았습니다. 초대 가입을 지원하지 않는 서버일 수 있으니 운영자에게 확인하세요.':'서버가 요청 형식을 받아들이지 않았습니다.';
+    if(s===400||s===422)return ctx==='register'?'서버가 가입 요청 형식을 받아들이지 않았습니다. 초대 가입을 지원하지 않는 서버일 수 있으니 운영자에게 확인하세요.':ctx==='password'?'새 비밀번호가 서버 조건에 맞지 않습니다. 입력은 지웠고 저장하지 않습니다.':'서버가 요청 형식을 받아들이지 않았습니다.';
     if(s>=500)return '공유 서버 오류입니다. 잠시 후 다시 시도하세요.';
     return '공유 서버 응답을 해석하지 못했습니다.';}
   const validRecord=r=>!!r&&typeof r==='object'&&typeof r.id==='string'&&!!r.id&&r.id.length<=80&&Object.hasOwn(KINDS,r.kind)&&['private','shared'].includes(r.visibility)&&!!r.owner&&typeof r.owner==='object'&&typeof r.owner.id==='string'&&Number.isInteger(r.revision)&&!!r.payload&&typeof r.payload==='object'&&!Array.isArray(r.payload);
@@ -40,7 +44,7 @@
     const cfg=deps.config??globalThis.FalsifyCloudConfig,storage=deps.storage??globalThis.localStorage,fetcher=deps.fetch??globalThis.fetch?.bind(globalThis),lab=deps.lab??globalThis.FalsifyLab;
     const base=parseBase(cfg?.apiBase),hostName=base?new URL(base).host:'';
     // epoch changes whenever server-derived state is purged, so a response that arrives after sign-out is dropped instead of re-filling the screen.
-    let session=null,expired=false,denied=false,memoryOnly=false,lastUser='',scope='shared',kind='',shown=[],cursor=null,loaded=false,snapshot=null,confirming=null,previewed=null,reviewTarget=null,uploadSeq=0,reviewSeq=0,coreP=null,compared=false,userField=null,fields=null,epoch=0;
+    let session=null,expired=false,denied=false,memoryOnly=false,lastUser='',scope='shared',kind='',shown=[],cursor=null,loaded=false,snapshot=null,confirming=null,confirmingRevoke=false,previewed=null,reviewTarget=null,uploadSeq=0,reviewSeq=0,coreP=null,compared=false,userField=null,fields=null,passwordFields=null,epoch=0;
     // localIds keeps only my runs' local IDs (absent from list projections) so a local review can link to a run uploaded elsewhere.
     // controls maps 'recordId action' to the buttons of the current render so focus can follow a re-render.
     const seen=new Map(),localIds=new Map(),controls=new Map(),busy={list:false,auth:false,upload:false,review:false,op:false},upload={body:null},review={body:null};
@@ -54,12 +58,12 @@
       try{storage.setItem(SESSION_KEY,JSON.stringify(session));memoryOnly=false;}catch{memoryOnly=true;}}
     // Team records are member-only, so signing out or losing the session drops every server record held in memory with the
     // comparison, the review composer and any upload preview built from them. The local ledger is never touched.
-    function forget(){session=null;try{storage.removeItem(SESSION_KEY);}catch{}epoch++;seen.clear();localIds.clear();shown=[];cursor=null;loaded=false;scope='shared';confirming=null;previewed=null;compared=false;
+    function forget(){session=null;confirmingRevoke=false;passwordFields=null;try{storage.removeItem(SESSION_KEY);}catch{}epoch++;seen.clear();localIds.clear();shown=[];cursor=null;loaded=false;scope='shared';confirming=null;previewed=null;compared=false;
       compareOut.replaceChildren();closeReview();fillItems();connection.textContent='서버 '+hostName+' · 아직 불러오지 않음';}
     function onSignedOut(flag){if(!session)return;forget();if(flag==='denied')denied=true;else expired=true;account.open=true;renderAccount();setBusy();renderList();}
     const live=at=>at===epoch&&!!session;
 
-    async function api(method,path,{body,auth=false,ifMatch}={}){
+    async function api(method,path,{body,auth=false,ifMatch,sessionPolicy}={}){
       if(!base||!fetcher)throw local('공유 서버가 설정되지 않았습니다.');
       const headers={accept:'application/json'};if(body!==undefined)headers['content-type']='application/json';
       if(auth){if(!session)throw local('로그인한 뒤 사용할 수 있습니다.');headers.authorization='Bearer '+session.token;}
@@ -69,7 +73,7 @@
       catch{throw Object.assign(Error('request'),{code:ctl.signal.aborted?'timeout':'network'});}
       finally{clearTimeout(timer);}
       // 401 ends the session; a 403 on a signed-in read means the account is no longer an active member, which also signs out.
-      if(!res.ok){if(auth&&(res.status===401||res.status===403&&method==='GET'))onSignedOut(res.status===401?'expired':'denied');throw Object.assign(Error('http'),{code:'http',status:res.status});}
+      if(!res.ok){const errorCode=safeErrorCode(text);const wrongPassword=sessionPolicy==='keep'&&res.status===401&&errorCode==='invalid_credentials';if(auth&&!wrongPassword&&(res.status===401||res.status===403&&method==='GET'))onSignedOut(res.status===401?'expired':'denied');throw Object.assign(Error('http'),{code:'http',status:res.status,errorCode});}
       if(res.status===204||!text)return {};
       try{const data=JSON.parse(text);if(data&&typeof data==='object'&&!Array.isArray(data))return data;}catch{}
       throw Object.assign(Error('response'),{code:'response',status:res.status});}
@@ -203,11 +207,19 @@
         say('Harness 편집기에 미리보기만 불러왔습니다'+(typeof hash==='string'?' (내용 해시 '+short(hash)+')':'')+'. 등록·선택·실행은 하지 않았습니다.');}
       catch(e){say(e?.code==='local'?e.message:'Harness 미리보기 실패: '+str(e?.message,200),true);}finally{busy.op=false;renderList();refocus(r.id,['preview']);}}
 
-    function renderAccount(){accountBody.replaceChildren();userField=null;
+    function renderAccount(){accountBody.replaceChildren();userField=null;passwordFields=null;if(!session)confirmingRevoke=false;
       if(session){accountSummary.textContent='로그인됨 · '+str(session.author.displayName,80);
+        const current=el('input',{id:'cloud-current-password',type:'password',autocomplete:'current-password',maxLength:128,spellcheck:'false','aria-describedby':'cloud-current-password-hint'}),next=el('input',{id:'cloud-new-password',type:'password',autocomplete:'new-password',maxLength:128,spellcheck:'false','aria-describedby':'cloud-new-password-hint'}),confirm=el('input',{id:'cloud-confirm-password',type:'password',autocomplete:'new-password',maxLength:128,spellcheck:'false','aria-describedby':'cloud-confirm-password-hint'});
+        passwordFields={current,next,confirm};
+        const passwordForm=el('form',{id:'cloud-password-form',className:'cloud-auth',novalidate:''},el('h3',{id:'cloud-password-title'},'비밀번호 변경'),el('p',{className:'muted'},'현재 비밀번호를 확인한 뒤 바꿉니다. 바꾸면 이 계정의 서버 세션이 모두 끝나고 이 브라우저의 토큰도 지웁니다. 새 비밀번호는 저장하지 않으며 자동으로 다시 로그인하지 않습니다.'),el('label',{},'현재 비밀번호',el('small',{id:'cloud-current-password-hint'},'확인만 하고 저장하지 않습니다'),current),el('label',{},'새 비밀번호',el('small',{id:'cloud-new-password-hint'},'12–128자'),next),el('label',{},'새 비밀번호 확인',el('small',{id:'cloud-confirm-password-hint'},'새 비밀번호와 같아야 합니다'),confirm),el('div',{className:'button-row'},el('button',{type:'submit',id:'cloud-password-change',className:'button primary',disabled:busy.auth},'비밀번호 변경')));
+        passwordForm.addEventListener('submit',e=>{e.preventDefault();changePassword(current,next,confirm);});
+        const revokeBox=el('div',{id:'cloud-revoke',className:confirmingRevoke?'cloud-confirm':''},el('p',{},'이 계정의 서버 세션만 끝냅니다. 다른 계정, 공유 기록, 소유 권한은 바꾸지 않습니다.'),confirmingRevoke
+          ?el('div',{className:'button-row'},button('모든 세션 끝내기 확인','primary',revokeAllSessions,{id:'cloud-revoke-confirm',disabled:busy.auth}),button('취소','secondary',()=>{confirmingRevoke=false;renderAccount();},{id:'cloud-revoke-cancel',disabled:busy.auth}))
+          :el('div',{className:'button-row'},button('모든 세션 끝내기','secondary',()=>{confirmingRevoke=true;renderAccount();},{id:'cloud-revoke-all',disabled:busy.auth})));
         accountBody.append(el('dl',{},el('dt',{},'표시 이름'),el('dd',{},str(session.author.displayName,80)+' · 자기 보고'),el('dt',{},'사용자 이름'),el('dd',{},str(session.author.username,40)),el('dt',{},'세션 만료'),el('dd',{},when(session.expiresAt))),
           el('p',{className:'muted'},memoryOnly?'브라우저 저장소를 쓸 수 없어 이 탭을 닫으면 로그아웃됩니다.':'세션 토큰은 이 브라우저 localStorage의 별도 항목('+SESSION_KEY+')에만 있고 '+hostName+'로만 보냅니다. 비밀번호는 저장하지 않습니다.'),
-          el('div',{className:'button-row'},button('로그아웃','secondary',logout,{id:'cloud-logout',disabled:busy.auth}),button('이 브라우저에서만 지우기','text',()=>{forget();say('이 브라우저의 세션 토큰과 불러온 서버 기록을 지웠습니다. 서버 세션은 만료될 때까지 남습니다.');renderAccount();setBusy();renderList();status.focus?.();},{id:'cloud-forget',disabled:busy.auth})));return;}
+          el('div',{className:'button-row'},button('로그아웃','secondary',logout,{id:'cloud-logout',disabled:busy.auth}),button('이 브라우저에서만 지우기','text',()=>{forget();say('이 브라우저의 세션 토큰과 불러온 서버 기록을 지웠습니다. 서버 세션은 만료될 때까지 남습니다.');renderAccount();setBusy();renderList();status.focus?.();},{id:'cloud-forget',disabled:busy.auth})),
+          passwordForm,revokeBox);return;}
       accountSummary.textContent=expired?'다시 로그인 필요':denied?'팀 멤버 확인 필요':'로그인 · 초대 가입 (공유 기록을 보려면 필요)';
       const user=el('input',{id:'cloud-username',type:'text',autocomplete:'username',maxLength:32,spellcheck:'false',autocapitalize:'none','aria-describedby':'cloud-username-hint'}),pass=el('input',{id:'cloud-password',type:'password',autocomplete:'current-password',maxLength:128,'aria-describedby':'cloud-password-hint'}),display=el('input',{id:'cloud-display-name',type:'text',autocomplete:'nickname',maxLength:80});
       // The invitation is masked, never autofilled or saved by the browser, and has no name, so no form submission can carry it.
@@ -234,6 +246,23 @@
     async function logout(){if(busy.auth||!session)return;busy.auth=true;renderAccount();say('로그아웃하는 중…');
       try{await api('POST','/v1/logout',{auth:true});forget();say('로그아웃했습니다. 서버 세션을 끝내고 이 브라우저의 토큰과 불러온 서버 기록을 지웠습니다. 로컬 기록은 그대로입니다.');}
       catch(e){if(!session){expired=false;say('세션이 이미 끝나 있어 이 브라우저의 토큰만 지웠습니다.');}else say(explain(e,'write')+' 서버 세션이 남아 있을 수 있습니다. 필요하면 "이 브라우저에서만 지우기"를 쓰세요.',true);}
+      finally{busy.auth=false;const a=document.activeElement,lost=!a||a===document.body||accountBody.contains(a);renderAccount();setBusy();renderList();if(lost)status.focus?.();}}
+    // Passwords stay in the request body only. Fields are cleared before validation and before the request.
+    // A wrong current password is 401 while the server session remains, so this call keeps the local token.
+    // Success revokes every session of this author; the panel then drops the token and does not log in again.
+    async function changePassword(current,next,confirm){if(busy.auth||!session)return;const currentPassword=current.value,newPassword=next.value,again=confirm.value;current.value=next.value=confirm.value='';let retry=null;
+      try{if([...currentPassword].length<1){retry='current';throw local('현재 비밀번호를 입력하세요. 입력란은 비웠습니다.');}const n=[...newPassword].length;if(n<12||n>128){retry='next';throw local('새 비밀번호는 12–128자입니다. 입력란은 비웠고 서버에는 보내지 않았습니다.');}if(newPassword!==again){retry='confirm';throw local('새 비밀번호 확인이 일치하지 않습니다. 입력란은 비웠고 서버에는 보내지 않았습니다.');}
+        busy.auth=true;say('비밀번호를 바꾸는 중…');
+        const data=await api('POST','/v1/auth/password',{auth:true,sessionPolicy:'keep',body:{currentPassword,newPassword}});
+        if(!data||data.changed!==true)throw local('서버가 비밀번호 변경을 확인하지 않았습니다. 입력은 지웠고 저장하지 않았습니다.');
+        forget();expired=true;account.open=true;say('비밀번호를 바꿨습니다. 이 계정의 서버 세션을 모두 끝내고 이 브라우저의 토큰과 불러온 서버 기록을 지웠습니다. 새 비밀번호로 다시 로그인하세요. 비밀번호는 저장하지 않았습니다. 로컬 기록은 그대로입니다.');}
+      catch(e){if(session)say(explain(e,'password'),true);else{expired=true;account.open=true;say('세션이 끝나 비밀번호를 바꾸지 못했습니다. 이 브라우저의 토큰을 지웠습니다. 다시 로그인하세요. 비밀번호는 저장하지 않았습니다. 로컬 기록은 그대로입니다.',true);}}
+      finally{busy.auth=false;const a=document.activeElement,lost=!a||a===document.body||accountBody.contains(a);renderAccount();setBusy();renderList();if(lost)(retry&&session?passwordFields?.[retry]:status)?.focus?.();}}
+    // The first button only reveals confirmation. The request is sent after that second, explicit action.
+    async function revokeAllSessions(){if(busy.auth||!session||!confirmingRevoke)return;confirmingRevoke=false;busy.auth=true;renderAccount();say('모든 세션을 끝내는 중…');
+      try{const data=await api('POST','/v1/auth/sessions/revoke',{auth:true});if(!data||data.revoked!==true)throw local('서버가 세션 종료를 확인하지 않았습니다.');
+        forget();expired=true;account.open=true;say('이 계정의 서버 세션을 모두 끝내고 이 브라우저의 토큰과 불러온 서버 기록을 지웠습니다. 다른 계정의 세션과 기록은 바꾸지 않았습니다. 로컬 기록은 그대로입니다.');}
+      catch(e){if(session)say(explain(e,'revoke'),true);else{expired=true;account.open=true;say('세션이 이미 끝나 이 브라우저의 토큰을 지웠습니다. 로컬 기록은 그대로입니다.');}}
       finally{busy.auth=false;const a=document.activeElement,lost=!a||a===document.body||accountBody.contains(a);renderAccount();setBusy();renderList();if(lost)status.focus?.();}}
 
     async function readSnapshot(){

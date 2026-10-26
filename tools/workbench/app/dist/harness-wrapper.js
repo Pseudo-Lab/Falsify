@@ -1,5 +1,5 @@
 // Wrapper connection profile builder for the Harness manager. It only builds, validates and previews JSON in this page: it never
-// registers, executes, installs or calls a model. The preview applies the profile to pasted sample text; it is not a compatibility test.
+// registers, executes, installs or calls a model (the nested AI draft panel in harness-profile.js calls a CLI only on its own explicit click). The preview applies the profile to pasted sample text; it is not a compatibility test.
 (function(root,factory){const api=factory(root);if(typeof module==='object'&&module.exports)module.exports=api;else{root.FalsifyHarnessWrapper=api;api.watch(root.document);}})(globalThis,function(root){
   'use strict';
   const core=()=>root.FalsifyHarness||(typeof require==='function'?require('./harness-core.js'):null);
@@ -81,7 +81,7 @@
     const load=x('button',{type:'button',className:'button secondary',text:'편집기에서 불러오기'}),restore=x('button',{type:'button',className:'button secondary',text:'편집기 이전 내용 복원',hidden:true});
     const status=x('p',{id:'wrapper-status',className:'ledger-status',role:'status'});
     const panel=x('details',{id:'harness-wrapper',className:'harness-wrapper'},x('summary',{text:'기존 프로그램 연결 프로필 · wrapper'}),
-      x('p',{text:'지금 쓰는 프로그램을 고치지 않고 입력 · 출력 형식만 맞춘 harness JSON을 만듭니다. 이 빌더는 등록 · 실행 · 설치 · 모델 호출을 하지 않으며, 버튼을 누르기 전에는 편집기 내용을 바꾸지 않습니다.'}),
+      x('p',{text:'지금 쓰는 프로그램을 고치지 않고 입력 · 출력 형식만 맞춘 harness JSON을 만듭니다. 수동 빌더 자체는 등록 · 실행 · 설치 · 모델 호출을 하지 않으며, 버튼을 누르기 전에는 편집기 내용을 바꾸지 않습니다. 모델 호출은 아래 「AI 초안 요청」을 직접 누를 때 로컬 companion의 Claude Code CLI에 한 번뿐입니다.'}),
       x('div',{className:'wrapper-grid'},basic,targetBox,inputBox,outputBox),previewBox,x('div',{className:'button-row'},toEditor,check,load,restore),status);
     const say=(text,error)=>{status.textContent=text;status.classList.toggle('error',!!error);};
     const values=()=>Object.fromEntries(Object.entries(c).map(([k,v])=>[k,v.value]));

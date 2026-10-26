@@ -11,6 +11,10 @@
   // Optional single-occurrence image replacement (its bundle may be absent): this module is its only source authority and busy owner.
   // It receives the bound PDF file/hash, never candidates, text exports or the BLUE handoff; clear() cancels it.
   const IMG=globalThis.FalsifyImageEditor?.mount?.({hold:imageHold})||null;
+  const P=globalThis.FalsifyPendingJobs||null;let recovering=false,sourceFileRequired=false;
+  function shippedHelper(){try{const nodes=document.scripts?[...document.scripts]:[];return nodes.some(s=>{const src=String(s&&(typeof s.getAttribute==='function'?s.getAttribute('src'):s.src)||'');return src==='pending-job.js'||src.endsWith('/pending-job.js');});}catch{return false;}}
+  function helperReady(){return !!(P&&typeof P.hold==='function'&&typeof P.note==='function'&&typeof P.read==='function'&&typeof P.matches==='function'&&typeof P.recover==='function');}
+  function expectsHelper(){return !!(P||shippedHelper());}
   const hash=async bytes=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes))).map(x=>x.toString(16).padStart(2,'0')).join('');
   const msg=(s,error=false)=>{const e=$('#red-progress');e.textContent=s;e.classList.toggle('error',error);};
   // Persistent outcome for a response without candidates: status plus coverage/synthesis, never a generic empty state.
@@ -23,7 +27,7 @@
   function connection(){const s=B.state(),cap=s.cap;
     $('#red-connection').textContent=s.status==='checking'?'로컬 실행 상태 확인 중':s.connected?(s.status==='paired'?'페어링된 로컬 broker':'로컬 broker 연결')+(cap?.red?' · 실행 CLI·모델은 아래 Harness 선택을 따릅니다'+(cap.cliSelection?'':' · 이 companion은 기본 Codex CLI'+(cap.model?' ('+cap.model+')':'')+'만 지원 (CLI 선택은 최신 companion 필요)')+' · 사용자 harness는 자체 모델/도구를 사용하며 내부 격리는 미검증':' · 이 broker는 RED 실행을 지원하지 않습니다.'):'로컬 broker 연결 없음 · 파일 추출과 수동 JSON 교환만 가능합니다. 위 연결 패널을 확인하세요.';}
   // The record button is ledger-mounted; bridge changes before that only refresh the connection line.
-  document.addEventListener('falsify:local-bridge',()=>{connection();if($('#red-record'))controls();});connection();
+  document.addEventListener('falsify:local-bridge',()=>{connection();if($('#red-record'))controls();if(helperReady())void recoverRed();});connection();if(helperReady())void recoverRed();
   function controls(){
     const active=!!doc&&!busy;
     const cap=B.capabilities();$('#red-start').disabled=!active||!cap?.red||!$('#red-consent').checked||!FalsifyLab.allowed('red');
@@ -36,7 +40,8 @@
     $('#red-selection-summary').textContent=count+'개 선택 · 처음에는 모두 미선택입니다. After를 바꾸면 이전 다운로드 검증은 무효입니다.';
     const plain=doc&&/^(TXT|MD|MARKDOWN|TEXT|TEX|CSV|TSV|RST)$/.test(doc.format);
     const pdf=doc?.format==='PDF'?pdfMode(cap):null,supported=plain||!!pdf&&pdf.kind!=='none';
-    $('#red-download').disabled=!active||!count||!$('#red-export-consent').checked||!supported;
+    $('#red-download').disabled=!active||!count||!$('#red-export-consent').checked||!supported||sourceFileRequired;
+    if(sourceFileRequired)ensureReselect();
     const mode=$('#red-export-mode');mode.hidden=!supported||!pdf;mode.replaceChildren();if(supported&&pdf)mode.append(...pdfModeText(pdf));
     // Reflow deliberately changes pagination, so its action never promises preservation or a finished copy.
     $('#red-download').textContent=pdf?.kind==='reflow'?'재배치·자체검사 후 실험용 사본 다운로드':'보존 검사 후 완성본 다운로드';
@@ -46,7 +51,7 @@
     document.dispatchEvent(new CustomEvent('falsify:document-state',{detail:doc?{name:doc.name,count:candidates.length,selected:count,busy}:null}));
   }
   function cancelCurrent(){const old=job,l=jobLink;job=null;jobLink=null;if(old&&l)void l.request('/api/red/jobs/'+encodeURIComponent(old)+'/cancel',{}).catch(()=>{});}
-  function clear(){generation++;cancelCurrent();analysisReset();IMG?.source(null);binding=null;doc=null;file=null;candidates=[];response=null;request=null;busy=false;invalidate();$('#document-red').hidden=true;$('#red-candidates').replaceChildren();$('#red-empty').textContent=EMPTY;$('#red-response').value='';$('#red-record-status').textContent='';$('#red-export').hidden=true;$('#red-consent').checked=false;$('#red-harness-consent').checked=false;$('#red-export-consent').checked=false;statusText('');msg('');controls();}
+  function clear(){generation++;cancelCurrent();analysisReset();IMG?.source(null);binding=null;doc=null;file=null;sourceFileRequired=false;candidates=[];response=null;request=null;busy=false;invalidate();$('#document-red').hidden=true;$('#red-candidates').replaceChildren();$('#red-empty').textContent=EMPTY;$('#red-response').value='';$('#red-record-status').textContent='';$('#red-export').hidden=true;$('#red-consent').checked=false;$('#red-harness-consent').checked=false;$('#red-export-consent').checked=false;statusText('');msg('');controls();}
   document.addEventListener('falsify:document-clear',clear);
   // The shell asks before replacing/closing the source; cancelling the discard confirmation keeps everything.
   document.addEventListener('falsify:before-document-change',e=>{if(e.detail?.role==='red'&&!keepEdits())e.preventDefault();});
@@ -81,19 +86,118 @@
   // While a response is retained, re-download its bound request so later final snapshots keep the root's requestId; only a fresh start mints a new execution request.
   $('#red-request').addEventListener('click',async()=>{const current=generation;try{const next=response&&request?request:await makeRequest();if(current!==generation)return;request=next;jsonDownload(request,'falsify-document-red-request.json');msg('수동 전달용 요청과 harness를 저장했습니다. 실행·전송은 하지 않았습니다.');}catch(e){msg(e.message,true);}});
   $('#red-import-response').addEventListener('click',async()=>{if(busy||!doc)return;const current=generation;try{const source=$('#red-response').value;if(source.length>150000)throw new Error('응답은 150,000자 이내입니다.');const next=request||await makeRequest();if(current!==generation)return;request=next;applyResponse(JSON.parse(source),'manual-unverified',true);}catch(e){msg('응답 적용 안 됨: '+e.message,true);}});
+  async function holdRed(){
+    const instance=B.capabilities()?.companionInstance||null;
+    const held=await P.hold({role:'red',request,doc,companionInstance:instance,hashHarness:h=>H.hash(h)});
+    if(!held.ok)throw new Error(held.message);
+    return held;
+  }
+  async function postRed(l,held){
+    request=held.record.request;
+    const wire=JSON.stringify(request);
+    if(await hash(new TextEncoder().encode(wire))!==held.record.requestBytesDigest)throw new Error('직렬화한 요청 바이트가 대기 기록과 달라 보내지 않았습니다.');
+    let started;try{started=await l.request('/api/red/jobs',request);}catch(err){await P.note(held.record,{postReceipt:'unknown'});throw err;}
+    if(!started||started.id!==request.requestId){await P.note(held.record,{postReceipt:'unknown'});throw new Error('서버가 저장한 요청 ID와 다른 작업을 돌려줘 그 작업을 이어받지 않았습니다.');}
+    await P.note(held.record,{postReceipt:'accepted'});return started;
+  }
+  async function watchRed(current,l,strict){
+    while(current===generation&&job){
+      const data=await l.request('/api/red/jobs/'+encodeURIComponent(job));if(current!==generation||!job)return;
+      if(strict){const found=P.read('red');if(found.status!=='record'||found.record.requestId!==job||!P.matches(found.record,data))throw new Error('조회한 작업의 식별이 저장한 요청과 달라 적용하지 않았습니다.');}
+      if(data.state==='completed'){applyResponse(data.result,'local-codex');if(strict){const found=P.read('red');if(found.status==='record')await P.note(found.record,{disposition:'completed',finishedAt:Date.now()});}break;}
+      if(['failed','cancelled'].includes(data.state)){if(strict){const found=P.read('red');if(found.status==='record'){await P.note(found.record,{disposition:data.state==='failed'?'failed':'cancelled',finishedAt:Date.now()});showPending({status:data.state==='failed'?'failed':'cancelled',record:found.record});}}throw new Error(data.error||'검토 취소됨');}
+      if(strict){const found=P.read('red');if(found.status==='record'&&found.record.disposition!=='running')await P.note(found.record,{disposition:'running'});}
+      msg('Harness 검토 중 · '+(data.progress.completedCalls||0)+' / '+(data.progress.requiredCalls||'?')+'회 완료 · 사용자 harness 내부 호출량은 별도입니다.');
+      await new Promise(resolve=>setTimeout(resolve,1500));
+    }
+  }
+  function showPending(outcome){
+    msg(P.text(outcome),outcome.status!=='still-running');
+    const keep=!!outcome&&outcome.status&&outcome.status!=='absent'&&outcome.status!=='completed'&&outcome.status!=='still-running';
+    let b=$('#red-pending-discard');
+    if(keep&&!b){b=document.createElement('button');b.type='button';b.id='red-pending-discard';b.className='button secondary';b.textContent='이 대기 작업 버리기';$('#red-progress').after(b);
+      b.addEventListener('click',()=>{generation++;cancelCurrent();const done=P.discard('red',{acknowledge:true});b.hidden=true;busy=false;job=null;jobLink=null;msg(done.ok?P.text({status:'discarded'}):done.message,!done.ok);controls();});}
+    if(b)b.hidden=!keep;
+  }
+  function adoptRecovered(stored){
+    doc={revision:stored.revision,sourceHash:stored.sourceHash,fileHash:stored.fileHash,format:stored.format,name:stored.name,segments:stored.segments.map(s=>({...s}))};
+    file=null;sourceFileRequired=true;binding=null;$('#document-red').hidden=false;
+    $('#red-document-summary').textContent=(doc.name||'복구된 문서')+' · 추출 텍스트만 복구됨 · 원본 파일은 다시 선택해야 내보낼 수 있습니다';
+    IMG?.source(null);controls();
+  }
+  async function probe(role,id){
+    const l=B.session();if(!l)return {httpStatus:0,body:null};
+    try{return {httpStatus:200,body:await l.request('/api/'+role+'/jobs/'+encodeURIComponent(id))};}
+    catch(e){const m=String(e&&e.message||'');
+      if(m.includes('401')||m.includes('403')||m.includes('인증을 거부'))return {httpStatus:403,body:null};
+      if(m.includes('404')||m.includes('not_found')||m.includes('찾을 수 없습니다'))return {httpStatus:404,body:null};
+      return {httpStatus:0,body:null};}
+  }
+  async function resumeRed(outcome){
+    const l=B.session();if(!l){showPending({status:'unpaired',record:outcome.record});return;}
+    adoptRecovered(outcome.doc);request=outcome.record.request;
+    if(outcome.record.postReceipt!=='accepted')await P.note(outcome.record,{postReceipt:'accepted'});
+    const current=generation;busy=true;job=outcome.record.requestId;jobLink=l;controls();msg(P.text(outcome));
+    try{await watchRed(current,l,true);}catch(e){if(current===generation)msg(e.message+' 자동 재시도하지 않았습니다.',true);}
+    finally{if(current===generation){busy=false;job=null;jobLink=null;controls();}}
+  }
+  function showRecoveredRed(outcome){adoptRecovered(outcome.doc);request=outcome.record.request;applyResponse(outcome.result,'local-codex');msg(P.text(outcome)+' '+$('#red-progress').textContent);}
+  async function recoverRed(){
+    if(!helperReady()||recovering||busy)return;
+    const found=P.read('red');if(found.status==='absent')return;
+    if(doc){if(found.status==='record'&&doc.sourceHash===found.record.sourceHash&&doc.fileHash===found.record.fileHash&&doc.revision===found.record.revision&&(job||found.record.disposition==='completed'))return;showPending(found.status==='record'?{status:'unresolved',record:found.record}:found);return;}
+    if(!B.state().connected){showPending(found.status==='record'?{status:'unpaired',record:found.record}:found);return;}
+    recovering=true;
+    try{
+      const outcome=await P.recover({role:'red',companionInstance:B.capabilities()?.companionInstance||null,hashHarness:h=>H.hash(h),validate:(d,res)=>C.validateResponse(d,res),getJob:id=>probe('red',id)});
+      if(!outcome||outcome.status==='absent')return;
+      if(outcome.status==='still-running'){await resumeRed(outcome);return;}
+      if(outcome.status==='completed'){showRecoveredRed(outcome);const rec=P.read('red');if(rec.status==='record')await P.note(rec.record,{disposition:'completed',finishedAt:Date.now()});return;}
+      if((outcome.status==='failed'||outcome.status==='cancelled')&&outcome.record)await P.note(outcome.record,{disposition:outcome.status,finishedAt:Date.now()});
+      showPending(outcome);
+    }finally{recovering=false;}
+  }
+  async function confirmReselect(){
+    const input=$('#red-source-reselect');const chosen=input&&input.files&&input.files[0];if(!chosen||!doc||!sourceFileRequired)return;
+    try{const next=await hash(await chosen.arrayBuffer());
+      if(next!==doc.fileHash){input.value='';exportStatus('다시 고른 파일의 SHA-256이 검토에 쓰인 원본과 다릅니다. 내보내지 않습니다.',true);return;}
+      file=chosen;sourceFileRequired=false;IMG?.source({file,fileHash:doc.fileHash,format:doc.format});
+      exportStatus('원본 파일 SHA-256이 검토 때와 같습니다. 내보내기를 계속할 수 있습니다.');controls();
+    }catch(e){exportStatus('원본 파일을 확인하지 못했습니다: '+e.message,true);}
+  }
+  function ensureReselect(){
+    let input=$('#red-source-reselect');
+    if(!input){const row=document.createElement('div');row.className='button-row';row.id='red-source-reselect-row';input=document.createElement('input');input.type='file';input.id='red-source-reselect';input.hidden=true;
+      const label=document.createElement('label');label.className='button secondary';label.htmlFor=input.id;label.textContent='원본 파일 다시 선택';row.append(label,input);
+      ($('#red-export-status')||$('#red-progress')).after(row);input.addEventListener('change',()=>{void confirmReselect();});}
+    const row=$('#red-source-reselect-row');if(row)row.hidden=!sourceFileRequired;
+  }
   $('#red-start').addEventListener('click',async()=>{
     if(busy||!doc||!$('#red-consent').checked||!FalsifyLab.allowed('red')||!keepEdits())return;const current=generation;
+    if(expectsHelper()){
+      if(!helperReady()){msg('대기 기록 도우미가 없거나 손상되어 실행하지 않았습니다. 요청을 보내지 않습니다.',true);return;}
+      busy=true;controls();
+      let l,held=null;
+      try{l=link();request=await makeRequest();if(current!==generation)return;held=await holdRed();}
+      catch(e){if(current===generation)msg(e.message+' 자동 재시도하지 않았습니다.',true);}
+      finally{if(!held){busy=false;controls();}}
+      if(current!==generation){busy=false;controls();return;}
+      if(!held)return;
+      candidates=[];response=null;invalidate();$('#red-export-status').textContent='';$('#red-export-consent').checked=false;renderCandidates();controls();
+      try{msg('전체 검토 예산 확인 후 선택 harness를 실행합니다.');const started=await postRed(l,held);
+        if(current!==generation){void l.request('/api/red/jobs/'+encodeURIComponent(started.id)+'/cancel',{}).catch(()=>{});return;}
+        job=started.id;jobLink=l;controls();await watchRed(current,l,true);
+      }catch(e){if(current===generation)msg(e.message+' 자동 재시도하지 않았습니다.',true);}
+      finally{if(current===generation){busy=false;job=null;jobLink=null;controls();}}
+      return;
+    }
+    // UNSHIPPED_TEST_ISOLATION: document-red.js loaded with neither pending-job.js nor the shipped script tag.
+    // Standalone page VMs keep this direct POST. index.html always includes the helper and never uses this branch.
     busy=true;candidates=[];response=null;invalidate();$('#red-export-status').textContent='';$('#red-export-consent').checked=false;renderCandidates();controls();
     try{const l=link();request=await makeRequest();if(current!==generation)return;msg('전체 검토 예산 확인 후 선택 harness를 실행합니다.');const started=await l.request('/api/red/jobs',request);
       if(current!==generation){void l.request('/api/red/jobs/'+encodeURIComponent(started.id)+'/cancel',{}).catch(()=>{});return;}
       job=started.id;jobLink=l;controls();
-      while(current===generation&&job){
-        const data=await l.request('/api/red/jobs/'+encodeURIComponent(job));if(current!==generation||!job)return;
-        if(data.state==='completed'){applyResponse(data.result,'local-codex');break;}
-        if(['failed','cancelled'].includes(data.state))throw new Error(data.error||'검토 취소됨');
-        msg('Harness 검토 중 · '+(data.progress.completedCalls||0)+' / '+(data.progress.requiredCalls||'?')+'회 완료 · 사용자 harness 내부 호출량은 별도입니다.');
-        await new Promise(resolve=>setTimeout(resolve,1500));
-      }
+      await watchRed(current,l,false);
     }catch(e){if(current===generation)msg(e.message+' 자동 재시도하지 않았습니다.',true);}
     finally{if(current===generation){busy=false;job=null;jobLink=null;controls();}}
   });
@@ -236,7 +340,9 @@
     if(kind==='reflow')return keep+' 긴 After의 재배치는 1단·회전 없음·잘림 없음인 최상위 본문 텍스트에서만 됩니다. 해당 후보 선택을 해제하거나 After를 직접 조정해 다시 시도하거나, 변경 계획 JSON만 저장할 수 있습니다. 엔진·연결 오류라면 위 연결 패널에서 companion을 다시 실행·연결하세요.';
     return keep+' 이 companion은 원래 줄 공간에 들어가는 변경만 지원합니다. 줄바꿈 재배치 엔진이 있는 companion으로 다시 연결하거나, 다른 후보를 고르거나, 변경 계획 JSON만 저장할 수 있습니다.';}
   $('#red-download').addEventListener('click',async()=>{
-    if(busy||!doc||!$('#red-export-consent').checked)return;const current=generation,pdf=doc.format==='PDF'?pdfMode(B.capabilities()):null;busy=true;preview?.clear();controls();exportStatus(pdf?.kind==='reflow'?'선택 변경만 적용하고 재배치·자체검사 중':'선택 변경만 적용하고 보존 검사 중');
+    if(busy||!doc||!$('#red-export-consent').checked)return;
+    if(sourceFileRequired||!file){exportStatus('복구된 검토는 원본 파일을 다시 고르고 SHA-256이 같을 때만 내보냅니다.',true);return;}
+    const current=generation,pdf=doc.format==='PDF'?pdfMode(B.capabilities()):null;busy=true;preview?.clear();controls();exportStatus(pdf?.kind==='reflow'?'선택 변경만 적용하고 재배치·자체검사 중':'선택 변경만 적용하고 보존 검사 중');
     try{const patches=C.patches(doc,candidates);let output,reported=null;
       // Same request body as before: only checked candidates' Before plus the user's current After; progress is staged text, never an invented percentage.
       if(pdf){exportStatus('원본 PDF와 선택 변경 '+patches.length+'개를 companion에서 '+(pdf.kind==='reflow'?'교체·줄바꿈 재배치·엔진 자체검사':'한 줄 교체·보존 검사')+'하는 중입니다. 엔진이 진행률을 알려주지 않아 퍼센트는 표시하지 않습니다.');

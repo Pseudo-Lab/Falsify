@@ -260,14 +260,26 @@ function authorView(author) {
   return { id: author.id, username: author.username, displayName: author.displayName };
 }
 
-async function createSession(db, author) {
+// expectedPasswordHash binds the new session to the credential just verified. A password change that
+// commits first makes the INSERT match nothing, so a stale login cannot mint a session. Registration
+// omits it: the author row was created in this request.
+async function createSession(db, author, expectedPasswordHash = null) {
   const token = 'fss_' + base64url(crypto.getRandomValues(new Uint8Array(32)));
   const nowMs = Date.now();
   const expiresAt = nowMs + SESSION_TTL_MS;
-  await db.batch([
+  const tokenHash = await sha256Hex(token);
+  const createdAt = new Date(nowMs).toISOString();
+  const insert = expectedPasswordHash === null
+    ? db.prepare('INSERT INTO sessions (token_hash, author_id, created_at, expires_at) VALUES (?1, ?2, ?3, ?4)').bind(tokenHash, author.id, createdAt, expiresAt)
+    : db.prepare(
+        `INSERT INTO sessions (token_hash, author_id, created_at, expires_at)
+         SELECT ?1, ?2, ?3, ?4 WHERE EXISTS (SELECT 1 FROM authors WHERE id = ?2 AND password_hash = ?5)`
+      ).bind(tokenHash, author.id, createdAt, expiresAt, expectedPasswordHash);
+  const results = await db.batch([
     db.prepare('DELETE FROM sessions WHERE author_id = ?1 AND (expires_at <= ?2 OR revoked_at IS NOT NULL)').bind(author.id, nowMs),
-    db.prepare('INSERT INTO sessions (token_hash, author_id, created_at, expires_at) VALUES (?1, ?2, ?3, ?4)').bind(await sha256Hex(token), author.id, new Date(nowMs).toISOString(), expiresAt),
+    insert,
   ]);
+  if (expectedPasswordHash !== null && results[1].meta.changes !== 1) return null;
   return { token, author: authorView(author), expiresAt: new Date(expiresAt).toISOString() };
 }
 
@@ -404,8 +416,10 @@ async function login(ctx) {
   if (!ok || !row) throw fail(401, 'invalid_credentials');
   // A correct password of a non-member creates no session and keeps its failure slot.
   if (row.member_status !== 'active') throw fail(403, 'membership_required');
+  const session = await createSession(db, { id: row.id, username: row.username, displayName: row.display_name }, row.password_hash);
+  if (!session) throw fail(401, 'invalid_credentials');
   await releaseSlot(db, failures, reserved);
-  return json(200, await createSession(db, { id: row.id, username: row.username, displayName: row.display_name }));
+  return json(200, session);
 }
 
 async function me(ctx) {
@@ -417,6 +431,85 @@ async function logout(ctx) {
   const db = database(ctx.env);
   const author = await authenticate(ctx.request, db, { member: false });
   await db.prepare('UPDATE sessions SET revoked_at = ?1 WHERE token_hash = ?2 AND revoked_at IS NULL').bind(now(), author.keyHash).run();
+  return json(200, { revoked: true });
+}
+
+// Changes the authenticated member's password and revokes every session of that author only.
+// The new password is never returned and no replacement session is minted; the client must log in again.
+// currentPassword follows the login failure contract (one derivation, fixed 401 invalid_credentials).
+// newPassword follows the registration length contract. Failure buckets are separate from login so the
+// caps match without coupling the counters. The write is one D1 batch. The hash update matches the hash
+// just verified AND the bearer still being a live session (author.keyHash), so a revoke-all that lands
+// during scrypt changes zero rows instead of writing the hash and then failing revocation. Session
+// revocation is conditional on that new hash already being stored. A stale hash updates nothing and
+// revokes nothing. Records are not in the batch.
+async function changePassword(ctx) {
+  const db = database(ctx.env);
+  const author = await authenticate(ctx.request, db);
+  const body = await readJson(ctx.request, MAX_AUTH_BODY_BYTES);
+  fields(body, ['currentPassword', 'newPassword'], ['currentPassword', 'newPassword']);
+  if (typeof body.currentPassword !== 'string' || typeof body.newPassword !== 'string') throw fail(400, 'invalid_request');
+  const next = passwordText(body.newPassword);
+  if (next === null) throw fail(400, 'invalid_password');
+  const failures = await bucketKey('password:author:', author.id);
+  await rateLimit(db, await bucketKey('password:ip:', clientIp(ctx.request)), ctx.settings.loginsPerIpHour);
+  await rateLimit(db, 'password:all', ctx.settings.loginsPerHour);
+  const reserved = await rateLimit(db, failures, ctx.settings.loginFailuresPerUsernameHour);
+  const current = passwordText(body.currentPassword);
+  const row = await db.prepare('SELECT password_hash FROM authors WHERE id = ?1').bind(author.id).first();
+  const ok = await verifyPassword(current ?? body.currentPassword, row?.password_hash ?? null);
+  if (!ok || !row) throw fail(401, 'invalid_credentials');
+  const nextHash = await hashPassword(next);
+  const revokedAt = now();
+  const nowMs = Date.now();
+  const results = await db.batch([
+    db.prepare(
+      `UPDATE authors SET password_hash = ?1
+       WHERE id = ?2 AND password_hash = ?3
+         AND EXISTS (
+           SELECT 1 FROM sessions
+           WHERE token_hash = ?4 AND author_id = ?2 AND revoked_at IS NULL AND expires_at > ?5
+         )
+         AND EXISTS (
+           SELECT 1 FROM team_members WHERE author_id = ?2 AND status = 'active'
+         )`
+    ).bind(nextHash, author.id, row.password_hash, author.keyHash, nowMs),
+    db.prepare(
+      `UPDATE sessions SET revoked_at = ?1 WHERE author_id = ?2 AND revoked_at IS NULL
+       AND EXISTS (SELECT 1 FROM authors WHERE id = ?2 AND password_hash = ?3)`
+    ).bind(revokedAt, author.id, nextHash),
+  ]);
+  if (results[0].meta.changes !== 1) {
+    const live = await db
+      .prepare('SELECT 1 AS ok FROM sessions WHERE token_hash = ?1 AND author_id = ?2 AND revoked_at IS NULL AND expires_at > ?3')
+      .bind(author.keyHash, author.id, Date.now())
+      .first();
+    if (!live) {
+      await releaseSlot(db, failures, reserved);
+      throw fail(401, 'unauthorized');
+    }
+    const member = await db.prepare('SELECT status FROM team_members WHERE author_id = ?1').bind(author.id).first();
+    if (!member || member.status !== 'active') {
+      await releaseSlot(db, failures, reserved);
+      throw fail(403, 'membership_required');
+    }
+    throw fail(401, 'invalid_credentials');
+  }
+  // The password row changed. A zero-row revoke means those sessions were already ended; finish any
+  // straggler without turning a committed change into a 500.
+  if (results[1].meta.changes < 1) {
+    await db.prepare('UPDATE sessions SET revoked_at = ?1 WHERE author_id = ?2 AND revoked_at IS NULL').bind(now(), author.id).run();
+  }
+  await releaseSlot(db, failures, reserved);
+  return json(200, { changed: true });
+}
+
+// Revokes every still-valid session of the authenticated member and nobody else.
+// Does not read a body, does not touch records or membership, and does not issue a new session.
+async function revokeAllSessions(ctx) {
+  const db = database(ctx.env);
+  const author = await authenticate(ctx.request, db);
+  await db.prepare('UPDATE sessions SET revoked_at = ?1 WHERE author_id = ?2 AND revoked_at IS NULL').bind(now(), author.id).run();
   return json(200, { revoked: true });
 }
 
@@ -573,6 +666,8 @@ const ROUTES = {
   '/v1/health': { GET: health },
   '/v1/auth/register': { POST: register },
   '/v1/auth/login': { POST: login },
+  '/v1/auth/password': { POST: changePassword },
+  '/v1/auth/sessions/revoke': { POST: revokeAllSessions },
   '/v1/me': { GET: me },
   '/v1/logout': { POST: logout },
   '/v1/records': { GET: listRecords, POST: createRecord },

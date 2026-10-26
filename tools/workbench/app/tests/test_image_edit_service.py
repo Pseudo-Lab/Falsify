@@ -500,7 +500,7 @@ class ServerTests(unittest.TestCase):
             self.assertTrue(started.wait(10))
             self.assertEqual(self.call(body=list_request())[::2], (409, {'error': 'companion_busy'}))
             status, _, _ = self.call('/api/export', body={'x': 1}); self.assertEqual(status, 409)
-            red = {'requestId': 'r1'}
+            red = {'requestId': 'r1', 'revision': 'rev-busy', 'sourceHash': 'ab' * 32}
             with patch.object(server, 'validate_request', lambda d: None):
                 self.assertEqual(self.call('/api/red/jobs', body=red)[0], 409)
             self.assertEqual(server.JOBS, {})

@@ -24,6 +24,10 @@ jobs:
       - name: Browser contracts
         working-directory: app
         run: npm test
+      - name: Portable BLUE sources (offline only)
+        run: |
+          python app/examples/evidence_blue_v033/build_profile.py
+          python -m unittest discover -s app/examples/evidence_blue_v033 -p "test_*.py" -q
       - name: Shared API dependencies
         working-directory: cloud/api
         run: npm ci --ignore-scripts

@@ -1,0 +1,878 @@
+{
+  "schema": "falsify.methodology-corpus.v1",
+  "sources": [
+    {
+      "id": "orig-pmc4359000-head-2015",
+      "title": "The Extent and Consequences of P-Hacking in Science",
+      "url": "https://doi.org/10.1371/journal.pbio.1002106",
+      "license": "CC-BY-4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+      "version": "doi:10.1371/journal.pbio.1002106 (2015-03-13)",
+      "retrievedAt": "2026-10-19",
+      "licenseEvidence": [
+        {
+          "file": "sources/pmc/PMC4359000.xml",
+          "quote": "This is an open-access article distributed under the terms of the Creative Commons Attribution License, which permits unrestricted use, distribution, and reproduction in any medium",
+          "sha256": "e39c00de8fe5c438f047979f1ce540df5228045cfeef291d6eeff3f8730119c7"
+        },
+        {
+          "file": "rights/europepmc-PMC4359000.json",
+          "quote": "\"license\":\"cc by\"",
+          "sha256": "fe7e36f08686cbf0c891c9d552d7b3ca05eea9f2ce02ffda423ee4ed8dccc8e3"
+        },
+        {
+          "url": "https://journals.plos.org/plosbiology/article?id=10.1371/journal.pbio.1002106",
+          "retrievedAt": "2026-10-19",
+          "quote": "© 2015 Head et al. This is an open access article distributed under the terms of the <a href=\"http://creativecommons.org/licenses/by/4.0/\">Creative Commons Attribution License</a>"
+        }
+      ],
+      "attribution": "Megan L. Head, Luke Holman, Rob Lanfear, Andrew T. Kahn, Michael D. Jennions (2015) The Extent and Consequences of P-Hacking in Science. PLoS Biology 13(3): e1002106. © 2015 Head et al. https://doi.org/10.1371/journal.pbio.1002106. Open access under the Creative Commons Attribution License. Text retrieved as JATS XML from Europe PMC (PMC4359000, https://europepmc.org/article/PMC/PMC4359000). Changes: converted from JATS XML to Markdown; figure and table images, MathML-only rendering and journal front-matter metadata other than title, authors, copyright and license are not included. Falsify derivative: body paragraphs flattened from JATS without paraphrasing; figures/tables/front matter omitted.",
+      "originalFileSha256": "e39c00de8fe5c438f047979f1ce540df5228045cfeef291d6eeff3f8730119c7",
+      "text": "There is increasing concern that many published results are false positives [1,2] (but see [3]). Many argue that current scientific practices create strong incentives to publish statistically significant (i.e., “positive”) results, and there is good evidence that journals, especially prestigious ones with higher impact factors, disproportionately publish statistically significant results [4–10]. Employers and funders often count papers and weigh them by the journal’s impact factor to assess a researcher’s performance [11]. In combination, these factors create incentives for researchers to selectively pursue and selectively attempt to publish statistically significant research findings.\n\nThere are two widely recognized types of researcher-driven publication bias: selection (also known as the “file drawer effect”, where studies with nonsignificant results have lower publication rates [7]) and inflation [12]. Inflation bias, also known as “p-hacking” or “selective reporting,” is the misreporting of true effect sizes in published studies (Box 1). It occurs when researchers try out several statistical analyses and/or data eligibility specifications and then selectively report those that produce significant results [12–15]. Common practices that lead to p-hacking include: conducting analyses midway through experiments to decide whether to continue collecting data [15,16]; recording many response variables and deciding which to report postanalysis [16,17], deciding whether to include or drop outliers postanalyses [16], excluding, combining, or splitting treatment groups postanalysis [2], including or excluding covariates postanalysis [14], and stopping data exploration if an analysis yields a significant p-value [18,19].\n\nFisher [20] introduced null hypothesis significance testing (NHST) to objectively separate interesting findings from background noise [21]. NHST is the most widely used data analysis method in most scientific disciplines [22,23]. The null hypothesis is typically a statement of no relationship between variables or no effect of an experimental manipulation. With NHST, one computes the probability (i.e., p) of finding an effect at least or more extreme than the observed finding if the null hypothesis is true [24,25].\n\nThe NHST approach uses an arbitrary cutoff value (usually 0.05). Findings with smaller p-values are described as “statistically significant” (“positive” findings), and the remainder as “nonsignificant” (“negative” findings). This arbitrary cutoff has led to the scientifically dubious practice of regarding “significant” findings as more valuable, reliable, and reproducible [24], thereby incentivizing various kinds of research bias.\n\nBefore computers, test statistics (e.g., t and F) were routinely calculated by hand and the associated p-value was looked up in statistical tables. Here, p-values were given for a limited set of values (e.g., 0.001, 0.01, 0.02, and 0.05) [26]. Researchers then reported p-values as the lowest threshold consistent with the test statistic (e.g., p < 0.05 or p < 0.01). With modern statistical software this practice is unnecessary, as precise p-values are now provided, but it is still commonplace. Previous research has shown that strict adherence to p-value thresholds can bias how research is reported, even within the region of significance [27].\n\nThe p-value is easily misinterpreted. For example, it is often equated with the strength of a relationship, but a tiny effect size can have very low p-values with a large enough sample size. Similarly, a low p-value does not mean that a finding is of major clinical or biological interest [28]. Many researchers have advocated abolishing NHST (e.g., [29,30]). However, others note that many of the problems with publication bias reoccur with other approaches, such as reporting effect sizes and their confidence intervals [31] or Bayesian credible intervals [32]. Publication biases are not a problem with p-values per se. They simply reflect the incentives to report strong (i.e., significant) effects.\n\nIf published data are biased, data synthesis might lead to flawed conclusions. Meta-analysis is a set of statistical methods that combine studies on the same question to estimate the true effect size [33]. Meta-analyses are now the “gold standard” for synthesizing the evidence for an effect of a treatment or the existence of a relationship, and combining effect size estimates across studies to give an overall estimate. Meta-analyses guide the application of medical treatments and policy decisions, and influence future research directions [34]. However, meta-analyses are compromised if the studies being synthesized do not reflect the true distribution of effect sizes [5,35–37].\n\nQuantifying p-hacking is important because publication of false positives hinders scientific progress. When false positive results enter the literature they can be very persistent. In many fields, there is little incentive to replicate research [38]. Even when research is replicated, early positive studies often receive more attention than later negative ones. In addition, false positives can inspire investment in fruitless research programs, and even discredit entire fields [14,16].\n\nDespite the potential importance of p-hacking, the consequences for formal and informal data synthesis are unknown. Here, we address both issues using p-curves (see Box 2). First, we used text-mining to obtain reported p-values in papers drawn from a broad range of scientific disciplines. We then looked for evidence of p-hacking based on the shape of the p-curves. Second, we produced p-curves from primary data used in published meta-analyses. This allowed us to test the evidence for p-hacking when looking at specific hypotheses which researchers have clearly identified as being of general interest (i.e., that warrant a meta-analysis).\n\nA p-curve is the distribution of p-values for a set of studies. P-curves can be a helpful tool to assess the reliability of published research. Here, we outline how they have been used to assess the literature.\n\nOne can examine whether a set of findings contains evidential value by examining the distribution of p-values, particularly those between 0 and 0.05. “Evidential value” refers to whether or not the published evidence for a specific hypothesis suggests that the effect size is nonzero.\n\nWhen the effect size for a studied phenomenon is zero, every p-value is equally likely to be observed. The expected distribution of p-values under the null hypothesis is uniform (Black line, Fig. 1A and Fig. 2A), such that p<0.05 will occur 5% of the time, p<0.04 will occur 4% of the time, and so on. On the other hand, when the true effect size is nonzero, the expected distribution of p-values is exponential with a right skew [39–42] (Black line, Fig. 1B and Fig. 2B). When the true effect is strong, researchers are more likely to obtain very low p-values (e.g., p<0.001) than moderately low p-values (e.g., 0.01), and less likely still to obtain nonsignificant p-values (p > 0.05) [41]. So, as the true effect size increases the p-curve is more right skewed [41].\n\nSeveral studies have plotted the distribution of p-values or related test statistics (i.e., Z or t) around the main significance threshold of p = 0.05 (often in the range of 0.01 to 0.1). A notable drop in p-values above 0.05 (or for Z values, 1.96) (Red line, Fig. 1A and Fig. 1B) is interpreted as evidence for publication bias (e.g., [40,43–45]). While a discontinuity in the distribution of p-values around 0.05 is indicative of publication bias, it does not distinguish between selective publication bias and p-hacking (see Box 1).\n\nThe p-curve can, however, be used to identify p-hacking, by only considering significant findings [14]. If researchers p-hack and turn a truly nonsignificant result into a significant one, then the p-curve’s shape will be altered close to the perceived significance threshold (typically p = 0.05). Consequently, a p-hacked p-curve will have an overabundance of p-values just below 0.05 [12,40,41]. If researchers p-hack when there is no true effect, the p-curve will shift from being flat to left skewed (Fig. 2A). If, however, researchers p-hack when there is a true effect, the p-curve will be exponential with right skew but there will be an overrepresentation of p-values in the tail of the distribution just below 0.05 (Fig. 2B). Both p-hacking and selective publication bias predict a discontinuity in the p-curve around 0.05, but only p-hacking predicts an overabundance of p-values just below 0.05 [12]. The exact shape of the p-curve will, however, depend on both the true effect (i.e., the p-curve before p-hacking) and the intensity of p-hacking [41].\n\nSimilar to previous studies (e.g., [14,43]) we employ binomial tests to look for evidence of evidential value and p-hacking in both our text-mined and meta-analyses datasets. We tested for evidential value using a two-tailed sign test, in which we compared the number of p-values falling in the bin 0 ≤ p < 0.025 to the number in the bin 0.025 ≤ p < 0.05. Under the null hypothesis of no evidential value, the expected number of p-values in each of these bins is equal. Significantly more p-values in the lower bin is consistent with evidential value (i.e., right skewed p-curve), and significantly more p-values in the upper bin is consistent with severe p-hacking. This test is a slightly modified version of a test proposed by Simohnson et al. [41], who suggest using two separate one-tailed sign tests for the same purpose.\n\nThe two-tailed sign test with a p = 0.025 threshold (above) and the tests proposed by Simonsohn et al. [41] can detect severe p-hacking, but are insensitive to more modest (and arguably more realistic) levels of p-hacking. This is true especially if the average true effect size is strong, as the right skew introduced to the p-curve will mask the left skew caused by p-hacking. A more sensitive approach to detect p-hacking is to look for an increase in the relative frequency of p-values just below 0.05, where we expect the signal of p-hacking to be strongest. Under the null hypothesis of no p-hacking, we expect either that the distribution of p-values is uniform close to 0.05 (if the true effect sizes are zero), or right skewed (i.e., if at least some effect sizes are nonzero). However, p-hacking introduces additional p-values close to 0.05, producing a left skew. Thus, a simple, and conservative, test for p-hacking involves testing the null hypothesis that the p-values just below 0.05 are either uniformly distributed or right skewed. We used a one-tailed sign test to ask whether the number of p-values in the bin that abuts 0.05 is greater than that in the adjacent lower bin. This test becomes more likely to detect p-hacking if one uses smaller bins, since p-values are right skewed when the average effect size is positive (masking p-hacking), but in practice, using smaller bins will reduce the sample size (and thus power) of the test. We selected a bin width of 0.005, with the lower bin specified as 0.04 < p < 0.045 and the upper bin as 0.045 < p < 0.05. We chose p < 0.05 as the cutoff for our upper bin (following [3]), rather than p = 0.05 (see [46]) because we suspect that many authors do not regard p = 0.05 as significant. As a measure of the strength of p-hacking, we present the proportion of p-values in the upper bin and the associated 95% confidence intervals (calculated following Clopper and Pearson [47] using the binom.test function in R).\n\nWe ran the above analyses separately for each discipline and meta-analysis dataset. In addition, we tested for overall evidential value (two-tailed test) and signs of p-hacking (one-tailed test) in the two main datasets (Text-mining of p-values and the meta-analysis data sets respectively). To do this, we used the proportion of p-values occurring in the upper bin for each discipline or meta-analysis (depending on the dataset being analysed) and ran a binomial generalised linear model to test whether the observed intercept differed from 0.5 (i.e., equal number of cases in the two bins). This approach is equivalent to a meta-analysis testing for a significant trend when combining the individual disciplines or questions because each is weighted by its sample size. The R code we used is deposited in Dryad [48].\n\nA) Black line shows distribution of p-values when there is no evidential value and the red line shows how publication bias influences this distribution. B) Black line shows distribution of p-values when there is evidential value and red line shows how publication bias influences this distribution. Tests for publication bias due to a file-drawer effect often compare the number of p-values in each of the bins either side of 0.05.\n\nA) Black line shows distribution of p-values when there is no evidential value and the red line shows how p-hacking influences this distribution. B) Black line shows distribution of p-values when there is evidential value and the red line shows how p-hacking influences this distribution. Tests for p-hacking often compare the number of p-values in two adjacent bins just below 0.05.\n\nWe used text-mining to search for p-values in all Open Access papers available in the PubMed database (see S1 Text). To quantify “evidential value” (i.e., if there is evidence that the true effect size is nonzero) and p-hacking, we constructed p-curves from the p-values we obtained (see Box 2). We present separate tests of evidential value and p-hacking for p-values extracted from the Results section, and for p-values extracted from the Abstracts. Researchers have identified weaknesses in the use of text-mined data to look for publication bias (e.g., [46]). Here, we adopted several measures to counter these weaknesses (see S1 Text).\n\nPooling p-values across all disciplines, there was strong evidence for “evidential value”; that is, researchers appear to be predominantly studying phenomena with nonzero effect sizes, as shown by the strong right skew of the p-curve for p-values found in both the Results (binomial glm: estimated proportion of p-values in the upper bin (0.025 ≤ p < 0.05) (lower CI, upper CI) = 0.257 (0.254, 0.259), p < 0.001, n = 14 disciplines) and the Abstracts (binomial glm: estimated proportion of p-values in the upper bin (0.025 ≤ p < 0.05) (lower CI, upper CI) = 0.262 (0.257, 0.267), p < 0.001, n = 10 disciplines). We found significant evidential value in every discipline represented in our text-mining data, irrespective of whether we tested the p-values from the Results or Abstracts (Table 1; Table 2). Based on the net trend across all disciplines, however, there was also strong evidence for p-hacking in both the Results (binomial glm: estimated proportion of p-values in the upper bin (0.045 < p < 0.05) (lower CI) = 0.546 (0.536), p < 0.001, n = 14 disciplines) and the Abstracts (binomial glm: estimated proportion of p-values in the upper bin (0.045 < p < 0.05) (lower CI) = 0.537 (0.518), p < 0.001, n = 10 disciplines). In most disciplines, there were more p-values in the upper than the lower bin; and when we look at the p-values text-mined from Results sections in every discipline where we had good statistical power (i.e., Health and medical Sciences, Biological Sciences, and Multidisciplinary), this difference was statistically significant (Table 1, Fig. 3A). When looking at p-values text-mined from Abstracts, despite the significant general trend, only the multidisciplinary and Information and Computer Science categories were significant (Table 2, Fig. 3B).\n\nNumber of p-values in each bin is the mean number based on 1,000 bootstraps of one p-value per Results section, rounded to the nearest whole number. Disciplines (n = 8) for which we found fewer than 50 p-values below 0.05 in the Results section were excluded.\n\nNumber of p-values in each bin is the mean number based on 1,000 bootstraps of one p-value per Abstract, rounded to the nearest whole number. Disciplines (n = 12) for which we found fewer than 50 p-values below 0.05 in the Abstract were excluded.\n\nA) Evidence for p-hacking from p-values obtained from Results sections. B) Evidence for p-hacking from p-values obtained from Abstracts. The strength of p-hacking is presented as the proportion of p-values in the upper bin (0.045 < p < 0.05) with one-tailed 95% confidence intervals (calculated following Clopper and Pearson [47] using the binom.test function in R). Only disciplines where text-mining of the Results sections returned more than 25 p-values between 0.04 and 0.05 are presented. Marker colour is shaded according to the sample size: with white indicating low samples sizes and red indicating larger sample sizes.\n\nOur text-mining suggests that p-hacking is widespread. Other studies that have inspected p-curves for far smaller sets of journals have also found evidence of p-hacking [12,40,45]. By contrast, Jager and Leek [3] found no evidence of p-hacking in a text-mining study of five medical journals. However, they were criticized for using p-values from Abstracts [46], because reporting p-values in Abstracts is optional, so they are more likely to contain only the strongest results (i.e., smallest p-values). Such a bias would exaggerate evidential value in our analysis, and make it harder to detect p-hacking (e.g., if researchers censor results with p = 0.049 from the Abstract, but not p = 0.041). Even though Abstracts are more likely to contain p-values that relate to primary hypotheses, which are expected to be more strongly p-hacked than p-values from less interesting, ancillary tests [41], lower power and reporting bias may impede detection of p-hacking using p-values obtained from Abstracts. The fact that we find evidence for p-hacking when using p-values from either the Abstracts or the Results sections across all scientific disciplines for which data are available (our overall analysis) supports the conclusion that p-hacking is rife.\n\nAlthough we present evidence that p-hacking is widespread, there was still a strong right skew in all the p-curves we examined. This is consistent with researchers investigating predictions that lead to refutation of the null hypothesis, implying that the average true effect size studied by life scientists is nonzero. Given recent concerns about the lack of reproducibility of findings (e.g., [49] but see [50]) and the possibility that many published results are false [2], our results are reassuring. It is, of course, important to note that when using text-mining, we are combining many different types of questions to generate our p-curves. Consequently, it remains unclear whether there are some research fields or questions subsumed within the disciplines we considered for which the average effect size of published results is zero (i.e., the p-curve is flat). To examine this, it is important to also look at p-curves for well-defined research questions [41].\n\nMeta-analysis is an excellent method for systematically synthesizing the literature and quantifying an effect or relationship by averaging effect sizes from multiple studies after weighting each one by its reliability [33,51]. However, meta-analyses are only as good as the data they use, and a recent study estimated that up to 37% of meta-analyses of clinical trials reporting a significant mean effect size represent false positives [34].\n\nTests for evidential value and p-hacking can readily be used to detect biases in datasets used in meta-analyses. We encourage researchers conducting meta-analyses to report p-values associated with each effect size (which is not currently standard practice) and then to test for evidential value and p-hacking. For a recent example of this practice, see [52]. To demonstrate this procedure, we obtained p-values from studies subject to meta-analyses by evolutionary biologists studying sexual selection [53–61] (see S1 Text).\n\nWhen conducting our own meta-analysis of all the data used in these meta-analyses, there was clear evidence that researchers have strong evidential value for claims that effect sizes are nonzero (binomial glm: estimated proportion of p-values in the upper bin (0.025 ≤ p < 0.05) (lower CI, upper CI) = 0.202 (0.179, 0.228), p<0.001, n = 12 datasets). We then examined each dataset separately and found statistically significant evidential value for 9 of the 12 p-curves (Table 3). The three p-curves that did not show evidential value had the three lowest sample sizes, so low statistical power to detect evidential value may explain the lack of significance. Again, it is worth noting that evidential value for well-studied phenomena is not a given (see a real-world example in [62]).\n\nMeta-analyses with ten or fewer significant p-values are not shown. Numbers in the lower and upper bins of the p-hacking test are those including misreported p-values followed by those excluding misreported p-values in brackets.\n\nWhen considering evidence for p-hacking, we found that when we included misreported p-values (those given as p < 0.05 which were actually larger; a total of 16 cases—see S1 Text) there were more p-values in the upper than the lower bin for 7 of 12 p-curves (Table 3). This bias was significant in one dataset (Fig. 4), which was also the one with the largest sample size. However, the evidence for p-hacking disappeared when we excluded misreported p-values from our analyses (Table 3). One could argue that including misreported p-values in the upper bin of our binomial test biases our results toward detecting p-hacking, but reporting nonsignificant results as “p<0.05” is a component of p-hacking that should not be ignored. Indeed, Leggett et al. [45] also found considerable misreporting of p-values around the 0.05 threshold. They noted that p-values were more likely to be misreported as significant when they were not, rather than the reverse, and that this “error” has become more common in recent years.\n\nThe p-curve shows evidence for evidential value (strong right skew) and p-hacking (rise in p-values just below 0.05).\n\nMore importantly, when misreported p-values were included in our analysis we found significant p-hacking from a meta-analysis of the p-curves of the 12 meta-analyses (binomial glm: estimated proportion of p-values in the upper bin (0.045 < p < 0.05) (lower CI) = 0.615 (0.513), p = 0.033; excluding misreported p-values: 0.489 (0.375), p = 0.443). Although questions subjected to meta-analysis might not be a representative sample of all research questions asked by scientists, our results indicate that studies on questions identified by researchers as important enough to warrant a meta-analysis tend to be p-hacked. Whether this influences the general conclusions of a meta-analysis depends on both the extent of p-hacking and the strength of the true effect. For instance, we found a statistically significant indication of p-hacking in only one of the 12 questions examined in published meta-analyses (Fig. 4). However, this study [56] also showed strong evidential value and p-values in the 0.045–0.05 bin were only a small proportion of published significant p-values. It is therefore unlikely that p-hacking would change the qualitative conclusions made in this meta-analysis, although p-hacking might have inflated the estimated mean effect size. In general, meta-analyses might be robust to inflated effects sizes that results from p-hacking, because: 1) all else being equal, studies that are most susceptible to p-hacking are those with small sample sizes (i.e., because low statistical power means less chance of a significant result), and these are given less weighting in a meta-analysis, 2) at least in some fields (e.g., ecology and evolution), meta-analyses often use data that is not directly related to the primary focus of the original paper. The p-values associated with secondary questions are less likely to be p-hacked. One way to check how sensitive estimates of effects sizes are to p-hacking would be to randomly remove the appropriate number of studies that contribute to a hump in the p-curve just below 0.05. Alternatively, meta-analysts could estimate effect sizes using p-curves (i.e., using only the significant p-values they find), a method which has been proposed to account for publication biases and to offer a conservative estimate of the true effect when there is p-hacking [62,63]. Development of p-curve methods is ongoing and we look forward to further tests of their ability to correct for the file-drawer effect, p-hacking, and other forms of publication bias given that real world data are likely to violate some of the assumptions in the available simulations of their effectiveness.\n\nOur study provides two lines of empirical evidence that p-hacking is widespread in the scientific literature. Our text-mining approach is based on a very large dataset that consists of p-values from different disciplines and questions, while our meta-analysis approach consists of p-values concerning a few specific hypotheses. Both approaches yielded similar results: evidential value for claims that the mean effect sizes for key study questions are nonzero—the conclusions researchers are making based on significant study findings—but that estimated mean effect size has probably been inflated by p-hacking.\n\nEliminating p-hacking entirely is unlikely when career advancement is assessed by publication output, and publication decisions are affected by the p-value or other measures of statistical support for relationships. Even so, there are a number of steps that the research community and scientific publishers can take to decrease the occurrence of p-hacking (see Box 3).\n\nThe key to decreasing p-hacking is better education of researchers. Many practices that lead to p-hacking are still deemed acceptable. John et al. [16] measured the prevalence of questionable research practices in psychology. They asked survey participants if they had ever engaged in a set of questionable research practices and, if so, whether they thought their actions were defensible on a scale of 0–2 (0 = no, 1 = possibly, 2 = yes). Over 50% of participants admitted to “failing to report all of a study’s dependent measures” and “deciding whether to collect more data after looking to see whether the results were significant,” and these practices received a mean defensibility rating greater than 1.5. This indicates that many researchers p-hack but do not appreciate the extent to which this is a form of scientific misconduct. Amazingly, some animal ethics boards even encourage or mandate the termination of research if a significant result is obtained during the study, which is a particularly egregious form of p-hacking (Anonymous reviewer, personal communication).\n\nClearly label research as prespecified (i.e., designed to answer a specific question, where detail of methods and analyses can be fully reported prior to data collection) or exploratory (i.e., involves exploration of data that looks intriguing, where methods and analyses used are often post hoc [13]), so that readers can treat results with appropriate caution. Results from prespecified studies offer far more convincing evidence than those from exploratory research [2].\n\nAdhere to common analysis standards [2]; measuring only response variables that are known (or predicted) to be important; and using sufficient sample sizes.\n\nPerform data analysis blind wherever possible. This approach makes it difficult to p-hack for specific results.\n\nPlace greater emphasis on the quality of research methods and data collection rather than the significance or novelty of the subsequent findings when reviewing or assessing research. Ideally, methods should be assessed independently of results [13,44].\n\nProvide clear and detailed guidelines for the full reporting of data analyses and results. For instance, stating that it is necessary to report effect sizes whether small or large, to report all p-values to three decimal places [27,64], to report samples sizes, and, most importantly, to be explicit about the entire analysis process (not just the final tests used to generate reported p-values). This will reduce p-hacking and aid the collection of data for meta-analyses and text-mining studies.\n\nEncourage and/or provide platforms for method prespecification [13,65]. Although methods and results in publications do not always match their prespecified protocols [5,66], prespecification allows readers to assess the risk of p-hacking and adjust their confidence in the reported outcomes accordingly.\n\nEncourage and/or provide platforms for open access to raw data. While access to raw data does not prevent p-hacking, it does make researchers more accountable for marginal results and allows readers to reanalyze data to check the robustness of results.\n\n(DOCX)\n\nClick here for additional data file.\n\nWe are grateful to members of the Jennions lab for comments and discussion on various versions of the manuscript.\n\nNull hypothesis significance testing\n\nFunding for this research was provided by Australian Research Council Grants awarded to MDJ, RL and LH. The funders had no role in study design, data collection and analysis, decision to publish, or preparation of the manuscript.\n\n(DOCX)\n\nClick here for additional data file.",
+      "textSha256": "b77ec10e0505feeca789fae78a31cd02dff36fcea68d0f514d73e30e1164aba5"
+    },
+    {
+      "id": "orig-pmc3812051-sandve-2013",
+      "title": "Ten Simple Rules for Reproducible Computational Research",
+      "url": "https://doi.org/10.1371/journal.pcbi.1003285",
+      "license": "CC-BY-4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+      "version": "doi:10.1371/journal.pcbi.1003285 (2013-10-24)",
+      "retrievedAt": "2026-10-19",
+      "licenseEvidence": [
+        {
+          "file": "sources/pmc/PMC3812051.xml",
+          "quote": "This is an open-access article distributed under the terms of the Creative Commons Attribution License, which permits unrestricted use, distribution, and reproduction in any medium",
+          "sha256": "6c72197e487de37923690bca0e31fd21cfb0f37d0a5eb313594df9661810fe71"
+        },
+        {
+          "file": "rights/europepmc-PMC3812051.json",
+          "quote": "\"license\":\"cc by\"",
+          "sha256": "e75199468f70e82f531dd0a90478f3e4e8a6cebdea01057cf46eb129b5f21e2e"
+        },
+        {
+          "file": "sources/pmc/PMC3812051.xml",
+          "quote": "content-type=\"ccbylicense\">https://creativecommons.org/licenses/by/4.0/</ali:license_ref><license-p>This is an open-access article distributed under the terms of the Creative Commons Attribution License",
+          "sha256": "6c72197e487de37923690bca0e31fd21cfb0f37d0a5eb313594df9661810fe71"
+        }
+      ],
+      "attribution": "Geir Kjetil Sandve, Anton Nekrutenko, James Taylor, Eivind Hovig (2013) Ten Simple Rules for Reproducible Computational Research. PLoS Computational Biology 9(10): e1003285. © 2013 Sandve et al. https://doi.org/10.1371/journal.pcbi.1003285. Open access under the Creative Commons Attribution License. Text retrieved as JATS XML from Europe PMC (PMC3812051, https://europepmc.org/article/PMC/PMC3812051). Changes: converted from JATS XML to Markdown; figure and table images, MathML-only rendering and journal front-matter metadata other than title, authors, copyright and license are not included. Falsify derivative: body paragraphs flattened from JATS without paraphrasing; figures/tables/front matter omitted.",
+      "originalFileSha256": "6c72197e487de37923690bca0e31fd21cfb0f37d0a5eb313594df9661810fe71",
+      "text": "Replication is the cornerstone of a cumulative science [1]. However, new tools and technologies, massive amounts of data, interdisciplinary approaches, and the complexity of the questions being asked are complicating replication efforts, as are increased pressures on scientists to advance their research [2]. As full replication of studies on independently collected data is often not feasible, there has recently been a call for reproducible research as an attainable minimum standard for assessing the value of scientific claims [3]. This requires that papers in experimental science describe the results and provide a sufficiently clear protocol to allow successful repetition and extension of analyses based on original data [4].\n\nThe importance of replication and reproducibility has recently been exemplified through studies showing that scientific papers commonly leave out experimental details essential for reproduction [5], studies showing difficulties with replicating published experimental results [6], an increase in retracted papers [7], and through a high number of failing clinical trials [8], [9]. This has led to discussions on how individual researchers, institutions, funding bodies, and journals can establish routines that increase transparency and reproducibility. In order to foster such aspects, it has been suggested that the scientific community needs to develop a “culture of reproducibility” for computational science, and to require it for published claims [3].\n\nWe want to emphasize that reproducibility is not only a moral responsibility with respect to the scientific field, but that a lack of reproducibility can also be a burden for you as an individual researcher. As an example, a good practice of reproducibility is necessary in order to allow previously developed methodology to be effectively applied on new data, or to allow reuse of code and results for new projects. In other words, good habits of reproducibility may actually turn out to be a time-saver in the longer run.\n\nWe further note that reproducibility is just as much about the habits that ensure reproducible research as the technologies that can make these processes efficient and realistic. Each of the following ten rules captures a specific aspect of reproducibility, and discusses what is needed in terms of information handling and tracking of procedures. If you are taking a bare-bones approach to bioinformatics analysis, i.e., running various custom scripts from the command line, you will probably need to handle each rule explicitly. If you are instead performing your analyses through an integrated framework (such as GenePattern [10], Galaxy [11], LONI pipeline [12], or Taverna [13]), the system may already provide full or partial support for most of the rules. What is needed on your part is then merely the knowledge of how to exploit these existing possibilities.\n\nIn a pragmatic setting, with publication pressure and deadlines, one may face the need to make a trade-off between the ideals of reproducibility and the need to get the research out while it is still relevant. This trade-off becomes more important when considering that a large part of the analyses being tried out never end up yielding any results. However, frequently one will, with the wisdom of hindsight, contemplate the missed opportunity to ensure reproducibility, as it may already be too late to take the necessary notes from memory (or at least much more difficult than to do it while underway). We believe that the rewards of reproducibility will compensate for the risk of having spent valuable time developing an annotated catalog of analyses that turned out as blind alleys.\n\nAs a minimal requirement, you should at least be able to reproduce the results yourself. This would satisfy the most basic requirements of sound research, allowing any substantial future questioning of the research to be met with a precise explanation. Although it may sound like a very weak requirement, even this level of reproducibility will often require a certain level of care in order to be met. There will for a given analysis be an exponential number of possible combinations of software versions, parameter values, pre-processing steps, and so on, meaning that a failure to take notes may make exact reproduction essentially impossible.\n\nWith this basic level of reproducibility in place, there is much more that can be wished for. An obvious extension is to go from a level where you can reproduce results in case of a critical situation to a level where you can practically and routinely reuse your previous work and increase your productivity. A second extension is to ensure that peers have a practical possibility of reproducing your results, which can lead to increased trust in, interest for, and citations of your work [6], [14].\n\nWe here present ten simple rules for reproducibility of computational research. These rules can be at your disposal for whenever you want to make your research more accessible—be it for peers or for your future self.\n\nWhenever a result may be of potential interest, keep track of how it was produced. When doing this, one will frequently find that getting from raw data to the final result involves many interrelated steps (single commands, scripts, programs). We refer to such a sequence of steps, whether it is automated or performed manually, as an analysis workflow. While the essential part of an analysis is often represented by only one of the steps, the full sequence of pre- and post-processing steps are often critical in order to reach the achieved result. For every involved step, you should ensure that every detail that may influence the execution of the step is recorded. If the step is performed by a computer program, the critical details include the name and version of the program, as well as the exact parameters and inputs that were used.\n\nAlthough manually noting the precise sequence of steps taken allows for an analysis to be reproduced, the documentation can easily get out of sync with how the analysis was really performed in its final version. By instead specifying the full analysis workflow in a form that allows for direct execution, one can ensure that the specification matches the analysis that was (subsequently) performed, and that the analysis can be reproduced by yourself or others in an automated way. Such executable descriptions [10] might come in the form of simple shell scripts or makefiles [15], [16] at the command line, or in the form of stored workflows in a workflow management system [10], [11], [13], [17], [18].\n\nAs a minimum, you should at least record sufficient details on programs, parameters, and manual procedures to allow yourself, in a year or so, to approximately reproduce the results.\n\nWhenever possible, rely on the execution of programs instead of manual procedures to modify data. Such manual procedures are not only inefficient and error-prone, they are also difficult to reproduce. If working at the UNIX command line, manual modification of files can usually be replaced by the use of standard UNIX commands or small custom scripts. If working with integrated frameworks, there will typically be a quite rich collection of components for data manipulation. As an example, manual tweaking of data files to attain format compatibility should be replaced by format converters that can be reenacted and included into executable workflows. Other manual operations like the use of copy and paste between documents should also be avoided. If manual operations cannot be avoided, you should as a minimum note down which data files were modified or moved, and for what purpose.\n\nIn order to exactly reproduce a given result, it may be necessary to use programs in the exact versions used originally. Also, as both input and output formats may change between versions, a newer version of a program may not even run without modifying its inputs. Even having noted which version was used of a given program, it is not always trivial to get hold of a program in anything but the current version. Archiving the exact versions of programs actually used may thus save a lot of hassle at later stages. In some cases, all that is needed is to store a single executable or source code file. In other cases, a given program may again have specific requirements to other installed programs/packages, or dependencies to specific operating system components. To ensure future availability, the only viable solution may then be to store a full virtual machine image of the operating system and program. As a minimum, you should note the exact names and versions of the main programs you use.\n\nEven the slightest change to a computer program can have large intended or unintended consequences. When a continually developed piece of code (typically a small script) has been used to generate a certain result, only that exact state of the script may be able to produce that exact output, even given the same input data and parameters. As also discussed for rules 3 and 6, exact reproduction of results may in certain situations be essential. If computer code is not systematically archived along its evolution, backtracking to a code state that gave a certain result may be a hopeless task. This can cast doubt on previous results, as it may be impossible to know if they were partly the result of a bug or otherwise unfortunate behavior.\n\nThe standard solution to track evolution of code is to use a version control system [15], such as Subversion, Git, or Mercurial. These systems are relatively easy to set up and use, and may be used to systematically store the state of the code throughout development at any desired time granularity.\n\nAs a minimum, you should archive copies of your scripts from time to time, so that you keep a rough record of the various states the code has taken during development.\n\nIn principle, as long as the full process used to produce a given result is tracked, all intermediate data can also be regenerated. In practice, having easily accessible intermediate results may be of great value. Quickly browsing through intermediate results can reveal discrepancies toward what is assumed, and can in this way uncover bugs or faulty interpretations that are not apparent in the final results. Secondly, it more directly reveals consequences of alternative programs and parameter choices at individual steps. Thirdly, when the full process is not readily executable, it allows parts of the process to be rerun. Fourthly, when reproducing results, it allows any experienced inconsistencies to be tracked to the steps where the problems arise. Fifth, it allows critical examination of the full process behind a result, without the need to have all executables operational. When possible, store such intermediate results in standardized formats. As a minimum, archive any intermediate result files that are produced when running an analysis (as long as the required storage space is not prohibitive).\n\nMany analyses and predictions include some element of randomness, meaning the same program will typically give slightly different results every time it is executed (even when receiving identical inputs and parameters). However, given the same initial seed, all random numbers used in an analysis will be equal, thus giving identical results every time it is run. There is a large difference between observing that a result has been reproduced exactly or only approximately. While achieving equal results is a strong indication that a procedure has been reproduced exactly, it is often hard to conclude anything when achieving only approximately equal results. For analyses that involve random numbers, this means that the random seed should be recorded. This allows results to be reproduced exactly by providing the same seed to the random number generator in future runs. As a minimum, you should note which analysis steps involve randomness, so that a certain level of discrepancy can be anticipated when reproducing the results.\n\nFrom the time a figure is first generated to it being part of a published article, it is often modified several times. In some cases, such modifications are merely visual adjustments to improve readability, or to ensure visual consistency between figures. If raw data behind figures are stored in a systematic manner, so as to allow raw data for a given figure to be easily retrieved, one can simply modify the plotting procedure, instead of having to redo the whole analysis. An additional advantage of this is that if one really wants to read fine values in a figure, one can consult the raw numbers. In cases where plotting involves more than a direct visualization of underlying numbers, it can be useful to store both the underlying data and the processed values that are directly visualized. An example of this is the plotting of histograms, where both the values before binning (original data) and the counts per bin (heights of visualized bars) could be stored. When plotting is performed using a command-based system like R, it is convenient to also store the code used to make the plot. One can then apply slight modifications to these commands, instead of having to specify the plot from scratch. As a minimum, one should note which data formed the basis of a given plot and how this data could be reconstructed.\n\nThe final results that make it to an article, be it plots or tables, often represent highly summarized data. For instance, each value along a curve may in turn represent averages from an underlying distribution. In order to validate and fully understand the main result, it is often useful to inspect the detailed values underlying the summaries. A common but impractical way of doing this is to incorporate various debug outputs in the source code of scripts and programs. When the storage context allows, it is better to simply incorporate permanent output of all underlying data when a main result is generated, using a systematic naming convention to allow the full data underlying a given summarized value to be easily found. We find hypertext (i.e., html file output) to be particularly useful for this purpose. This allows summarized results to be generated along with links that can be very conveniently followed (by simply clicking) to the full data underlying each summarized value. When working with summarized results, you should as a minimum at least once generate, inspect, and validate the detailed values underlying the summaries.\n\nThroughout a typical research project, a range of different analyses are tried and interpretation of the results made. Although the results of analyses and their corresponding textual interpretations are clearly interconnected at the conceptual level, they tend to live quite separate lives in their representations: results usually live on a data area on a server or personal computer, while interpretations live in text documents in the form of personal notes or emails to collaborators. Such textual interpretations are not generally mere shadows of the results—they often involve viewing the results in light of other theories and results. As such, they carry extra information, while at the same time having their necessary support in a given result.\n\nIf you want to reevaluate your previous interpretations, or allow peers to make their own assessment of claims you make in a scientific paper, you will have to connect a given textual statement (interpretation, claim, conclusion) to the precise results underlying the statement. Making this connection when it is needed may be difficult and error-prone, as it may be hard to locate the exact result underlying and supporting the statement from a large pool of different analyses with various versions.\n\nTo allow efficient retrieval of details behind textual statements, we suggest that statements are connected to underlying results already from the time the statements are initially formulated (for instance in notes or emails). Such a connection can for instance be a simple file path to detailed results, or the ID of a result in an analysis framework, included within the text itself. For an even tighter integration, there are tools available to help integrate reproducible analyses directly into textual documents, such as Sweave [19], the GenePattern Word add-in [4], and Galaxy Pages [20]. These solutions can also subsequently be used in connection with publications, as discussed in the next rule.\n\nAs a minimum, you should provide enough details along with your textual interpretations so as to allow the exact underlying results, or at least some related results, to be tracked down in the future.\n\nLast, but not least, all input data, scripts, versions, parameters, and intermediate results should be made publicly and easily accessible. Various solutions have now become available to make data sharing more convenient, standardized, and accessible in particular domains, such as for gene expression data [21]–[23]. Most journals allow articles to be supplemented with online material, and some journals have initiated further efforts for making data and code more integrated with publications [3], [24]. As a minimum, you should submit the main data and source code as supplementary material, and be prepared to respond to any requests for further data or methodology details by peers.\n\nMaking reproducibility of your work by peers a realistic possibility sends a strong signal of quality, trustworthiness, and transparency. This could increase the quality and speed of the reviewing process on your work, the chances of your work getting published, and the chances of your work being taken further and cited by other researchers after publication [25].",
+      "textSha256": "9084f7abbd962c9029d158d897bc464e83f918306e3f2f298e6d4c844e47a8b6"
+    }
+  ],
+  "chunks": [
+    {
+      "id": "orig-pmc4359000-head-2015-p1",
+      "sourceId": "orig-pmc4359000-head-2015",
+      "paragraph": 1,
+      "roles": [
+        "statistics",
+        "methods"
+      ],
+      "text": "There is increasing concern that many published results are false positives [1,2] (but see [3]). Many argue that current scientific practices create strong incentives to publish statistically significant (i.e., “positive”) results, and there is good evidence that journals, especially prestigious ones with higher impact factors, disproportionately publish statistically significant results [4–10]. Employers and funders often count papers and weigh them by the journal’s impact factor to assess a researcher’s performance [11]. In combination, these factors create incentives for researchers to selectively pursue and selectively attempt to publish statistically significant research findings.",
+      "sha256": "d2cee1a9a6a256091d322a744f28813821d03ed29b4fd5bd03990f94aaae922d"
+    },
+    {
+      "id": "orig-pmc4359000-head-2015-p2",
+      "sourceId": "orig-pmc4359000-head-2015",
+      "paragraph": 2,
+      "roles": [
+        "statistics",
+        "methods"
+      ],
+      "text": "There are two widely recognized types of researcher-driven publication bias: selection (also known as the “file drawer effect”, where studies with nonsignificant results have lower publication rates [7]) and inflation [12]. Inflation bias, also known as “p-hacking” or “selective reporting,” is the misreporting of true effect sizes in published studies (Box 1). It occurs when researchers try out several statistical analyses and/or data eligibility specifications and then selectively report those that produce significant results [12–15]. Common practices that lead to p-hacking include: conducting analyses midway through experiments to decide whether to continue collecting data [15,16]; recording many response variables and deciding which to report postanalysis [16,17], deciding whether to include or drop outliers postanalyses [16], excluding, combining, or splitting treatment groups postanalysis [2], including or excluding covariates postanalysis [14], and stopping data exploration if an analysis yields a significant p-value [18,19].",
+      "sha256": "0a47280da3c24c4cdd0bdc2f8da0fc97121752dfb2fce149569b9e099d0d5f4e"
+    },
+    {
+      "id": "orig-pmc4359000-head-2015-p3",
+      "sourceId": "orig-pmc4359000-head-2015",
+      "paragraph": 3,
+      "roles": [
+        "statistics",
+        "methods"
+      ],
+      "text": "Fisher [20] introduced null hypothesis significance testing (NHST) to objectively separate interesting findings from background noise [21]. NHST is the most widely used data analysis method in most scientific disciplines [22,23]. The null hypothesis is typically a statement of no relationship between variables or no effect of an experimental manipulation. With NHST, one computes the probability (i.e., p) of finding an effect at least or more extreme than the observed finding if the null hypothesis is true [24,25].",
+      "sha256": "0f26ac932f160b262e35e6d17c24b3c903de8cd4ea4cb8977bb3a0af9d08a47e"
+    },
+    {
+      "id": "orig-pmc4359000-head-2015-p4",
+      "sourceId": "orig-pmc4359000-head-2015",
+      "paragraph": 4,
+      "roles": [
+        "statistics",
+        "methods"
+      ],
+      "text": "The NHST approach uses an arbitrary cutoff value (usually 0.05). Findings with smaller p-values are described as “statistically significant” (“positive” findings), and the remainder as “nonsignificant” (“negative” findings). This arbitrary cutoff has led to the scientifically dubious practice of regarding “significant” findings as more valuable, reliable, and reproducible [24], thereby incentivizing various kinds of research bias.",
+      "sha256": "1bf326a2171a83b48586194383104d8c5f3aed5f0d409c6aaf5ab7c90ca1ad46"
+    },
+    {
+      "id": "orig-pmc4359000-head-2015-p5",
+      "sourceId": "orig-pmc4359000-head-2015",
+      "paragraph": 5,
+      "roles": [
+        "statistics",
+        "methods"
+      ],
+      "text": "Before computers, test statistics (e.g., t and F) were routinely calculated by hand and the associated p-value was looked up in statistical tables. Here, p-values were given for a limited set of values (e.g., 0.001, 0.01, 0.02, and 0.05) [26]. Researchers then reported p-values as the lowest threshold consistent with the test statistic (e.g., p < 0.05 or p < 0.01). With modern statistical software this practice is unnecessary, as precise p-values are now provided, but it is still commonplace. Previous research has shown that strict adherence to p-value thresholds can bias how research is reported, even within the region of significance [27].",
+      "sha256": "01180402d557b14248b7ae44d2547de9f65e384c344e3bb2b3c116e3bc43c3ac"
+    },
+    {
+      "id": "orig-pmc4359000-head-2015-p6",
+      "sourceId": "orig-pmc4359000-head-2015",
+      "paragraph": 6,
+      "roles": [
+        "statistics",
+        "methods"
+      ],
+      "text": "The p-value is easily misinterpreted. For example, it is often equated with the strength of a relationship, but a tiny effect size can have very low p-values with a large enough sample size. Similarly, a low p-value does not mean that a finding is of major clinical or biological interest [28]. Many researchers have advocated abolishing NHST (e.g., [29,30]). However, others note that many of the problems with publication bias reoccur with other approaches, such as reporting effect sizes and their confidence intervals [31] or Bayesian credible intervals [32]. Publication biases are not a problem with p-values per se. They simply reflect the incentives to report strong (i.e., significant) effects.",
+      "sha256": "40c95bcf37c95375e1c2647ed1fb8dea5fbea4f345e47db836c844b07751020a"
+    },
+    {
+      "id": "orig-pmc4359000-head-2015-p7",
+      "sourceId": "orig-pmc4359000-head-2015",
+      "paragraph": 7,
+      "roles": [
+        "statistics",
+        "methods"
+      ],
+      "text": "If published data are biased, data synthesis might lead to flawed conclusions. Meta-analysis is a set of statistical methods that combine studies on the same question to estimate the true effect size [33]. Meta-analyses are now the “gold standard” for synthesizing the evidence for an effect of a treatment or the existence of a relationship, and combining effect size estimates across studies to give an overall estimate. Meta-analyses guide the application of medical treatments and policy decisions, and influence future research directions [34]. However, meta-analyses are compromised if the studies being synthesized do not reflect the true distribution of effect sizes [5,35–37].",
+      "sha256": "f071b12188be90c05328f3cbb53811858e90ca1c983f7f56152968bd69363f60"
+    },
+    {
+      "id": "orig-pmc4359000-head-2015-p8",
+      "sourceId": "orig-pmc4359000-head-2015",
+      "paragraph": 8,
+      "roles": [
+        "statistics",
+        "methods"
+      ],
+      "text": "Quantifying p-hacking is important because publication of false positives hinders scientific progress. When false positive results enter the literature they can be very persistent. In many fields, there is little incentive to replicate research [38]. Even when research is replicated, early positive studies often receive more attention than later negative ones. In addition, false positives can inspire investment in fruitless research programs, and even discredit entire fields [14,16].",
+      "sha256": "e07986e62ae9e8b9f08e6e1d1ca37d860c63f5b80f1ece0318f298a2472525e5"
+    },
+    {
+      "id": "orig-pmc4359000-head-2015-p9",
+      "sourceId": "orig-pmc4359000-head-2015",
+      "paragraph": 9,
+      "roles": [
+        "statistics",
+        "methods"
+      ],
+      "text": "Despite the potential importance of p-hacking, the consequences for formal and informal data synthesis are unknown. Here, we address both issues using p-curves (see Box 2). First, we used text-mining to obtain reported p-values in papers drawn from a broad range of scientific disciplines. We then looked for evidence of p-hacking based on the shape of the p-curves. Second, we produced p-curves from primary data used in published meta-analyses. This allowed us to test the evidence for p-hacking when looking at specific hypotheses which researchers have clearly identified as being of general interest (i.e., that warrant a meta-analysis).",
+      "sha256": "a486e8d27f1855e1cba6eb168a472e092dbdec09d8f51f7fb0df9f42fa0eab15"
+    },
+    {
+      "id": "orig-pmc4359000-head-2015-p10",
+      "sourceId": "orig-pmc4359000-head-2015",
+      "paragraph": 10,
+      "roles": [
+        "statistics",
+        "methods"
+      ],
+      "text": "A p-curve is the distribution of p-values for a set of studies. P-curves can be a helpful tool to assess the reliability of published research. Here, we outline how they have been used to assess the literature.",
+      "sha256": "50bdac234a35b460a4e5eb866642463058b9d1471ba8d45b49e544c264ae000f"
+    },
+    {
+      "id": "orig-pmc4359000-head-2015-p11",
+      "sourceId": "orig-pmc4359000-head-2015",
+      "paragraph": 11,
+      "roles": [
+        "statistics",
+        "methods"
+      ],
+      "text": "One can examine whether a set of findings contains evidential value by examining the distribution of p-values, particularly those between 0 and 0.05. “Evidential value” refers to whether or not the published evidence for a specific hypothesis suggests that the effect size is nonzero.",
+      "sha256": "fc2f4c24bc68c0b5496d5bfa788ba5c0c03eb8cc19d47bc076702af279dfbf63"
+    },
+    {
+      "id": "orig-pmc4359000-head-2015-p12",
+      "sourceId": "orig-pmc4359000-head-2015",
+      "paragraph": 12,
+      "roles": [
+        "statistics",
+        "methods"
+      ],
+      "text": "When the effect size for a studied phenomenon is zero, every p-value is equally likely to be observed. The expected distribution of p-values under the null hypothesis is uniform (Black line, Fig. 1A and Fig. 2A), such that p<0.05 will occur 5% of the time, p<0.04 will occur 4% of the time, and so on. On the other hand, when the true effect size is nonzero, the expected distribution of p-values is exponential with a right skew [39–42] (Black line, Fig. 1B and Fig. 2B). When the true effect is strong, researchers are more likely to obtain very low p-values (e.g., p<0.001) than moderately low p-values (e.g., 0.01), and less likely still to obtain nonsignificant p-values (p > 0.05) [41]. So, as the true effect size increases the p-curve is more right skewed [41].",
+      "sha256": "d2a35b59a73530857c2b2159167b8446aec3fa5079b12fcba12b084619ddba81"
+    },
+    {
+      "id": "orig-pmc4359000-head-2015-p13",
+      "sourceId": "orig-pmc4359000-head-2015",
+      "paragraph": 13,
+      "roles": [
+        "statistics",
+        "methods"
+      ],
+      "text": "Several studies have plotted the distribution of p-values or related test statistics (i.e., Z or t) around the main significance threshold of p = 0.05 (often in the range of 0.01 to 0.1). A notable drop in p-values above 0.05 (or for Z values, 1.96) (Red line, Fig. 1A and Fig. 1B) is interpreted as evidence for publication bias (e.g., [40,43–45]). While a discontinuity in the distribution of p-values around 0.05 is indicative of publication bias, it does not distinguish between selective publication bias and p-hacking (see Box 1).",
+      "sha256": "8b8dfc5eb77b4e3aa5290ba3df396001ef6423746fbd8e259a6ae95c9cf8ce14"
+    },
+    {
+      "id": "orig-pmc4359000-head-2015-p14",
+      "sourceId": "orig-pmc4359000-head-2015",
+      "paragraph": 14,
+      "roles": [
+        "statistics",
+        "methods"
+      ],
+      "text": "The p-curve can, however, be used to identify p-hacking, by only considering significant findings [14]. If researchers p-hack and turn a truly nonsignificant result into a significant one, then the p-curve’s shape will be altered close to the perceived significance threshold (typically p = 0.05). Consequently, a p-hacked p-curve will have an overabundance of p-values just below 0.05 [12,40,41]. If researchers p-hack when there is no true effect, the p-curve will shift from being flat to left skewed (Fig. 2A). If, however, researchers p-hack when there is a true effect, the p-curve will be exponential with right skew but there will be an overrepresentation of p-values in the tail of the distribution just below 0.05 (Fig. 2B). Both p-hacking and selective publication bias predict a discontinuity in the p-curve around 0.05, but only p-hacking predicts an overabundance of p-values just below 0.05 [12]. The exact shape of the p-curve will, however, depend on both the true effect (i.e., the p-curve before p-hacking) and the intensity of p-hacking [41].",
+      "sha256": "7c226088fd7a080282b754d96ca625e1a9ff3245bcce15717db3f96a5c3cbefa"
+    },
+    {
+      "id": "orig-pmc4359000-head-2015-p15",
+      "sourceId": "orig-pmc4359000-head-2015",
+      "paragraph": 15,
+      "roles": [
+        "statistics",
+        "methods"
+      ],
+      "text": "Similar to previous studies (e.g., [14,43]) we employ binomial tests to look for evidence of evidential value and p-hacking in both our text-mined and meta-analyses datasets. We tested for evidential value using a two-tailed sign test, in which we compared the number of p-values falling in the bin 0 ≤ p < 0.025 to the number in the bin 0.025 ≤ p < 0.05. Under the null hypothesis of no evidential value, the expected number of p-values in each of these bins is equal. Significantly more p-values in the lower bin is consistent with evidential value (i.e., right skewed p-curve), and significantly more p-values in the upper bin is consistent with severe p-hacking. This test is a slightly modified version of a test proposed by Simohnson et al. [41], who suggest using two separate one-tailed sign tests for the same purpose.",
+      "sha256": "efad5e2eb311c480c0af43d82ed4155ba6cd1b27d3abd7b9e777468d622e7315"
+    },
+    {
+      "id": "orig-pmc4359000-head-2015-p16",
+      "sourceId": "orig-pmc4359000-head-2015",
+      "paragraph": 16,
+      "roles": [
+        "statistics",
+        "methods"
+      ],
+      "text": "The two-tailed sign test with a p = 0.025 threshold (above) and the tests proposed by Simonsohn et al. [41] can detect severe p-hacking, but are insensitive to more modest (and arguably more realistic) levels of p-hacking. This is true especially if the average true effect size is strong, as the right skew introduced to the p-curve will mask the left skew caused by p-hacking. A more sensitive approach to detect p-hacking is to look for an increase in the relative frequency of p-values just below 0.05, where we expect the signal of p-hacking to be strongest. Under the null hypothesis of no p-hacking, we expect either that the distribution of p-values is uniform close to 0.05 (if the true effect sizes are zero), or right skewed (i.e., if at least some effect sizes are nonzero). However, p-hacking introduces additional p-values close to 0.05, producing a left skew. Thus, a simple, and conservative, test for p-hacking involves testing the null hypothesis that the p-values just below 0.05 are either uniformly distributed or right skewed. We used a one-tailed sign test to ask whether the number of p-values in the bin that abuts 0.05 is greater than that in the adjacent lower bin. This test becomes more likely to detect p-hacking if one uses smaller bins, since p-values are right skewed when the average effect size is positive (masking p-hacking), but in practice, using smaller bins will reduce the sample size (and thus power) of the test. We selected a bin width of 0.005, with the lower bin specified as 0.04 < p < 0.045 and the upper bin as 0.045 < p < 0.05. We chose p < 0.05 as the cutoff for our upper bin (following [3]), rather than p = 0.05 (see [46]) because we suspect that many authors do not regard p = 0.05 as significant. As a measure of the strength of p-hacking, we present the proportion of p-values in the upper bin and the associated 95% confidence intervals (calculated following Clopper and Pearson [47] using the binom.test function in R).",
+      "sha256": "75d752d8bfd372702e150ced8354dc8829644b6ef4b335859db7023874933804"
+    },
+    {
+      "id": "orig-pmc4359000-head-2015-p17",
+      "sourceId": "orig-pmc4359000-head-2015",
+      "paragraph": 17,
+      "roles": [
+        "statistics",
+        "methods"
+      ],
+      "text": "We ran the above analyses separately for each discipline and meta-analysis dataset. In addition, we tested for overall evidential value (two-tailed test) and signs of p-hacking (one-tailed test) in the two main datasets (Text-mining of p-values and the meta-analysis data sets respectively). To do this, we used the proportion of p-values occurring in the upper bin for each discipline or meta-analysis (depending on the dataset being analysed) and ran a binomial generalised linear model to test whether the observed intercept differed from 0.5 (i.e., equal number of cases in the two bins). This approach is equivalent to a meta-analysis testing for a significant trend when combining the individual disciplines or questions because each is weighted by its sample size. The R code we used is deposited in Dryad [48].",
+      "sha256": "bf73e57efefd3ccf2af02a77ddaf8dc18c903d6a407b926fa2a8bdc8a3d6eee5"
+    },
+    {
+      "id": "orig-pmc4359000-head-2015-p18",
+      "sourceId": "orig-pmc4359000-head-2015",
+      "paragraph": 18,
+      "roles": [
+        "statistics",
+        "methods"
+      ],
+      "text": "A) Black line shows distribution of p-values when there is no evidential value and the red line shows how publication bias influences this distribution. B) Black line shows distribution of p-values when there is evidential value and red line shows how publication bias influences this distribution. Tests for publication bias due to a file-drawer effect often compare the number of p-values in each of the bins either side of 0.05.",
+      "sha256": "32fd4211fa6e24af0070bb3ea143dddfdf22bc87f7c19c37b82751a268c5f81c"
+    },
+    {
+      "id": "orig-pmc4359000-head-2015-p19",
+      "sourceId": "orig-pmc4359000-head-2015",
+      "paragraph": 19,
+      "roles": [
+        "statistics",
+        "methods"
+      ],
+      "text": "A) Black line shows distribution of p-values when there is no evidential value and the red line shows how p-hacking influences this distribution. B) Black line shows distribution of p-values when there is evidential value and the red line shows how p-hacking influences this distribution. Tests for p-hacking often compare the number of p-values in two adjacent bins just below 0.05.",
+      "sha256": "c3d8319d99d9dc9c5a3bfb3d1e3e71076261e8cfa20f8eee4a0b2461bc336a08"
+    },
+    {
+      "id": "orig-pmc4359000-head-2015-p20",
+      "sourceId": "orig-pmc4359000-head-2015",
+      "paragraph": 20,
+      "roles": [
+        "statistics",
+        "methods"
+      ],
+      "text": "We used text-mining to search for p-values in all Open Access papers available in the PubMed database (see S1 Text). To quantify “evidential value” (i.e., if there is evidence that the true effect size is nonzero) and p-hacking, we constructed p-curves from the p-values we obtained (see Box 2). We present separate tests of evidential value and p-hacking for p-values extracted from the Results section, and for p-values extracted from the Abstracts. Researchers have identified weaknesses in the use of text-mined data to look for publication bias (e.g., [46]). Here, we adopted several measures to counter these weaknesses (see S1 Text).",
+      "sha256": "4f9b9d7df761bc2a468aace3a3aa8504872a9281157958146abf170b2c32a919"
+    },
+    {
+      "id": "orig-pmc4359000-head-2015-p21",
+      "sourceId": "orig-pmc4359000-head-2015",
+      "paragraph": 21,
+      "roles": [
+        "statistics",
+        "methods"
+      ],
+      "text": "Pooling p-values across all disciplines, there was strong evidence for “evidential value”; that is, researchers appear to be predominantly studying phenomena with nonzero effect sizes, as shown by the strong right skew of the p-curve for p-values found in both the Results (binomial glm: estimated proportion of p-values in the upper bin (0.025 ≤ p < 0.05) (lower CI, upper CI) = 0.257 (0.254, 0.259), p < 0.001, n = 14 disciplines) and the Abstracts (binomial glm: estimated proportion of p-values in the upper bin (0.025 ≤ p < 0.05) (lower CI, upper CI) = 0.262 (0.257, 0.267), p < 0.001, n = 10 disciplines). We found significant evidential value in every discipline represented in our text-mining data, irrespective of whether we tested the p-values from the Results or Abstracts (Table 1; Table 2). Based on the net trend across all disciplines, however, there was also strong evidence for p-hacking in both the Results (binomial glm: estimated proportion of p-values in the upper bin (0.045 < p < 0.05) (lower CI) = 0.546 (0.536), p < 0.001, n = 14 disciplines) and the Abstracts (binomial glm: estimated proportion of p-values in the upper bin (0.045 < p < 0.05) (lower CI) = 0.537 (0.518), p < 0.001, n = 10 disciplines). In most disciplines, there were more p-values in the upper than the lower bin; and when we look at the p-values text-mined from Results sections in every discipline where we had good statistical power (i.e., Health and medical Sciences, Biological Sciences, and Multidisciplinary), this difference was statistically significant (Table 1, Fig. 3A). When looking at p-values text-mined from Abstracts, despite the significant general trend, only the multidisciplinary and Information and Computer Science categories were significant (Table 2, Fig. 3B).",
+      "sha256": "f456f29fd67fff35c205f9438afd8c1eddb47ecfc492d5691abdb83a34969846"
+    },
+    {
+      "id": "orig-pmc4359000-head-2015-p22",
+      "sourceId": "orig-pmc4359000-head-2015",
+      "paragraph": 22,
+      "roles": [
+        "statistics",
+        "methods"
+      ],
+      "text": "Number of p-values in each bin is the mean number based on 1,000 bootstraps of one p-value per Results section, rounded to the nearest whole number. Disciplines (n = 8) for which we found fewer than 50 p-values below 0.05 in the Results section were excluded.",
+      "sha256": "300e71740c626c989e6d030d05cb2f169bd66c16a6f25d17265f4b9e9f1b0eb4"
+    },
+    {
+      "id": "orig-pmc4359000-head-2015-p23",
+      "sourceId": "orig-pmc4359000-head-2015",
+      "paragraph": 23,
+      "roles": [
+        "statistics",
+        "methods"
+      ],
+      "text": "Number of p-values in each bin is the mean number based on 1,000 bootstraps of one p-value per Abstract, rounded to the nearest whole number. Disciplines (n = 12) for which we found fewer than 50 p-values below 0.05 in the Abstract were excluded.",
+      "sha256": "c75ea4a08662b05bb14eec58052de1a691418f45797087ecae4f7ac7562ed933"
+    },
+    {
+      "id": "orig-pmc4359000-head-2015-p24",
+      "sourceId": "orig-pmc4359000-head-2015",
+      "paragraph": 24,
+      "roles": [
+        "statistics",
+        "methods"
+      ],
+      "text": "A) Evidence for p-hacking from p-values obtained from Results sections. B) Evidence for p-hacking from p-values obtained from Abstracts. The strength of p-hacking is presented as the proportion of p-values in the upper bin (0.045 < p < 0.05) with one-tailed 95% confidence intervals (calculated following Clopper and Pearson [47] using the binom.test function in R). Only disciplines where text-mining of the Results sections returned more than 25 p-values between 0.04 and 0.05 are presented. Marker colour is shaded according to the sample size: with white indicating low samples sizes and red indicating larger sample sizes.",
+      "sha256": "91d194092c359b4b147aedf00aac8458b323bb5c263485aec944ba560c534193"
+    },
+    {
+      "id": "orig-pmc4359000-head-2015-p25",
+      "sourceId": "orig-pmc4359000-head-2015",
+      "paragraph": 25,
+      "roles": [
+        "statistics",
+        "methods"
+      ],
+      "text": "Our text-mining suggests that p-hacking is widespread. Other studies that have inspected p-curves for far smaller sets of journals have also found evidence of p-hacking [12,40,45]. By contrast, Jager and Leek [3] found no evidence of p-hacking in a text-mining study of five medical journals. However, they were criticized for using p-values from Abstracts [46], because reporting p-values in Abstracts is optional, so they are more likely to contain only the strongest results (i.e., smallest p-values). Such a bias would exaggerate evidential value in our analysis, and make it harder to detect p-hacking (e.g., if researchers censor results with p = 0.049 from the Abstract, but not p = 0.041). Even though Abstracts are more likely to contain p-values that relate to primary hypotheses, which are expected to be more strongly p-hacked than p-values from less interesting, ancillary tests [41], lower power and reporting bias may impede detection of p-hacking using p-values obtained from Abstracts. The fact that we find evidence for p-hacking when using p-values from either the Abstracts or the Results sections across all scientific disciplines for which data are available (our overall analysis) supports the conclusion that p-hacking is rife.",
+      "sha256": "da903db2c43c58a256468400699094665f511f2bcd35ab3224057be3d4418324"
+    },
+    {
+      "id": "orig-pmc4359000-head-2015-p26",
+      "sourceId": "orig-pmc4359000-head-2015",
+      "paragraph": 26,
+      "roles": [
+        "statistics",
+        "methods"
+      ],
+      "text": "Although we present evidence that p-hacking is widespread, there was still a strong right skew in all the p-curves we examined. This is consistent with researchers investigating predictions that lead to refutation of the null hypothesis, implying that the average true effect size studied by life scientists is nonzero. Given recent concerns about the lack of reproducibility of findings (e.g., [49] but see [50]) and the possibility that many published results are false [2], our results are reassuring. It is, of course, important to note that when using text-mining, we are combining many different types of questions to generate our p-curves. Consequently, it remains unclear whether there are some research fields or questions subsumed within the disciplines we considered for which the average effect size of published results is zero (i.e., the p-curve is flat). To examine this, it is important to also look at p-curves for well-defined research questions [41].",
+      "sha256": "ec5d5262f5f66bf475d716db10aa2aa4309da0d4623131d23282a46b4daa1632"
+    },
+    {
+      "id": "orig-pmc4359000-head-2015-p27",
+      "sourceId": "orig-pmc4359000-head-2015",
+      "paragraph": 27,
+      "roles": [
+        "statistics",
+        "methods"
+      ],
+      "text": "Meta-analysis is an excellent method for systematically synthesizing the literature and quantifying an effect or relationship by averaging effect sizes from multiple studies after weighting each one by its reliability [33,51]. However, meta-analyses are only as good as the data they use, and a recent study estimated that up to 37% of meta-analyses of clinical trials reporting a significant mean effect size represent false positives [34].",
+      "sha256": "b9dd7f878675db78436bbf316756ec605ea6b999d71fdface18109d59cbdd4d5"
+    },
+    {
+      "id": "orig-pmc4359000-head-2015-p28",
+      "sourceId": "orig-pmc4359000-head-2015",
+      "paragraph": 28,
+      "roles": [
+        "statistics",
+        "methods"
+      ],
+      "text": "Tests for evidential value and p-hacking can readily be used to detect biases in datasets used in meta-analyses. We encourage researchers conducting meta-analyses to report p-values associated with each effect size (which is not currently standard practice) and then to test for evidential value and p-hacking. For a recent example of this practice, see [52]. To demonstrate this procedure, we obtained p-values from studies subject to meta-analyses by evolutionary biologists studying sexual selection [53–61] (see S1 Text).",
+      "sha256": "9e67408debb5eb2a8d723eb02df9205bdbeb67f474da7142db32e1aa8d628d59"
+    },
+    {
+      "id": "orig-pmc4359000-head-2015-p29",
+      "sourceId": "orig-pmc4359000-head-2015",
+      "paragraph": 29,
+      "roles": [
+        "statistics",
+        "methods"
+      ],
+      "text": "When conducting our own meta-analysis of all the data used in these meta-analyses, there was clear evidence that researchers have strong evidential value for claims that effect sizes are nonzero (binomial glm: estimated proportion of p-values in the upper bin (0.025 ≤ p < 0.05) (lower CI, upper CI) = 0.202 (0.179, 0.228), p<0.001, n = 12 datasets). We then examined each dataset separately and found statistically significant evidential value for 9 of the 12 p-curves (Table 3). The three p-curves that did not show evidential value had the three lowest sample sizes, so low statistical power to detect evidential value may explain the lack of significance. Again, it is worth noting that evidential value for well-studied phenomena is not a given (see a real-world example in [62]).",
+      "sha256": "1ed190a2d978c5d2417128632b649929f2182ff7eaf40e843615459f1cd22be4"
+    },
+    {
+      "id": "orig-pmc4359000-head-2015-p30",
+      "sourceId": "orig-pmc4359000-head-2015",
+      "paragraph": 30,
+      "roles": [
+        "statistics",
+        "methods"
+      ],
+      "text": "Meta-analyses with ten or fewer significant p-values are not shown. Numbers in the lower and upper bins of the p-hacking test are those including misreported p-values followed by those excluding misreported p-values in brackets.",
+      "sha256": "4a2763e886491a7b6d1d77ffcd931a3a488e609b3fde8ebb65e8ad4a69e1718c"
+    },
+    {
+      "id": "orig-pmc4359000-head-2015-p31",
+      "sourceId": "orig-pmc4359000-head-2015",
+      "paragraph": 31,
+      "roles": [
+        "statistics",
+        "methods"
+      ],
+      "text": "When considering evidence for p-hacking, we found that when we included misreported p-values (those given as p < 0.05 which were actually larger; a total of 16 cases—see S1 Text) there were more p-values in the upper than the lower bin for 7 of 12 p-curves (Table 3). This bias was significant in one dataset (Fig. 4), which was also the one with the largest sample size. However, the evidence for p-hacking disappeared when we excluded misreported p-values from our analyses (Table 3). One could argue that including misreported p-values in the upper bin of our binomial test biases our results toward detecting p-hacking, but reporting nonsignificant results as “p<0.05” is a component of p-hacking that should not be ignored. Indeed, Leggett et al. [45] also found considerable misreporting of p-values around the 0.05 threshold. They noted that p-values were more likely to be misreported as significant when they were not, rather than the reverse, and that this “error” has become more common in recent years.",
+      "sha256": "1d254b5cd2ca31a7aef1a53adc153532a556821f22876d69766c6ff4586cec41"
+    },
+    {
+      "id": "orig-pmc4359000-head-2015-p32",
+      "sourceId": "orig-pmc4359000-head-2015",
+      "paragraph": 32,
+      "roles": [
+        "statistics",
+        "methods"
+      ],
+      "text": "The p-curve shows evidence for evidential value (strong right skew) and p-hacking (rise in p-values just below 0.05).",
+      "sha256": "f671243ce6d77243421615013d4a306c092e0e7c5603842cfd773c69b93aa7ef"
+    },
+    {
+      "id": "orig-pmc4359000-head-2015-p33",
+      "sourceId": "orig-pmc4359000-head-2015",
+      "paragraph": 33,
+      "roles": [
+        "statistics",
+        "methods"
+      ],
+      "text": "More importantly, when misreported p-values were included in our analysis we found significant p-hacking from a meta-analysis of the p-curves of the 12 meta-analyses (binomial glm: estimated proportion of p-values in the upper bin (0.045 < p < 0.05) (lower CI) = 0.615 (0.513), p = 0.033; excluding misreported p-values: 0.489 (0.375), p = 0.443). Although questions subjected to meta-analysis might not be a representative sample of all research questions asked by scientists, our results indicate that studies on questions identified by researchers as important enough to warrant a meta-analysis tend to be p-hacked. Whether this influences the general conclusions of a meta-analysis depends on both the extent of p-hacking and the strength of the true effect. For instance, we found a statistically significant indication of p-hacking in only one of the 12 questions examined in published meta-analyses (Fig. 4). However, this study [56] also showed strong evidential value and p-values in the 0.045–0.05 bin were only a small proportion of published significant p-values. It is therefore unlikely that p-hacking would change the qualitative conclusions made in this meta-analysis, although p-hacking might have inflated the estimated mean effect size. In general, meta-analyses might be robust to inflated effects sizes that results from p-hacking, because: 1) all else being equal, studies that are most susceptible to p-hacking are those with small sample sizes (i.e., because low statistical power means less chance of a significant result), and these are given less weighting in a meta-analysis, 2) at least in some fields (e.g., ecology and evolution), meta-analyses often use data that is not directly related to the primary focus of the original paper. The p-values associated with secondary questions are less likely to be p-hacked. One way to check how sensitive estimates of effects sizes are to p-hacking would be to randomly remove the appropriate number of studies that contribute to a hump in the p-curve just below 0.05. Alternatively, meta-analysts could estimate effect sizes using p-curves (i.e., using only the significant p-values they find), a method which has been proposed to account for publication biases and to offer a conservative estimate of the true effect when there is p-hacking [62,63]. Development of p-curve methods is ongoing and we look forward to further tests of their ability to correct for the file-drawer effect, p-hacking, and other forms of publication bias given that real world data are likely to violate some of the assumptions in the available simulations of their effectiveness.",
+      "sha256": "1559052147c1f20d459ee34b50412e19bc91d24e0805930c68a3342aaefa84fb"
+    },
+    {
+      "id": "orig-pmc4359000-head-2015-p34",
+      "sourceId": "orig-pmc4359000-head-2015",
+      "paragraph": 34,
+      "roles": [
+        "statistics",
+        "methods"
+      ],
+      "text": "Our study provides two lines of empirical evidence that p-hacking is widespread in the scientific literature. Our text-mining approach is based on a very large dataset that consists of p-values from different disciplines and questions, while our meta-analysis approach consists of p-values concerning a few specific hypotheses. Both approaches yielded similar results: evidential value for claims that the mean effect sizes for key study questions are nonzero—the conclusions researchers are making based on significant study findings—but that estimated mean effect size has probably been inflated by p-hacking.",
+      "sha256": "cb690986c2faea70ac98ccb10b8a0e856368767d144ef111f4a4e18d5d13983f"
+    },
+    {
+      "id": "orig-pmc4359000-head-2015-p35",
+      "sourceId": "orig-pmc4359000-head-2015",
+      "paragraph": 35,
+      "roles": [
+        "statistics",
+        "methods"
+      ],
+      "text": "Eliminating p-hacking entirely is unlikely when career advancement is assessed by publication output, and publication decisions are affected by the p-value or other measures of statistical support for relationships. Even so, there are a number of steps that the research community and scientific publishers can take to decrease the occurrence of p-hacking (see Box 3).",
+      "sha256": "d868c1712094f4d0f6f5371dcbeded8fe80273963fc3a88bec3df3cb8acb1e91"
+    },
+    {
+      "id": "orig-pmc4359000-head-2015-p36",
+      "sourceId": "orig-pmc4359000-head-2015",
+      "paragraph": 36,
+      "roles": [
+        "statistics",
+        "methods"
+      ],
+      "text": "The key to decreasing p-hacking is better education of researchers. Many practices that lead to p-hacking are still deemed acceptable. John et al. [16] measured the prevalence of questionable research practices in psychology. They asked survey participants if they had ever engaged in a set of questionable research practices and, if so, whether they thought their actions were defensible on a scale of 0–2 (0 = no, 1 = possibly, 2 = yes). Over 50% of participants admitted to “failing to report all of a study’s dependent measures” and “deciding whether to collect more data after looking to see whether the results were significant,” and these practices received a mean defensibility rating greater than 1.5. This indicates that many researchers p-hack but do not appreciate the extent to which this is a form of scientific misconduct. Amazingly, some animal ethics boards even encourage or mandate the termination of research if a significant result is obtained during the study, which is a particularly egregious form of p-hacking (Anonymous reviewer, personal communication).",
+      "sha256": "b0523b3b35ec3af82be2e63262b18e1e7e93dd9bbe713552fe4f30cae92474fc"
+    },
+    {
+      "id": "orig-pmc4359000-head-2015-p37",
+      "sourceId": "orig-pmc4359000-head-2015",
+      "paragraph": 37,
+      "roles": [
+        "statistics",
+        "methods"
+      ],
+      "text": "Clearly label research as prespecified (i.e., designed to answer a specific question, where detail of methods and analyses can be fully reported prior to data collection) or exploratory (i.e., involves exploration of data that looks intriguing, where methods and analyses used are often post hoc [13]), so that readers can treat results with appropriate caution. Results from prespecified studies offer far more convincing evidence than those from exploratory research [2].",
+      "sha256": "b7db066ea8f52faa3eee48c9a8700ab4f7c3a7df8bab7e914fea3a00222ae6e8"
+    },
+    {
+      "id": "orig-pmc4359000-head-2015-p38",
+      "sourceId": "orig-pmc4359000-head-2015",
+      "paragraph": 38,
+      "roles": [
+        "statistics",
+        "methods"
+      ],
+      "text": "Adhere to common analysis standards [2]; measuring only response variables that are known (or predicted) to be important; and using sufficient sample sizes.",
+      "sha256": "d0dad1a0d45161aaff6d2f639f294ddf1efff6b98c04822c83183267e891e8e1"
+    },
+    {
+      "id": "orig-pmc4359000-head-2015-p39",
+      "sourceId": "orig-pmc4359000-head-2015",
+      "paragraph": 39,
+      "roles": [
+        "statistics",
+        "methods"
+      ],
+      "text": "Perform data analysis blind wherever possible. This approach makes it difficult to p-hack for specific results.",
+      "sha256": "b33528f91845783e50af466511b06df09d933d09834118ba12c85c8a5f03a7ad"
+    },
+    {
+      "id": "orig-pmc4359000-head-2015-p40",
+      "sourceId": "orig-pmc4359000-head-2015",
+      "paragraph": 40,
+      "roles": [
+        "statistics",
+        "methods"
+      ],
+      "text": "Place greater emphasis on the quality of research methods and data collection rather than the significance or novelty of the subsequent findings when reviewing or assessing research. Ideally, methods should be assessed independently of results [13,44].",
+      "sha256": "4d1b55fff97e2241b79cdd3e0a8b7f5760091ee9f487ea5b02b67d8a5b66d25f"
+    },
+    {
+      "id": "orig-pmc4359000-head-2015-p41",
+      "sourceId": "orig-pmc4359000-head-2015",
+      "paragraph": 41,
+      "roles": [
+        "statistics",
+        "methods"
+      ],
+      "text": "Provide clear and detailed guidelines for the full reporting of data analyses and results. For instance, stating that it is necessary to report effect sizes whether small or large, to report all p-values to three decimal places [27,64], to report samples sizes, and, most importantly, to be explicit about the entire analysis process (not just the final tests used to generate reported p-values). This will reduce p-hacking and aid the collection of data for meta-analyses and text-mining studies.",
+      "sha256": "ed58bb719e9ef006e848afb8018cd7ddd8c9a1fc68fdf741ad632e1d13fa738d"
+    },
+    {
+      "id": "orig-pmc4359000-head-2015-p42",
+      "sourceId": "orig-pmc4359000-head-2015",
+      "paragraph": 42,
+      "roles": [
+        "statistics",
+        "methods"
+      ],
+      "text": "Encourage and/or provide platforms for method prespecification [13,65]. Although methods and results in publications do not always match their prespecified protocols [5,66], prespecification allows readers to assess the risk of p-hacking and adjust their confidence in the reported outcomes accordingly.",
+      "sha256": "7861ba0dfcd06795d5cb8cf388b5c9a1e699fc62596fc8b757520bf12e93c412"
+    },
+    {
+      "id": "orig-pmc4359000-head-2015-p43",
+      "sourceId": "orig-pmc4359000-head-2015",
+      "paragraph": 43,
+      "roles": [
+        "statistics",
+        "methods"
+      ],
+      "text": "Encourage and/or provide platforms for open access to raw data. While access to raw data does not prevent p-hacking, it does make researchers more accountable for marginal results and allows readers to reanalyze data to check the robustness of results.",
+      "sha256": "3fafca43142730c67649caa22fcc4a95b254f42d2cfda38ecc90979bc9b5865e"
+    },
+    {
+      "id": "orig-pmc4359000-head-2015-p44",
+      "sourceId": "orig-pmc4359000-head-2015",
+      "paragraph": 44,
+      "roles": [
+        "statistics",
+        "methods"
+      ],
+      "text": "(DOCX)",
+      "sha256": "344bbb1ea889b2323f7442b4c14fa618380c984d636a3d663269db6f5c9b5c38"
+    },
+    {
+      "id": "orig-pmc4359000-head-2015-p45",
+      "sourceId": "orig-pmc4359000-head-2015",
+      "paragraph": 45,
+      "roles": [
+        "statistics",
+        "methods"
+      ],
+      "text": "Click here for additional data file.",
+      "sha256": "5cd4a43ee259815e44b18b247874258350fef6b058c542e48b7dac730a44eee0"
+    },
+    {
+      "id": "orig-pmc4359000-head-2015-p46",
+      "sourceId": "orig-pmc4359000-head-2015",
+      "paragraph": 46,
+      "roles": [
+        "statistics",
+        "methods"
+      ],
+      "text": "We are grateful to members of the Jennions lab for comments and discussion on various versions of the manuscript.",
+      "sha256": "52c25e7eecb724558d0ac6b3d7a45e9d5c633d03fa461cce1eddb7e5685cd9b2"
+    },
+    {
+      "id": "orig-pmc4359000-head-2015-p47",
+      "sourceId": "orig-pmc4359000-head-2015",
+      "paragraph": 47,
+      "roles": [
+        "statistics",
+        "methods"
+      ],
+      "text": "Null hypothesis significance testing",
+      "sha256": "16166d2c08675ab42ad52485e5fb0fe65bda0716d00e6b62b69c92df452ccc25"
+    },
+    {
+      "id": "orig-pmc4359000-head-2015-p48",
+      "sourceId": "orig-pmc4359000-head-2015",
+      "paragraph": 48,
+      "roles": [
+        "statistics",
+        "methods"
+      ],
+      "text": "Funding for this research was provided by Australian Research Council Grants awarded to MDJ, RL and LH. The funders had no role in study design, data collection and analysis, decision to publish, or preparation of the manuscript.",
+      "sha256": "89500b079b2224bfb89e8f3998dd5a51b232b30ef3ec7f285b455eac4432d676"
+    },
+    {
+      "id": "orig-pmc4359000-head-2015-p49",
+      "sourceId": "orig-pmc4359000-head-2015",
+      "paragraph": 49,
+      "roles": [
+        "statistics",
+        "methods"
+      ],
+      "text": "(DOCX)",
+      "sha256": "344bbb1ea889b2323f7442b4c14fa618380c984d636a3d663269db6f5c9b5c38"
+    },
+    {
+      "id": "orig-pmc4359000-head-2015-p50",
+      "sourceId": "orig-pmc4359000-head-2015",
+      "paragraph": 50,
+      "roles": [
+        "statistics",
+        "methods"
+      ],
+      "text": "Click here for additional data file.",
+      "sha256": "5cd4a43ee259815e44b18b247874258350fef6b058c542e48b7dac730a44eee0"
+    },
+    {
+      "id": "orig-pmc3812051-sandve-2013-p1",
+      "sourceId": "orig-pmc3812051-sandve-2013",
+      "paragraph": 1,
+      "roles": [
+        "methods"
+      ],
+      "text": "Replication is the cornerstone of a cumulative science [1]. However, new tools and technologies, massive amounts of data, interdisciplinary approaches, and the complexity of the questions being asked are complicating replication efforts, as are increased pressures on scientists to advance their research [2]. As full replication of studies on independently collected data is often not feasible, there has recently been a call for reproducible research as an attainable minimum standard for assessing the value of scientific claims [3]. This requires that papers in experimental science describe the results and provide a sufficiently clear protocol to allow successful repetition and extension of analyses based on original data [4].",
+      "sha256": "158bdd1ef98f20fcdc0b266c4718d53d6b448b0b022f1216453d79528159ad3f"
+    },
+    {
+      "id": "orig-pmc3812051-sandve-2013-p2",
+      "sourceId": "orig-pmc3812051-sandve-2013",
+      "paragraph": 2,
+      "roles": [
+        "methods"
+      ],
+      "text": "The importance of replication and reproducibility has recently been exemplified through studies showing that scientific papers commonly leave out experimental details essential for reproduction [5], studies showing difficulties with replicating published experimental results [6], an increase in retracted papers [7], and through a high number of failing clinical trials [8], [9]. This has led to discussions on how individual researchers, institutions, funding bodies, and journals can establish routines that increase transparency and reproducibility. In order to foster such aspects, it has been suggested that the scientific community needs to develop a “culture of reproducibility” for computational science, and to require it for published claims [3].",
+      "sha256": "967bac18a0d6fed8d4cefb9858204b0b9152646f2f41ebcf09d4a2ee8a1ca739"
+    },
+    {
+      "id": "orig-pmc3812051-sandve-2013-p3",
+      "sourceId": "orig-pmc3812051-sandve-2013",
+      "paragraph": 3,
+      "roles": [
+        "methods"
+      ],
+      "text": "We want to emphasize that reproducibility is not only a moral responsibility with respect to the scientific field, but that a lack of reproducibility can also be a burden for you as an individual researcher. As an example, a good practice of reproducibility is necessary in order to allow previously developed methodology to be effectively applied on new data, or to allow reuse of code and results for new projects. In other words, good habits of reproducibility may actually turn out to be a time-saver in the longer run.",
+      "sha256": "21694269b83dce93e276aa1d5079331c3f3069e687fde073cea0f60f71897619"
+    },
+    {
+      "id": "orig-pmc3812051-sandve-2013-p4",
+      "sourceId": "orig-pmc3812051-sandve-2013",
+      "paragraph": 4,
+      "roles": [
+        "methods"
+      ],
+      "text": "We further note that reproducibility is just as much about the habits that ensure reproducible research as the technologies that can make these processes efficient and realistic. Each of the following ten rules captures a specific aspect of reproducibility, and discusses what is needed in terms of information handling and tracking of procedures. If you are taking a bare-bones approach to bioinformatics analysis, i.e., running various custom scripts from the command line, you will probably need to handle each rule explicitly. If you are instead performing your analyses through an integrated framework (such as GenePattern [10], Galaxy [11], LONI pipeline [12], or Taverna [13]), the system may already provide full or partial support for most of the rules. What is needed on your part is then merely the knowledge of how to exploit these existing possibilities.",
+      "sha256": "7836aac1b9616f9a19a56ed72228916922430b4efd7a30486646a6ab3284afc7"
+    },
+    {
+      "id": "orig-pmc3812051-sandve-2013-p5",
+      "sourceId": "orig-pmc3812051-sandve-2013",
+      "paragraph": 5,
+      "roles": [
+        "methods"
+      ],
+      "text": "In a pragmatic setting, with publication pressure and deadlines, one may face the need to make a trade-off between the ideals of reproducibility and the need to get the research out while it is still relevant. This trade-off becomes more important when considering that a large part of the analyses being tried out never end up yielding any results. However, frequently one will, with the wisdom of hindsight, contemplate the missed opportunity to ensure reproducibility, as it may already be too late to take the necessary notes from memory (or at least much more difficult than to do it while underway). We believe that the rewards of reproducibility will compensate for the risk of having spent valuable time developing an annotated catalog of analyses that turned out as blind alleys.",
+      "sha256": "5971e94be2b5a0b20d1e1b34235658d95b28d1d64e400a01011e6bdc4c62cfa5"
+    },
+    {
+      "id": "orig-pmc3812051-sandve-2013-p6",
+      "sourceId": "orig-pmc3812051-sandve-2013",
+      "paragraph": 6,
+      "roles": [
+        "methods"
+      ],
+      "text": "As a minimal requirement, you should at least be able to reproduce the results yourself. This would satisfy the most basic requirements of sound research, allowing any substantial future questioning of the research to be met with a precise explanation. Although it may sound like a very weak requirement, even this level of reproducibility will often require a certain level of care in order to be met. There will for a given analysis be an exponential number of possible combinations of software versions, parameter values, pre-processing steps, and so on, meaning that a failure to take notes may make exact reproduction essentially impossible.",
+      "sha256": "181b7d2d9729cef34f10684982beb28d5fddfe6e4429f076fcad53f44d8b8894"
+    },
+    {
+      "id": "orig-pmc3812051-sandve-2013-p7",
+      "sourceId": "orig-pmc3812051-sandve-2013",
+      "paragraph": 7,
+      "roles": [
+        "methods"
+      ],
+      "text": "With this basic level of reproducibility in place, there is much more that can be wished for. An obvious extension is to go from a level where you can reproduce results in case of a critical situation to a level where you can practically and routinely reuse your previous work and increase your productivity. A second extension is to ensure that peers have a practical possibility of reproducing your results, which can lead to increased trust in, interest for, and citations of your work [6], [14].",
+      "sha256": "245a2cc6bd3af2e2c407bdc9125bc99c3a0c5323daf9ec0d09f8a125d88a03d0"
+    },
+    {
+      "id": "orig-pmc3812051-sandve-2013-p8",
+      "sourceId": "orig-pmc3812051-sandve-2013",
+      "paragraph": 8,
+      "roles": [
+        "methods"
+      ],
+      "text": "We here present ten simple rules for reproducibility of computational research. These rules can be at your disposal for whenever you want to make your research more accessible—be it for peers or for your future self.",
+      "sha256": "ab57a2cc81b0199734258824d9997fa853a604202eb4eea6dd8b000afb323248"
+    },
+    {
+      "id": "orig-pmc3812051-sandve-2013-p9",
+      "sourceId": "orig-pmc3812051-sandve-2013",
+      "paragraph": 9,
+      "roles": [
+        "methods"
+      ],
+      "text": "Whenever a result may be of potential interest, keep track of how it was produced. When doing this, one will frequently find that getting from raw data to the final result involves many interrelated steps (single commands, scripts, programs). We refer to such a sequence of steps, whether it is automated or performed manually, as an analysis workflow. While the essential part of an analysis is often represented by only one of the steps, the full sequence of pre- and post-processing steps are often critical in order to reach the achieved result. For every involved step, you should ensure that every detail that may influence the execution of the step is recorded. If the step is performed by a computer program, the critical details include the name and version of the program, as well as the exact parameters and inputs that were used.",
+      "sha256": "87cc6f87a4884b0120e5f25abed37b1a6d369df8777f9ab717dbe172e8a654e0"
+    },
+    {
+      "id": "orig-pmc3812051-sandve-2013-p10",
+      "sourceId": "orig-pmc3812051-sandve-2013",
+      "paragraph": 10,
+      "roles": [
+        "methods"
+      ],
+      "text": "Although manually noting the precise sequence of steps taken allows for an analysis to be reproduced, the documentation can easily get out of sync with how the analysis was really performed in its final version. By instead specifying the full analysis workflow in a form that allows for direct execution, one can ensure that the specification matches the analysis that was (subsequently) performed, and that the analysis can be reproduced by yourself or others in an automated way. Such executable descriptions [10] might come in the form of simple shell scripts or makefiles [15], [16] at the command line, or in the form of stored workflows in a workflow management system [10], [11], [13], [17], [18].",
+      "sha256": "d8e4ac8b726412fbf622f72a49e3a76a3162237d51097351a6d1f69cb400fa06"
+    },
+    {
+      "id": "orig-pmc3812051-sandve-2013-p11",
+      "sourceId": "orig-pmc3812051-sandve-2013",
+      "paragraph": 11,
+      "roles": [
+        "methods"
+      ],
+      "text": "As a minimum, you should at least record sufficient details on programs, parameters, and manual procedures to allow yourself, in a year or so, to approximately reproduce the results.",
+      "sha256": "b916c640b436778178bfc84acdf2015437fb69e1d6aa9675c874f56d1a86fec2"
+    },
+    {
+      "id": "orig-pmc3812051-sandve-2013-p12",
+      "sourceId": "orig-pmc3812051-sandve-2013",
+      "paragraph": 12,
+      "roles": [
+        "methods"
+      ],
+      "text": "Whenever possible, rely on the execution of programs instead of manual procedures to modify data. Such manual procedures are not only inefficient and error-prone, they are also difficult to reproduce. If working at the UNIX command line, manual modification of files can usually be replaced by the use of standard UNIX commands or small custom scripts. If working with integrated frameworks, there will typically be a quite rich collection of components for data manipulation. As an example, manual tweaking of data files to attain format compatibility should be replaced by format converters that can be reenacted and included into executable workflows. Other manual operations like the use of copy and paste between documents should also be avoided. If manual operations cannot be avoided, you should as a minimum note down which data files were modified or moved, and for what purpose.",
+      "sha256": "216e4e8a2fe72f29af0a8ee0f89680608aa5d684f38f7bfcceada1094addb406"
+    },
+    {
+      "id": "orig-pmc3812051-sandve-2013-p13",
+      "sourceId": "orig-pmc3812051-sandve-2013",
+      "paragraph": 13,
+      "roles": [
+        "methods"
+      ],
+      "text": "In order to exactly reproduce a given result, it may be necessary to use programs in the exact versions used originally. Also, as both input and output formats may change between versions, a newer version of a program may not even run without modifying its inputs. Even having noted which version was used of a given program, it is not always trivial to get hold of a program in anything but the current version. Archiving the exact versions of programs actually used may thus save a lot of hassle at later stages. In some cases, all that is needed is to store a single executable or source code file. In other cases, a given program may again have specific requirements to other installed programs/packages, or dependencies to specific operating system components. To ensure future availability, the only viable solution may then be to store a full virtual machine image of the operating system and program. As a minimum, you should note the exact names and versions of the main programs you use.",
+      "sha256": "b8aabcc6aacb9dc2010d6822a07e68505e99a3fab688c597a6390bced1a3a71a"
+    },
+    {
+      "id": "orig-pmc3812051-sandve-2013-p14",
+      "sourceId": "orig-pmc3812051-sandve-2013",
+      "paragraph": 14,
+      "roles": [
+        "methods"
+      ],
+      "text": "Even the slightest change to a computer program can have large intended or unintended consequences. When a continually developed piece of code (typically a small script) has been used to generate a certain result, only that exact state of the script may be able to produce that exact output, even given the same input data and parameters. As also discussed for rules 3 and 6, exact reproduction of results may in certain situations be essential. If computer code is not systematically archived along its evolution, backtracking to a code state that gave a certain result may be a hopeless task. This can cast doubt on previous results, as it may be impossible to know if they were partly the result of a bug or otherwise unfortunate behavior.",
+      "sha256": "4edd763d670a6c64f0764e4b9b87c26b4dc6f4c3bbbd752d38a60535f5a2fb6d"
+    },
+    {
+      "id": "orig-pmc3812051-sandve-2013-p15",
+      "sourceId": "orig-pmc3812051-sandve-2013",
+      "paragraph": 15,
+      "roles": [
+        "methods"
+      ],
+      "text": "The standard solution to track evolution of code is to use a version control system [15], such as Subversion, Git, or Mercurial. These systems are relatively easy to set up and use, and may be used to systematically store the state of the code throughout development at any desired time granularity.",
+      "sha256": "45e4c34ca5a2437bbaa0b741caa876ed2042b2a94536b0ad1cd090af58197056"
+    },
+    {
+      "id": "orig-pmc3812051-sandve-2013-p16",
+      "sourceId": "orig-pmc3812051-sandve-2013",
+      "paragraph": 16,
+      "roles": [
+        "methods"
+      ],
+      "text": "As a minimum, you should archive copies of your scripts from time to time, so that you keep a rough record of the various states the code has taken during development.",
+      "sha256": "e33814c70c5a7725a6c1f6550abef6066b79a8dbb8bfcd0115648575a51b7286"
+    },
+    {
+      "id": "orig-pmc3812051-sandve-2013-p17",
+      "sourceId": "orig-pmc3812051-sandve-2013",
+      "paragraph": 17,
+      "roles": [
+        "methods"
+      ],
+      "text": "In principle, as long as the full process used to produce a given result is tracked, all intermediate data can also be regenerated. In practice, having easily accessible intermediate results may be of great value. Quickly browsing through intermediate results can reveal discrepancies toward what is assumed, and can in this way uncover bugs or faulty interpretations that are not apparent in the final results. Secondly, it more directly reveals consequences of alternative programs and parameter choices at individual steps. Thirdly, when the full process is not readily executable, it allows parts of the process to be rerun. Fourthly, when reproducing results, it allows any experienced inconsistencies to be tracked to the steps where the problems arise. Fifth, it allows critical examination of the full process behind a result, without the need to have all executables operational. When possible, store such intermediate results in standardized formats. As a minimum, archive any intermediate result files that are produced when running an analysis (as long as the required storage space is not prohibitive).",
+      "sha256": "612293392dc989c19b30015e2d0b820ac63436e6bb472f30ecc157d8fd5f7a22"
+    },
+    {
+      "id": "orig-pmc3812051-sandve-2013-p18",
+      "sourceId": "orig-pmc3812051-sandve-2013",
+      "paragraph": 18,
+      "roles": [
+        "methods"
+      ],
+      "text": "Many analyses and predictions include some element of randomness, meaning the same program will typically give slightly different results every time it is executed (even when receiving identical inputs and parameters). However, given the same initial seed, all random numbers used in an analysis will be equal, thus giving identical results every time it is run. There is a large difference between observing that a result has been reproduced exactly or only approximately. While achieving equal results is a strong indication that a procedure has been reproduced exactly, it is often hard to conclude anything when achieving only approximately equal results. For analyses that involve random numbers, this means that the random seed should be recorded. This allows results to be reproduced exactly by providing the same seed to the random number generator in future runs. As a minimum, you should note which analysis steps involve randomness, so that a certain level of discrepancy can be anticipated when reproducing the results.",
+      "sha256": "3e2d50a43ae55aa7e197fadadd092f3834b69cbf787bccd21c50c04e75fe2a06"
+    },
+    {
+      "id": "orig-pmc3812051-sandve-2013-p19",
+      "sourceId": "orig-pmc3812051-sandve-2013",
+      "paragraph": 19,
+      "roles": [
+        "methods"
+      ],
+      "text": "From the time a figure is first generated to it being part of a published article, it is often modified several times. In some cases, such modifications are merely visual adjustments to improve readability, or to ensure visual consistency between figures. If raw data behind figures are stored in a systematic manner, so as to allow raw data for a given figure to be easily retrieved, one can simply modify the plotting procedure, instead of having to redo the whole analysis. An additional advantage of this is that if one really wants to read fine values in a figure, one can consult the raw numbers. In cases where plotting involves more than a direct visualization of underlying numbers, it can be useful to store both the underlying data and the processed values that are directly visualized. An example of this is the plotting of histograms, where both the values before binning (original data) and the counts per bin (heights of visualized bars) could be stored. When plotting is performed using a command-based system like R, it is convenient to also store the code used to make the plot. One can then apply slight modifications to these commands, instead of having to specify the plot from scratch. As a minimum, one should note which data formed the basis of a given plot and how this data could be reconstructed.",
+      "sha256": "21ab89364c6d35b87ffc28d3dd16f63feb500dca9e9ccedf14ee221250c0015c"
+    },
+    {
+      "id": "orig-pmc3812051-sandve-2013-p20",
+      "sourceId": "orig-pmc3812051-sandve-2013",
+      "paragraph": 20,
+      "roles": [
+        "methods"
+      ],
+      "text": "The final results that make it to an article, be it plots or tables, often represent highly summarized data. For instance, each value along a curve may in turn represent averages from an underlying distribution. In order to validate and fully understand the main result, it is often useful to inspect the detailed values underlying the summaries. A common but impractical way of doing this is to incorporate various debug outputs in the source code of scripts and programs. When the storage context allows, it is better to simply incorporate permanent output of all underlying data when a main result is generated, using a systematic naming convention to allow the full data underlying a given summarized value to be easily found. We find hypertext (i.e., html file output) to be particularly useful for this purpose. This allows summarized results to be generated along with links that can be very conveniently followed (by simply clicking) to the full data underlying each summarized value. When working with summarized results, you should as a minimum at least once generate, inspect, and validate the detailed values underlying the summaries.",
+      "sha256": "093c78844966c20ed8334612418b359b678bc822ca94d38c2d0dab3a1518336c"
+    },
+    {
+      "id": "orig-pmc3812051-sandve-2013-p21",
+      "sourceId": "orig-pmc3812051-sandve-2013",
+      "paragraph": 21,
+      "roles": [
+        "methods"
+      ],
+      "text": "Throughout a typical research project, a range of different analyses are tried and interpretation of the results made. Although the results of analyses and their corresponding textual interpretations are clearly interconnected at the conceptual level, they tend to live quite separate lives in their representations: results usually live on a data area on a server or personal computer, while interpretations live in text documents in the form of personal notes or emails to collaborators. Such textual interpretations are not generally mere shadows of the results—they often involve viewing the results in light of other theories and results. As such, they carry extra information, while at the same time having their necessary support in a given result.",
+      "sha256": "fe39fed452ad7fb841f6828f6bdd0af26d7d0f408acd2e959487bf7c248b1560"
+    },
+    {
+      "id": "orig-pmc3812051-sandve-2013-p22",
+      "sourceId": "orig-pmc3812051-sandve-2013",
+      "paragraph": 22,
+      "roles": [
+        "methods"
+      ],
+      "text": "If you want to reevaluate your previous interpretations, or allow peers to make their own assessment of claims you make in a scientific paper, you will have to connect a given textual statement (interpretation, claim, conclusion) to the precise results underlying the statement. Making this connection when it is needed may be difficult and error-prone, as it may be hard to locate the exact result underlying and supporting the statement from a large pool of different analyses with various versions.",
+      "sha256": "c5c4e213f47644a20f8d4dc8506739e72807b40b72d0e2f6f681cf1ec064473f"
+    },
+    {
+      "id": "orig-pmc3812051-sandve-2013-p23",
+      "sourceId": "orig-pmc3812051-sandve-2013",
+      "paragraph": 23,
+      "roles": [
+        "methods"
+      ],
+      "text": "To allow efficient retrieval of details behind textual statements, we suggest that statements are connected to underlying results already from the time the statements are initially formulated (for instance in notes or emails). Such a connection can for instance be a simple file path to detailed results, or the ID of a result in an analysis framework, included within the text itself. For an even tighter integration, there are tools available to help integrate reproducible analyses directly into textual documents, such as Sweave [19], the GenePattern Word add-in [4], and Galaxy Pages [20]. These solutions can also subsequently be used in connection with publications, as discussed in the next rule.",
+      "sha256": "ffdb13892d856badec6cbd96570c79616981c7d7c377e672d0c6cfd823a026d6"
+    },
+    {
+      "id": "orig-pmc3812051-sandve-2013-p24",
+      "sourceId": "orig-pmc3812051-sandve-2013",
+      "paragraph": 24,
+      "roles": [
+        "methods"
+      ],
+      "text": "As a minimum, you should provide enough details along with your textual interpretations so as to allow the exact underlying results, or at least some related results, to be tracked down in the future.",
+      "sha256": "8ee1840a0db237cdc9d7e888f08a21c35a8647932e5257275f935568645253d5"
+    },
+    {
+      "id": "orig-pmc3812051-sandve-2013-p25",
+      "sourceId": "orig-pmc3812051-sandve-2013",
+      "paragraph": 25,
+      "roles": [
+        "methods"
+      ],
+      "text": "Last, but not least, all input data, scripts, versions, parameters, and intermediate results should be made publicly and easily accessible. Various solutions have now become available to make data sharing more convenient, standardized, and accessible in particular domains, such as for gene expression data [21]–[23]. Most journals allow articles to be supplemented with online material, and some journals have initiated further efforts for making data and code more integrated with publications [3], [24]. As a minimum, you should submit the main data and source code as supplementary material, and be prepared to respond to any requests for further data or methodology details by peers.",
+      "sha256": "2bd86487df14a03bc2e10baec7b94753b8b6cd30089f4ebd418b315d650b531d"
+    },
+    {
+      "id": "orig-pmc3812051-sandve-2013-p26",
+      "sourceId": "orig-pmc3812051-sandve-2013",
+      "paragraph": 26,
+      "roles": [
+        "methods"
+      ],
+      "text": "Making reproducibility of your work by peers a realistic possibility sends a strong signal of quality, trustworthiness, and transparency. This could increase the quality and speed of the reviewing process on your work, the chances of your work getting published, and the chances of your work being taken further and cited by other researchers after publication [25].",
+      "sha256": "22c69d64822c9b5492ec84ede6196b1c5fa1167406c3e8119c2f51f9e396d256"
+    }
+  ],
+  "limitations": "Two methodology papers; not domain ground truth. Paragraphs over 6000 chars and non-body/table/image content are not retrieved."
+}
