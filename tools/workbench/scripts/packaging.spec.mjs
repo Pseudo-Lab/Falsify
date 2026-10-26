@@ -7,7 +7,8 @@ import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import {
-  MUPDF_WASM, MUPDF_WASM_SHA256, PDFJS_WASM, assertShippableSource, unexpectedReleasePaths, verifyVendoredMupdfWasm,
+  MUPDF_WASM, MUPDF_WASM_SHA256, PDFJS_WASM, PARAGRAPH_WASM, PARAGRAPH_WASM_SHA256,
+  assertShippableSource, unexpectedReleasePaths, verifyVendoredMupdfWasm, verifyParagraphRuntime,
 } from './package-release.mjs';
 import { assertChromeLoaderExecuted, CHROME_TEST } from './assert-browser-pdf-executed.mjs';
 
@@ -76,6 +77,15 @@ test('a mismatched manifest, digest, or NOTICE is not allowlisted', () => {
     writeFileSync(join(vendor, 'NOTICE.md'), '# MuPDF.js 1.28.1\nno license name\n');
     assert.throws(() => verifyVendoredMupdfWasm(dir), /NOTICE\.md/);
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('only both exact paragraph runtime files with matching notices are shippable', () => {
+  const result = verifyParagraphRuntime(root);
+  assert.equal(result.wasmSha256, PARAGRAPH_WASM_SHA256);
+  assert.equal(result.sourceBuildVerified, false);
+  assertShippableSource([...PARAGRAPH_WASM], root);
+  assert.throws(() => assertShippableSource([PARAGRAPH_WASM[0]], root), /both source and shipped/);
+  assert.throws(() => assertShippableSource([...PARAGRAPH_WASM, 'app/dist/paragraph-vendor/unknown.wasm'], root), /Unexpected private\/binary/);
 });
 
 test('this tree is shippable with the tracked MuPDF wasm and without other binaries', () => {

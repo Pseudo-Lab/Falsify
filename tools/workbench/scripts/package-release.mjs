@@ -1,4 +1,5 @@
-// Source-only release artifacts from an exact clean committed tree. Never packages local research/runtime/config.
+// Source releases from an exact clean committed tree. Only named, hash-pinned
+// browser runtimes ship; private research, generated profiles and config do not.
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFileSync, mkdirSync, writeFileSync } from 'node:fs';
@@ -20,12 +21,41 @@ export const MUPDF_VERSION = '1.28.1';
 export const MUPDF_LICENSE = 'AGPL-3.0-or-later';
 export const MUPDF_WASM_SHA256 = '5a30ef7b027f541ea8fc54e7c73f16414b0b59940741a12efe5e55f1fd0a99d7';
 export const MUPDF_WASM_BYTES = 10409826;
+export const PARAGRAPH_WASM = Object.freeze([
+  'app/src/paragraph-vendor/runtime/editcore.wasm',
+  'app/dist/paragraph-vendor/editcore.wasm',
+]);
+export const PARAGRAPH_WASM_SHA256 = '9b14b88937a9b21697565df94e82b28ac645547413606d4994d50d9200529c6e';
+export const PARAGRAPH_JS_SHA256 = '6e6989a9994715951720e05355111aca7eab898e92b519ebea160167875bb3eb';
+export const PARAGRAPH_WASM_BYTES = 7338382;
 
 const forbidden = /(?:^|\/)(?:\.venv|\.local|node_modules|\.pdf-editor\.local\.json|\.runtime[^/]*|output|tmp)(?:\/|$)|^experiments\/|\.(?:pdf|docx|wav|mp3|wasm)$/i;
 const pdfjsWasm = new Set(PDFJS_WASM);
 
 export function unexpectedReleasePaths(tracked) {
-  return tracked.filter(p => forbidden.test(p) && !pdfjsWasm.has(p) && p !== MUPDF_WASM && p !== 'experiments/selfplay_codex.py');
+  return tracked.filter(p => forbidden.test(p) && !pdfjsWasm.has(p) && p !== MUPDF_WASM && !PARAGRAPH_WASM.includes(p) && p !== 'experiments/selfplay_codex.py');
+}
+
+export function verifyParagraphRuntime(rootDir) {
+  for (const rel of PARAGRAPH_WASM) {
+    const directory = dirname(join(rootDir, rel));
+    const manifest = readJson(join(directory, 'candidate-manifest.json'));
+    if (manifest.schema !== 'falsify-editor-candidate-runtime/1'
+        || manifest.artifacts?.wasm?.sha256 !== PARAGRAPH_WASM_SHA256
+        || manifest.artifacts?.js?.sha256 !== PARAGRAPH_JS_SHA256) throw new Error('Paragraph runtime manifest is not the pinned candidate.');
+    for (const [name, expected] of [['editcore.wasm', PARAGRAPH_WASM_SHA256], ['editcore.js', PARAGRAPH_JS_SHA256]]) {
+      const bytes = readFileSync(join(directory, name));
+      if (createHash('sha256').update(bytes).digest('hex') !== expected
+          || name.endsWith('.wasm') && bytes.length !== PARAGRAPH_WASM_BYTES) throw new Error('Paragraph runtime bytes do not match pinned candidate: ' + name);
+    }
+  }
+  for (const rel of ['app/src/paragraph-vendor', 'app/dist/paragraph-vendor']) {
+    const notice = readFileSync(join(rootDir, rel, 'NOTICE.md'), 'utf8');
+    const license = readFileSync(join(rootDir, rel, 'LICENSE'), 'utf8');
+    if (!notice.includes('AGPL') || !notice.includes('candidate-manifest.json')
+        || !license.includes('AFFERO GENERAL PUBLIC LICENSE')) throw new Error('Paragraph runtime source and license notices are required.');
+  }
+  return {wasmSha256: PARAGRAPH_WASM_SHA256, jsSha256: PARAGRAPH_JS_SHA256, sourceBuildVerified: false};
 }
 
 function readJson(path) {
@@ -70,6 +100,10 @@ export function verifyVendoredMupdfWasm(rootDir) {
 export function assertShippableSource(tracked, rootDir) {
   const bad = unexpectedReleasePaths(tracked);
   if (bad.length) throw new Error(`Unexpected private/binary paths in source release: ${bad.join(', ')}`);
+  if (PARAGRAPH_WASM.some(p => tracked.includes(p))) {
+    if (!PARAGRAPH_WASM.every(p => tracked.includes(p))) throw new Error('Paragraph runtime requires both source and shipped WASM.');
+    verifyParagraphRuntime(rootDir);
+  }
   if (tracked.includes(MUPDF_WASM)) return verifyVendoredMupdfWasm(rootDir);
   return null;
 }
@@ -104,7 +138,9 @@ function main() {
   const sha256 = createHash('sha256').update(bytes).digest('hex');
   const receipt = { schema: 'falsify.source-release.v1', version, commit,
     repository: 'https://github.com/Shinick-Han/falsify-workbench', sourceOnly: true,
-    includesPrivatePapers: false, includesPatchedEditorWasm: false, archive: name, bytes: bytes.length, sha256 };
+    includesPrivatePapers: false, includesPatchedEditorWasm: tracked.includes(PARAGRAPH_WASM[1]),
+    ...(tracked.includes(PARAGRAPH_WASM[1]) ? {paragraphRuntime: verifyParagraphRuntime(root)} : {}),
+    archive: name, bytes: bytes.length, sha256 };
   writeFileSync(join(directory, 'release-manifest.json'), JSON.stringify(receipt, null, 2) + '\n');
   writeFileSync(join(directory, 'SHA256SUMS.txt'), `${sha256}  ${name}\n`);
   console.log(JSON.stringify(receipt));

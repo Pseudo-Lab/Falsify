@@ -1,0 +1,961 @@
+From 1dc4fc74902b4fd11976f634f9c0e382b299605d Mon Sep 17 00:00:00 2001
+From: Shinick-Han <jcpukpyi@gmail.com>
+Date: Tue, 27 Oct 2026 00:55:29 +0900
+Subject: [PATCH 1/3] Reflow source body around publisher edges and preserve
+ logical paragraph text
+
+---
+ docs/PAGINATION.md                  | 56 +++++++++++++++++++++++-
+ src/continuation-template.mjs       | 46 ++++++++++++++++++--
+ src/editor.mjs                      | 50 +++++++++++++++++----
+ src/pagination.mjs                  | 25 +++++++++--
+ src/quality.mjs                     | 67 ++++++++++++++++++++++++++---
+ test/body-flow-fixes.test.mjs       | 15 +++++++
+ test/continuation-template.test.mjs | 24 ++++++++++-
+ test/core.test.mjs                  | 33 +++++++++++++-
+ test/pagination.test.mjs            | 16 ++++++-
+ 9 files changed, 307 insertions(+), 25 deletions(-)
+
+diff --git a/docs/PAGINATION.md b/docs/PAGINATION.md
+index 9cca7e1..aff88f6 100644
+--- a/docs/PAGINATION.md
++++ b/docs/PAGINATION.md
+@@ -64,7 +64,7 @@ advances, shifted so its inked extent keeps the source anchor (centre within
+ left half). Original edge objects are only read.
+ 
+ Fail-closed codes (severity error, no PDF): `continuation_edge_graphics_unsupported`
+-(path/image/shading/form in an edge zone), `continuation_edge_clip_unsupported`
++(path/image/shading/form intruding beyond the physical edge zone), `continuation_edge_clip_unsupported`
+ (edge text with a clip path), `continuation_edge_text_layout_unsupported`
+ (chars off one text-space baseline, missing origin/box),
+ `continuation_edge_style_unsupported` (blend mode / soft mask),
+@@ -208,3 +208,57 @@ downstream page contents are never modified.
+   matched, but Poppler's raster differed. An isolated page-box restore and
+   reverse-perturb control reproduced/eliminated the effect. No universal
+   byte-exact geometry or cross-renderer pixel-identity claim is made.
++
++
++## Publisher-page paragraph reflow (2026-10-27)
++
++Long single-line publisher footers can exceed the short-text heuristic. A
++separate page-number paragraph on the same baseline within the physical
++bottom band corroborates them as fixed footer text. This prevents their
++left margin from being mistaken for a second body column.
++
++A spatially adjacent three-object fraction (`7`, `/`, `15`) on one baseline
++uses `7.1 / 15` on the first continuation: the numerator keeps its right
++anchor, the separator and denominator keep their exact source style and
++positions. A separate publisher year is fixed only when adjacent month/day
++objects corroborate it. Other numeric candidates still fail as ambiguous.
++
++Fixed graphics wholly inside the physical top/bottom 10% edge band remain
++on their original page and are omitted on text-only continuations, with
++`continuation_fixed_edge_graphics_not_repeated`. Graphics intruding into
++the body remain unsupported. Short zero-height inline underline paths can
++travel with a unique width-matching body text line; table rules, filled
++shapes and ambiguous marks remain unsupported. Link annotation actions are
++not migrated by this object-based flow.
++
++`sourcePageMap[].flowTop` optionally identifies the top of the edited body
++flow separately from `bodyTop`. Text above it, including table text, must
++stay at its exact original glyph positions/styles. Only the body below it
++is concatenated with continuation text for order verification. This avoids
++misreading a PDF's original table/body content-stream order as an appendix.
++
++Before matching accepts a visible hyphen for PDFium's U+0002 discretionary
++hyphen only when the source paragraph proves a letter, the marker, one
++whitespace character, and a letter at the next source line's `off`. The
++original Before remains in the request/report. No literal hyphen is removed.
++Saved-flow verification separately reports source typography normalization:
++source-marked discretionary hyphens are joined before full reflow;
++PDFium may expose additional word spacing after reflow. The saved check
++does not erase visible output hyphens to hide a misspelled word.
++Every non-space character must remain in order, existing word spaces must
++remain, and every requested After must occur with its requested word spaces.
++This warning does not establish typographic identity or independent visual QA.
++
++
++Independent local acceptance found a remaining renderer limitation on the
++cold-shower paper: all 139 source-page vector drawings retained their
++geometry and widths, but PDFium regeneration changed 137 table-rule fills
++from source ICC-derived RGB approximately (0.581415, 0.589273, 0.599481) to
++8-bit DeviceRGB (0.576471, 0.588235, 0.596078). This produces a small visible
++pixel difference on the edited page. Public colour setters only expose
++8-bit RGBA; exact original ICC/stream preservation is not guaranteed by
++this repair. Unmodified source pages remain untouched.
++
++`sourceParagraphText(paragraph)` exports source-proven logical selection text
++for adapters, leaving raw runs for geometry/style. Both logical quotes and
++visible line-end-hyphen quotes bind to the original raw character spans.
+diff --git a/src/continuation-template.mjs b/src/continuation-template.mjs
+index 2ba3c70..99b3f55 100644
+--- a/src/continuation-template.mjs
++++ b/src/continuation-template.mjs
+@@ -8,7 +8,8 @@
+ // source number plus a decimal suffix ("10.1", "10.2" ...) at the source
+ // alignment anchor. Original edge objects are only read, never moved.
+ //
+-// Scope is text-only. Edge graphics, ambiguous numbers, off-baseline edge
++// Scope is text-only. Fixed artwork wholly inside the physical edge band
++// stays on the source page and is not repeated. Intruding graphics, ambiguous numbers, off-baseline edge
+ // text and unencodable suffix glyphs are specific errors before anything is
+ // cloned; every clone is proven against the source glyphs via FPDFText.
+ // Contract: docs/PAGINATION.md.
+@@ -33,6 +34,32 @@ export function classifyEdgeText(text) {
+   return "running";
+ }
+ 
++// Resolve only a spatially corroborated three-object footer fraction.
++// Return the denominator object, which is fixed running text, not another
++// source page number. Other multiple-number shapes remain ambiguous.
++export function resolvePageFraction(items) {
++  const nums = items.filter((i) => /^\d+$/.test(i.text.trim()));
++  const slash = items.filter((i) => i.text.trim() === "/");
++  if (slash.length !== 1) return null;
++  const d = slash[0];
++  const a = nums.filter((n) => n.bounds.r <= d.bounds.l + 0.5).sort((a,b) => b.bounds.r - a.bounds.r)[0];
++  const b = nums.filter((n) => n.bounds.l >= d.bounds.r - 0.5).sort((a,b) => a.bounds.l - b.bounds.l)[0];
++  if (!a || !b) return null;
++  const baseline = (i) => i.chars?.[0]?.oy;
++  if (![a, b, d].every((i) => Number.isFinite(baseline(i))) || Math.abs(baseline(a) - baseline(b)) > 0.5 || Math.abs(baseline(a) - baseline(d)) > 0.5) return null;
++  if (!(a.bounds.r <= d.bounds.l + 0.5 && d.bounds.r <= b.bounds.l + 0.5)) return null;
++  const size = a.bounds.t - a.bounds.b;
++  if (!(size > 0) || d.bounds.l - a.bounds.r > size || b.bounds.l - d.bounds.r > size || +a.text > +b.text || +a.text < 1) return null;
++  const fixedNumbers = new Set([b]);
++  // A publisher date can contain a standalone year. Corroborate the
++  // adjacent month/day objects; unrelated numeric headers stay ambiguous.
++  const row = items.filter((i) => Math.abs(baseline(i) - baseline(a)) <= 0.5).sort((a,b) => a.bounds.l - b.bounds.l);
++  for (let k = 2; k < row.length; k++) {
++    if (/^(19|20)\d{2}$/.test(row[k].text.trim()) && /^\d{1,2},$/.test(row[k-1].text.trim()) && /^(January|February|March|April|May|June|July|August|September|October|November|December)$/.test(row[k-2].text.trim()) && row[k].bounds.r < a.bounds.l) fixedNumbers.add(row[k]);
++  }
++  return { numerator: a, denominator: b, fixedNumbers };
++}
++
+ export function continuationNumberText(source, ordinal) {
+   const t = String(source).trim();
+   if (!/^\d+$/.test(t) || !Number.isInteger(ordinal) || ordinal < 1) return null;
+@@ -241,9 +268,18 @@ export function snapshotPageEdges(engine, floor, bodyTop, exclude = null) {
+   const chars = charsByObject(M, page);
+   const items = [];
+   let skipped = 0;
++  let fixedGraphics = 0;
+   for (const e of edges) {
+     const at = { index: e.index };
+-    if (M._FPDFPageObj_GetType(e.h) !== OBJ_TEXT) return fail("continuation_edge_graphics_unsupported", at);
++    if (M._FPDFPageObj_GetType(e.h) !== OBJ_TEXT) {
++      // Fixed publisher artwork stays on the source page. Only graphics
++      // wholly inside the physical edge band may be omitted on the text-
++      // only continuation; objects intruding into body space still refuse.
++      const b = e.bounds;
++      if (!(b.t <= pageH * 0.1 && b.t < floor || b.b >= pageH * 0.9 && b.b > bodyTop)) return fail("continuation_edge_graphics_unsupported", at);
++      fixedGraphics++;
++      continue;
++    }
+     // A clone cannot be given the source clip path (no public setter), so a
+     // clipped edge would be drawn unclipped. Runtimes without the clip-path
+     // getters cannot detect this; see docs/PAGINATION.md, Known risks.
+@@ -306,9 +342,13 @@ export function snapshotPageEdges(engine, floor, bodyTop, exclude = null) {
+     Object.defineProperty(item, "textY", { value: ts[0].y });
+     items.push(item);
+   }
++  const fraction = resolvePageFraction(items);
++  if (fraction) for (const item of items) {
++    if (item.role === "page_number" && fraction.fixedNumbers.has(item)) item.role = "running";
++  }
+   const numbers = new Set(items.filter((i) => i.role === "page_number").map((i) => i.text.trim()));
+   if (numbers.size > 1) return fail("continuation_page_number_ambiguous");
+-  const snap = { ok: true, code: null, version: CONTINUATION_STYLE.version, pageW, pageH, floor, bodyTop, skipped, items };
++  const snap = { ok: true, code: null, version: CONTINUATION_STYLE.version, pageW, pageH, floor, bodyTop, skipped, fixedGraphics, items };
+   Object.defineProperty(snap, "order", { value: order });
+   return snap;
+ }
+diff --git a/src/editor.mjs b/src/editor.mjs
+index e06796e..19f81f7 100644
+--- a/src/editor.mjs
++++ b/src/editor.mjs
+@@ -103,17 +103,36 @@ function pageIndexMap(paras) {
+   const chars = [];
+   paras.forEach((p, pi) => {
+     if (pi > 0) chars.push({ ch: "\n", pi: -1 });
++    let offset = 0;
++    const text = p.runs.map((r) => r.text).join("");
++    const starts = new Set((p.lines || []).map((l) => l.off));
+     p.runs.forEach((r, ri) => {
+-      for (let o = 0; o < r.text.length; o++) chars.push({ ch: r.text[o], pi, ri, o });
++      for (let o = 0; o < r.text.length; o++) {
++        const at = offset + o;
++        const lineEndHyphen = text[at] === "\u0002" && /\p{L}/u.test(text[at - 1] || "") && /\s/.test(text[at + 1] || "") && /\p{L}/u.test(text[at + 2] || "") && starts.has(at + 2);
++        chars.push({ ch: r.text[o], pi, ri, o, lineEndHyphen });
++      }
++      offset += r.text.length;
+     });
+   });
+   return chars;
+ }
+ 
+-function normalizeChars(chars) {
++// Canonical selection text joins only source-proven discretionary line-end
++// hyphens. Literal hyphens/minus signs and unproven controls are untouched.
++export function sourceParagraphText(para) {
++  const chars = pageIndexMap([para]);
++  const drop = new Set(chars.flatMap((c,i) => c.lineEndHyphen ? [i,i+1] : []));
++  return chars.filter((_,i) => !drop.has(i)).map((c) => c.ch).join("");
++}
++
++export const canonicalParagraphText = sourceParagraphText;
++
++function normalizeChars(chars, logical = false) {
+   let norm = "";
+   const map = [];
+   for (let i = 0; i < chars.length; i++) {
++    if (logical && chars[i].lineEndHyphen) { i++; continue; }
+     if (/\s/.test(chars[i].ch)) {
+       let j = i;
+       while (j + 1 < chars.length && /\s/.test(chars[j + 1].ch)) j++;
+@@ -121,7 +140,7 @@ function normalizeChars(chars) {
+       map.push([i, j]);
+       i = j;
+     } else {
+-      norm += chars[i].ch;
++      norm += chars[i].lineEndHyphen ? "-" : chars[i].ch;
+       map.push([i, i]);
+     }
+   }
+@@ -137,11 +156,19 @@ function findAll(norm, needle) {
+ // breaks: optional "ri:o" keys of source whitespace written as hard breaks.
+ export function rebuildRuns(para, del, inserts, breaks = null) {
+   const out = [];
++  const sourceChars = !breaks ? pageIndexMap([para]) : [];
++  const discretionary = new Set();
++  sourceChars.forEach((c,i) => {
++    if (!c.lineEndHyphen) return;
++    discretionary.add(c.ri + ":" + c.o);
++    const next = sourceChars[i+1];
++    discretionary.add(next.ri + ":" + next.o);
++  });
+   para.runs.forEach((r, ri) => {
+     let t = "";
+     for (let o = 0; o <= r.text.length; o++) {
+       for (const ins of inserts) if (ins.ri === ri && ins.o === o) t += ins.text;
+-      if (o < r.text.length && !del.has(ri + ":" + o)) t += breaks?.has(ri + ":" + o) ? "\n" : r.text[o];
++      if (o < r.text.length && !del.has(ri + ":" + o) && !discretionary.has(ri + ":" + o)) t += breaks?.has(ri + ":" + o) ? "\n" : r.text[o];
+     }
+     out.push({ ...r, text: t, rgba: r.rgba >>> 0, sourceIndex: ri });
+   });
+@@ -156,13 +183,19 @@ export function rebuildRuns(para, del, inserts, breaks = null) {
+ // Returns { failures, plans, perPara }; failures carry no document text.
+ export function planPageEdits(paras, edits) {
+   const chars = pageIndexMap(paras);
+-  const { norm, map } = normalizeChars(chars);
++  const visible = normalizeChars(chars);
++  const logical = normalizeChars(chars, true);
+   const failures = [];
+   const spans = [];
+   const plans = [];
+   for (const e of edits) {
+     const needle = normalizeText(e.before);
+-    const hits = findAll(norm, needle);
++    let { norm, map } = visible;
++    let hits = findAll(norm, needle);
++    if (!hits.length) {
++      ({ norm, map } = logical);
++      hits = findAll(norm, needle);
++    }
+     if (hits.length !== 1) {
+       failures.push({ id: e.id, pageIndex: e.pageIndex, code: hits.length ? "AMBIGUOUS_MATCH" : "NOT_FOUND", hits: hits.length });
+       continue;
+@@ -189,7 +222,7 @@ export function planPageEdits(paras, edits) {
+       failures.push({ id: e.id, pageIndex: e.pageIndex, code: change.failure });
+       continue;
+     }
+-    plans.push({ edit: e, span, touched, insertAt: span.find((c) => c.pi === lastPi), noop, change, start: a });
++    plans.push({ edit: e, span, touched, insertAt: span.find((c) => c.pi === lastPi), noop, change, start: a, sourceHyphenNormalization: span.some((c) => c.lineEndHyphen) });
+   }
+   // Paragraph mutations, built only from accepted, non-noop plans.
+   const perPara = new Map();
+@@ -386,6 +419,7 @@ export async function editPdf(request, options = {}) {
+           status: p.noop ? "noop" : "planned",
+           paragraphIndices: [...p.touched],
+         });
++        if (p.sourceHyphenNormalization) report.warnings.push({ pageIndex, id: p.edit.id, code: "source_line_end_discretionary_hyphen_matched", severity: "info", evidence: "PDFium U+0002 followed by source line boundary", originalBefore: p.edit.before });
+         if (p.change?.warning) report.warnings.push({ pageIndex, id: p.edit.id, code: p.change.warning, severity: "warning" });
+       }
+       if (plan.perPara.size === 0) continue;
+@@ -521,7 +555,7 @@ export async function editPdf(request, options = {}) {
+     const c = continued.get(s);
+     const n = c?.added ?? 0;
+     const entry = { sourcePageIndex: s, outputPageIndex: out, continuationPageIndices: Array.from({ length: n }, (_, k) => out + 1 + k) };
+-    if (c) Object.assign(entry, { lineCounts: [...c.lineCounts], keptLines: c.keptLines, bodyTop: c.bodyTop, floor: c.floor });
++    if (c) Object.assign(entry, { lineCounts: [...c.lineCounts], keptLines: c.keptLines, bodyTop: c.bodyTop, ...(c.flowTop !== undefined ? { flowTop: c.flowTop } : {}), floor: c.floor });
+     if (c?.continuationStyle) entry.continuationStyle = { version: c.continuationStyle.version, policy: c.continuationStyle.policy, applied: c.continuationStyle.applied === true };
+     sourcePageMap.push(entry);
+     out += 1 + n;
+diff --git a/src/pagination.mjs b/src/pagination.mjs
+index 767c634..33c4b58 100644
+--- a/src/pagination.mjs
++++ b/src/pagination.mjs
+@@ -33,6 +33,7 @@ export const PAGINATION_CAPABILITY = Object.freeze({
+   supported: true,
+   scope: "single-column top-level body text flow below the edited paragraph on unrotated, uncropped pages",
+   continuationPages: "same size as the source page, inserted directly after it; moved body lines plus source-style copies of the source page's header/footer text; a standalone Arabic page number becomes source number plus decimal suffix (10.1, 10.2); no synthesized label",
++  fixedEdgeGraphics: "graphics wholly within the physical edge band stay on the original page and are omitted on text-only continuations, with an explicit warning; body-intersecting graphics still refuse",
+   sourcePageNumbers: "unchanged; existing page-number objects stay on their source page",
+   continuationStyle: Object.freeze({ version: CONTINUATION_STYLE.version, policy: CONTINUATION_STYLE.policy }),
+   downstreamPages: "never modified; only their output index shifts, see report.pagination.sourcePageMap",
+@@ -231,7 +232,24 @@ export function buildFlowPlan(engine, ctx, grown, { floor, maxNewPages }) {
+     if (b.x + b.w < anchor.x - 0.5 || b.x > anchor.x + anchor.w + 0.5) {
+       return err("pagination_unsupported_multi_column_flow");
+     }
+-    if (M._FPDFPageObj_GetType(h) !== OBJ_TEXT) return err("pagination_unsupported_foreign_object_in_flow");
++    if (M._FPDFPageObj_GetType(h) !== OBJ_TEXT) {
++      // A short zero-height link underline is an inline decoration, not a
++      // foreign figure. Bind it only to one width-matching text object on
++      // the current line; tables, filled shapes and ambiguous marks refuse.
++      const hits = M._FPDFPageObj_GetType(h) === 2 && b.top - b.bottom <= EPS && b.w > EPS
++        ? lines.filter((line) => {
++          const size = ctx.paras.find((q) => q.id === line.para)?.size || 0;
++          const text = line.items.filter((it) => {
++            const cx = it.x + it.w / 2;
++            return cx >= b.x - 3 && cx <= b.x + b.w + 3 && it.bottom - b.top >= -1 && it.bottom - b.top <= 0.4 * size;
++          });
++          const single = text.some((it) => Math.abs(it.x - b.x) <= 1 && Math.abs(it.x + it.w - b.x - b.w) <= 1);
++          return size > 0 && b.w <= 2 * size && text.length && (single || Math.abs(Math.min(...text.map((it) => it.x)) - b.x) <= 3 && Math.abs(Math.max(...text.map((it) => it.x + it.w)) - b.x - b.w) <= 3);
++        }) : [];
++      if (hits.length !== 1) return err("pagination_unsupported_foreign_object_in_flow");
++      hits[0].items.push({ h, order: indexOf.get(h), ...b });
++      continue;
++    }
+     const l = untouchedLines.find((x) => cy <= x.top + 0.5 && cy >= x.bottom - 0.5);
+     if (l) {
+       l.items.push({ h, order: indexOf.get(h), ...b });
+@@ -255,7 +273,7 @@ export function buildFlowPlan(engine, ctx, grown, { floor, maxNewPages }) {
+   const virtual = lines.map((l) => ({ top: l.top - l.shift, bottom: l.bottom - l.shift }));
+   const split = planFlow(virtual, { bodyTop, floor, maxNewPages });
+   if (!split.ok) return err(split.code, { line: split.line, maxNewPages: split.maxNewPages });
+-  return { ok: true, lines, pages: split.pages, bodyTop, floor, orphans, objects };
++  return { ok: true, lines, pages: split.pages, bodyTop, flowTop, floor, orphans, objects };
+ }
+ 
+ const coded = (code) => Object.assign(new Error(code), { code });
+@@ -391,8 +409,9 @@ export function paginateOverflow(engine, ctx, grown, { floor, maxNewPages }) {
+     repairs.push({ kind: "pagination", action: "failed" });
+     return { ok: false, warnings, repairs, added: 0 };
+   }
++  if (edges?.fixedGraphics) warnings.push({ code: "continuation_fixed_edge_graphics_not_repeated", severity: "warning", count: edges.fixedGraphics, policy: "source-graphics-preserved-text-only-continuation" });
+   if (plan.orphans) warnings.push({ code: "pagination_empty_objects_kept", severity: "info", count: plan.orphans });
+   repairs.push({ kind: "pagination", action: r.added ? "continued" : "shifted", added: r.added, keptLines: r.keptLines, lineCounts: r.lineCounts, copiedEdges: r.copiedEdges, floor: +plan.floor.toFixed(2), bodyTop: +plan.bodyTop.toFixed(2) });
+   const continuationStyle = r.added ? { version: CONTINUATION_STYLE.version, policy: CONTINUATION_STYLE.policy, applied: true } : undefined;
+-  return { ok: true, warnings, repairs, added: r.added, lineCounts: r.lineCounts, keptLines: r.keptLines, bodyTop: plan.bodyTop, floor: plan.floor, continuationStyle };
++  return { ok: true, warnings, repairs, added: r.added, lineCounts: r.lineCounts, keptLines: r.keptLines, bodyTop: plan.bodyTop, flowTop: plan.flowTop, floor: plan.floor, continuationStyle };
+ }
+diff --git a/src/quality.mjs b/src/quality.mjs
+index 5ba1eec..1cd0e64 100644
+--- a/src/quality.mjs
++++ b/src/quality.mjs
+@@ -16,6 +16,7 @@
+ // self-check, not an independent or rendering-based release check.
+ 
+ import { createHash } from "node:crypto";
++import { resolvePageFraction } from "./continuation-template.mjs";
+ 
+ const TOL = 1;
+ const EDGE_BAND = 0.1;
+@@ -103,6 +104,13 @@ export function capturePageLayout(engine, pageIndex, paragraphs) {
+       topLevel: slots.length === handles.length,
+     };
+   });
++  // A publisher footer can exceed the short-text heuristic. Require a
++  // separate page number on its baseline inside the bottom edge band.
++  const numbers = paras.filter((q) => q.role === "page_number" && q.box?.top <= edgeBottomY + pageH * EDGE_BAND);
++  for (const q of paras) {
++    if (q.role !== "body" || !q.box || q.baselines.length !== 1 || q.box.top > edgeBottomY + pageH * EDGE_BAND) continue;
++    if (numbers.some((n) => n.id !== q.id && n.baselines.some((y) => Math.abs(y - q.baselines[0]) <= 0.5) && hOverlap(n.box, q.box) <= 0)) q.role = "footer_uncertain";
++  }
+   return { pageIndex, pageW, pageH, objects, types, paras };
+ }
+ 
+@@ -307,7 +315,7 @@ export function repairPageLayout(engine, pageIndex, context, touched, options =
+   repairs.push(...(p?.repairs ?? []));
+   warnings.push(...(p?.warnings ?? []));
+   if (!p?.ok) return { repairs, warnings, pagination: null };
+-  const pagination = { added: p.added, lineCounts: p.lineCounts, keptLines: p.keptLines, bodyTop: p.bodyTop, floor: p.floor };
++  const pagination = { added: p.added, lineCounts: p.lineCounts, keptLines: p.keptLines, bodyTop: p.bodyTop, ...(p.flowTop !== undefined ? { flowTop: p.flowTop } : {}), floor: p.floor };
+   if (p.continuationStyle !== undefined) {
+     if (!validContinuationStyle(p.continuationStyle)) {
+       warnings.push({ code: "continuation_style_invalid", pageIndex, severity: "error" });
+@@ -683,12 +691,27 @@ function extents(g) {
+ // Apply each edit once to the whitespace-normalized source page text.
+ export function expectedPageText(sourceText, pageEdits) {
+   const norm = normStr(sourceText);
++  let matchText = "";
++  const matchMap = [];
++  for (let i = 0; i < norm.length; i++) {
++    const expanded = norm[i] === "\u0002" ? (norm[i + 1] === " " ? "-" : "- ") : norm[i];
++    matchText += expanded;
++    for (let j = 0; j < expanded.length; j++) matchMap.push(i);
++  }
++  let logicalText = "";
++  const logicalMap = [];
++  for (let i = 0; i < norm.length; i++) {
++    if (norm[i] === "\u0002") { if (norm[i+1] === " ") i++; continue; }
++    logicalText += norm[i]; logicalMap.push(i);
++  }
+   const spans = [];
+   for (const e of pageEdits) {
+     const needle = normStr(e.before);
+-    const k = needle ? norm.indexOf(needle) : -1;
+-    if (k < 0 || norm.indexOf(needle, k + 1) >= 0) return { ok: false, id: e.id, reason: k < 0 ? "before_not_found" : "before_ambiguous" };
+-    spans.push({ a: k, b: k + needle.length, after: normStr(e.after), id: e.id });
++    let text = matchText, map = matchMap;
++    let k = needle ? text.indexOf(needle) : -1;
++    if (k < 0) { text = logicalText; map = logicalMap; k = needle ? text.indexOf(needle) : -1; }
++    if (k < 0 || text.indexOf(needle, k + 1) >= 0) return { ok: false, id: e.id, reason: k < 0 ? "before_not_found" : "before_ambiguous" };
++    spans.push({ a: map[k], b: map[k + needle.length - 1] + 1, after: normStr(e.after), id: e.id });
+   }
+   spans.sort((x, y) => x.a - y.a);
+   for (let i = 1; i < spans.length; i++) {
+@@ -817,6 +840,7 @@ export function normalizePageMap(map, sourcePageCount) {
+       next++;
+     }
+     if (cont.length && !(Number.isFinite(m.bodyTop) && Number.isFinite(m.floor) && m.bodyTop > m.floor)) return null;
++    if (m.flowTop !== undefined && !(cont.length && Number.isFinite(m.flowTop) && m.flowTop > m.floor && m.flowTop <= m.bodyTop + 2)) return null;
+     if (cont.length && !(Array.isArray(m.lineCounts) && m.lineCounts.length === cont.length)) return null;
+     if (m.continuationStyle !== undefined && !(cont.length && validContinuationStyle(m.continuationStyle))) return null;
+     out.push({ ...m, continuationPageIndices: [...cont] });
+@@ -867,7 +891,9 @@ const textOf = (cs) => String.fromCharCode(...cs.map((c) => c.u));
+ // Source page numbers: edge text objects whose visible glyphs are only
+ // Arabic digits. Two such objects with different values are ambiguous.
+ function sourcePageNumbers(es) {
+-  const items = byObject(es).filter((cs) => /^\d+$/.test(textOf(cs))).map((cs) => ({ glyphs: cs, text: textOf(cs) }));
++  const groups = byObject(es).map((cs) => ({ glyphs: cs, text: textOf(cs), chars: cs.map((c) => ({ oy: c.oy ?? c.b })), bounds: { l: Math.min(...cs.map((c) => c.l)), r: Math.max(...cs.map((c) => c.r)), b: Math.min(...cs.map((c) => c.b)), t: Math.max(...cs.map((c) => c.t)) }, style: cs[0]?.style }));
++  const fraction = resolvePageFraction(groups);
++  const items = groups.filter((g) => /^\d+$/.test(g.text) && !fraction?.fixedNumbers.has(g));
+   return { items, ambiguous: new Set(items.map((x) => x.text)).size > 1 };
+ }
+ 
+@@ -999,11 +1025,18 @@ function inspectContinued(s, o, out, m, pageEdits, row, failures, warnings, incl
+   const i = row.pageIndex;
+   const { floor, bodyTop } = m;
+   const lo = floor - 0.5, hi = bodyTop + 0.5;
+-  const exp = expectedPageText(bandText(s, lo, hi), pageEdits);
++  const flowHi = m.flowTop === undefined ? hi : Math.min(hi, m.flowTop + 0.5);
++  const exp = expectedPageText(bandText(s, lo, flowHi), pageEdits);
++  if (flowHi < hi) {
++    const fixed = (g) => g.glyphs.filter((c) => c.b + (c.t - c.b) / 2 > flowHi && c.b + (c.t - c.b) / 2 <= hi);
++    const a = fixed(s), b = fixed(o);
++    row.fixed_body_stable = sameGlyphs(a, b) && sameStyles(a, b);
++    if (!row.fixed_body_stable) failures.push({ code: "fixed_body_above_flow_changed", pageIndex: i });
++  }
+   const conts = m.continuationPageIndices.map((k) => readGlyphs(out, k));
+   // Every page of the flow is compared by its body band only; anything a
+   // continuation page carries outside the band is checked as edge content.
+-  const parts = [o, ...conts].map((g) => normStr(bandText(g, lo, hi)));
++  const parts = [normStr(bandText(o, lo, flowHi)), ...conts.map((g) => normStr(bandText(g, lo, hi)))];
+   const joined = joinFlowParts(parts, exp.ok ? exp.text : "");
+   const got = joined.text;
+   row.body_band = { floor: +floor.toFixed(2), bodyTop: +bodyTop.toFixed(2) };
+@@ -1012,6 +1045,26 @@ function inspectContinued(s, o, out, m, pageEdits, row, failures, warnings, incl
+     failures.push({ code: "expected_text_uncomputable", pageIndex: i, id: exp.id, reason: exp.reason });
+   } else {
+     row.text_equal = exp.text === got;
++    // PDFium can expose source discretionary hyphens as U+0002 and
++    // regenerated ones as a hyphen plus a line break. Normalize only the
++    // exact source word carrying that marker; all other hyphens stay real.
++    let expectedTypography = exp.text;
++    let outputTypography = got;
++    for (const match of exp.text.matchAll(/([\p{L}]+)\u0002\s*([\p{L}]+)/gu)) {
++      const word = match[1] + match[2];
++      expectedTypography = expectedTypography.replace(match[0], word);
++      outputTypography = outputTypography.replaceAll(match[0], word);
++    }
++    let at = 0;
++    const extraSpacesOnly = [...normStr(outputTypography)].every((ch) => {
++      if (ch === normStr(expectedTypography)[at]) { at++; return true; }
++      return ch === " ";
++    }) && at === normStr(expectedTypography).length;
++    if (!row.text_equal && extraSpacesOnly && pageEdits.every((e) => normStr(outputTypography).includes(normStr(e.after)))) {
++      row.text_equal = true;
++      row.typography_normalized = true;
++      warnings.push({ code: "continued_flow_source_typography_normalized", pageIndex: i, severity: "warning", detail: "Source discretionary hyphens and PDFium word spacing differ; character order and every requested After text are preserved" });
++    }
+     row.expected_text = digest(exp.text, includeText);
+     row.output_parts = parts.map((p) => digest(p, includeText));
+     if (!row.text_equal) failures.push({ code: "edited_flow_text_or_order_mismatch", pageIndex: i });
+diff --git a/test/body-flow-fixes.test.mjs b/test/body-flow-fixes.test.mjs
+index b552c01..1728935 100644
+--- a/test/body-flow-fixes.test.mjs
++++ b/test/body-flow-fixes.test.mjs
+@@ -371,3 +371,18 @@ test("real engine F2: with pagination disabled the overflow is an explicit refus
+     (e) => e.code === "LAYOUT_UNSUPPORTED" && e.details.codes.includes("pagination_unsupported"),
+   );
+ });
++
++
++test("long publisher footer requires a separate page number on the same baseline", () => {
++  const { engine, model } = makeEngine();
++  const publisher = "PLOS ONE | DOI:10.1371/journal.pone.0161749 September 15, 2016 publication footer";
++  const footer = { ...model.find((p) => p.id === 9), id: 10, box: { x: 36, top: 40, w: 240, h: 14 }, runs: [{ text: publisher, size: 8 }] };
++  // The fixture need not add objects: classification relies on source
++  // geometry and baseline, with ownership still checked by pagination.
++  let ctx = capturePageLayout(engine, 0, [...model, footer]);
++  assert.equal(ctx.paras.find((p) => p.id === 10).role, "footer_uncertain");
++  ctx = capturePageLayout(engine, 0, [...model.filter((p) => p.id !== 9), footer]);
++  assert.equal(ctx.paras.find((p) => p.id === 10).role, "body");
++  ctx = capturePageLayout(engine, 0, [...model, { ...footer, lines: [{ y: 44 }] }]);
++  assert.equal(ctx.paras.find((p) => p.id === 10).role, "body");
++});
+diff --git a/test/continuation-template.test.mjs b/test/continuation-template.test.mjs
+index bcca6da..296b55b 100644
+--- a/test/continuation-template.test.mjs
++++ b/test/continuation-template.test.mjs
+@@ -6,6 +6,7 @@ import { test } from "node:test";
+ import { editPdf } from "../src/editor.mjs";
+ import {
+   anchorOf,
++  resolvePageFraction,
+   applyPageEdges,
+   classifyEdgeText,
+   continuationNumberText,
+@@ -218,7 +219,7 @@ test("real engine: tampered clone is caught by verifyPageEdges", { skip }, async
+ test("real engine: unsupported edges fail closed with specific codes", { skip }, async () => {
+   const rows = body(rowsWithTarget());
+   const cases = [
+-    [`0 0 0 RG 72 770 m 540 770 l S ${rows} ${footer("10")}`, "continuation_edge_graphics_unsupported"],
++    [`0 0 0 RG 72 700 m 540 810 l S ${rows} ${footer("10")}`, "continuation_edge_graphics_unsupported"],
+     [`${rows} ${footer("Page 3")}`, "continuation_page_number_unsupported"],
+     [`${rows} ${footer("xii")}`, "continuation_page_number_unsupported"],
+     [`BT /F2 10 Tf 300 770 Td (3) Tj ET ${rows} ${footer("4")}`, "continuation_page_number_ambiguous"],
+@@ -291,3 +292,24 @@ test("real engine: editPdf copies source-style edges onto continuation pages", {
+     srcEngine.close();
+   }
+ });
++
++
++test("fraction footer resolves only adjacent same-baseline numerator/slash/denominator", () => {
++  const item = (text, l, r, oy=30) => ({ text, bounds: { l, r, b: oy, t: oy+8 }, chars: [{ oy }], style: { size: 1 } });
++  const a=item("7",550,554), slash=item("/",556,559), b=item("15",561,569);
++  const r=resolvePageFraction([a,slash,b]);
++  assert.equal(r.numerator,a); assert.equal(r.denominator,b);
++  assert.equal(resolvePageFraction([a,slash,{...b,chars:[{oy:45}]}]),null);
++  assert.equal(resolvePageFraction([a,slash,item("15",580,588)]),null);
++  assert.equal(resolvePageFraction([a,slash,b,item("/",400,402)]),null);
++});
++
++test("real engine: fixed physical edge artwork stays on source and is omitted on text continuation", { skip }, async () => {
++  const content=`0 0 0 RG 72 770 m 540 770 l S ${body(rowsWithTarget())} ${footer("10")}`;
++  await withPage(pdfFromPages([content]), (engine) => {
++    const before=engine.M._FPDFPage_CountObjects(engine.page);
++    const snap=snapshotPageEdges(engine,50,750);
++    assert.equal(snap.ok,true); assert.equal(snap.fixedGraphics,1);
++    assert.equal(engine.M._FPDFPage_CountObjects(engine.page),before);
++  });
++});
+diff --git a/test/core.test.mjs b/test/core.test.mjs
+index d115852..39959cf 100644
+--- a/test/core.test.mjs
++++ b/test/core.test.mjs
+@@ -6,7 +6,7 @@ import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSyn
+ import { tmpdir, homedir } from "node:os";
+ import { join, parse } from "node:path";
+ import { test } from "node:test";
+-import { EditError, editPdf, planPageEdits, rebuildRuns, validateRequest } from "../src/editor.mjs";
++import { EditError, canonicalParagraphText, editPdf, planPageEdits, rebuildRuns, validateRequest } from "../src/editor.mjs";
+ import { main } from "../src/cli.mjs";
+ import { MODULE_ROOT, PINS, readVerifiedRuntime, resolveRuntimeDir, resolveSourceRoot, verifyAppSource } from "../src/runtime.mjs";
+ import { prepareRuntime, validateModuleRoot } from "../scripts/prepare-runtime.mjs";
+@@ -501,3 +501,34 @@ test("module root default resolves to this package", () => {
+   assert.ok(existsSync(join(MODULE_ROOT, "package.json")));
+   assert.equal(JSON.parse(readFileSync(join(MODULE_ROOT, "package.json"), "utf8")).license, "AGPL-3.0-only");
+ });
++
++
++test("only a source-proven discretionary line-end hyphen matches visible Before hyphen", () => {
++  const text="This prag\u0002 matic trial.";
++  const source=para(1,text,{lines:[{off:0,y:700},{off:11,y:686}]});
++  const edit={id:"hyphen",pageIndex:0,before:"This prag-\nmatic trial.",after:"This trial is qualified."};
++  const good=planPageEdits([source],[edit]);
++  assert.deepEqual(good.failures,[]);
++  assert.equal(good.plans[0].sourceHyphenNormalization,true);
++  assert.equal(good.plans[0].edit.before,edit.before);
++  assert.equal(planPageEdits([{...source,lines:[{off:0,y:700}]}],[edit]).failures[0].code,"NOT_FOUND");
++  assert.equal(planPageEdits([para(1,"This prag-matic trial.")],[edit]).failures[0].code,"NOT_FOUND");
++});
++
++
++test("full reflow joins only source-proven discretionary hyphens without changing run styles", () => {
++  const source=para(1,"This prag\u0002 matic well-known trial.",{lines:[{off:0,y:700},{off:11,y:686}]});
++  assert.equal(canonicalParagraphText(source),"This pragmatic well-known trial.");
++  assert.equal(rebuildRuns(source,new Set(),[]).map(r=>r.text).join(""),"This pragmatic well-known trial.");
++  assert.equal(rebuildRuns(source,new Set(),[])[0].sourceIndex,0);
++  assert.equal(canonicalParagraphText({...source,lines:[]}),source.runs[0].text);
++});
++
++
++test("logical paragraph quote binds to the same raw source span as a visible line-end hyphen", () => {
++  const source=para(1,"This prag\u0002 matic trial.",{lines:[{off:0,y:700},{off:11,y:686}]});
++  const changes=["This pragmatic trial.","This prag-\nmatic trial."];
++  const results=changes.map(before=>planPageEdits([source],[{id:"logical",pageIndex:0,before,after:"A qualified trial."}]));
++  for (const r of results) assert.deepEqual(r.failures,[]);
++  assert.deepEqual(results[0].perPara,results[1].perPara);
++});
+diff --git a/test/pagination.test.mjs b/test/pagination.test.mjs
+index c74c13e..27f0132 100644
+--- a/test/pagination.test.mjs
++++ b/test/pagination.test.mjs
+@@ -4,7 +4,7 @@
+ import assert from "node:assert/strict";
+ import { test } from "node:test";
+ import { EDITOR_CAPABILITIES, editPdf } from "../src/editor.mjs";
+-import { PAGINATION_LIMITS, groupLines, planFlow } from "../src/pagination.mjs";
++import { PAGINATION_LIMITS, buildFlowPlan, groupLines, planFlow } from "../src/pagination.mjs";
+ import { countGlyphLines, inspectSavedPdf, joinFlowParts, normalizePageMap } from "../src/quality.mjs";
+ import { loadRuntime } from "../src/runtime.mjs";
+ 
+@@ -284,3 +284,17 @@ test("real engine: long edit continues onto a new page with mapped, unchanged se
+   await assert.rejects(capped, { code: "PAGINATION_LIMIT" });
+   assert.equal(Buffer.compare(copy, Buffer.from(src)), 0);
+ });
++
++
++test("pagination binds a unique short inline underline but refuses table rules and filled shapes", () => {
++  const q={id:1,role:"body",editable:true,topLevel:true,box:{x:50,top:700,w:100,h:20},size:10};
++  const objects=[{h:1,type:1,b:{x:50,y:680,w:10,h:10}},{h:2,type:2,b:{x:50,y:678,w:10,h:0}}];
++  const engine={page:1,pageHeight:800,M:{_FPDFPage_CountObjects:()=>objects.length,_FPDFPage_GetObject:(_,i)=>objects[i].h,_FPDFPageObj_GetType:(h)=>objects.find(o=>o.h===h).type},paragraphObjects:()=>[1],objectBounds:(h)=>objects.find(o=>o.h===h).b};
++  const plan=()=>buildFlowPlan(engine,{paras:[q],pageH:800},[{id:1,box:q.box,delta:0}],{floor:50,maxNewPages:8});
++  assert.equal(plan().ok,true);
++  assert.deepEqual(plan().lines[0].items.map(i=>i.h),[1,2]);
++  objects[1].b.w=100;
++  assert.equal(plan().code,"pagination_unsupported_foreign_object_in_flow");
++  objects[1].b.w=10;objects[1].b.h=3;
++  assert.equal(plan().code,"pagination_unsupported_foreign_object_in_flow");
++});
+-- 
+2.55.0.windows.3
+
+
+From 010e2b9b29b7ce0571e0d2ddcce566cb08c95189 Mon Sep 17 00:00:00 2001
+From: Shinick-Han <jcpukpyi@gmail.com>
+Date: Tue, 27 Oct 2026 01:09:38 +0900
+Subject: [PATCH 2/3] Verify full logical paragraphs against provenance of
+ generated PDF whitespace
+
+---
+ src/quality.mjs          | 37 ++++++++++++++++++++++++++++++++++++-
+ test/pagination.test.mjs | 23 +++++++++++++++++++++++
+ test/quality.test.mjs    | 12 ++++++++++++
+ 3 files changed, 71 insertions(+), 1 deletion(-)
+
+diff --git a/src/quality.mjs b/src/quality.mjs
+index 1cd0e64..6d9dd70 100644
+--- a/src/quality.mjs
++++ b/src/quality.mjs
+@@ -559,7 +559,7 @@ function readGlyphs(engine, pageIndex) {
+     const u = M._FPDFText_GetUnicode(tp, i);
+     text += String.fromCharCode(u);
+     if (u <= 32 || !M._FPDFText_GetCharBox(tp, i, b, b + 8, b + 16, b + 24)) {
+-      chars.push({ u, cy: null });
++      chars.push({ u, cy: null, generated: typeof M._FPDFText_IsGenerated === "function" && M._FPDFText_IsGenerated(tp, i) === 1 });
+       continue;
+     }
+     const l = M.HEAPF64[b >> 3], r = M.HEAPF64[(b + 8) >> 3];
+@@ -1017,6 +1017,31 @@ export function joinFlowParts(parts, expected) {
+   return { text: normStr(acc), softJoins };
+ }
+ 
++// PDFium may synthesize whitespace between adjacent text objects even when
++// the caller's logical text has no space there. Only whitespace explicitly
++// marked generated by PDFium may be skipped; typed whitespace, visible
++// hyphens, character identity and order remain mandatory.
++export function matchesGeneratedWhitespace(expected, chars) {
++  const tokens = [];
++  for (const c of chars) {
++    const ch = String.fromCharCode(c.u);
++    if (/\s/.test(ch)) {
++      const prev = tokens[tokens.length - 1];
++      if (prev?.ch === " ") prev.optional &&= c.generated === true;
++      else tokens.push({ ch: " ", optional: c.generated === true });
++    } else tokens.push({ ch, optional: false });
++  }
++  if (tokens[0]?.ch === " ") tokens.shift();
++  if (tokens[tokens.length - 1]?.ch === " ") tokens.pop();
++  const text = normStr(expected);
++  let at = 0;
++  for (const token of tokens) {
++    if (token.ch === text[at]) at++;
++    else if (!(token.ch === " " && token.optional)) return false;
++  }
++  return at === text.length;
++}
++
+ // A source page whose flow continues on new pages: the body-band text of
+ // the output page followed by every continuation page must equal the
+ // source body-band text with the edits applied, in order; everything
+@@ -1065,6 +1090,16 @@ function inspectContinued(s, o, out, m, pageEdits, row, failures, warnings, incl
+       row.typography_normalized = true;
+       warnings.push({ code: "continued_flow_source_typography_normalized", pageIndex: i, severity: "warning", detail: "Source discretionary hyphens and PDFium word spacing differ; character order and every requested After text are preserved" });
+     }
++    if (!row.text_equal) {
++      const selected = (g, top) => g.chars.filter((c) => c.cy === null || c.cy >= lo && c.cy <= top);
++      const actual = [selected(o, flowHi), ...conts.map((g) => selected(g, hi))]
++        .flatMap((part, k) => k ? [{ u: 32, generated: true }, ...part] : part);
++      if (matchesGeneratedWhitespace(exp.text, actual)) {
++        row.text_equal = true;
++        row.generated_whitespace_normalized = true;
++        warnings.push({ code: "continued_flow_generated_whitespace_normalized", pageIndex: i, severity: "warning", detail: "Only PDFium-generated extraction whitespace differs; requested characters, literal whitespace and order are preserved" });
++      }
++    }
+     row.expected_text = digest(exp.text, includeText);
+     row.output_parts = parts.map((p) => digest(p, includeText));
+     if (!row.text_equal) failures.push({ code: "edited_flow_text_or_order_mismatch", pageIndex: i });
+diff --git a/test/pagination.test.mjs b/test/pagination.test.mjs
+index 27f0132..7f47610 100644
+--- a/test/pagination.test.mjs
++++ b/test/pagination.test.mjs
+@@ -108,6 +108,7 @@ function pdfEngineFor(docs) {
+         _FPDFText_LoadPage: (p) => p, _FPDFText_ClosePage() {},
+         _FPDFText_CountChars: (p) => doc[p - 1].length,
+         _FPDFText_GetUnicode: (p, i) => doc[p - 1][i][0].charCodeAt(0),
++        _FPDFText_IsGenerated: (p, i) => doc[p - 1][i][3] ? 1 : 0,
+         _FPDFText_GetCharBox: (p, i) => {
+           const [, x, y] = doc[p - 1][i];
+           heap[0] = x; heap[1] = x + 6; heap[2] = y; heap[3] = y + 10;
+@@ -298,3 +299,25 @@ test("pagination binds a unique short inline underline but refuses table rules a
+   objects[1].b.w=10;objects[1].b.h=3;
+   assert.equal(plan().code,"pagination_unsupported_foreign_object_in_flow");
+ });
++
++
++test("saved whole logical paragraph compares generated spaces across continuation without accepting a visible hyphen or typed space", async () => {
++  const src=new Uint8Array([21]),out=new Uint8Array([22]);
++  const edits=[{id:"whole",pageIndex:0,before:"trial,routinely beneficial delta",after:"trial,routinely beneficial qualified delta"}];
++  const source=[[...body(["trial,routinely ben\u0002eficial", "delta"]),...footer],line("other page",50,700)];
++  const inspect=async (text, generated) => {
++    const rows=[...line(text,50,700).map((c,i)=>[c[0],50+i*5,c[2]]),br];
++    const added=rows.find((c,i) => i>0 && rows[i-1][0]==="," && c[0]===" ");
++    if (added) added[3]=generated;
++    const docs=new Map([[src,source],[out,[[...rows,...footer],body(["delta"]),line("other page",50,700)]]]);
++    return inspectSavedPdf(pdfEngineFor(docs),src,out,edits,{sourcePageMap:mapFor([1])});
++  };
++  const good=await inspect("trial, routinely beneficial qualified",true);
++  assert.equal(good.ok,true,JSON.stringify(good.failures));
++  assert.equal(good.pages[0].generated_whitespace_normalized,true);
++  assert.ok(good.warnings.some(w=>w.code==="continued_flow_generated_whitespace_normalized"));
++  for (const [text,generated] of [["trial, routinely beneficial qualified",false],["trial, routinely ben-eficial qualified",true],["trial, routinely qualified beneficial",true]]) {
++    const bad=await inspect(text,generated);
++    assert.ok(bad.failures.some(f=>f.code==="edited_flow_text_or_order_mismatch"),text);
++  }
++});
+diff --git a/test/quality.test.mjs b/test/quality.test.mjs
+index eea77b8..50378ae 100644
+--- a/test/quality.test.mjs
++++ b/test/quality.test.mjs
+@@ -346,3 +346,15 @@ test("an unchanged edge band with a page model passes", async () => {
+   assert.equal(r.ok, true, JSON.stringify(r.failures));
+   assert.equal(r.pages[0].edge_stable, true);
+ });
++
++
++test("generated extraction spaces may differ in a whole logical After; typed spaces and visible hyphens remain exact", async () => {
++  const { matchesGeneratedWhitespace } = await import("../src/quality.mjs");
++  const extracted = (s) => [...s].map(ch => ({u:ch==="~"?32:ch.charCodeAt(0),generated:ch==="~"}));
++  assert.equal(matchesGeneratedWhitespace("trial,routinely effectswere",extracted("trial,~routinely effects~were")),true);
++  assert.equal(matchesGeneratedWhitespace("trial,routinely",extracted("trial, routinely")),false);
++  assert.equal(matchesGeneratedWhitespace("beneficial",extracted("ben-~eficial")),false);
++  assert.equal(matchesGeneratedWhitespace("effects were",extracted("effectswere")),false);
++  assert.equal(matchesGeneratedWhitespace("alpha beta",extracted("beta alpha")),false);
++  assert.equal(matchesGeneratedWhitespace("value - 3",extracted("value~3")),false);
++});
+-- 
+2.55.0.windows.3
+
+
+From 50abc7c10dac2f47033926e297484c0774328596 Mon Sep 17 00:00:00 2001
+From: Shinick-Han <jcpukpyi@gmail.com>
+Date: Tue, 27 Oct 2026 01:14:09 +0900
+Subject: [PATCH 3/3] Require generated-space provenance and unique raw spans
+ for logical paragraph edits
+
+---
+ src/editor.mjs           | 23 +++++++++++--------
+ src/quality.mjs          | 49 ++++++++++++++++++----------------------
+ test/core.test.mjs       | 15 ++++++++++++
+ test/pagination.test.mjs | 16 +++++++++++++
+ test/quality.test.mjs    |  8 +++++++
+ 5 files changed, 75 insertions(+), 36 deletions(-)
+
+diff --git a/src/editor.mjs b/src/editor.mjs
+index 19f81f7..c7ceb7d 100644
+--- a/src/editor.mjs
++++ b/src/editor.mjs
+@@ -190,18 +190,23 @@ export function planPageEdits(paras, edits) {
+   const plans = [];
+   for (const e of edits) {
+     const needle = normalizeText(e.before);
+-    let { norm, map } = visible;
+-    let hits = findAll(norm, needle);
+-    if (!hits.length) {
+-      ({ norm, map } = logical);
+-      hits = findAll(norm, needle);
++    // Both representations name raw source spans. Count their union before
++    // choosing a target: an exact visible hit must not hide a second
++    // paragraph whose source-proven discretionary spelling is equivalent.
++    const candidates = new Map();
++    for (const variant of [visible, logical]) {
++      for (const hit of findAll(variant.norm, needle)) {
++        const a = variant.map[hit][0], b = variant.map[hit + needle.length - 1][1];
++        const key = a + ":" + b;
++        if (!candidates.has(key)) candidates.set(key, { ...variant, hit, a, b });
++      }
+     }
+-    if (hits.length !== 1) {
+-      failures.push({ id: e.id, pageIndex: e.pageIndex, code: hits.length ? "AMBIGUOUS_MATCH" : "NOT_FOUND", hits: hits.length });
++    if (candidates.size !== 1) {
++      failures.push({ id: e.id, pageIndex: e.pageIndex, code: candidates.size ? "AMBIGUOUS_MATCH" : "NOT_FOUND", hits: candidates.size });
+       continue;
+     }
+-    const a = map[hits[0]][0];
+-    const b = map[hits[0] + needle.length - 1][1];
++    const { map, hit, a, b } = candidates.values().next().value;
++    const hits = [hit];
+     const overlap = spans.find((s) => !(b < s.a || a > s.b));
+     if (overlap) {
+       failures.push({ id: e.id, pageIndex: e.pageIndex, code: "OVERLAPPING_EDITS", with: overlap.id });
+diff --git a/src/quality.mjs b/src/quality.mjs
+index 6d9dd70..98103a9 100644
+--- a/src/quality.mjs
++++ b/src/quality.mjs
+@@ -707,11 +707,15 @@ export function expectedPageText(sourceText, pageEdits) {
+   const spans = [];
+   for (const e of pageEdits) {
+     const needle = normStr(e.before);
+-    let text = matchText, map = matchMap;
+-    let k = needle ? text.indexOf(needle) : -1;
+-    if (k < 0) { text = logicalText; map = logicalMap; k = needle ? text.indexOf(needle) : -1; }
+-    if (k < 0 || text.indexOf(needle, k + 1) >= 0) return { ok: false, id: e.id, reason: k < 0 ? "before_not_found" : "before_ambiguous" };
+-    spans.push({ a: map[k], b: map[k + needle.length - 1] + 1, after: normStr(e.after), id: e.id });
++    const candidates = new Map();
++    for (const [text, map] of [[matchText, matchMap], [logicalText, logicalMap]]) {
++      for (let k = needle ? text.indexOf(needle) : -1; k >= 0; k = text.indexOf(needle, k + 1)) {
++        const a = map[k], b = map[k + needle.length - 1] + 1;
++        candidates.set(a + ":" + b, { a, b, after: normStr(e.after), id: e.id });
++      }
++    }
++    if (candidates.size !== 1) return { ok: false, id: e.id, reason: candidates.size ? "before_ambiguous" : "before_not_found" };
++    spans.push(candidates.values().next().value);
+   }
+   spans.sort((x, y) => x.a - y.a);
+   for (let i = 1; i < spans.length; i++) {
+@@ -1070,34 +1074,25 @@ function inspectContinued(s, o, out, m, pageEdits, row, failures, warnings, incl
+     failures.push({ code: "expected_text_uncomputable", pageIndex: i, id: exp.id, reason: exp.reason });
+   } else {
+     row.text_equal = exp.text === got;
+-    // PDFium can expose source discretionary hyphens as U+0002 and
+-    // regenerated ones as a hyphen plus a line break. Normalize only the
+-    // exact source word carrying that marker; all other hyphens stay real.
+-    let expectedTypography = exp.text;
+-    let outputTypography = got;
+-    for (const match of exp.text.matchAll(/([\p{L}]+)\u0002\s*([\p{L}]+)/gu)) {
+-      const word = match[1] + match[2];
+-      expectedTypography = expectedTypography.replace(match[0], word);
+-      outputTypography = outputTypography.replaceAll(match[0], word);
+-    }
+-    let at = 0;
+-    const extraSpacesOnly = [...normStr(outputTypography)].every((ch) => {
+-      if (ch === normStr(expectedTypography)[at]) { at++; return true; }
+-      return ch === " ";
+-    }) && at === normStr(expectedTypography).length;
+-    if (!row.text_equal && extraSpacesOnly && pageEdits.every((e) => normStr(outputTypography).includes(normStr(e.after)))) {
+-      row.text_equal = true;
+-      row.typography_normalized = true;
+-      warnings.push({ code: "continued_flow_source_typography_normalized", pageIndex: i, severity: "warning", detail: "Source discretionary hyphens and PDFium word spacing differ; character order and every requested After text are preserved" });
+-    }
++    const sourceWords = new Set([...bandText(s, lo, flowHi).matchAll(/([\p{L}]+)\u0002\s*([\p{L}]+)/gu)].map((m) => m[1] + m[2]));
++    const expectedTypography = exp.text.replace(/([\p{L}]+)\u0002\s*([\p{L}]+)/gu, (raw, left, right) => sourceWords.has(left + right) ? left + right : raw);
+     if (!row.text_equal) {
+       const selected = (g, top) => g.chars.filter((c) => c.cy === null || c.cy >= lo && c.cy <= top);
+       const actual = [selected(o, flowHi), ...conts.map((g) => selected(g, hi))]
+         .flatMap((part, k) => k ? [{ u: 32, generated: true }, ...part] : part);
+-      if (matchesGeneratedWhitespace(exp.text, actual)) {
++      // Remove an actual U+0002 and its line separator only for the exact
++      // discretionary word proven by the source. Keep each surviving
++      // character's generated-whitespace provenance; visible '-' is real.
++      const raw = actual.map((c) => String.fromCharCode(c.u)).join("");
++      const drop = new Set();
++      for (const match of raw.matchAll(/([\p{L}]+)\u0002\s*([\p{L}]+)/gu)) {
++        if (!sourceWords.has(match[1] + match[2])) continue;
++        for (let k = match.index + match[1].length; k < match.index + match[0].length - match[2].length; k++) drop.add(k);
++      }
++      if (matchesGeneratedWhitespace(expectedTypography, actual.filter((_, k) => !drop.has(k)))) {
+         row.text_equal = true;
+         row.generated_whitespace_normalized = true;
+-        warnings.push({ code: "continued_flow_generated_whitespace_normalized", pageIndex: i, severity: "warning", detail: "Only PDFium-generated extraction whitespace differs; requested characters, literal whitespace and order are preserved" });
++        warnings.push({ code: "continued_flow_generated_whitespace_normalized", pageIndex: i, severity: "warning", detail: "Only source-proven discretionary markers and PDFium-generated extraction whitespace differ; requested characters, literal whitespace and order are preserved" });
+       }
+     }
+     row.expected_text = digest(exp.text, includeText);
+diff --git a/test/core.test.mjs b/test/core.test.mjs
+index 39959cf..93883f8 100644
+--- a/test/core.test.mjs
++++ b/test/core.test.mjs
+@@ -532,3 +532,18 @@ test("logical paragraph quote binds to the same raw source span as a visible lin
+   for (const r of results) assert.deepEqual(r.failures,[]);
+   assert.deepEqual(results[0].perPara,results[1].perPara);
+ });
++
++
++test("visible and logical quote candidates form one deduplicated raw-span union before selecting a paragraph", () => {
++  const first=para(1,"beneficial",{lines:[{off:0}]});
++  const second=para(2,"ben\u0002 eficial",{lines:[{off:0},{off:5}]});
++  const edit={id:"ambiguous-logical",pageIndex:0,before:"beneficial",after:"harmful"};
++  assert.equal(canonicalParagraphText(second),edit.before);
++  const ambiguous=planPageEdits([first,second],[edit]);
++  assert.equal(ambiguous.failures[0].code,"AMBIGUOUS_MATCH");
++  assert.equal(ambiguous.failures[0].hits,2);
++  assert.equal(ambiguous.perPara.size,0);
++  const unique=planPageEdits([first],[edit]);
++  assert.deepEqual(unique.failures,[]);
++  assert.deepEqual(unique.plans[0].touched,[0]);
++});
+diff --git a/test/pagination.test.mjs b/test/pagination.test.mjs
+index 7f47610..e62a578 100644
+--- a/test/pagination.test.mjs
++++ b/test/pagination.test.mjs
+@@ -321,3 +321,19 @@ test("saved whole logical paragraph compares generated spaces across continuatio
+     assert.ok(bad.failures.some(f=>f.code==="edited_flow_text_or_order_mismatch"),text);
+   }
+ });
++
++
++test("literal extra space in unchanged continued flow fails even while the requested word After exists", async () => {
++  const src=new Uint8Array([31]),out=new Uint8Array([32]);
++  const source=[[...body(["trial,routinely beta", "ben\u0002eficial delta"]),...footer],line("other page",50,700)];
++  const inspect=async(generated)=>{
++    const first=line("trial, routinely qualified",50,700);
++    first.find((c,i)=>i>0&&first[i-1][0]===","&&c[0]===" ")[3]=generated;
++    const docs=new Map([[src,source],[out,[[...first,br,...footer],body(["beneficial delta"]),line("other page",50,700)]]]);
++    return inspectSavedPdf(pdfEngineFor(docs),src,out,[{id:"word",pageIndex:0,before:"beta",after:"qualified"}],{sourcePageMap:mapFor([1])});
++  };
++  const bad=await inspect(false);
++  assert.ok(bad.failures.some(f=>f.code==="edited_flow_text_or_order_mismatch"));
++  const good=await inspect(true);
++  assert.equal(good.ok,true,JSON.stringify(good.failures));
++});
+diff --git a/test/quality.test.mjs b/test/quality.test.mjs
+index 50378ae..4814bca 100644
+--- a/test/quality.test.mjs
++++ b/test/quality.test.mjs
+@@ -358,3 +358,11 @@ test("generated extraction spaces may differ in a whole logical After; typed spa
+   assert.equal(matchesGeneratedWhitespace("alpha beta",extracted("beta alpha")),false);
+   assert.equal(matchesGeneratedWhitespace("value - 3",extracted("value~3")),false);
+ });
++
++
++test("expected text rejects distinct visible/logical matches but deduplicates equivalent maps of one raw span", () => {
++  const edit={id:"logical",before:"beneficial",after:"harmful"};
++  assert.equal(expectedPageText("beneficial ben\u0002eficial",[edit]).reason,"before_ambiguous");
++  assert.deepEqual(expectedPageText("beneficial",[edit]),{ok:true,text:"harmful"});
++  assert.deepEqual(expectedPageText("ben\u0002eficial",[edit]),{ok:true,text:"harmful"});
++});
+-- 
+2.55.0.windows.3
+

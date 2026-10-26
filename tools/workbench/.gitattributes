@@ -1,0 +1,4 @@
+# Preserve byte-identical upstream sources, patches and hash-pinned runtime assets.
+# Patch context and upstream formatting are part of the corresponding source.
+/app/src/paragraph-vendor/** -text whitespace=-blank-at-eol,-blank-at-eof
+/app/dist/paragraph-vendor/** -text whitespace=-blank-at-eol,-blank-at-eof

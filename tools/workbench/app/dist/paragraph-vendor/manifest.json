@@ -1,0 +1,57 @@
+{
+  "schema": "falsify.paragraph-pdf.vendor.v1",
+  "license": "AGPL-3.0-only",
+  "sourceModuleBase": "cd4ba2cdd68ae7e51198f615bd4ac6130206b162",
+  "sourceModuleOverlay": {
+    "schema": "falsify.paragraph-editor.overlay.v1",
+    "base": "cd4ba2cdd68ae7e51198f615bd4ac6130206b162",
+    "commit": "50abc7c10dac2f47033926e297484c0774328596",
+    "branch": "feature/paragraph-reflow-20261027",
+    "repository": "https://github.com/Shinick-Han/falsify-pdf-editor",
+    "patch": "patches/paragraph-flow-overlay.patch",
+    "patchSha256": "ec3edfacaf44be1c1c52214e9f9070832bc59cf6e30886eced3c864e326c7e75"
+  },
+  "upstream": {
+    "bentopdfCommit": "3a5f146d1b89d54dc7ca576aa6797c8bd3e42b97",
+    "engineCommit": "813903c93c758dfb8df46dbd34ace3b7f7a8538b",
+    "pdfiumCommit": "fce2b000cc7a9e2cabc92db41cd57ca03233f07d"
+  },
+  "sourcePatches": [
+    {
+      "name": "pdfium-stream-order.patch",
+      "sha256": "87190eea70e6d99e7a3f408c43c9fdfe3068996bde818beaa94ec7fe46b4c00d"
+    },
+    {
+      "name": "editcore-natural-space.patch",
+      "sha256": "44981d4aa639f9c1c9710a5c553e543764cc753030362e827774e1f27548338f"
+    },
+    {
+      "name": "editcore-justified-space.patch",
+      "sha256": "a1191d52cdc1e176bb3c8701b132a6ab30bd08ebd7ac247ba07847e20466e51f"
+    },
+    {
+      "name": "editcore-reedit-space.patch",
+      "sha256": "53919b15c82024b308799c58d732ae2907737fc5a7ad9188a98fd66711c7c509"
+    }
+  ],
+  "artifacts": {
+    "js": {
+      "path": "editcore.js",
+      "sha256": "6e6989a9994715951720e05355111aca7eab898e92b519ebea160167875bb3eb"
+    },
+    "wasm": {
+      "path": "editcore.wasm",
+      "sha256": "9b14b88937a9b21697565df94e82b28ac645547413606d4994d50d9200529c6e"
+    }
+  },
+  "sourceBuildVerified": false,
+  "trust": "locally-supplied-hash-verified-artifacts",
+  "editorModuleSha256": {
+    "editor.mjs": "71b2f284565f47e3c7f30b211e207f7da7aa483e6beab009a480fedd618558e3",
+    "quality.mjs": "e680654f5c536c4e4fcb6741808af32505c5e9cac7b91eb3da1d66f26cbbec41",
+    "pagination.mjs": "5d996fb310de7385772c2ede08ce9662d9bfecd2d73c49c26f72f7cd036a522e",
+    "inline-preservation.mjs": "4223e5431a5a616f3c9770439ac786519c71731e66ef95f06dead9e2af8d5d49",
+    "continuation-template.mjs": "b22d26adf07aca16e95cd6a87882248f94bd562217f531b947ebb749e5baab48"
+  },
+  "provenance": "Runtime bytes match caller-supplied candidate digests; build from listed C++ sources/patches is not verified. Editor-module overlay, if any, must accompany source distribution."
+}

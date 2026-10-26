@@ -272,6 +272,22 @@
       return 'e'+state.nextId++;
     }
     function snapshot(){return clone(viewOf(state));}
+    // Discovery adds immutable source paragraphs without becoming a user edit.
+    // Validate the entire batch before replacing the source catalog; undo/redo
+    // and existing anchors continue to refer to the exact same source text.
+    function addSegments(list){
+      const incoming=segmentsOf(list),known=new Map(state.segments.map(s=>[s.id,s])),added=[];
+      for(const seg of incoming){
+        const old=known.get(seg.id);
+        if(old){
+          if(old.text!==seg.text||old.pageIndex!==seg.pageIndex||old.label!==seg.label)fail('segment-conflict','이미 등록된 문단의 원문은 바꿀 수 없습니다.');
+        }else added.push(seg);
+      }
+      if(!added.length)return 0;
+      const raw=state.segments.concat(added).map(s=>s.pageIndex===null?{id:s.id,label:s.label,text:s.text}:s);
+      state.segments=segmentsOf(clone(raw));
+      return added.length;
+    }
     function add(edit){
       if(state.edits.length>=LIMITS.maxEdits)fail('invalid','편집 수가 한도를 벗어납니다.');
       const located=locate(state.segments,edit),at=clock();
@@ -318,7 +334,7 @@
       state.subs.add(sub);let dead=false;
       return function unsubscribe(){if(dead)return;dead=true;state.subs.delete(sub);};
     }
-    return Object.freeze({id:sessionId,snapshot,add,update,remove,setEnabled,undo,redo,subscribe});
+    return Object.freeze({id:sessionId,snapshot,addSegments,add,update,remove,setEnabled,undo,redo,subscribe});
   }
   function draft(input){
     allowKeys(input,['snapshot','now'],['snapshot'],'malformed','초안');

@@ -129,7 +129,7 @@ function mount(opts={}){
   const sourceBlobs=opts.sourceBlobs||blobMemory();
   const clock={value:opts.clock??1_700_000_000_000};
   const ws=api.create({document:w.document,preview:opts.preview===false?undefined:{pdfParams:Preview.pdfParams,fitScale:Preview.fitScale,defaultImport:async()=>lib},
-    edits:edits||undefined,exporter:exporter||undefined,storage,sourceBlobs,urls:{createObjectURL(file){downloads.push(file);return 'blob:'+downloads.length;},revokeObjectURL(){}},
+    edits:edits||undefined,exporter:exporter||undefined,paragraphPdf:opts.paragraphPdf,storage,sourceBlobs,urls:{createObjectURL(file){downloads.push(file);return 'blob:'+downloads.length;},revokeObjectURL(){}},
     timers,subtle:crypto.subtle,now:()=>clock.value});
   const file=f=>{w.get('paper-file').files=[f];w.get('paper-file').dispatchEvent(new Event('change'));};
   const canvas=()=>w.get('paper-before-stage').children.flatMap(page=>(page.children||[]).filter(c=>c.tagName==='canvas'));
@@ -809,6 +809,163 @@ test('wayfinding: an uploaded RED file points at manual editing',async()=>{
   document.dispatchEvent(new CustomEvent('falsify:document-state',{detail:{name:'paper.pdf',busy:true,hasResult:false,count:0}}));
   assert.equal(title.textContent,'RED 검토 중입니다');
   assert.equal(made.find(e=>e.className==='visual-next'&&e.textContent==='검토 중').textContent,'검토 중');
+});
+
+
+function clickParagraph(v,x=100,y=100){
+  const page=v.get('paper-before-stage').children[0];
+  page.getBoundingClientRect=()=>({left:20,top:30,width:612,height:792,right:632,bottom:822});
+  const event=new Event('click');Object.assign(event,{clientX:x+20,clientY:y+30,detail:1});
+  v.get('paper-before-stage').dispatchEvent(event);
+}
+function paragraphMock(text='A full paragraph.\nSecond line.',extra={}){
+  return {...extra,inspectPage:extra.inspectPage|| (async({file,pageIndex})=>({fileHash:sha(Buffer.from(await file.arrayBuffer())),pageIndex,width:612,height:792,rotation:0,paragraphs:[{id:'p0',text,bbox:[72,80,540,140]}]}))};
+}
+test('paragraph: a click edits the exact inspected paragraph with human origin and source coordinates; pending text survives another click',async()=>{
+  const text='A full paragraph.\nSecond line.';
+  const v=mount({paragraphPdf:paragraphMock(text)});v.file(pdfFile(pdfBytes('MARKER-A')));
+  await until(()=>/문단을 클릭/.test(v.get('paper-before-status').textContent),'inspected paragraph');
+  clickParagraph(v);
+  assert.equal(v.get('paper-inline-before').textContent,text);assert.equal(v.get('paper-inline-after').value,text);
+  assert.equal(v.ws.getEditSnapshot().edits.length,0,'opening the editor does not apply');
+  v.get('paper-inline-after').value='My full replacement paragraph.';clickParagraph(v);
+  assert.equal(v.get('paper-inline-after').value,'My full replacement paragraph.');
+  v.get('paper-inline-apply').click();
+  assert.equal(v.edits.added.length,1);const edit=v.edits.added[0];
+  assert.equal(edit.before,text);assert.equal(edit.after,'My full replacement paragraph.');assert.equal(edit.origin,'human');
+  assert.equal(edit.pageIndex,0);assert.equal(edit.segmentId,'paragraph:0:p0');
+  assert.deepEqual(edit.anchor,{start:0,end:text.length,occurrence:0,bbox:[72,80,540,140]});
+  v.get('paper-undo').click();assert.equal(v.ws.getEditSnapshot().edits.length,0);
+  v.get('paper-redo').click();assert.equal(v.ws.getEditSnapshot().edits.length,1);
+});
+test('paragraph: a late inspection is aborted and cannot bind the next source; drag selection remains available',async()=>{
+  let resolveA,signalA;
+  const adapter=paragraphMock('New paragraph.',{inspectPage:async({file,pageIndex,signal})=>{
+    const fileHash=sha(Buffer.from(await file.arrayBuffer()));
+    if(file.name==='a.pdf'){signalA=signal;return new Promise(resolve=>{resolveA=()=>resolve({fileHash,pageIndex,width:612,height:792,rotation:0,paragraphs:[{id:'old',text:'Old paragraph.',bbox:[72,80,540,140]}]});});}
+    return {fileHash,pageIndex,width:612,height:792,rotation:0,paragraphs:[{id:'new',text:'New paragraph.',bbox:[72,80,540,140]}]};
+  }});
+  const v=mount({paragraphPdf:adapter});v.file(pdfFile(pdfBytes('MARKER-A'),'a.pdf'));
+  await until(()=>resolveA,'inspection A');v.file(pdfFile(pdfBytes('MARKER-B'),'b.pdf'));
+  await until(()=>/문단을 클릭/.test(v.get('paper-before-status').textContent),'inspection B');
+  assert.equal(signalA.aborted,true);resolveA();await settle();
+  v.document.getSelection=()=>({isCollapsed:false});clickParagraph(v);assert.equal(v.get('paper-inline').hidden,true);
+  v.document.getSelection=()=>null;clickParagraph(v);assert.equal(v.get('paper-inline-before').textContent,'New paragraph.');
+  assert.ok(v.ws.getSource().segments.every(s=>s.text!=='Old paragraph.'));
+});
+test('paragraph output: preferred adapter retains page map and previews mapped continuation bytes; an invalid map makes no page claim',async()=>{
+  const bytes=pdfBytes('MARKER-GEN'),file=pdfFile(bytes,'edited.pdf');let calls=0;
+  const map=[{sourcePageIndex:0,outputPageIndex:1,continuationPageIndices:[2]},{sourcePageIndex:1,outputPageIndex:0,continuationPageIndices:[]}];
+  const adapter=paragraphMock('A full paragraph.',{prepare:async args=>{calls++;assert.equal(args.fileHash,sha(pdfBytes('MARKER-A')));return {file,sha256:sha(bytes),verification:{status:'warning'},pageMap:map};}});
+  const v=mount({paragraphPdf:adapter,exporter:{prepare:async()=>{assert.fail('canonical paragraph must use the flow adapter');}}});v.file(pdfFile(pdfBytes('MARKER-A')));
+  await until(()=>/문단을 클릭/.test(v.get('paper-before-status').textContent),'inspected paragraph');clickParagraph(v);
+  v.get('paper-inline-after').value='Longer flowing replacement.';v.get('paper-inline-apply').click();
+  v.log.setPages(3);v.get('paper-generate').click();
+  await until(()=>v.get('paper-after-stage').children[0]?.painted===2,'mapped original page');
+  assert.equal(calls,1);assert.deepEqual(v.ws.getOutput().pageMap,map);
+  const nav=v.created.find(e=>e.className==='paper-after-nav');assert.equal(nav.hidden,false);
+  nav.children[2].click();await until(()=>v.get('paper-after-stage').children[0]?.painted===3,'continuation page');
+  assert.match(v.get('paper-after-status').textContent,/이어지는 쪽/);
+  assert.deepEqual(v.log.received.at(-1),bytes);
+  v.get('paper-page-next').click();await until(()=>v.get('paper-after-stage').children[0]?.painted===1,'mapped second source page');
+  assert.equal(nav.hidden,true);
+  map[1].outputPageIndex=99;v.get('paper-generate').click();
+  await until(()=>/페이지 대응이 없습니다/.test(v.get('paper-after-status').textContent),'invalid map diagnostic');
+  assert.equal(v.get('paper-after-stage').children.length,0);assert.ok(v.ws.getOutput(),'verified bytes remain downloadable');
+});
+
+
+test('paragraph core: discovering another page appends source bindings without losing human edit undo history',async()=>{
+  const edits=require('../dist/paper-edits.js');
+  const v=mount({edits,paragraphPdf:paragraphMock('Canonical paragraph.\nLine two.')});v.file(pdfFile(pdfBytes('MARKER-A')));
+  await until(()=>/문단을 클릭/.test(v.get('paper-before-status').textContent),'first paragraph');
+  clickParagraph(v);v.get('paper-inline-after').value='First replacement.';v.get('paper-inline-apply').click();
+  assert.equal(v.ws.getEditSnapshot().edits.length,1);const first=v.ws.getEditSnapshot().edits[0];
+  v.get('paper-page-next').click();
+  await until(()=>/^2 \/ 2쪽.*문단을 클릭/.test(v.get('paper-before-status').textContent),'second paragraph');
+  clickParagraph(v);v.get('paper-inline-after').value='Second replacement.';v.get('paper-inline-apply').click();
+  assert.equal(v.ws.getEditSnapshot().edits.length,2);assert.equal(v.ws.getEditSnapshot().edits[0].id,first.id);
+  v.get('paper-undo').click();assert.equal(v.ws.getEditSnapshot().edits.length,1);
+  v.get('paper-undo').click();assert.equal(v.ws.getEditSnapshot().edits.length,0);
+});
+
+
+test('paragraph draft: explicit restore verifies only saved pages and rebinds exact canonical edits across pages',async()=>{
+  const edits=require('../dist/paper-edits.js'),storage=memory(),file=pdfFile(pdfBytes('MARKER-A'));
+  const adapter=paragraphMock('Canonical paragraph.\nLine two.');
+  const first=mount({edits,storage,paragraphPdf:adapter});first.file(file);
+  await until(()=>/문단을 클릭/.test(first.get('paper-before-status').textContent),'draft page one');
+  clickParagraph(first);first.get('paper-inline-after').value='First saved replacement.';first.get('paper-inline-apply').click();
+  first.get('paper-page-next').click();
+  await until(()=>/^2 \/ 2쪽.*문단을 클릭/.test(first.get('paper-before-status').textContent),'draft page two');
+  clickParagraph(first);first.get('paper-inline-after').value='Second saved replacement.';first.get('paper-inline-apply').click();
+  const saved=first.ws.getEditSnapshot();first.get('paper-draft-opt').checked=true;first.get('paper-draft-save').click();
+  await until(()=>storage.keys().some(k=>k.startsWith('falsify.paper-draft.v1.')),'saved draft');
+  const inspected=[],second=mount({edits,storage,paragraphPdf:paragraphMock('',{inspectPage:async args=>{inspected.push(args.pageIndex);return adapter.inspectPage(args);}})});
+  second.file(file);await until(()=>/문단을 클릭/.test(second.get('paper-before-status').textContent),'new source initial page');
+  assert.equal(second.ws.getEditSnapshot().edits.length,0,'a matching draft never restores automatically');
+  second.get('paper-draft-restore').click();await until(()=>second.ws.getEditSnapshot().edits.length===2,'two restored edits');
+  assert.deepEqual(inspected,[0,0,1],'only unique saved pages are inspected during explicit restore');
+  const restored=second.ws.getEditSnapshot();assert.equal(restored.canUndo,false,'restored history starts at this session');
+  assert.deepEqual(restored.edits.map(e=>({id:e.id,before:e.before,after:e.after,origin:e.origin,anchor:e.anchor})),saved.edits.map(e=>({id:e.id,before:e.before,after:e.after,origin:e.origin,anchor:e.anchor})));
+  clickParagraph(second);second.get('paper-inline-after').value='Revised after restoring.';second.get('paper-inline-apply').click();
+  second.get('paper-undo').click();assert.equal(second.ws.getEditSnapshot().edits[0].after,'First saved replacement.');
+});
+
+
+test('proposal aliases: exact same-page canonical aliases prefer the original while real duplicate quotes stay ambiguous',()=>{
+  const raw={id:'raw0',pageIndex:0,text:'Latin words. Other text.'},alias={id:'paragraph:0:p0',pageIndex:0,text:'Latin words.'};
+  const classify=segments=>api.classifyProposals([{before:'words',after:'changed'}],segments,{origin:'external-ai-import'}).items[0];
+  assert.equal(classify([raw,alias]).status,'matched');assert.equal(classify([raw,alias]).segmentId,'raw0');
+  assert.equal(classify([raw,alias,{id:'raw1',pageIndex:1,text:'More words.'}]).status,'ambiguous');
+  assert.equal(classify([{...raw,text:'Latin words. Latin words.'},alias]).status,'ambiguous');
+  assert.equal(classify([raw,{...alias,text:'Novel words.'}]).status,'ambiguous','unproven aliases remain separate');
+  const explicit=api.classifyProposals([{segmentId:alias.id,before:'words',after:'changed'}],[raw,alias],{origin:'external-ai-import'}).items[0];
+  assert.equal(explicit.segmentId,alias.id);assert.equal(explicit.status,'matched');
+});
+test('export intent: legacy source edits stay on MuPDF; only an exact unsupported long-room failure reflows the whole batch',async()=>{
+  const bytes=pdfBytes('MARKER-GEN'),file=pdfFile(bytes,'edited.pdf'),result={file,sha256:sha(bytes),verification:{status:'warning'}};
+  const calls=[],flow=[],text='Latin words. Other text.';let failure=null;
+  const v=mount({paragraphPdf:paragraphMock(text,{prepare:async request=>{flow.push(request);return result;}}),exporter:{prepare:async request=>{calls.push(request);if(failure)throw failure;return result;}}});
+  const source=pdfFile(pdfBytes('MARKER-A'));v.file(source);await until(()=>/문단을 클릭/.test(v.get('paper-before-status').textContent),'export intent source');
+  v.document.dispatchEvent(new CustomEvent('falsify:document',{detail:{file:source,result:{segments:[{id:'raw0',pageIndex:0,text}]}}}));
+  v.edits.last.add({segmentId:'raw0',pageIndex:0,before:'Latin',after:'Hello한국어',origin:'human'});
+  v.edits.last.add({segmentId:'raw0',pageIndex:0,before:'Other',after:'Another replacement',origin:'human'});
+  assert.equal(v.ws.getEditSnapshot().edits.length,2);v.get('paper-generate').click();await settle();
+  assert.equal(calls.length,1);assert.equal(flow.length,0);assert.equal(v.ws.getOutput().verification.status,'warning');
+  failure=Object.assign(new Error('no room'),{code:'unsupported',details:{edits:[{code:'long-after-no-room'}]}});
+  v.get('paper-generate').click();await settle();assert.equal(flow.length,1);
+  assert.deepEqual(flow[0].edits,calls[1].edits);assert.equal(flow[0].edits.length,2);assert.equal(flow[0].edits[0].after,'Hello한국어');
+  for(const error of [
+    {code:'aborted',details:{edits:[{code:'long-after-no-room'}]}},
+    {code:'stale-source',details:{edits:[{code:'long-after-no-room'}]}},
+    {code:'unsupported',details:{edits:[{code:'long-after-no-room'},{code:'ambiguous-anchor'}]}},
+    {code:'unsupported',details:{edits:[{code:'anchor-mismatch'}]}}
+  ]){failure=Object.assign(new Error('guarded failure'),error);v.get('paper-generate').click();await settle();assert.equal(flow.length,1,'no fallback for '+JSON.stringify(error));}
+  assert.equal(v.ws.getOutput().file,file,'failure preserves the last real output');
+});
+test('proposal acceptance: a source-segment substring cannot overlap a canonical paragraph edit through an alias',async()=>{
+  const text='Latin words. Other text.',v=mount({paragraphPdf:paragraphMock('Latin words.')});const file=pdfFile(pdfBytes('MARKER-A'));
+  v.file(file);await until(()=>/문단을 클릭/.test(v.get('paper-before-status').textContent),'overlap source');
+  v.document.dispatchEvent(new CustomEvent('falsify:document',{detail:{file,result:{segments:[{id:'raw0',pageIndex:0,text}]}}}));
+  clickParagraph(v);v.get('paper-inline-after').value='Changed paragraph.';v.get('paper-inline-apply').click();assert.equal(v.ws.getEditSnapshot().edits.length,1);
+  const rejected=v.ws.acceptProposals([{segmentId:'raw0',before:'words',after:'overlap'}],{origin:'external-ai-import',confirmed:true});
+  assert.equal(rejected.applied,0);assert.equal(v.ws.getEditSnapshot().edits.length,1);assert.match(v.get('paper-proposal-status').textContent,/같은 위치/);
+  const added=v.ws.acceptProposals([{segmentId:'raw0',before:'Other',after:'Separate'}],{origin:'external-ai-import',confirmed:true});
+  assert.equal(added.applied,1);assert.equal(v.ws.getEditSnapshot().edits.length,2);
+});
+
+
+test('export intent: an eight-item external rewrite batch with source-proven hyphenated Before routes directly to paragraph flow',async()=>{
+  const bytes=pdfBytes('MARKER-GEN'),file=pdfFile(bytes,'edited.pdf'),calls=[];
+  const quotes=Array.from({length:8},(_,i)=>i===0?'This prag-\nmatic approach.':'Unique source quotation '+i+'.');
+  const v=mount({paragraphPdf:{prepare:async request=>{calls.push(request);return {file,sha256:sha(bytes),verification:{status:'applied'}};}},exporter:{prepare:async()=>assert.fail('external rewrite batch must not visit legacy exact selection adapter')}});
+  const source=pdfFile(pdfBytes('MARKER-A'));v.file(source);await until(()=>v.ws.getSource()?.fileHash,'external source');
+  v.document.dispatchEvent(new CustomEvent('falsify:document',{detail:{file:source,result:{segments:quotes.map((text,i)=>({id:'raw'+i,pageIndex:0,text}))}}}));
+  const result=v.ws.acceptProposals(quotes.map((before,i)=>({segmentId:'raw'+i,before,after:'A full flowing replacement paragraph '+i+'.'})),{origin:'external-ai-import',confirmed:true});
+  assert.equal(result.applied,8);v.get('paper-generate').click();await settle();
+  assert.equal(calls.length,1);assert.equal(calls[0].edits.length,8);assert.equal(calls[0].edits[0].before,'This prag-\nmatic approach.');
+  assert.ok(calls[0].edits.every(e=>e.origin==='external-ai-import'));assert.equal(v.ws.getOutput().verification.status,'applied');
 });
 
 (async()=>{let passed=0;for(const [name,fn] of tests){try{await fn();passed++;console.log('PASS '+name);}catch(e){console.error('FAIL '+name+'\n'+(e.stack||e));process.exitCode=1;}}

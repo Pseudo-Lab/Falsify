@@ -81,7 +81,7 @@ details.reference > *{display:block}
 <h2 id="quick-title">빠른 사용</h2>
 <ol id="quick-steps">
 <li><b class="ui">RED 논문 파일</b>에 PDF를 넣습니다.</li>
-<li>글자를 선택하고 After를 수정한 뒤 <b class="ui">편집 반영</b>을 누릅니다.</li>
+<li>문단을 누르거나 글자를 선택하고 After를 수정한 뒤 <b class="ui">편집 반영</b>을 누릅니다.</li>
 <li><b class="ui">현재 편집으로 생성</b>으로 미리보고 <b class="ui">현재 생성본 다운로드</b>로 받습니다.</li>
 </ol>
 <p><a href="#external-ai">외부 모델</a> · <a href="#red">로컬 AI</a> · <a href="#blue">BLUE</a> · <a href="#review">사람 검수</a></p>
@@ -93,7 +93,8 @@ details.reference > *{display:block}
 <section id="paper" aria-labelledby="paper-title">
 <h2 id="paper-title">논문 작업대</h2>
 <p>논문 PDF는 <b class="ui">RED 논문 파일</b>로 올리면 텍스트 추출이나 AI 검토가 끝나기 전에 쪽 단위로 열립니다. 직접 고른 편집, PC 없이 붙이는 외부 모델 응답, 접힌 <b class="ui">AI 검토 · 선택 사항</b>의 로컬 AI는 서로 다른 경로입니다. BLUE 파일과 사람 검수는 그 경로와 따로 둡니다.</p>
-<p><b class="ui">RED 논문 파일</b>에 PDF를 올리면 <b class="ui">원본 쪽 보기 · 직접 편집</b>에서 글자를 선택할 수 있습니다. Before를 확인하고 After를 적은 뒤 <b class="ui">편집 반영</b>합니다. 이 직접 편집은 모델을 호출하지 않습니다.</p>
+<p><b class="ui">RED 논문 파일</b>에 PDF를 올리면 <b class="ui">원본 쪽 보기 · 직접 편집</b>에서 문단을 눌러 전체 문단을 고칠 수 있습니다. 글자를 드래그하면 부분 편집도 가능합니다. Before를 확인하고 After를 적은 뒤 <b class="ui">편집 반영</b>합니다. 변경 전·후와 위치, 사람 작성 출처는 자동으로 기록되며 모델을 호출하지 않습니다.</p>
+<p>문단 편집은 원래 글꼴과 크기를 활용해 줄을 다시 나누고 뒤따르는 본문을 밀어냅니다. 본문이 넘치면 원래 쪽 뒤에 이어지는 쪽이 생길 수 있습니다. 생성본의 <b class="ui">이전</b>·<b class="ui">다음</b>으로 이어지는 쪽까지 확인하세요. 현재는 한 단의 본문 흐름을 중심으로 지원하며, 임의 표·그림·수식의 일반적인 재배치는 보장하지 않습니다. 이어지는 쪽에는 원래 머리말·꼬리말 글자를 사용하지만 고정 출판사 로고는 반복하지 않습니다. 수정한 쪽을 재저장할 때 미세한 색상 변환이 있을 수 있습니다.</p>
 <p><b class="ui">이전 쪽</b>, <b class="ui">다음 쪽</b>, <b class="ui">축소</b>, <b class="ui">확대</b>로 원본 한 쪽을 봅니다. 선택 상자는 <b class="ui">편집 반영</b>과 <b class="ui">선택 취소</b>가 있고, After는 4000자까지입니다. 편집 목록에서는 이동, 켜기/끄기, After 수정, 삭제를 할 수 있습니다. <b class="ui">실행 취소</b>와 <b class="ui">다시 실행</b>은 그 목록의 조작입니다. 편집 코어가 없으면 쪽 보기와 원본 다운로드는 남고, 편집은 저장되지 않으며 성공으로 표시하지 않습니다.</p>
 <h3 id="external-ai">외부 모델 (PC 없음)</h3>
 <p>PC의 companion 없이 외부 모델을 쓰려면 <b class="ui">원문과 과제 프롬프트 복사</b> 또는 <b class="ui">프롬프트 TXT 내려받기</b>로 과제를 복사해 그 모델에 직접 붙입니다. 응답은 <b class="ui">붙여넣은 응답</b>에 넣고 <b class="ui">변경 찾기</b>를 누릅니다. <b class="ui">한 곳</b>만 <b class="ui">이 변경을 가져오기</b>로 고릅니다. <b class="ui">여러 곳</b>이면 위치 하나를 고르고 <b class="ui">고른 위치로 확정</b>한 다음에만 가져옵니다. <b class="ui">선택한 변경 가져오기</b>는 고른 변경만 편집 목록에 올립니다. 이 가져오기는 검증된 RED 실행이 아니며, 앱이 모델을 호출하거나 응답을 자동 적용하지 않습니다. 로컬 AI는 <b class="ui">AI 검토 · 선택 사항</b>을 연 뒤 전송 동의와 <b class="ui">선택 harness로 전체 검토</b>가 있을 때만 실행됩니다.</p>

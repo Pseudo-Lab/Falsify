@@ -1,0 +1,80 @@
+diff --git a/core/fpdfapi/edit/cpdf_pagecontentgenerator.cpp b/core/fpdfapi/edit/cpdf_pagecontentgenerator.cpp
+index f99f1e4153b41630218b2211b5a9fd8b7c7c7128..f387341a226b836a5ab0aa442b31b9192aa2187a 100644
+--- a/core/fpdfapi/edit/cpdf_pagecontentgenerator.cpp
++++ b/core/fpdfapi/edit/cpdf_pagecontentgenerator.cpp
+@@ -444,7 +444,29 @@ CPDF_PageContentGenerator::GenerateModifiedStreams() {
+   // e.g. a page-level `/C1 cs` prolog a bare-`scn` form inherits (see the
+   // pruning guard in UpdateResourcesDict, and
+   // FPDFAnnotEmbedderTest.ApplyRedactionPreservesInheritedColorspaceResources).
++  //
++  // Falsify stream-order: "append" means the streamless objects really are at
++  // the tail of the object list. A streamless object that precedes an object
++  // already living in a content stream was inserted (e.g. via
++  // FPDFPage_InsertObjectAtIndex), and writing it to an appended stream would
++  // move it after that object in paint and reading order.
++  bool streamless_precedes_streamed = false;
++  {
++    bool seen_streamless = false;
++    for (auto& pPageObj : page_objects_) {
++      if (!pPageObj->IsActive()) {
++        continue;
++      }
++      if (pPageObj->GetContentStream() == CPDF_PageObject::kNoContentStream) {
++        seen_streamless = true;
++      } else if (seen_streamless) {
++        streamless_precedes_streamed = true;
++        break;
++      }
++    }
++  }
+   const bool append_only =
++      !streamless_precedes_streamed &&
+       marked_dirty_streams.empty() && all_dirty_streams.size() == 1 &&
+       all_dirty_streams.count(CPDF_PageObject::kNoContentStream) == 1;
+   if (!append_only && !all_dirty_streams.empty()) {
+@@ -468,6 +490,45 @@ CPDF_PageContentGenerator::GenerateModifiedStreams() {
+     for (int32_t i = 0; i <= last_index; ++i) {
+       all_dirty_streams.insert(i);
+     }
++
++    // Falsify stream-order: every existing stream is regenerated in object
++    // list order, so a streamless object can be serialized in place instead
++    // of in a stream appended after all of them. Bind each one to the stream
++    // of its nearest preceding active object that already has a stream (or,
++    // for leading objects, of the nearest following one). Only streamless
++    // objects are rebound; objects parsed from or previously saved to a
++    // stream keep their index. Each regenerated stream starts from the
++    // identity CTM and objects serialize their own graphics state, so the
++    // target stream does not change how the object paints.
++    if (last_index >= 0) {
++      int32_t prev_stream = CPDF_PageObject::kNoContentStream;
++      std::vector<CPDF_PageObject*> leading;
++      for (auto& pPageObj : page_objects_) {
++        if (!pPageObj->IsActive()) {
++          continue;
++        }
++        const int32_t stream = pPageObj->GetContentStream();
++        if (stream >= 0 && stream <= last_index) {
++          for (CPDF_PageObject* obj : leading) {
++            obj->SetContentStream(stream);
++          }
++          leading.clear();
++          prev_stream = stream;
++        } else if (stream == CPDF_PageObject::kNoContentStream) {
++          if (prev_stream != CPDF_PageObject::kNoContentStream) {
++            pPageObj->SetContentStream(prev_stream);
++          } else {
++            leading.push_back(pPageObj.get());
++          }
++        }
++      }
++      // Objects still streamless (no streamed neighbour at all) keep the
++      // appended bucket. Otherwise drop it: only inactive objects could
++      // still name it, and they are never serialized.
++      if (leading.empty()) {
++        all_dirty_streams.erase(CPDF_PageObject::kNoContentStream);
++      }
++    }
+   }
+   // --- end embedpdf
+ 

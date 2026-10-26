@@ -41,3 +41,5 @@
 .paper-stage{max-height:min(70vh,720px)}
 .paper-inline.is-open{position:fixed;left:8px;right:8px;bottom:8px;top:auto;width:auto}
 }
+
+.paper-after-nav{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px;margin:6px 0}.paper-after-nav[hidden]{display:none}

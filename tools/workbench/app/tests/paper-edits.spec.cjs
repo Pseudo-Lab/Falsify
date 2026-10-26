@@ -238,6 +238,36 @@ check('failed adds do not consume ids and remove/re-add stays available',()=>{
   assert.equal(cycle.snapshot().edits.length,1);
 });
 
+check('discovered paragraphs preserve undo history and bind exact immutable source',()=>{
+  const s=session([seg('s0','unique claim in the source',0)]);
+  const first=s.add(edit());s.update(first,{after:'second claim'});s.undo();
+  const before=s.snapshot();let calls=0;s.subscribe(()=>calls++);
+  const incoming=seg('paragraph-1','Another source paragraph.',1);
+  assert.equal(s.addSegments([incoming]),1);
+  incoming.text='Mutated caller copy';
+  assert.deepEqual(s.snapshot(),before);assert.equal(calls,0);
+  assert.equal(s.addSegments([seg('paragraph-1','Another source paragraph.',1)]),0);
+  s.redo();assert.equal(s.snapshot().edits[0].after,'second claim');
+  s.add({segmentId:'paragraph-1',pageIndex:1,before:'Another source paragraph.',after:'Another edited paragraph.',origin:'human'});
+  assert.equal(s.snapshot().edits[1].before,'Another source paragraph.');
+  assert.equal(s.snapshot().edits[1].anchor.start,0);
+  assert.equal(s.snapshot().edits[1].origin,'human');
+});
+
+check('paragraph discovery rejects a conflicting batch atomically and enforces combined limits',()=>{
+  const s=session([seg('s0','unique claim in the source',0)]);
+  assert.throws(()=>s.addSegments([seg('new','New text',1),seg('s0','Different source',0)]),e=>e.code==='segment-conflict');
+  assert.throws(()=>s.add({pageIndex:1,segmentId:'new',before:'New text',after:'Changed text',origin:'human'}),e=>e.code==='invalid');
+  assert.equal(s.snapshot().revision,0);
+  assert.throws(()=>s.addSegments([seg('bad','text',-1)]),e=>e.code==='invalid');
+  const full=session(Array.from({length:E.LIMITS.maxSegments},(_,i)=>seg('p'+i,'a',0)));
+  assert.throws(()=>full.addSegments([seg('extra','b',0)]),e=>e.code==='invalid');
+  assert.equal(full.snapshot().revision,0);
+  const unpaged=session([{id:'original',label:'Text',text:'Before text'}]);
+  assert.equal(unpaged.addSegments([seg('paged','Page text',1)]),1);
+  assert.equal(unpaged.addSegments([{id:'original',label:'Text',text:'Before text'}]),0);
+});
+
 check('browser global export does not touch storage, DOM or network',()=>{
   const code=fs.readFileSync(path.join(__dirname,'../dist/paper-edits.js'),'utf8');
   for(const banned of ['localStorage','sessionStorage','indexedDB','XMLHttpRequest','WebSocket','fetch(','document.','window.'])assert.equal(code.includes(banned),false,banned);

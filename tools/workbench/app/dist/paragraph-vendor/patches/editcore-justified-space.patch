@@ -1,0 +1,140 @@
+diff --git a/packages/pdfium/build/code/editcore/layout.cpp b/packages/pdfium/build/code/editcore/layout.cpp
+index 31e9b900..a90322a3 100644
+--- a/packages/pdfium/build/code/editcore/layout.cpp
++++ b/packages/pdfium/build/code/editcore/layout.cpp
+@@ -1582,109 +1582,126 @@ bool layoutParagraph(Session& s, FPDF_PAGE page, Paragraph& p, bool autoWiden,
+                 ? &layoutRuns[ri].srcAdv
+                 : nullptr;
+         if (sa) srcAdvUsed++;
+         for (size_t ci = 0; ci < text.size(); ci++) {
+             uint32_t cp = text[ci];
+             const size_t ci0 = ci;
+             if (cp >= 0xD800 && cp <= 0xDBFF && ci + 1 < text.size() &&
+                 text[ci + 1] >= 0xDC00 && text[ci + 1] <= 0xDFFF) {
+                 cp = 0x10000 + ((cp - 0xD800) << 10) + (text[ci + 1] - 0xDC00);
+                 ci++;
+             }
+             const float ov = sa ? (*sa)[ci0] : -1.0f;
+             const uint8_t lvl = bidiLv[runUnitStart[ri] + ci0];
+             if (cp == u'\r') continue;
+             if (cp == u'\n') {
+                 flushWord();
+ 
+                 {
+                     Token t;
+                     t.kind = Token::Break;
+                     tokens.push_back(t);
+                 }
+             } else if (cp == 0x00AD) {
+ 
+                 flushWord();
+                 if (!tokens.empty() && tokens.back().kind == Token::Word) {
+                     tokens.back().softHyphen = true;
+                 }
+             } else if (isBreakableSpace(cp)) {
+                 flushWord();
+                 Token t;
+                 t.kind = Token::Space;
+                 t.level = lvl;
+                 t.runIndex = static_cast<int>(ri);
+                 t.off = ci0;
+ 
+                 const bool atomicNbr =
+                     (ri > 0 && layoutRuns[ri - 1].atomicObject) ||
+                     (ri + 1 < layoutRuns.size() &&
+                      layoutRuns[ri + 1].atomicObject);
+                 if (cp == u'\t') {
+ 
+                     float w = ov;
+                     if (w < 0.0f && ci0 < layoutRuns[ri].srcAdv.size())
+                         w = layoutRuns[ri].srcAdv[ci0];
+                     t.width = w > 0.0f
+                                   ? w
+                                   : 4.0f * advanceOf(static_cast<int>(ri), u' ');
+                 } else {
+ 
+-                    const bool naturalOk =
+-                        cp == u' ' && std::abs(p.fmt.word_spacing) < 0.005f &&
+-                        naturalSpace[ri] > 0.0f;
+-                    t.width = (ov >= 0 && std::abs(p.fmt.word_spacing) < 0.005f &&
+-                               (!anyEdited || atomicNbr ||
+-                                layoutRuns[ri].textUnchanged))
+-                                  ? ov
+-                                  : naturalOk ? naturalSpace[ri]
+-                                              : advanceOf(static_cast<int>(ri), u' ');
++                    // A kept space keeps its source advance (0 when its gap
++                    // is folded into the glyph before it); any other space
++                    // takes the source natural gap when known, else the font.
++                    // Word spacing measures every space by the font plus Tw;
++                    // where the natural gap is known that same base stays on
++                    // top, so a space after an edited glyph is as wide as one
++                    // after a kept glyph that carries the gap folded in. Only
++                    // between words: leading (indent) spaces keep the font.
++                    const bool naturalOk = cp == u' ' && naturalSpace[ri] > 0.0f;
++                    const float base =
++                        (ov >= 0 && (!anyEdited || atomicNbr ||
++                                     layoutRuns[ri].textUnchanged))
++                            ? ov
++                            : naturalOk ? naturalSpace[ri] : -1.0f;
++                    bool afterWord = false;
++                    for (auto it = tokens.rbegin(); it != tokens.rend(); ++it) {
++                        if (it->kind == Token::Space) continue;
++                        afterWord = it->kind == Token::Word;
++                        break;
++                    }
++                    if (std::abs(p.fmt.word_spacing) < 0.005f)
++                        t.width = base >= 0 ? base
++                                            : advanceOf(static_cast<int>(ri), u' ');
++                    else
++                        t.width = advanceOf(static_cast<int>(ri), u' ') +
++                                  (naturalOk && afterWord ? base : 0.0f);
+                 }
+                 tokens.push_back(t);
+             } else {
+ 
+                 if (!word.chars.empty() && word.level != lvl) flushWord();
+                 word.level = lvl;
+                 word.chars.push_back({cp, static_cast<int>(ri)});
+                 word.advs.push_back(ov);
+                 word.offs.push_back(ci0);
+             }
+         }
+     }
+     flushWord();
+ 
+     if (autoWiden && preEditLineCount == 1 && p.rotation == 0) {
+         bool hasBreak = false;
+         float natural = 0, trailingSpace = 0;
+         for (const auto& t : tokens) {
+             if (t.kind == Token::Break || t.kind == Token::ParaBreak) {
+                 hasBreak = true;
+                 break;
+             }
+             float w = 0;
+             if (t.kind == Token::Word) {
+                 w = wordWidth(t);
+                 natural += w + trailingSpace;
+                 trailingSpace = 0;
+             } else if (t.kind == Token::Space) {
+                 trailingSpace += t.width > 0 ? t.width : advanceOf(t.runIndex, u' ');
+             }
+         }
+ 
+         if (!hasBreak && natural > p.width + 1.0f) {
+             const float pageW = FPDF_GetPageWidthF(page);
+             const float MARGIN = 2.0f;
+             float newW = natural + 0.5f;
+ 
+             if (p.fmt.align == 1) {
+                 const float cx = p.x + p.width * 0.5f;
+                 const float room = 2.0f * std::max(0.0f,
+                     std::min(cx - MARGIN, pageW - MARGIN - cx));
+                 newW = std::min(newW, room);
+                 if (newW > p.width) { p.x = cx - newW * 0.5f; p.width = newW; }
+             } else if (p.fmt.align == 2) {
+                 const float rightEdge = p.x + p.width;
+                 newW = std::min(newW, rightEdge - MARGIN);
+                 if (newW > p.width) { p.x = rightEdge - newW; p.width = newW; }
+             } else {
+                 newW = std::min(newW, pageW - MARGIN - p.x);
+                 if (newW > p.width) p.width = newW;

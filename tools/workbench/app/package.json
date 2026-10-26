@@ -1,6 +1,6 @@
 {
   "name": "falsify-paper-workbench",
-  "version": "0.2.0-alpha.13",
+  "version": "0.2.0-alpha.14",
   "license": "AGPL-3.0-only",
   "private": true,
   "scripts": {
@@ -9,7 +9,9 @@
     "build:browser-pdf": "node scripts/build-browser-pdf.mjs",
     "test:browser-pdf": "node scripts/build-browser-pdf.mjs && node --test tests/browser-pdf.spec.mjs",
     "test": "node scripts/test.mjs",
-    "test:browser": "node tests/visual-workflow.browser.cjs"
+    "test:browser": "node tests/visual-workflow.browser.cjs",
+    "build:paragraph-pdf": "node scripts/build-paragraph-pdf.mjs",
+    "test:paragraph-pdf": "node scripts/build-paragraph-pdf.mjs && node --test tests/paragraph-pdf.spec.mjs"
   },
   "dependencies": {
     "fflate": "0.8.3",

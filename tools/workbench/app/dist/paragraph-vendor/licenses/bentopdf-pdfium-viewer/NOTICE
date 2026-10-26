@@ -1,0 +1,11 @@
+BentoPDF PDF Viewer
+Copyright 2026 BentoPDF
+
+Includes code from EmbedPDF (https://github.com/embedpdf/embed-pdf-viewer)
+Copyright 2025 CloudPDF, licensed under the MIT License
+(licenses/LICENSE.embedpdf-mit).
+Modified by BentoPDF; changes are recorded in the Git history.
+
+Includes HarfBuzz (https://github.com/harfbuzz/harfbuzz), licensed under the
+Old MIT license (licenses/LICENSE.harfbuzz), vendored at
+packages/pdfium/build/code/harfbuzz.

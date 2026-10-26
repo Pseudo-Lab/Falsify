@@ -1,0 +1,47 @@
+{
+  "schema": "falsify-editor-candidate-runtime/1",
+  "upstream": {
+    "bentopdfCommit": "3a5f146d1b89d54dc7ca576aa6797c8bd3e42b97",
+    "engineCommit": "813903c93c758dfb8df46dbd34ace3b7f7a8538b",
+    "pdfiumCommit": "fce2b000cc7a9e2cabc92db41cd57ca03233f07d"
+  },
+  "toolchain": {
+    "emsdk": "3.1.70"
+  },
+  "sourcePatches": [
+    {
+      "name": "pdfium-stream-order.patch",
+      "sha256": "87190eea70e6d99e7a3f408c43c9fdfe3068996bde818beaa94ec7fe46b4c00d"
+    },
+    {
+      "name": "editcore-natural-space.patch",
+      "sha256": "44981d4aa639f9c1c9710a5c553e543764cc753030362e827774e1f27548338f"
+    },
+    {
+      "name": "editcore-justified-space.patch",
+      "sha256": "a1191d52cdc1e176bb3c8701b132a6ab30bd08ebd7ac247ba07847e20466e51f"
+    },
+    {
+      "name": "editcore-reedit-space.patch",
+      "sha256": "53919b15c82024b308799c58d732ae2907737fc5a7ad9188a98fd66711c7c509"
+    }
+  ],
+  "artifacts": {
+    "js": {
+      "path": "editcore.js",
+      "sha256": "6e6989a9994715951720e05355111aca7eab898e92b519ebea160167875bb3eb"
+    },
+    "wasm": {
+      "path": "editcore.wasm",
+      "sha256": "9b14b88937a9b21697565df94e82b28ac645547413606d4994d50d9200529c6e"
+    }
+  },
+  "provenance": {
+    "preparedBy": "scripts/prepare-candidate-runtime.mjs",
+    "preparedAt": "2026-10-19T04:13:12.488Z",
+    "jsInputName": "pdfium.js",
+    "wasmInputName": "pdfium.wasm",
+    "verification": "Artifact and patch sha256 recorded from supplied files only; C++/WASM rebuild from the listed sources was not verified by this script.",
+    "note": "reedit-1726cc21-20261019 snapshot (provenance.json b2878492) from same-host build root /home/jcpuk/editor-wasm-build.I80fju out/wasm-resumed-20261019; native 1726cc21, parent 8ba2939, gate native-repair-review.json fea29c69 ACCEPT_SOURCE_SCOPE. Stacked patches applied in order stream-order(pdfium), natural-space, justified-space, reedit-space(engine); only stream-order and reedit-space reverse-check individually, all four bound by engine.diff 6cf69c5f (blob ids 813903c..1726cc21) and pdfium.diff d5225a53. Incremental, not clean-room."
+  }
+}

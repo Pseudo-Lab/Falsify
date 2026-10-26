@@ -1,0 +1,162 @@
+{
+  "schema": "falsify-pdf-editor/upstream/v1",
+  "module": {
+    "name": "falsify-pdf-editor",
+    "license": "AGPL-3.0-only",
+    "copyright": "Copyright (C) 2026 Shinick-Han",
+    "repository": "https://github.com/Shinick-Han/falsify-pdf-editor",
+    "licenseFile": "LICENSE",
+    "noticeFiles": ["NOTICE", "THIRD_PARTY_NOTICES.md"]
+  },
+  "sources": [
+    {
+      "id": "bentopdf",
+      "name": "BentoPDF",
+      "repository": "https://github.com/alam00000/bentopdf.git",
+      "path": "upstream/bentopdf",
+      "commit": "3a5f146d1b89d54dc7ca576aa6797c8bd3e42b97",
+      "describe": "v2.8.8-40-g3a5f146",
+      "package": { "name": "bento-pdf", "version": "2.8.8" },
+      "spdx": "AGPL-3.0-only",
+      "used": ["src/js/editcore/*.js", "src/js/utils/freetext-script.ts"],
+      "modified": false,
+      "licenseFiles": [
+        {
+          "upstreamPath": "LICENSE",
+          "copiedTo": "LICENSE",
+          "sha256": "8486a10c4393cee1c25392769ddd3b2d6c242d6ec7928e1414efff7dfb2f07ef"
+        }
+      ],
+      "notes": "Authors also offer BentoPDF's own contributions under commercial terms; not obtained or evaluated by this project."
+    },
+    {
+      "id": "engine",
+      "name": "BentoPDF PDF Viewer (bentopdf-pdfium-viewer)",
+      "repository": "https://github.com/alam00000/bentopdf-pdfium-viewer.git",
+      "path": "upstream/engine",
+      "commit": "813903c93c758dfb8df46dbd34ace3b7f7a8538b",
+      "spdx": "AGPL-3.0-only",
+      "copyright": "Copyright 2026 BentoPDF",
+      "modified": false,
+      "licenseFiles": [
+        {
+          "upstreamPath": "LICENSE",
+          "copiedTo": "LICENSE",
+          "sha256": "8486a10c4393cee1c25392769ddd3b2d6c242d6ec7928e1414efff7dfb2f07ef"
+        },
+        {
+          "upstreamPath": "NOTICE",
+          "copiedTo": "licenses/bentopdf-pdfium-viewer/NOTICE",
+          "sha256": "965b3e650e58e882eee34602e918e638c078364a680eaba75170555976b57d18"
+        },
+        {
+          "upstreamPath": "licenses/LICENSE.embedpdf-mit",
+          "copiedTo": "licenses/bentopdf-pdfium-viewer/LICENSE.embedpdf-mit",
+          "sha256": "2682b3fb76058f105989f63a47284878c8cdf8b80431cf0edfdab46dc6a11a97"
+        },
+        {
+          "upstreamPath": "licenses/LICENSE.harfbuzz",
+          "copiedTo": "licenses/bentopdf-pdfium-viewer/LICENSE.harfbuzz",
+          "sha256": "d7c66d81b855f8dbf73b401eae8ff93b2760a1fbcda8002884b3beb5ea872566"
+        },
+        {
+          "upstreamPath": "packages/pdfium/LICENSE",
+          "copiedTo": "licenses/bentopdf-pdfium-viewer/packages-pdfium-LICENSE.mit",
+          "sha256": "f5031b66adba8ef5ef57666deff980a7f2ccff5c8a8c22a8117e854d2b8dfcd3"
+        },
+        {
+          "upstreamPath": "packages/pdfium/LICENSE.pdfium",
+          "copiedTo": "licenses/bentopdf-pdfium-viewer/packages-pdfium-LICENSE.pdfium",
+          "sha256": "b033ffb8fc19c23ca81f7e98019ab658cc6f4cf14587c7c6a2a67fb0f6ac0f5a"
+        },
+        {
+          "upstreamPath": "packages/pdfium/build/code/harfbuzz/src/ms-use/COPYING",
+          "copiedTo": "licenses/bentopdf-pdfium-viewer/harfbuzz-src-ms-use-COPYING",
+          "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"
+        }
+      ],
+      "runtimeArtifacts": [
+        {
+          "upstreamPath": "packages/pdfium/src/vendor/pdfium.wasm",
+          "gitBlob": "0fe9a407282757a252a3d1abc9933c328f77d563",
+          "generatedPath": ".runtime/editcore.wasm",
+          "bytes": 7330128,
+          "sha256": "1860f0b33a1c7d231b78fa9bfedace19739f06e80b1d5f654dd2ea77a7a893ce",
+          "tracked": false,
+          "provenance": "upstream-committed-binary",
+          "independentlyRebuilt": false
+        },
+        {
+          "upstreamPath": "packages/pdfium/src/vendor/pdfium.js",
+          "gitBlob": "9cc85e4284d88e93c18f2cd12a97705b09cb6139",
+          "generatedPath": ".runtime/editcore.js",
+          "bytes": 218591,
+          "sha256": "6e6989a9994715951720e05355111aca7eab898e92b519ebea160167875bb3eb",
+          "tracked": false,
+          "provenance": "upstream-committed-binary",
+          "independentlyRebuilt": false
+        }
+      ],
+      "correspondingSource": {
+        "editcoreCpp": "packages/pdfium/build/code/editcore/",
+        "glueCpp": "packages/pdfium/build/code/cpp/",
+        "harfbuzz": "packages/pdfium/build/code/harfbuzz/",
+        "pdfiumPatches": "packages/pdfium/build/patch/",
+        "buildScripts": [
+          "packages/pdfium/Dockerfile",
+          "packages/pdfium/docker-compose.yml",
+          "packages/pdfium/scripts/build.sh",
+          "packages/pdfium/build/compile.sh"
+        ]
+      }
+    },
+    {
+      "id": "pdfium",
+      "name": "PDFium (EmbedPDF fork)",
+      "repository": "https://github.com/embedpdf/pdfium.git",
+      "path": "upstream/engine/packages/pdfium/pdfium-src",
+      "commit": "fce2b000cc7a9e2cabc92db41cd57ca03233f07d",
+      "spdx": "BSD-3-Clause AND Apache-2.0",
+      "spdxNote": "As shipped in the engine's packages/pdfium/LICENSE.pdfium: PDFium Authors BSD-3-Clause style text followed by Apache License 2.0 text. Licenses of statically linked third_party/DEPS libraries are not inventoried.",
+      "licenseFiles": [
+        {
+          "upstreamPath": "packages/pdfium/LICENSE.pdfium (engine)",
+          "copiedTo": "licenses/bentopdf-pdfium-viewer/packages-pdfium-LICENSE.pdfium",
+          "sha256": "b033ffb8fc19c23ca81f7e98019ab658cc6f4cf14587c7c6a2a67fb0f6ac0f5a"
+        }
+      ]
+    },
+    {
+      "id": "embedpdf",
+      "name": "EmbedPDF",
+      "repository": "https://github.com/embedpdf/embed-pdf-viewer",
+      "includedVia": "engine",
+      "spdx": "MIT",
+      "copyright": "Copyright 2025 CloudPDF",
+      "licenseFiles": [
+        { "copiedTo": "licenses/bentopdf-pdfium-viewer/LICENSE.embedpdf-mit" },
+        { "copiedTo": "licenses/bentopdf-pdfium-viewer/packages-pdfium-LICENSE.mit" }
+      ],
+      "notes": "packages/pdfium MIT metadata is not treated as an MIT grant for editcore, which was added after the AGPL relicense."
+    },
+    {
+      "id": "harfbuzz",
+      "name": "HarfBuzz",
+      "repository": "https://github.com/harfbuzz/harfbuzz",
+      "includedVia": "engine",
+      "path": "upstream/engine/packages/pdfium/build/code/harfbuzz",
+      "spdx": "MIT-Modern-Variant",
+      "spdxNote": "Upstream calls it the \"Old MIT\" license; src/ms-use is MIT (Microsoft).",
+      "licenseFiles": [
+        { "copiedTo": "licenses/bentopdf-pdfium-viewer/LICENSE.harfbuzz" },
+        { "copiedTo": "licenses/bentopdf-pdfium-viewer/harfbuzz-src-ms-use-COPYING" }
+      ]
+    }
+  ],
+  "copyMethod": "git cat-file blob <pinned commit>:<upstreamPath> (byte copy of the repository object, LF line endings)",
+  "knownGaps": [
+    "PDFium third_party and DEPS library licenses not reproduced",
+    "Emscripten runtime/system library licenses not reproduced",
+    "WASM not independently rebuilt from source; no bit-for-bit reproducibility claim"
+  ]
+}

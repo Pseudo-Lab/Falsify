@@ -1,0 +1,49 @@
+Falsify PDF Editor
+Copyright (C) 2026 Shinick-Han
+
+This program is free software: you can redistribute it and/or modify it
+under the terms of the GNU Affero General Public License as published by the
+Free Software Foundation, version 3 only (SPDX: AGPL-3.0-only). It is
+distributed WITHOUT ANY WARRANTY; see the LICENSE file for the full text and
+details.
+
+This module builds on third-party software that keeps its own copyright and
+license terms. Nothing in this repository replaces or narrows those terms.
+
+- BentoPDF (https://github.com/alam00000/bentopdf), pinned at
+  3a5f146d1b89d54dc7ca576aa6797c8bd3e42b97 as the upstream/bentopdf
+  submodule. Declared AGPL-3.0-only by its package.json; full license text in
+  LICENSE. Copyright BentoPDF and its contributors (see the upstream Git
+  history). The module loads BentoPDF's editcore JavaScript from the
+  submodule at runtime without modifying it.
+
+- BentoPDF PDF Viewer engine (https://github.com/alam00000/bentopdf-pdfium-viewer),
+  pinned at 813903c93c758dfb8df46dbd34ace3b7f7a8538b as the upstream/engine
+  submodule. Declared AGPL-3.0-only; Copyright 2026 BentoPDF. Its NOTICE is
+  reproduced verbatim in licenses/bentopdf-pdfium-viewer/NOTICE and covers:
+    * EmbedPDF, Copyright 2025 CloudPDF, MIT License, modified by BentoPDF
+      (licenses/bentopdf-pdfium-viewer/LICENSE.embedpdf-mit);
+    * HarfBuzz, "Old MIT" license
+      (licenses/bentopdf-pdfium-viewer/LICENSE.harfbuzz and
+      licenses/bentopdf-pdfium-viewer/harfbuzz-src-ms-use-COPYING).
+  The engine's packages/pdfium directory additionally carries an MIT license,
+  Copyright (c) 2024 CloudPDF, Ji Chang
+  (licenses/bentopdf-pdfium-viewer/packages-pdfium-LICENSE.mit), and the
+  PDFium license, Copyright 2014 PDFium Authors, BSD-3-Clause style with
+  appended Apache License 2.0 text
+  (licenses/bentopdf-pdfium-viewer/packages-pdfium-LICENSE.pdfium).
+
+- The WebAssembly engine (editcore.wasm) and its JavaScript loader
+  (editcore.js) are not stored in this repository. A preparation script copies
+  them byte-for-byte from the pinned engine's Git objects into the ignored
+  .runtime/ directory and checks their SHA-256 values. They are upstream
+  binaries compiled from PDFium, HarfBuzz, the engine's editcore C++ sources
+  and statically linked PDFium dependencies; this project has not
+  independently rebuilt them. See UPSTREAM.json and docs/BUILD.md.
+
+- Parts of this module's edit alignment and run-preserving logic were adapted
+  from the author's earlier prototype adapter written against the BentoPDF
+  editcore API. That code is distributed here under AGPL-3.0-only.
+
+Further component details, including known gaps in the notice inventory, are
+in THIRD_PARTY_NOTICES.md.

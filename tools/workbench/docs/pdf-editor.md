@@ -1,4 +1,20 @@
-# PDF editor adapter (local companion)
+# PDF paragraph editor and local export adapter
+
+## Browser paragraph editor (alpha.14)
+
+1. Open RED and select a PDF. Move to the desired page.
+2. Click a paragraph, edit its text, and apply. Drag selection remains available for short edits.
+3. Generate, compare Before/After, and download the actual previewed PDF. Use the After page controls to inspect added continuation pages.
+
+The browser reuses the source font runs and size, wraps longer paragraphs and moves the following body into source-style continuation pages when needed. Before/After, source position and human provenance are recorded automatically. External AI changes use the same paragraph engine; importing them does not call a model. Duplicate source locations and overlapping edits require correction instead of silently editing a different passage.
+
+The engine runs in a separate browser worker with fixed same-origin, SHA-256-verified JS/WASM assets. No PDF is uploaded, no local companion is required, and cancelling terminates only that operation's worker. Input limit: 25 MiB. The runtime is a locally supplied, hash-verified build; its source build provenance is not independently verified. Corresponding source, pins, patches and notices are in `app/src/paragraph-vendor/`; regenerate with `npm run build:paragraph-pdf --prefix app`.
+
+Support is bounded to identifiable, unrotated, uncropped single-column body flow. Overflow is inserted immediately after the edited source page, with text headers/footers and decimal source-page suffixes. Other original pages retain their contents and numbering. This is not full-document Word pagination or general table/figure migration. Publisher artwork is kept on the source page and is not repeated on continuation pages. Edited-page ICC colors may undergo slight RGB conversion. Missing glyphs, mixed or ambiguous layouts, scanned pages and formulas are not universally supported.
+
+The saved-file self-check verifies applied text and order using PDFium, so it is not independent typography verification. Readable failed drafts retain their warnings and can be downloaded; an operation that produces no readable PDF cannot invent a generated file. Original bytes and selected edits remain intact. Review the actual After preview before use.
+
+## Optional local companion adapter
 
 The local companion can route the existing authenticated `/api/export` request through the
 patched `falsify-pdf-editor` (Node 24+, verified WASM) instead of the legacy single-line

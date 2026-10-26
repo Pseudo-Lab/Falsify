@@ -1,0 +1,510 @@
+diff --git a/packages/pdfium/build/code/editcore/layout.cpp b/packages/pdfium/build/code/editcore/layout.cpp
+index 2870d732..31e9b900 100644
+--- a/packages/pdfium/build/code/editcore/layout.cpp
++++ b/packages/pdfium/build/code/editcore/layout.cpp
+@@ -54,100 +54,152 @@ void pinLiftedTextPositions(FPDF_PAGEOBJECT obj) {
+     }
+ }
+ 
+ constexpr float kSuperScale = 0.58f;
+ constexpr float kSuperShift = 0.34f;
+ constexpr float kSubShift = -0.18f;
+ 
+ struct ResolvedRun {
+     const ParaRun* run = nullptr;
+     FPDF_FONT font = nullptr;
+     float emitSize = 12;
+     float baseShift = 0;
+     float hScale = 1;
+ 
+     bool complex = false;
+     const std::vector<uint8_t>* hbBytes = nullptr;
+     FPDF_FONT cidFont = nullptr;
+ };
+ 
+ struct Token {
+     enum Kind { Word, Space, Break, ParaBreak } kind = Word;
+ 
+     std::vector<std::pair<uint32_t, int>> chars;
+ 
+     std::vector<float> advs;
+ 
+     std::vector<size_t> offs;
+ 
+     uint8_t level = 0;
+     int runIndex = 0;
+     size_t off = 0;
+     float width = 0;
+ 
+     bool softHyphen = false;
+ };
+ 
+ void appendCodepointUtf16(std::u16string& out, uint32_t cp) {
+     if (cp <= 0xFFFF) {
+         out.push_back(static_cast<char16_t>(cp));
+     } else {
+         uint32_t v = cp - 0x10000;
+         out.push_back(static_cast<char16_t>(0xD800 + (v >> 10)));
+         out.push_back(static_cast<char16_t>(0xDC00 + (v & 0x3FF)));
+     }
+ }
+ 
+ bool isBreakableSpace(uint32_t cp) {
+     return cp == u' ' || cp == u'\t' || cp == 0x3000;
+ }
+ 
++// Source advances of one layout run, grouped by source font, size and scale.
++// Fonts embedded without a space glyph (TeX subsets) realise a space as
++// positioning: its gap is the space's own source advance or, with the space
++// at 0, folded into the advance of the glyph before it. own(cp) is that
++// glyph's advance without the gap, or < 0 when its metrics are unknown.
++struct SpaceSampleRun {
++    FPDF_FONT font = nullptr;
++    float size = 0;
++    float hScale = 1;
++    const std::u16string* text = nullptr;
++    const std::vector<float>* adv = nullptr;
++    std::function<float(uint32_t)> own;
++};
++
++// Natural interword advance per run (< 0 when unknown): the median source gap
++// of single spaces in the runs sharing its font, size and scale, provided
++// those gaps agree. Nothing is assumed for a font without such evidence.
++std::vector<float> sourceNaturalSpaces(const std::vector<SpaceSampleRun>& runs) {
++    std::vector<float> out(runs.size(), -1.0f);
++    auto same = [](const SpaceSampleRun& a, const SpaceSampleRun& b) {
++        return a.font == b.font && std::abs(a.size - b.size) < 0.01f &&
++               std::abs(a.hScale - b.hScale) < 0.001f;
++    };
++    for (size_t i = 0; i < runs.size(); i++) {
++        if (!runs[i].font || runs[i].size <= 0.0f) continue;
++        std::vector<float> gaps;
++        for (const SpaceSampleRun& r : runs) {
++            if (!same(runs[i], r) || !r.text || !r.adv || !r.own ||
++                r.adv->size() != r.text->size())
++                continue;
++            const std::u16string& t = *r.text;
++            for (size_t k = 1; k + 1 < t.size(); k++) {
++                const char16_t pc = t[k - 1];
++                if (t[k] != u' ' || pc < 0x21 || t[k + 1] < 0x21 ||
++                    (pc >= 0xD800 && pc <= 0xDFFF))
++                    continue;
++                const float pa = (*r.adv)[k - 1], sa = (*r.adv)[k];
++                if (pa <= 0.0f || sa < 0.0f) continue;
++                const float own = r.own(pc);
++                if (own <= 0.0f) continue;
++                const float g = pa + sa - own;
++                if (g > 0.05f * r.size && g < r.size) gaps.push_back(g);
++            }
++        }
++        if (gaps.empty()) continue;
++        std::sort(gaps.begin(), gaps.end());
++        if (gaps.back() - gaps.front() > 0.1f * runs[i].size) continue;
++        out[i] = gaps[gaps.size() / 2];
++    }
++    return out;
++}
++
+ bool fontCovers(FPDF_FONT font, const std::vector<uint32_t>& cps) {
+     if (!font) return false;
+ 
+     float notdefW = -1;
+     for (uint32_t sentinel : {0xF8FFu, 0x10FFFDu}) {
+         float w = 0;
+         if (FPDFFont_GetGlyphWidth(font, sentinel, 12.0f, &w)) { notdefW = w; break; }
+     }
+     for (uint32_t cp : cps) {
+         if (cp == u'\n' || cp == u'\r') continue;
+         float w = 0;
+         if (!FPDFFont_GetGlyphWidth(font, cp, 12.0f, &w)) return false;
+         if (w <= 0.001f && cp != u' ' && cp != 0x00A0) return false;
+ 
+         if (notdefW >= 0 && std::abs(w - notdefW) < 0.01f && cp != u' ' && cp != 0x00A0) {
+             FPDF_GLYPHPATH gp = FPDFFont_GetGlyphPath(font, cp, 12.0f);
+             if (!gp || FPDFGlyphPath_CountGlyphSegments(gp) <= 0) return false;
+         }
+     }
+     return true;
+ }
+ 
+ std::string standardFontFor(const RunStyle& st) {
+ 
+     std::string fam = st.family;
+     for (auto& c : fam) c = static_cast<char>(tolower(c));
+     bool serif = fam.find("times") != std::string::npos ||
+                  fam.find("georgia") != std::string::npos ||
+                  fam.find("serif") != std::string::npos;
+     bool fixed = fam.find("courier") != std::string::npos ||
+                  fam.find("mono") != std::string::npos;
+     const char* base = fixed ? "Courier" : (serif ? "Times" : "Helvetica");
+     std::string name = base;
+     if (fixed) {
+         if (st.bold && st.italic) name += "-BoldOblique";
+         else if (st.bold) name += "-Bold";
+         else if (st.italic) name += "-Oblique";
+     } else if (serif) {
+         if (st.bold && st.italic) name += "-BoldItalic";
+         else if (st.bold) name += "-Bold";
+         else if (st.italic) name += "-Italic";
+         else name += "-Roman";
+     } else {
+         if (st.bold && st.italic) name += "-BoldOblique";
+         else if (st.bold) name += "-Bold";
+         else if (st.italic) name += "-Oblique";
+     }
+     return name;
+ }
+ 
+@@ -1393,200 +1445,246 @@ bool layoutParagraph(Session& s, FPDF_PAGE page, Paragraph& p, bool autoWiden,
+         [&](const Token& t,
+             const std::function<void(int, const std::u16string&)>& fn) {
+             int curRi = -1;
+             std::u16string seg;
+             for (const auto& pr : t.chars) {
+                 if (pr.second != curRi && !seg.empty()) {
+                     fn(curRi, seg);
+                     seg.clear();
+                 }
+                 curRi = pr.second;
+                 appendCodepointUtf16(seg, pr.first);
+             }
+             if (!seg.empty()) fn(curRi, seg);
+         };
+     auto tokenHasComplex = [&](const Token& t) {
+         for (const auto& pr : t.chars)
+             if (resolved[pr.second].complex) return true;
+         return false;
+     };
+ 
+     auto wordWidth = [&](const Token& t) -> float {
+         float w = 0;
+         size_t k = 0;
+         while (k < t.chars.size()) {
+             const int ri = t.chars[k].second;
+             size_t k2 = k;
+             std::u16string segText;
+             while (k2 < t.chars.size() && t.chars[k2].second == ri) {
+                 appendCodepointUtf16(segText, t.chars[k2].first);
+                 k2++;
+             }
+             const float cw =
+                 resolved[ri].complex ? complexSegWidth(ri, segText) : -1.0f;
+             if (cw >= 0) {
+                 w += cw;
+             } else {
+                 for (size_t j = k; j < k2; j++) {
+                     const float ov = t.advs.empty() ? -1.0f : t.advs[j];
+                     w += ov >= 0 ? ov : advanceOf(ri, t.chars[j].first);
+                 }
+             }
+             k = k2;
+         }
+         return w;
+     };
+ 
+     int srcAdvUsed = 0;
+     const bool srcAdvOk =
+         std::abs(p.fmt.char_spacing - p.srcCharSpacing) < 0.005f;
+ 
++    std::vector<float> naturalSpace;
++    {
++        std::vector<SpaceSampleRun> samples(layoutRuns.size());
++        for (size_t ri = 0; ri < layoutRuns.size(); ri++) {
++            const ParaRun& lr = layoutRuns[ri];
++            SpaceSampleRun& sr = samples[ri];
++            if (lr.atomicObject) continue;
++            sr.font = lr.originalFont;
++            sr.size = lr.style.size;
++            sr.hScale = lr.style.hScale;
++            if (!srcAdvOk || resolved[ri].complex ||
++                lr.srcAdv.size() != lr.text.size() ||
++                resolved[ri].font != lr.originalFont)
++                continue;
++            sr.text = &lr.text;
++            sr.adv = &lr.srcAdv;
++            sr.own = [&, ri](uint32_t cp) {
++                float w = 0;
++                if (!resolved[ri].font ||
++                    !FPDFFont_GetGlyphWidth(resolved[ri].font, cp,
++                                            resolved[ri].emitSize, &w) ||
++                    w <= 0)
++                    return -1.0f;
++                return (w + charSpacing) * resolved[ri].hScale;
++            };
++        }
++        naturalSpace = sourceNaturalSpaces(samples);
++        // The source gap stands in only for a space the emitted font cannot
++        // measure, and only when the piece emits in its source font: a known
++        // space width (the source gap may be justified) or a substituted font
++        // keeps the existing measurement.
++        for (size_t ri = 0; ri < layoutRuns.size(); ri++) {
++            float w = 0;
++            if (naturalSpace[ri] > 0.0f &&
++                (resolved[ri].font != layoutRuns[ri].originalFont ||
++                 (FPDFFont_GetGlyphWidth(resolved[ri].font, u' ',
++                                         resolved[ri].emitSize, &w) &&
++                  std::isfinite(w) && w > 0.0f)))
++                naturalSpace[ri] = -1.0f;
++        }
++    }
++
+     bool anyEdited = false;
+     for (const auto& r : layoutRuns) {
+         if (!r.textUnchanged || !r.originalFont) {
+             anyEdited = true;
+             break;
+         }
+     }
+     std::vector<Token> tokens;
+     Token word;
+     auto flushWord = [&]() {
+         if (!word.chars.empty()) {
+             tokens.push_back(word);
+             word = Token();
+         }
+     };
+ 
+     std::vector<uint8_t> bidiLv;
+     std::vector<size_t> runUnitStart(layoutRuns.size(), 0);
+     {
+         std::u16string all;
+         for (size_t ri = 0; ri < layoutRuns.size(); ri++) {
+             runUnitStart[ri] = all.size();
+             all += layoutRuns[ri].text;
+         }
+         bidiLv = bidiLevels(all, p.fmt.dir ? p.fmt.dir : (paraRtl ? 2 : 1));
+     }
+     for (size_t ri = 0; ri < layoutRuns.size(); ri++) {
+ 
+         if (layoutRuns[ri].atomicObject) {
+             flushWord();
+             Token t;
+             t.kind = Token::Word;
+             t.chars.push_back({0xFFFC, static_cast<int>(ri)});
+             t.advs.push_back(layoutRuns[ri].atomicW);
+             t.offs.push_back(0);
+             t.width = layoutRuns[ri].atomicW;
+             tokens.push_back(t);
+             continue;
+         }
+         const std::u16string& text = layoutRuns[ri].text;
+ 
+         const std::vector<float>* sa =
+             (srcAdvOk && !resolved[ri].complex &&
+              layoutRuns[ri].srcAdv.size() == text.size() &&
+              srcAdvMatchesFont(static_cast<int>(ri)))
+                 ? &layoutRuns[ri].srcAdv
+                 : nullptr;
+         if (sa) srcAdvUsed++;
+         for (size_t ci = 0; ci < text.size(); ci++) {
+             uint32_t cp = text[ci];
+             const size_t ci0 = ci;
+             if (cp >= 0xD800 && cp <= 0xDBFF && ci + 1 < text.size() &&
+                 text[ci + 1] >= 0xDC00 && text[ci + 1] <= 0xDFFF) {
+                 cp = 0x10000 + ((cp - 0xD800) << 10) + (text[ci + 1] - 0xDC00);
+                 ci++;
+             }
+             const float ov = sa ? (*sa)[ci0] : -1.0f;
+             const uint8_t lvl = bidiLv[runUnitStart[ri] + ci0];
+             if (cp == u'\r') continue;
+             if (cp == u'\n') {
+                 flushWord();
+ 
+                 {
+                     Token t;
+                     t.kind = Token::Break;
+                     tokens.push_back(t);
+                 }
+             } else if (cp == 0x00AD) {
+ 
+                 flushWord();
+                 if (!tokens.empty() && tokens.back().kind == Token::Word) {
+                     tokens.back().softHyphen = true;
+                 }
+             } else if (isBreakableSpace(cp)) {
+                 flushWord();
+                 Token t;
+                 t.kind = Token::Space;
+                 t.level = lvl;
+                 t.runIndex = static_cast<int>(ri);
+                 t.off = ci0;
+ 
+                 const bool atomicNbr =
+                     (ri > 0 && layoutRuns[ri - 1].atomicObject) ||
+                     (ri + 1 < layoutRuns.size() &&
+                      layoutRuns[ri + 1].atomicObject);
+                 if (cp == u'\t') {
+ 
+                     float w = ov;
+                     if (w < 0.0f && ci0 < layoutRuns[ri].srcAdv.size())
+                         w = layoutRuns[ri].srcAdv[ci0];
+                     t.width = w > 0.0f
+                                   ? w
+                                   : 4.0f * advanceOf(static_cast<int>(ri), u' ');
+                 } else {
+ 
++                    const bool naturalOk =
++                        cp == u' ' && std::abs(p.fmt.word_spacing) < 0.005f &&
++                        naturalSpace[ri] > 0.0f;
+                     t.width = (ov >= 0 && std::abs(p.fmt.word_spacing) < 0.005f &&
+                                (!anyEdited || atomicNbr ||
+                                 layoutRuns[ri].textUnchanged))
+                                   ? ov
+-                                  : advanceOf(static_cast<int>(ri), u' ');
++                                  : naturalOk ? naturalSpace[ri]
++                                              : advanceOf(static_cast<int>(ri), u' ');
+                 }
+                 tokens.push_back(t);
+             } else {
+ 
+                 if (!word.chars.empty() && word.level != lvl) flushWord();
+                 word.level = lvl;
+                 word.chars.push_back({cp, static_cast<int>(ri)});
+                 word.advs.push_back(ov);
+                 word.offs.push_back(ci0);
+             }
+         }
+     }
+     flushWord();
+ 
+     if (autoWiden && preEditLineCount == 1 && p.rotation == 0) {
+         bool hasBreak = false;
+         float natural = 0, trailingSpace = 0;
+         for (const auto& t : tokens) {
+             if (t.kind == Token::Break || t.kind == Token::ParaBreak) {
+                 hasBreak = true;
+                 break;
+             }
+             float w = 0;
+             if (t.kind == Token::Word) {
+                 w = wordWidth(t);
+                 natural += w + trailingSpace;
+                 trailingSpace = 0;
+             } else if (t.kind == Token::Space) {
+                 trailingSpace += t.width > 0 ? t.width : advanceOf(t.runIndex, u' ');
+             }
+         }
+ 
+         if (!hasBreak && natural > p.width + 1.0f) {
+             const float pageW = FPDF_GetPageWidthF(page);
+             const float MARGIN = 2.0f;
+             float newW = natural + 0.5f;
+ 
+             if (p.fmt.align == 1) {
+                 const float cx = p.x + p.width * 0.5f;
+                 const float room = 2.0f * std::max(0.0f,
+                     std::min(cx - MARGIN, pageW - MARGIN - cx));
+                 newW = std::min(newW, room);
+                 if (newW > p.width) { p.x = cx - newW * 0.5f; p.width = newW; }
+             } else if (p.fmt.align == 2) {
+                 const float rightEdge = p.x + p.width;
+                 newW = std::min(newW, rightEdge - MARGIN);
+                 if (newW > p.width) { p.x = rightEdge - newW; p.width = newW; }
+             } else {
+                 newW = std::min(newW, pageW - MARGIN - p.x);
+                 if (newW > p.width) p.width = newW;
+diff --git a/packages/pdfium/build/code/editcore/session.cpp b/packages/pdfium/build/code/editcore/session.cpp
+index 3a26622a..714e9d95 100644
+--- a/packages/pdfium/build/code/editcore/session.cpp
++++ b/packages/pdfium/build/code/editcore/session.cpp
+@@ -1,86 +1,99 @@
+ #include <cstdlib>
+ 
+ #include <ctime>
+ 
+ #include "ec_internal.h"
+ #include "fpdf_save.h"
+ #include "pdfium_internal.h"
+ #include "fpdf_signature.h"
+ #include "fpdf_structtree.h"
+ #include "fpdf_ppo.h"
+ #include "fpdf_transformpage.h"
+ 
+ using namespace ec;
+ 
+ namespace {
+ 
+ Session* asSession(EC_SESSION s) { return static_cast<Session*>(s); }
+ 
+ char* dupString(const std::string& s) {
+     char* out = static_cast<char*>(malloc(s.size() + 1));
+     if (!out) return nullptr;
+     memcpy(out, s.c_str(), s.size() + 1);
+     return out;
+ }
+ 
+ bool textProvablyCovered(const std::u16string& text, const std::u16string& rendered) {
+     return !text.empty() && rendered.find(text) != std::u16string::npos;
+ }
+ 
+ std::vector<float> sliceSrcAdvAt(const ParaRun& src, size_t at, size_t len) {
+     if (!len || src.srcAdv.size() != src.text.size() ||
+         at + len > src.srcAdv.size())
+         return {};
+     std::vector<float> out(src.srcAdv.begin() + static_cast<long>(at),
+                            src.srcAdv.begin() + static_cast<long>(at + len));
+-    if (at + len < src.text.size()) out.back() = -1.0f;
++    // A glyph cut before its source neighbour loses the kerning to it. A cut
++    // space at 0 keeps it: its gap is folded into the kept glyph before it
++    // and does not depend on the next word.
++    if (at + len < src.text.size() &&
++        !(src.text[at + len - 1] == u' ' && out.back() >= 0.0f &&
++          out.back() < 0.01f))
++        out.back() = -1.0f;
++    // Leading spaces whose gap was folded into the cut-off glyph before them
++    // carry no width of their own; leave them for layout to measure.
++    if (at > 0)
++        for (size_t k = 0; k < out.size() && src.text[at + k] == u' ' &&
++                           out[k] >= 0.0f && out[k] < 0.01f;
++             k++)
++            out[k] = -1.0f;
+     return out;
+ }
+ 
+ std::vector<float> sliceSrcAdv(const ParaRun& src, const std::u16string& piece) {
+     if (piece.empty()) return {};
+     const size_t at = src.text.find(piece);
+     if (at == std::u16string::npos) return {};
+     return sliceSrcAdvAt(src, at, piece.size());
+ }
+ 
+ void appendEditedRun(std::vector<ParaRun>& out, ParaRun r, const ParaRun& srcRun) {
+     const std::u16string& oldText = srcRun.text;
+     const std::u16string nt = r.text;
+     const size_t n = nt.size(), o = oldText.size();
+     size_t pre = 0;
+     while (pre < n && pre < o && nt[pre] == oldText[pre]) ++pre;
+     while (pre > 0 && nt[pre - 1] >= 0xD800 && nt[pre - 1] <= 0xDBFF) --pre;
+     size_t suf = 0;
+     while (suf < n - pre && suf < o - pre && nt[n - 1 - suf] == oldText[o - 1 - suf]) ++suf;
+     while (suf > 0 && nt[n - suf] >= 0xDC00 && nt[n - suf] <= 0xDFFF) --suf;
+ 
+     if (pre < n && pre > 0 && nt[pre] != u' ' && nt[pre - 1] != u' ') {
+         size_t sp = nt.rfind(u' ', pre - 1);
+         pre = (sp == std::u16string::npos) ? 0 : sp + 1;
+     }
+ 
+     if (suf > 0 && suf < n && nt[n - suf] != u' ' && nt[n - suf - 1] != u' ') {
+         size_t sp = nt.find(u' ', n - suf);
+         suf = (sp == std::u16string::npos) ? 0 : n - sp - 1;
+     }
+     if (pre + suf > n) suf = n - pre;
+     if (pre == 0 && suf == 0) { out.push_back(std::move(r)); return; }
+     auto emit = [&](std::u16string t, std::vector<float> adv, bool unchanged) {
+         if (t.empty()) return;
+         ParaRun piece = r;
+         piece.text = std::move(t);
+         piece.textUnchanged = unchanged;
+ 
+         piece.srcAdv = std::move(adv);
+         out.push_back(std::move(piece));
+     };
+     emit(nt.substr(0, pre), sliceSrcAdvAt(srcRun, 0, pre), true);
+     emit(nt.substr(pre, n - pre - suf), {}, false);
+     emit(nt.substr(n - suf), sliceSrcAdvAt(srcRun, o - suf, suf), true);
+ }
+ 
+ int scriptClassOf(uint32_t cp) {
+     if ((cp >= 0x0600 && cp <= 0x06FF) || (cp >= 0x0750 && cp <= 0x077F) ||
+         (cp >= 0x08A0 && cp <= 0x08FF) || (cp >= 0xFB50 && cp <= 0xFEFC))
+         return 1;
