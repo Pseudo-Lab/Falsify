@@ -78,7 +78,7 @@ pre,table{break-inside:avoid}
 <h2 id="quick-title">빠른 사용</h2>
 <h3>처음 한 번만 (companion이 필요할 때)</h3>
 <ol>
-<li>새로 받는다면 <code>git clone https://github.com/Shinick-Han/falsify-workbench.git</code> 후 <code>cd falsify-workbench</code>로 들어갑니다(공개 Workbench 소스 저장소). 이미 설치해 쓰던 폴더가 있으면 그대로 씁니다. Windows는 그 폴더에서 <code>start-companion.ps1</code>을 한 번 실행해 로컬 실행기(companion)를 준비합니다(첫 실행만 의존성 설치). macOS/Linux는 <a href="#launch">수동 실행</a>을 따릅니다.</li>
+<li>새로 받는다면 <code>git clone --branch feat/workbench-html-guide-20261012 https://github.com/Pseudo-Lab/Falsify.git</code> 후 <code>cd Falsify/tools/workbench</code>로 들어갑니다(main 브랜치에는 이 폴더가 없습니다). 이미 설치해 쓰던 폴더가 있으면 그대로 씁니다. Windows는 그 폴더에서 <code>start-companion.ps1</code>을 한 번 실행해 로컬 실행기(companion)를 준비합니다(첫 실행만 의존성 설치). macOS/Linux는 <a href="#launch">수동 실행</a>을 따릅니다.</li>
 <li>모델을 실행할 때만: 쓸 CLI 하나를 설치하고 로그인합니다: <code>codex login</code>, 또는 <code>claude</code> 실행 후 로그인. PDF 사전분석·내보내기만 한다면 건너뜁니다. 자세한 것은 <a href="#prereq">준비물과 설치</a>.</li>
 </ol>
 <h3>매번</h3>
@@ -168,8 +168,8 @@ pre,table{break-inside:avoid}
 <section id="launch" aria-labelledby="launch-title">
 <h2 id="launch-title">2. 소스 받기와 첫 실행</h2>
 <p>companion은 모델 실행, PDF 사전분석, PDF 편집·그림 교체 내보내기에만 필요합니다. 브라우저만으로 쓰는 수동 JSON 교환이나 검수만 한다면 이 장을 건너뜁니다. 팀 저장소의 main 브랜치에는 <code>tools/workbench</code>가 없으므로 새로 받을 때는 Workbench 브랜치를 지정합니다. 이미 설치해 쓰던 Workbench 폴더가 있으면 다시 받거나 <code>git pull</code>할 필요 없이 그 폴더를 그대로 쓰고, 원래 폴더를 지우거나 바꾸지 않습니다. 스크립트는 실행 전에 직접 읽어 보세요.</p>
-<pre><code>git clone https://github.com/Shinick-Han/falsify-workbench.git
-cd falsify-workbench
+<pre><code>git clone --branch feat/workbench-html-guide-20261012 https://github.com/Pseudo-Lab/Falsify.git
+cd Falsify/tools/workbench
 powershell -NoProfile -ExecutionPolicy Bypass -File .\start-companion.ps1</code></pre>
 <p>이 안내의 다른 명령에 나오는 <code>cd tools/workbench</code>는 저장소 루트(<code>Falsify</code>) 기준이며, 이미 <code>tools/workbench</code> 안에 있다면 <code>cd</code> 줄은 건너뜁니다. Windows의 <code>start-companion.ps1</code>과 클릭 실행 링크는 편의 기능이고, macOS/Linux는 아래 수동 실행으로 씁니다.</p>
 <ul>
@@ -194,7 +194,7 @@ python3 -m venv .venv
 <h2 id="connect-title">3. 연결 방식 세 가지</h2>
 <dl>
 <dt>공개 페이지 + 토큰 연결</dt>
-<dd><a href="https://shinick-han.github.io/falsify-branch-preview/">공개 Workbench</a>에서 <b class="ui">로컬 실행 연결</b> 패널을 엽니다. 터미널의 토큰 한 줄을 <b class="ui">페어링 토큰</b>에 붙여넣고 <b class="ui">토큰으로 연결</b>. 브라우저가 로컬 네트워크 접근을 물으면 이 사이트에만 허용합니다. 연결은 기능 확인만 하며 모델을 실행하지 않습니다. 포트를 바꿨다면 <b class="ui">수동 실행 · 포트 변경 · 연결 문제</b>에서 같은 번호로 맞춥니다.</dd>
+<dd><a href="https://shinick-han.github.io/falsify-workbench/">공개 Workbench</a>에서 <b class="ui">로컬 실행 연결</b> 패널을 엽니다. 터미널의 토큰 한 줄을 <b class="ui">페어링 토큰</b>에 붙여넣고 <b class="ui">토큰으로 연결</b>. 브라우저가 로컬 네트워크 접근을 물으면 이 사이트에만 허용합니다. 연결은 기능 확인만 하며 모델을 실행하지 않습니다. 포트를 바꿨다면 <b class="ui">수동 실행 · 포트 변경 · 연결 문제</b>에서 같은 번호로 맞춥니다.</dd>
 <dt>로컬 작업대 (토큰 불필요)</dt>
 <dd>한 번 <code>start-companion.ps1</code>로 의존성이 설치된 뒤, <code>tools/workbench</code> 폴더에서 <code>.\.venv\Scripts\python.exe app/local/server.py</code>를 <code>--web-origin</code> 없이 실행하고, 출력된 <code>http://127.0.0.1:&lt;포트&gt;/</code>를 엽니다. 같은 origin 세션이라 페어링이 필요 없습니다. 기록은 공개 페이지와 따로 저장됩니다.</dd>
 <dt>수동 JSON 교환 (연결 없음)</dt>
