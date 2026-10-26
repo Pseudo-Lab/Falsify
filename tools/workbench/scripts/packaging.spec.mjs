@@ -113,7 +113,8 @@ test('MuPDF browser CI installs dependencies before the test and rejects a skip'
   const npmCi = workflow.indexOf('npm ci --ignore-scripts');
   assert.ok(npmCi >= 0 && npmCi < workflow.indexOf('run: npm test'));
   assert.ok(npmCi < workflow.indexOf('tests/browser-pdf.spec.mjs'));
-  assert.match(workflow, /playwright install --with-deps chromium/);
+  assert.match(workflow, /playwright install chromium/);
+  assert.match(workflow, /Isolated visual workflow browser dependencies\s*\n\s*timeout-minutes: 5/);
   assert.match(mupdf, /FALSIFY_CHROME_EXECUTABLE/);
   assert.match(mupdf, /assert-browser-pdf-executed\.mjs/);
   assert.throws(() => assertChromeLoaderExecuted(`ok 1 - ${CHROME_TEST} # SKIP playwright is not installed\n`), /skip is not a pass/);

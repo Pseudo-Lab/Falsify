@@ -22,10 +22,11 @@ jobs:
       - name: Python dependencies
         run: python -m pip install -r app/local/requirements.txt -r app/local/requirements-images.txt
       - name: Isolated visual workflow browser dependencies
+        timeout-minutes: 5
         working-directory: app
         run: |
           npm ci --ignore-scripts
-          npx playwright install --with-deps chromium
+          npx playwright install chromium
       - name: Browser contracts
         working-directory: app
         run: npm test
