@@ -94,7 +94,10 @@ details.reference > *{display:block}
 <h2 id="paper-title">논문 작업대</h2>
 <p>논문 PDF는 <b class="ui">RED 논문 파일</b>로 올리면 텍스트 추출이나 AI 검토가 끝나기 전에 쪽 단위로 열립니다. 직접 고른 편집, PC 없이 붙이는 외부 모델 응답, 접힌 <b class="ui">AI 검토 · 선택 사항</b>의 로컬 AI는 서로 다른 경로입니다. BLUE 파일과 사람 검수는 그 경로와 따로 둡니다.</p>
 <p><b class="ui">RED 논문 파일</b>에 PDF를 올리면 <b class="ui">원본 쪽 보기 · 직접 편집</b>에서 문단을 눌러 전체 문단을 고칠 수 있습니다. 글자를 드래그하면 부분 편집도 가능합니다. Before를 확인하고 After를 적은 뒤 <b class="ui">편집 반영</b>합니다. 변경 전·후와 위치, 사람 작성 출처는 자동으로 기록되며 모델을 호출하지 않습니다.</p>
-<p>문단 편집은 원래 글꼴과 크기를 활용해 줄을 다시 나누고 뒤따르는 본문을 밀어냅니다. 본문이 넘치면 원래 쪽 뒤에 이어지는 쪽이 생길 수 있습니다. 생성본의 <b class="ui">이전</b>·<b class="ui">다음</b>으로 이어지는 쪽까지 확인하세요. 현재는 한 단의 본문 흐름을 중심으로 지원하며, 임의 표·그림·수식의 일반적인 재배치는 보장하지 않습니다. 이어지는 쪽에는 원래 머리말·꼬리말 글자를 사용하지만 고정 출판사 로고는 반복하지 않습니다. 수정한 쪽을 재저장할 때 미세한 색상 변환이 있을 수 있습니다.</p>
+<p>문단 편집은 원래 글꼴과 크기를 활용해 줄을 다시 나누고 뒤따르는 본문을 밀어냅니다. 넘친 본문은 조건이 맞는 기존 다음 쪽부터 채우고, 남는 분량에만 이어지는 쪽을 추가합니다. 대상은 크기와 본문 폭이 맞는 1단 텍스트 흐름입니다. 표·그림, 다단 배치, 움직일 본문을 가리키는 링크 등이 있으면 그 구간은 이어지는 쪽을 유지하고 경고합니다. 원래 쪽의 머리말·꼬리말은 고정되며, 새 이어지는 쪽에는 원래 가장자리 글자를 사용하지만 고정 출판사 로고는 반복하지 않습니다. 생성본의 <b class="ui">이전</b>·<b class="ui">다음</b>으로 실제 출력 위치와 경고를 확인하세요. 수정한 쪽을 재저장할 때 미세한 색상 변환이 있을 수 있습니다.</p>
+<h3 id="paper-table">표 셀 직접 편집</h3>
+<p>격자 아이콘의 <b class="ui">표 셀 편집</b>을 누르면 현재 쪽의 셀 후보를 찾습니다. 셀을 눌러 정확한 Before와 After를 확인하고 <b class="ui">편집 반영</b>합니다. 반복되는 숫자도 원본 위치로 구분하며, 점선 셀은 지원하지 않는 이유를 보여 줍니다. 표 후보는 선택한 Stirling MIT 구성요소로 찾지만, 편집할 때는 원본 바이트·글자·위치를 다시 확인합니다. 빈 셀, 여러 글 조각이나 겹친 글자, 불확실한 경계는 지원하지 않을 수 있습니다. 칸 크기와 테두리는 자동으로 늘어나지 않으므로 생성 글자가 칸을 넘는다는 경고를 확인하세요.</p>
+<p>표 셀과 긴 본문을 함께 고치면 표를 먼저 저장한 실제 PDF에 본문 편집을 이어 적용합니다. 각 단계의 상태를 확인하세요. 표 단계 검사가 실패하면 본문은 미적용으로 남으며, 읽을 수 있는 실패 후보가 제공될 수 있습니다. 본문 단계의 실패·초안도 그대로 표시합니다. 표·그림·캡션을 한 덩어리로 이동하는 기능은 아닙니다. 실제 cold-shower 8건 편집 점검은 원본 15쪽에서 생성본 18쪽, 기존 쪽 흐름 그룹 0개를 유지했습니다. 표와 역참조 링크가 보호 경계로 남습니다.</p>
 <p><b class="ui">이전 쪽</b>, <b class="ui">다음 쪽</b>, <b class="ui">축소</b>, <b class="ui">확대</b>로 원본 한 쪽을 봅니다. 선택 상자는 <b class="ui">편집 반영</b>과 <b class="ui">선택 취소</b>가 있고, After는 4000자까지입니다. 편집 목록에서는 이동, 켜기/끄기, After 수정, 삭제를 할 수 있습니다. <b class="ui">실행 취소</b>와 <b class="ui">다시 실행</b>은 그 목록의 조작입니다. 편집 코어가 없으면 쪽 보기와 원본 다운로드는 남고, 편집은 저장되지 않으며 성공으로 표시하지 않습니다.</p>
 <h3 id="external-ai">외부 모델 (PC 없음)</h3>
 <p>PC의 companion 없이 외부 모델을 쓰려면 <b class="ui">원문과 과제 프롬프트 복사</b> 또는 <b class="ui">프롬프트 TXT 내려받기</b>로 과제를 복사해 그 모델에 직접 붙입니다. 응답은 <b class="ui">붙여넣은 응답</b>에 넣고 <b class="ui">변경 찾기</b>를 누릅니다. <b class="ui">한 곳</b>만 <b class="ui">이 변경을 가져오기</b>로 고릅니다. <b class="ui">여러 곳</b>이면 위치 하나를 고르고 <b class="ui">고른 위치로 확정</b>한 다음에만 가져옵니다. <b class="ui">선택한 변경 가져오기</b>는 고른 변경만 편집 목록에 올립니다. 이 가져오기는 검증된 RED 실행이 아니며, 앱이 모델을 호출하거나 응답을 자동 적용하지 않습니다. 로컬 AI는 <b class="ui">AI 검토 · 선택 사항</b>을 연 뒤 전송 동의와 <b class="ui">선택 harness로 전체 검토</b>가 있을 때만 실행됩니다.</p>
@@ -139,7 +142,7 @@ details.reference > *{display:block}
 <tbody>
 <tr><td><a href="https://www.python.org/downloads/">Python</a> 3.10 이상</td><td>companion 기본 기능(PDF 사전분석, PDF 한 줄 편집 내보내기, 모델 실행 중계). PATH에서 찾을 수 있어야 합니다.</td></tr>
 <tr><td>Python 3.11 이상</td><td>선택 기능 <a href="#image">그림 한 곳 교체</a>만. <code>.venv</code>가 3.11 이상으로 만들어져 있어야 합니다.</td></tr>
-<tr><td>Node 24 이상</td><td>긴 After 줄바꿈 재배치 엔진을 <em>직접 설정한 경우에만</em>. 기본 설치에는 필요 없습니다.</td></tr>
+<tr><td>Node 24 이상</td><td>로컬 줄바꿈 재배치 엔진을 <em>직접 설정한 경우에만</em>. 브라우저 글·표 셀 편집을 위해 설치할 필요는 없습니다.</td></tr>
 <tr><td>Codex CLI 또는 Claude Code</td><td>앱의 기본 실행기로 모델을 부를 때만. 하나만 있어도 됩니다. PDF 사전분석·내보내기·그림 교체에는 필요 없습니다.</td></tr>
 </tbody></table></div>
 <h3>CLI 설치와 로그인</h3>
@@ -152,7 +155,7 @@ details.reference > *{display:block}
 
 <section id="launch" aria-labelledby="launch-title">
 <h2 id="launch-title">2. 소스 받기와 첫 실행</h2>
-<p>companion은 모델 실행, PDF 사전분석, PDF 편집·그림 교체 내보내기에만 필요합니다. 브라우저만으로 쓰는 수동 JSON 교환이나 검수만 한다면 이 장을 건너뜁니다. 팀 저장소의 main 브랜치에는 <code>tools/workbench</code>가 없으므로 새로 받을 때는 Workbench 브랜치를 지정합니다. 이미 설치해 쓰던 Workbench 폴더가 있으면 다시 받거나 <code>git pull</code>할 필요 없이 그 폴더를 그대로 쓰고, 원래 폴더를 지우거나 바꾸지 않습니다. 스크립트는 실행 전에 직접 읽어 보세요.</p>
+<p>companion은 선택적인 로컬 모델 실행, PDF 사전분석, 구형 로컬 PDF 내보내기와 그림 교체에 필요합니다. 브라우저의 직접 글·표 셀 편집과 생성, 수동 JSON 교환이나 검수는 PC 연결 없이 쓸 수 있으므로 이 장을 건너뛰어도 됩니다. 팀 저장소의 main 브랜치에는 <code>tools/workbench</code>가 없으므로 새로 받을 때는 Workbench 브랜치를 지정합니다. 이미 설치해 쓰던 Workbench 폴더가 있으면 다시 받거나 <code>git pull</code>할 필요 없이 그 폴더를 그대로 쓰고, 원래 폴더를 지우거나 바꾸지 않습니다. 스크립트는 실행 전에 직접 읽어 보세요.</p>
 <pre><code>git clone https://github.com/Shinick-Han/falsify-workbench.git
 cd falsify-workbench
 powershell -NoProfile -ExecutionPolicy Bypass -File .\start-companion.ps1</code></pre>
@@ -209,8 +212,9 @@ python3 -m venv .venv
 <section id="pdf-export" aria-labelledby="pdf-export-title">
 <h2 id="pdf-export-title">5. PDF·텍스트 내보내기</h2>
 <ul>
-<li><strong>기본(한 줄 보존 편집)</strong>: 연결된 companion이 PyMuPDF로 처리합니다. 재사용 가능한 원본 글꼴로 된 한 줄 텍스트가 원래 공간에 들어갈 때만 바꾸고, 변경 영역 밖을 비교합니다. 글리프 누락·혼합 글꼴·줄바꿈이 필요한 After는 차단합니다.</li>
-<li><strong>줄바꿈 재배치(선택)</strong>: 별도 모듈 <a href="https://github.com/Shinick-Han/falsify-pdf-editor">falsify-pdf-editor</a>를 직접 빌드·설정한 companion에서만 긴 After의 줄바꿈과 이어지는 페이지 추가를 시도합니다. 대상은 1단·회전 없음·잘림 없음인 본문 텍스트뿐입니다. 이 엔진과 검증된 WASM은 Workbench에 <strong>포함되어 있지 않으며</strong>, 사설로 패치한 WASM을 공개 저장소나 페이지에 올리지 않습니다. 설정 방법은 <a href="https://github.com/Shinick-Han/falsify-workbench/blob/main/docs/pdf-editor.md">PDF 편집기 설정</a>.</li>
+<li><strong>브라우저 직접 편집</strong>: <b class="ui">현재 편집으로 생성</b>은 포함된 MuPDF와 <a href="https://github.com/Shinick-Han/falsify-pdf-editor">BentoPDF/PDFium 문단 편집기</a>를 브라우저 worker에서 실행합니다. 직접 글·표 셀 편집에는 companion이나 모델 호출이 필요하지 않습니다.</li>
+<li><strong>본문 줄바꿈과 쪽 흐름</strong>: 지원되는 1단·회전 없음·잘림 없음인 최상위 본문을 기존 쪽에 이어 배치하고, 남는 분량에 이어지는 쪽을 추가합니다. 조건이 맞지 않는 그룹은 경고와 기존 이어지는 쪽을 유지합니다. 원래 글꼴·크기와 고정 머리말·꼬리말을 검사하지만 임의 다단·표·그림 재배치를 보장하지 않습니다.</li>
+<li><strong>선택적인 로컬 내보내기</strong>: 이전 RED 후보 다운로드 경로의 한 줄 보존 편집과 별도로 설정한 로컬 문단 편집기는 companion을 사용합니다. 설정과 지원 범위는 <a href="https://github.com/Shinick-Han/falsify-workbench/blob/main/docs/pdf-editor.md">PDF 편집기 설정</a>을 확인하세요.</li>
 <li><strong>TXT류</strong>: TXT/MD/LaTeX/CSV 등은 브라우저에서 인코딩·줄끝·변경 밖 바이트를 보존해 내보냅니다. 표시 앱의 자동 줄바꿈은 검증하지 않습니다.</li>
 <li><strong>DOCX/ODT/HTML</strong>: 원래 레이아웃을 검증할 렌더러가 없어 완성본 다운로드를 막고 변경 계획만 저장합니다.</li>
 </ul>
@@ -230,7 +234,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\start-companion.ps1 -NoIns
 <li>Before/After를 확인합니다. 원래 배치 상자의 크기는 고정되므로 비율이 다르면 늘어나 보입니다. 원본 상자와 같은 비율로 준비하세요.</li>
 <li>동의 후 <b class="ui">선택한 한 곳만 교체한 사본 만들기</b> → <b class="ui">실험용 PDF 다운로드</b>와 <b class="ui">교체 보고서 JSON 다운로드</b>. 보고서는 PDF에 넣지 않는 별도 파일이며, 원본과 텍스트 후보 다운로드는 덮어쓰지 않습니다.</li>
 </ol>
-<p>지원 범위는 페이지에 직접 그려진 불투명 래스터 이미지입니다. Form XObject 안·인라인 이미지, 잘림·회전·투명 마스크, 벡터 그림과 표는 지원하지 않으며 우회하지 않습니다. 입력 PDF 25 MiB, 출력 64 MiB 상한입니다. 보고서의 렌더 검사는 같은 엔진의 자체 확인이며 독립 과학 검증이 아닙니다.</p>
+<p>선택적인 로컬 companion은 페이지에 직접 그려졌거나 단순한 Form XObject 안에 있는 불투명 래스터 이미지 한 곳을 지원합니다. Form은 최대 3단계이며, 공유 이미지·Form도 고른 호출만 분리해 바꿉니다. 인라인 이미지, 잘림·회전·투명 마스크·복잡한 합성, 선택적 표시 레이어와 태그 구조, 벡터 그림과 표는 지원하지 않습니다. 그림 크기는 원래 상자로 고정되며 캡션이나 본문과 함께 이동하지 않습니다. 입력 PDF 25 MiB, 출력 64 MiB 상한입니다. 보고서의 렌더 검사는 같은 엔진의 자체 확인이며 독립 과학 검증이 아닙니다.</p>
 </section>
 
 <section id="blue" aria-labelledby="blue-title">
@@ -347,11 +351,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\start-companion.ps1 -NoIns
 <dt>응답 적용 차단 (원문 불일치)</dt>
 <dd>후보의 Before나 인용이 추출 원문과 정확히 일치하지 않으면 적용하지 않습니다. 다시 실행합니다.</dd>
 <dt>After 거부 (수치·인용·URL 변경)</dt>
-<dd>현재 기본 텍스트 경로는 Before의 숫자 토큰, 대괄호 인용, URL을 After에서 바꾸는 것을 거부합니다. After의 그 부분을 Before와 같게 되돌립니다. 이 검사를 우회하는 방법은 없으며, 모델의 유보·거절도 재시도로 넘기지 않습니다.</dd>
+<dd>이 메시지가 나오는 RED 후보·기존 텍스트 다운로드 경로는 Before의 숫자 토큰, 대괄호 인용, URL 보존을 요구합니다. 그 경로에서는 해당 부분을 Before와 같게 되돌립니다. 브라우저의 직접 글·표 셀 편집은 원본 위치에 묶인 별도 수동 경로이며 모델 실행으로 기록하지 않습니다. 모델의 유보·거절은 재시도로 넘기지 않습니다.</dd>
 <dt>PDF 다운로드 차단</dt>
-<dd>글꼴·글리프 문제, 기본 편집기에서 After가 원래 줄 공간을 넘는 경우, 재배치 대상이 아닌 텍스트(다단·회전·잘림)인 경우입니다. After를 줄이거나 재배치 엔진을 설정합니다.</dd>
+<dd>글꼴·글리프·원문 위치 문제나 지원하지 않는 다단·회전·잘림일 수 있습니다. 브라우저 생성과 구형 로컬 RED 다운로드는 다른 경로이므로 화면의 실패 이유를 확인하세요. 표 셀 넘침은 경고로 표시되며 칸이 자동으로 커지지 않습니다. 읽을 수 있는 실패 후보·초안이 제공되면 상태를 확인하고 검수하세요.</dd>
 <dt>그림 교체 실패</dt>
-<dd>Form 내부·인라인 그림은 목록에서 지원 불가입니다. 교체 결과가 원본과 같아 선택 영역이 바뀌지 않으면(no-op) 실패로 처리합니다.</dd>
+<dd>지원 범위를 벗어난 Form, 인라인 그림, 잘림·마스크·레이어·태그 구조 등은 목록에서 지원 불가로 표시됩니다. 단순한 불투명 Form 그림은 고른 한 곳만 교체할 수 있습니다. 선택 영역이 원본과 같으면(no-op) 실패로 처리합니다.</dd>
 <dt>저장 공간 부족</dt>
 <dd>기존 기록은 덮어쓰지 않습니다. <b class="ui">전체 기록 JSON 백업</b> 후 공간을 확보하고 다시 기록합니다.</dd>
 <dt>유보·거절</dt>
@@ -366,12 +370,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\start-companion.ps1 -NoIns
 <caption>입력 형식과 받을 수 있는 결과</caption>
 <thead><tr><th>입력</th><th>RED 다운로드</th><th>BLUE 입력</th></tr></thead>
 <tbody>
-<tr><td>PDF</td><td>실험용 PDF (companion 필요)</td><td>가능 (텍스트만)</td></tr>
+<tr><td>PDF</td><td>브라우저 직접 글·표 셀 편집 PDF; 그림 교체·구형 로컬 경로는 companion 필요</td><td>가능 (텍스트만)</td></tr>
 <tr><td>TXT · MD · LaTeX · CSV · TSV · RST</td><td>바이트 보존 텍스트 파일</td><td>TXT · MD 가능</td></tr>
 <tr><td>DOCX · ODT · HTML</td><td>차단, 변경 계획 JSON만</td><td>가능 (텍스트만)</td></tr>
 <tr><td>PNG (그림 교체용)</td><td>교체 PDF + 별도 보고서 JSON</td><td>해당 없음</td></tr>
 </tbody></table></div>
-<p>Word 형식으로 내보내는 기능은 없습니다. 화면의 상태는 두 종류로 읽습니다. <strong>경고·사용 불가</strong>(예: 사전분석 사용 불가, 독립 검사 미실행, 구버전 companion)는 그 기능만 쓸 수 없다는 뜻이고 다른 기능은 계속 쓸 수 있습니다. <strong>확정 실패</strong>(보존 검사 실패, 해시 불일치, 원문 불일치)는 결과 파일을 내주지 않습니다.</p>
+<p>Word 형식으로 내보내는 기능은 없습니다. <strong>경고·사용 불가</strong>(예: 사전분석 사용 불가, 독립 검사 미실행, 구버전 companion)는 해당 기능의 상태이며 다른 기능은 계속 쓸 수 있습니다. 해시·원문 바인딩 실패나 지원 불가로 파일을 만들지 못하면 이전 실제 생성본을 유지합니다. 브라우저 편집기가 읽을 수 있는 <strong>실패 후보·초안</strong>을 제공하는 경우도 있으므로, 다운로드 가능 여부와 전체 편집 적용 여부를 따로 확인하세요. 혼합 편집에서 표 단계가 실패하면 본문 미적용 표시가 남습니다.</p>
 </section>
 
 <section id="examples" aria-labelledby="examples-title">

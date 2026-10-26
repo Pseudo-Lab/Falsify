@@ -25,3 +25,10 @@ Visual workflow components:
   ISC and inherited Feather MIT terms: app/dist/vendor/LICENSE-LUCIDE.txt
   https://github.com/lucide-icons/lucide
 No Squoosh analytics, codecs or ScratchJr/Excalidraw runtime is included.
+
+Table recognition and geometry:
+- Selected Stirling PDF frontend table core at cd48ccb288f66ff884cbb084bf101b875ed7ded7.
+  Copyright (c) 2025 Stirling PDF Inc., MIT for the included frontend paths.
+  Original sources, license and provenance: app/src/table-vendor/.
+  Browser notices and license: app/dist/table-vendor/.
+  No restricted Stirling engine, proprietary, desktop, cloud, SaaS or processor code is included.

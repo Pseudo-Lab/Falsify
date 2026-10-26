@@ -30,11 +30,14 @@ After restarting, pair the hosted Workbench with the new terminal token. Do not 
 
 ## Supported boundary
 
-The first version targets **direct page-level, opaque raster Image XObjects**. A resource reused on the same page or across
-pages can have one selected painting invocation changed: the replacement image and page resource dictionary are localized,
-and only that invocation points at the new image. Image geometry, page size and unselected content must be preserved.
+The writer supports **opaque raster Image XObjects painted directly on a page or inside simple Form XObjects** (at most
+three nested Forms). A resource or Form reused on the same page or across pages can have one selected painting invocation
+changed. The writer clones only the selected Form ancestry, with separate Resources/XObject dictionaries at every level,
+and renames exactly that chain's painting operands with pikepdf/QPDF raw tokens. Original shared Forms/images keep their
+original references for all other uses. Image geometry, page size and unselected content must be preserved. Form matrices
+and containing rectangular BBoxes are retained; the image's final transform must be positive and axis-aligned.
 
-Form-contained/inline images, ambiguous clipping, transparent masks, unsupported transforms, cropped/rotated page mappings
+Inline images, non-containing or ambiguous clipping, Form transparency groups/masks, image masks, unsupported transforms, cropped/rotated page mappings
 and overlapping content require separate support; they are not silently reconstructed or flattened. Vector figures and
 tables are not raster placements. A bounded or incomplete inventory is not evidence that every figure was inspected.
 
@@ -43,7 +46,10 @@ IDs bind selection to the exact original. The companion re-derives the placement
 not from a client-provided rectangle. The native child has a timeout and temporary-file cleanup, **not an OS memory sandbox**.
 
 The writer checks page count/geometry, extracted text and rendered pixels outside the tight selected region; the selected
-region must actually change. Its report calls this an **engine rendering check**, not independent scientific verification.
+region must actually change. Decoded page and reachable Form streams are also compared by painting invocation: only the
+selected ancestry's exact operand renames are allowed, so a shared Form changing elsewhere fails even if it causes no pixel
+difference. Malformed painting operands or unbalanced graphics state make the affected scan incomplete and non-editable.
+Its report calls this an **engine rendering check**, not independent scientific verification.
 Coordinator cross-renderer checks on synthetic shared-image fixtures are separate evidence, not arbitrary-paper fidelity.
 Current BLUE is **text-only**. Failure to read a changed image is not proof of sophisticated reasoning evasion or BLUE quality.
 
@@ -53,3 +59,17 @@ The writer uses [pikepdf's content-stream/token APIs](https://pikepdf.readthedoc
 not global shared-xref replacement or whole-page rasterization. pikepdf is MPL-2.0; underlying QPDF and native dependencies
 have their own notices. Pillow has its own license. PyMuPDF remains AGPL/commercial; the Workbench source is AGPL-3.0.
 The source release does not bundle the optional native wheels, private paper assets or the separate patched text-editor WASM.
+
+Synthetic engine tests exercise one and two nested Forms repeated on the same and other pages, source immutability,
+retained matrices/BBoxes/metadata, exact stream isolation and unselected pixel equality. They also refuse masks, transparency
+groups, cutting/complex clips, rotated transforms and ambiguous operators. This does not establish general publisher-figure
+editing: vector/table reconstruction, arbitrary clipping, annotations and complex compositing remain separate work.
+
+
+## Layer and structure boundaries
+
+Simple Form replacement excludes optional-content membership (`/OC`), tagged
+Form/image ownership (`/StructParent`, `/StructParents`) and marked-content
+operators inside a cloned Form. A default visible render cannot validate hidden
+layer behavior or ParentTree/MCR associations. These cases retain the existing
+`form-image` unsupported reason until their graphs can be cloned and verified.

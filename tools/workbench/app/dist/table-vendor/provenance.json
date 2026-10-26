@@ -1,0 +1,49 @@
+{
+  "repository": "Stirling-Tools/Stirling-PDF",
+  "commit": "cd48ccb288f66ff884cbb084bf101b875ed7ded7",
+  "license": "MIT for included frontend/src/editor/core paths; upstream/LICENSE retained",
+  "retrievedVia": "gh api contents at exact ref, application/vnd.github.raw+json",
+  "build": {
+    "tool": "esbuild",
+    "version": "0.28.2",
+    "format": "esm",
+    "platform": "browser",
+    "target": "es2022",
+    "minify": false,
+    "modification": "TableModel runtime Color alias replaced by relative ./Color.ts before bundle; type imports erased"
+  },
+  "files": [
+    {
+      "path": "upstream/frontend/src/editor/core/tools/pdfTextEditor/__tests__/tableDetection.test.ts",
+      "sha256": "0d3033e226f183ed8f6984a48f1584497b7b9edcdfff00c6da6eb7e4500fd636"
+    },
+    {
+      "path": "upstream/frontend/src/editor/core/tools/pdfTextEditor/__tests__/tableGeometry.test.ts",
+      "sha256": "159fbae0332ca90529158ada771908ceb7d34fe610c384f708bed108e0737ed5"
+    },
+    {
+      "path": "upstream/frontend/src/editor/core/tools/pdfTextEditor/model/Color.ts",
+      "sha256": "4cae63849a7a58218c24f6b78e441a6dc54162bb361913cfee7149942a2146ff"
+    },
+    {
+      "path": "upstream/frontend/src/editor/core/tools/pdfTextEditor/model/TableModel.ts",
+      "sha256": "a5503f868bad023ba619609e8e8d42157c51142dc64104b778f566bf363a5e95"
+    },
+    {
+      "path": "upstream/frontend/src/editor/core/tools/pdfTextEditor/types.ts",
+      "sha256": "86caa3ee4f5d40b2dcc61584ce68da7a60a05d61098cdbf1a9f9081f7ce84f34"
+    },
+    {
+      "path": "upstream/frontend/src/editor/core/tools/pdfTextEditor/util/tableDetection.ts",
+      "sha256": "357c3720abc5e5b02a5611bd51b0129bdba4e4f531c600da70e97383f0931401"
+    },
+    {
+      "path": "upstream/frontend/src/editor/core/tools/pdfTextEditor/util/tableGeometry.ts",
+      "sha256": "ef34a998efd874820acf345982584dada6a9f0ccbbba926fad21876e50506102"
+    },
+    {
+      "path": "upstream/LICENSE",
+      "sha256": "e37c7ec776906aebe25e48288da4305afd45dee92f0231ddec68af59cbd7736b"
+    }
+  ]
+}

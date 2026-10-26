@@ -18,7 +18,8 @@ for (const [kind, expected] of Object.entries(manifest.artifacts)) {
 writeFileSync(join(vendor, 'package.json'), '{"private":true,"type":"module"}\n');
 copyFileSync(join(source, 'runtime/candidate-manifest.json'), join(vendor, 'candidate-manifest.json'));
 for (const name of ['NOTICE.md', 'LICENSE', 'NOTICE', 'THIRD_PARTY_NOTICES.md', 'UPSTREAM.json', 'overlay.json', 'licenses', 'patches', 'build-source']) cpSync(join(source, name), join(vendor, name), {recursive: true});
-const modules = ['editor.mjs', 'quality.mjs', 'pagination.mjs', 'inline-preservation.mjs', 'continuation-template.mjs'];
+const modules = ['editor.mjs', 'quality.mjs', 'pagination.mjs', 'inline-preservation.mjs', 'continuation-template.mjs',
+  'document-flow.mjs', 'document-flow-band.mjs', 'document-flow-links.mjs', 'document-flow-underlines.mjs'];
 writeFileSync(join(vendor, 'manifest.json'), JSON.stringify({
   schema: 'falsify.paragraph-pdf.vendor.v1', license: 'AGPL-3.0-only',
   sourceModuleBase: 'cd4ba2cdd68ae7e51198f615bd4ac6130206b162',
@@ -32,6 +33,7 @@ writeFileSync(join(vendor, 'manifest.json'), JSON.stringify({
 const plugin = {
   name: 'paragraph-browser-adaptations',
   setup(build) {
+    build.onResolve({filter: /^\.\/browser-pdf-vendor\/mupdf\.js$/}, () => ({path: './browser-pdf-vendor/mupdf.js', external: true}));
     build.onResolve({filter: /^node:crypto$/}, () => ({path: join(app, 'src/paragraph-pdf-crypto.mjs')}));
     build.onResolve({filter: /^\.\/runtime\.mjs$/}, args => args.importer.replaceAll('\\', '/').endsWith('paragraph-vendor/editor.mjs') ? ({path: join(app, 'src/paragraph-pdf-runtime.mjs')}) : undefined);
     build.onResolve({filter: /^\.\/engine-loader\.js$/}, () => ({path: join(app, 'src/paragraph-pdf-engine-loader.mjs')}));

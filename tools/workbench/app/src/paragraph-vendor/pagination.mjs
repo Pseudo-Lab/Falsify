@@ -273,7 +273,10 @@ export function buildFlowPlan(engine, ctx, grown, { floor, maxNewPages }) {
   const virtual = lines.map((l) => ({ top: l.top - l.shift, bottom: l.bottom - l.shift }));
   const split = planFlow(virtual, { bodyTop, floor, maxNewPages });
   if (!split.ok) return err(split.code, { line: split.line, maxNewPages: split.maxNewPages });
-  return { ok: true, lines, pages: split.pages, bodyTop, flowTop, floor, orphans, objects };
+  // Paragraph boxes use font metrics; bodyTop is measured glyph ink. The
+  // report's flow band must not begin above the measured body band merely
+  // because an ascender metric extends farther than its actual glyphs.
+  return { ok: true, lines, pages: split.pages, bodyTop, flowTop: Math.min(flowTop, bodyTop), floor, orphans, objects };
 }
 
 const coded = (code) => Object.assign(new Error(code), { code });

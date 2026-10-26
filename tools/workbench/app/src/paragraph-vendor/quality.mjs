@@ -17,6 +17,9 @@
 
 import { createHash } from "node:crypto";
 import { resolvePageFraction } from "./continuation-template.mjs";
+import { deriveDocumentFlowBand } from "./document-flow-band.mjs";
+import { deriveNativeLinkMoves, savedLinkGlyphs } from "./document-flow-links.mjs";
+import { verifySavedUnderlines } from "./document-flow-underlines.mjs";
 
 const TOL = 1;
 const EDGE_BAND = 0.1;
@@ -689,7 +692,7 @@ function extents(g) {
 }
 
 // Apply each edit once to the whitespace-normalized source page text.
-export function expectedPageText(sourceText, pageEdits) {
+export function expectedPageText(sourceText, pageEdits, options = {}) {
   const norm = normStr(sourceText);
   let matchText = "";
   const matchMap = [];
@@ -726,7 +729,7 @@ export function expectedPageText(sourceText, pageEdits) {
     out += norm.slice(at, s.a) + s.after;
     at = s.b;
   }
-  return { ok: true, text: normStr(out + norm.slice(at)) };
+  return { ok: true, text: normStr(out + norm.slice(at)), ...(options.includeSpans ? {spans:spans.map(s=>({...s}))} : {}) };
 }
 
 export async function inspectSavedPdf(engineFactory, sourceBytes, outputBytes, edits, options = {}) {
@@ -751,6 +754,15 @@ export async function inspectSavedPdf(engineFactory, sourceBytes, outputBytes, e
       if (!(p >= 0 && p < src.pageCount)) failures.push({ code: "edit_page_out_of_range", pageIndex: p });
     }
     const n = map && out.pageCount === expectedOut ? src.pageCount : map ? 0 : Math.min(src.pageCount, out.pageCount);
+    let annotationModel=null;
+    const annotationAdapter=options.annotationAdapter;
+    if(annotationAdapter&&(options.flowGroups?.length??0)>0){
+      if(!['inspect','transport','validate'].every(k=>typeof annotationAdapter[k]==='function'))throw new Error('document_flow_annotation_adapter_invalid');
+      annotationModel=await annotationAdapter.inspect({sourceBytes,sourceSha256:createHash('sha256').update(sourceBytes).digest('hex')});
+      if(!annotationModel||!Array.isArray(annotationModel.annotations))throw new Error('document_flow_annotation_inventory_mismatch');
+    }
+    const annotationMoves=[];
+    const grouped = inspectDocumentGroups(src, out, map, options.flowGroups ?? [], byPage, failures, warnings, !!options.includeText, annotationModel, annotationMoves);
     for (let i = 0; i < n; i++) {
       const m = map ? map[i] : { outputPageIndex: i, continuationPageIndices: [] };
       const s = readGlyphs(src, i);
@@ -758,6 +770,10 @@ export async function inspectSavedPdf(engineFactory, sourceBytes, outputBytes, e
       const pageEdits = byPage.get(i) || [];
       const row = { pageIndex: i, outputPageIndex: m.outputPageIndex, edited: pageEdits.length > 0 };
       pages.push(row);
+      if (grouped.has(i)) {
+        Object.assign(row, grouped.get(i));
+        continue;
+      }
       if (m.continuationPageIndices.length) {
         row.continuationPageIndices = [...m.continuationPageIndices];
         if (!pageEdits.length) failures.push({ code: "continuation_without_edit", pageIndex: i });
@@ -802,6 +818,11 @@ export async function inspectSavedPdf(engineFactory, sourceBytes, outputBytes, e
         else failures.push({ code: "edge_band_body_changed", pageIndex: i, count: split.bodyChanged });
       }
     }
+    if(annotationAdapter&&annotationModel){
+      const verified=await annotationAdapter.validate({model:annotationModel,sourceBytes,outputBytes,sourcePageMap:map,moves:annotationMoves,reflowedSourcePages:[...grouped.keys()]});
+      if(verified?.ok!==true)failures.push({code:typeof verified?.code==='string'&&/^[a-z_]{1,64}$/.test(verified.code)?verified.code:'document_flow_annotation_verification_failed'});
+      report.annotationCheck={ok:verified?.ok===true,moves:annotationMoves.length};
+    }
     report.ok = failures.length === 0;
     warnings.push({ code: "self_check_not_independent", detail: "same PDFium build; independent extraction and rendering review still required" });
   } catch (err) {
@@ -812,6 +833,117 @@ export async function inspectSavedPdf(engineFactory, sourceBytes, outputBytes, e
     try { out?.close(); } catch {}
   }
   return report;
+}
+
+function inspectDocumentGroups(src, out, map, groups, byPage, failures, warnings, includeText, annotationModel=null, annotationMoves=[]) {
+  const covered=new Map(), outputs=new Set();
+  const bad=()=>failures.push({code:'document_flow_map_invalid'});
+  if(!Array.isArray(groups)||groups.length>64){bad();return covered;}
+  for(const group of groups){
+    const ss=group?.sourcePages,oo=group?.outputPages;
+    const band=b=>b&&['bodyTop','flowTop','floor','x0','x1'].every(k=>Number.isFinite(b[k]))&&b.bodyTop===b.flowTop&&b.bodyTop>b.floor&&b.x1>b.x0;
+    if(group?.version!==1||!Array.isArray(ss)||ss.length<2||ss.length>64||src.pageCount>64||!Array.isArray(oo)||oo.length<ss.length||oo.length>ss.length+32||!Array.isArray(group.contentMap)||group.contentMap.length!==ss.length||!map){bad();continue;}
+    const ids=ss.map(b=>b.sourcePageIndex),ois=oo.map(b=>b.outputPageIndex);
+    const expectedOutputs=ss.flatMap(b=>map[b.sourcePageIndex]?[map[b.sourcePageIndex].outputPageIndex,...map[b.sourcePageIndex].continuationPageIndices]:[]);
+    if(ss.some((b,k)=>!band(b)||!Number.isInteger(b.sourcePageIndex)||b.sourcePageIndex<0||b.sourcePageIndex>=src.pageCount||k&&b.sourcePageIndex!==ids[k-1]+1||covered.has(b.sourcePageIndex))
+      ||oo.some((b,k)=>!band(b)||!Number.isInteger(b.outputPageIndex)||b.outputPageIndex<0||b.outputPageIndex>=out.pageCount||!Number.isInteger(b.lineCount)||b.lineCount<1||outputs.has(b.outputPageIndex)||k&&b.outputPageIndex!==ois[k-1]+1)
+      ||JSON.stringify(ois)!==JSON.stringify(expectedOutputs)
+      ||group.contentMap.some((c,k)=>c?.sourcePageIndex!==ids[k]||!Array.isArray(c.outputPageIndices)||!c.outputPageIndices.length||c.outputPageIndices.some((x,j)=>!ois.includes(x)||j&&x<=c.outputPageIndices[j-1])||JSON.stringify(c.outputPageIndices)!==JSON.stringify(map[c.sourcePageIndex].contentOutputPageIndices))){bad();continue;}
+    // Reserve membership even when proof later fails: never reroute a failed
+    // group into an unrelated weaker page-level continuation check.
+    for(const i of ids)covered.set(i,{documentFlow:true,text_equal:false});for(const i of ois)outputs.add(i);
+    // Report bands are evidence to validate, never geometry authority. Derive
+    // all source bands from immutable source bytes with the producer's same
+    // classifier, then derive destination/tail bands from those results.
+    let derived;
+    try {derived=ids.map(i=>deriveDocumentFlowBand(src,i,capturePageLayout,annotationModel));}
+    catch {bad();continue;}
+    const keys=['bodyTop','flowTop','floor','x0','x1'];
+    const near=(a,b)=>Number.isFinite(a)&&Math.abs(a-b)<=1e-4;
+    const expectedX0=Math.min(...derived.map(b=>b.x0)),expectedX1=Math.max(...derived.map(b=>b.x1));
+    if(ss.some((b,k)=>keys.some(key=>!near(b[key],derived[k][key])))
+      ||oo.some((b,k)=>{
+        const destination=derived[Math.min(k,derived.length-1)];
+        return ['bodyTop','flowTop','floor'].some(key=>!near(b[key],destination[key]))||!near(b.x0,expectedX0)||!near(b.x1,expectedX1);
+      })) {bad();continue;}
+    try {
+      const moves=deriveNativeLinkMoves(src,derived,savedLinkGlyphs(out,oo),[...byPage.values()].flat(),annotationModel,expectedPageText);
+      annotationMoves.push(...moves);
+      verifySavedUnderlines(out,derived,oo,moves);
+    }catch(error){failures.push({code:error?.code??'document_flow_link_mapping_failed',pageIndex:ids[0]});}
+    const source=ss.map(b=>readGlyphs(src,b.sourcePageIndex)),output=oo.map(b=>readGlyphs(out,b.outputPageIndex));
+    const expected=[];let valid=true;
+    for(let k=0;k<ss.length;k++){
+      const b=ss[k],s=source[k],m=map[b.sourcePageIndex],o=output[ois.indexOf(m.outputPageIndex)];
+      const fixed=outsideBand(s,b.floor-.5,b.bodyTop+.5),fixedOut=outsideBand(o,b.floor-.5,b.bodyTop+.5);
+      const body=inBand(s,b.floor-.5,b.bodyTop+.5);
+      if(!body.length||b.floor<0||b.bodyTop>s.H||b.x0<0||b.x1>s.W||Math.abs(Math.min(...body.map(c=>c.l))-b.x0)>.5||Math.abs(Math.max(...body.map(c=>c.r))-b.x1)>.5||Math.abs(Math.max(...body.map(c=>c.t))-b.bodyTop)>.5){bad();valid=false;}
+      // Full-body scope: every excluded source glyph must be a physical edge.
+      if(fixed.some(c=>(c.b+c.t)/2>s.H*.1&&(c.b+c.t)/2<s.H*.9)) {bad();valid=false;}
+      if(!sameGlyphs(fixed,fixedOut)||!sameStyles(fixed,fixedOut))failures.push({code:'document_flow_fixed_content_changed',pageIndex:b.sourcePageIndex});
+      const exp=expectedPageText(bandText(s,b.floor-.5,b.bodyTop+.5),byPage.get(b.sourcePageIndex)||[]);
+      if(!exp.ok){failures.push({code:'expected_text_uncomputable',pageIndex:b.sourcePageIndex});valid=false;}else expected.push(exp.text);
+      if(Math.abs(s.W-o.W)>.01||Math.abs(s.H-o.H)>.01)failures.push({code:'document_flow_page_size_changed',pageIndex:b.sourcePageIndex});
+    }
+    const want=normStr(expected.join(' '));
+    if(oo.some((b,k)=>Math.abs(b.x0-Math.min(...ss.map(s=>s.x0)))>.01||Math.abs(b.x1-Math.max(...ss.map(s=>s.x1)))>.01||b.bodyTop!==ss[Math.min(k,ss.length-1)].bodyTop||b.floor!==ss[Math.min(k,ss.length-1)].floor)){bad();valid=false;}
+    const parts=output.map((g,k)=>normStr(bandText(g,oo[k].floor-.5,oo[k].bodyTop+.5)));
+    const actual=joinFlowParts(parts,want).text;
+    let equal=valid&&actual===want;
+    if(!equal&&valid){
+      const chars=output.flatMap((g,k)=>[...(k?[{u:32,generated:true}]:[]),...g.chars.filter(c=>c.cy===null||c.cy>=oo[k].floor-.5&&c.cy<=oo[k].bodyTop+.5)]);
+      equal=matchesGeneratedWhitespace(want,chars);
+    }
+    if(!equal)failures.push({code:'document_flow_text_or_order_mismatch',pageIndex:ids[0]});
+    // Unedited source bodies must retain their exact glyph styles in the
+    // known ordered output; selected edits alone may introduce new glyphs.
+    const actualGlyphs=output.flatMap((g,k)=>inBand(g,oo[k].floor-.5,oo[k].bodyTop+.5));
+    let glyphOffset=0;
+    const outputRanges=output.map((g,k)=>{const start=glyphOffset;glyphOffset+=inBand(g,oo[k].floor-.5,oo[k].bodyTop+.5).length;return {start,end:glyphOffset,index:oo[k].outputPageIndex};});
+    let position=0;
+    for(let k=0;k<ss.length;k++){
+      const start=position;
+      const g=inBand(source[k],ss[k].floor-.5,ss[k].bodyTop+.5);
+      const edits=byPage.get(ids[k])||[];
+      const raw=g.map(c=>String.fromCharCode(c.u)).join('');
+      if(!edits.length){
+        const got=actualGlyphs.slice(position,position+g.length);
+        if(got.length!==g.length||got.some((c,j)=>c.u!==g[j].u||!sameStyle(c.style,g[j].style)))failures.push({code:'document_flow_unchanged_style_mismatch',pageIndex:ids[k]});
+        position+=g.length;
+      }else{
+        const spans=edits.map(e=>{const before=e.before.replace(/\s/g,''),after=e.after.replace(/\s/g,'');const at=raw.indexOf(before);return {at,before,after};}).sort((a,b)=>a.at-b.at);
+        let expected=[],at=0,styleValid=true;
+        for(const span of spans){
+          const selected=g.slice(span.at,span.at+span.before.length);
+          if(!span.before||span.at<at||raw.indexOf(span.before,span.at+1)!==-1||!selected.length||selected.some(c=>!sameStyle(c.style,selected[0].style))){styleValid=false;break;}
+          expected.push(...g.slice(at,span.at),...[...span.after].map(c=>({u:c.charCodeAt(0),style:selected[0].style})));
+          at=span.at+span.before.length;
+        }
+        expected.push(...g.slice(at));
+        if(!styleValid)failures.push({code:'document_flow_style_unverifiable',pageIndex:ids[k]});
+        const got=actualGlyphs.slice(position,position+expected.length);
+        if(!styleValid||got.length!==expected.length||got.some((c,j)=>c.u!==expected[j].u||!sameStyle(c.style,expected[j].style)))failures.push({code:'document_flow_edited_style_mismatch',pageIndex:ids[k]});
+        position+=expected.length;
+      }
+      const contentPages=outputRanges.filter(r=>r.start<position&&r.end>start).map(r=>r.index);
+      if(JSON.stringify(contentPages)!==JSON.stringify(group.contentMap[k].outputPageIndices))failures.push({code:'document_flow_content_map_mismatch',pageIndex:ids[k]});
+    }
+    if(position!==actualGlyphs.length)failures.push({code:'document_flow_style_coverage_mismatch',pageIndex:ids[0]});
+    for(let k=0;k<oo.length;k++){
+      const b=oo[k],g=output[k],body=inBand(g,b.floor-.5,b.bodyTop+.5);
+      if(body.some(c=>c.b<b.floor-.5||c.t>b.bodyTop+.5))failures.push({code:'document_flow_body_outside_band',outputPageIndex:b.outputPageIndex});
+      if(countGlyphLines(body)!==b.lineCount)failures.push({code:'document_flow_line_count_mismatch',outputPageIndex:b.outputPageIndex});
+      if(offPage(g))failures.push({code:'glyphs_off_page',outputPageIndex:b.outputPageIndex});
+      if(body.some(c=>c.l<Math.min(...ss.map(b=>b.x0))-1||c.r>Math.max(...ss.map(b=>b.x1))+1))failures.push({code:'text_outside_source_columns',outputPageIndex:b.outputPageIndex});
+      if(overlaps(g,true)>Math.max(...source.map(s=>overlaps(s,true))))failures.push({code:'glyph_overlap_increased',outputPageIndex:b.outputPageIndex});
+      if(k>=ss.length){
+        const last=source.at(-1),band=ss.at(-1),edge=outsideBand(g,b.floor-.5,b.bodyTop+.5);
+        checkContinuationEdges(last,outsideBand(last,band.floor-.5,band.bodyTop+.5),g,edge,k-ss.length+1,ids.at(-1),b.outputPageIndex,failures);
+      }
+    }
+    for(const i of ids)covered.set(i,{documentFlow:true,text_equal:equal,flowSourcePageIndices:ids,flowOutputPageIndices:ois,expected_text:digest(want,includeText)});
+  }
+  return covered;
 }
 
 const sameGlyphs = (a, b) => a.length === b.length && a.every((c, k) => {

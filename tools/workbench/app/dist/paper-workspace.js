@@ -16,6 +16,7 @@
   const HEX=/^[0-9a-f]{64}$/;
   const SECRET=/^(file|bytes|data|token|password|authorization|secret|pdfbytes)$/i;
   const ZOOMS=[0.75,1,1.25,1.5,2];
+  const sourceAlias=id=>/^(paragraph|table):/.test(String(id||''));
   const TTL=12*60*60*1000;
   const SVG='http://www.w3.org/2000/svg';
   const round=n=>Math.round(n*1000)/1000;
@@ -86,9 +87,9 @@
   function classifyProposals(proposals,segments,options){
     const norm=normalizeOrigin(options);
     const segs=Array.isArray(segments)?segments:[];
-    const originals=segs.filter(s=>s&&typeof s.id==='string'&&!s.id.startsWith('paragraph:'));
+    const originals=segs.filter(s=>s&&typeof s.id==='string'&&!sourceAlias(s.id));
     const items=(Array.isArray(proposals)?proposals:[]).map(p=>classifyOne(p,segs.filter(s=>{
-      if(!s||typeof s.id!=='string'||!s.id.startsWith('paragraph:')||p&&p.segmentId===s.id)return true;
+      if(!s||typeof s.id!=='string'||!sourceAlias(s.id)||p&&p.segmentId===s.id)return true;
       return !originals.some(o=>segmentPage(o)===segmentPage(s)&&s.text&&hitsIn(o.text,s.text).length===1);
     })));
     return {...norm,items};
@@ -317,6 +318,8 @@
   }
   function generationLead(verification,stale){
     const status=verification&&typeof verification.status==='string'?verification.status:'';
+    if(verification?.bodyPending===true)return (stale?'그 사이 편집이 바뀌어 마지막 부분 생성본으로 표시합니다. ':'')+'표 편집 단계가 검증을 통과하지 못해 본문 편집은 실행하지 않았습니다. 받은 부분 생성본만 표시하며 다운로드할 수 있습니다.';
+    if(status==='draft')return '검증을 통과하지 못한 초안입니다. 진단과 실제 생성본을 확인하세요. 이 파일은 다운로드할 수 있습니다.';
     if(status==='failed'||status==='warning')return (stale?'그 사이 편집이 바뀌어 마지막 생성본으로만 표시합니다. ':'')+'검증 상태는 '+status+'입니다. 이 파일은 받을 수 있습니다.';
     if(status==='applied')return stale?'생성본을 받았지만 그 사이 편집이 바뀌어 마지막 생성본으로만 표시합니다. 검증 상태는 applied입니다.':'검증 상태는 applied입니다. 미리보기와 다운로드는 이 파일의 바이트입니다.';
     return stale?'생성본을 받았지만 그 사이 편집이 바뀌어 마지막 생성본으로만 표시합니다.':'생성본을 받았습니다. 미리보기와 다운로드는 이 파일의 바이트입니다.';
@@ -411,6 +414,7 @@
     if(!doc||typeof doc.querySelector!=='function')throw new Error('document required');
     const need=id=>{const node=doc.querySelector('#'+id);if(!node)throw new Error('missing #'+id);return node;};
     const ui={
+      modeText:need('paper-mode-text'),modeTable:need('paper-mode-table'),modeHelp:need('paper-mode-help'),tableStatus:need('paper-table-status'),
       root:need('paper-workspace'),status:need('paper-workspace-status'),file:need('paper-file'),
       original:need('paper-original-download'),prev:need('paper-page-prev'),pageLabel:need('paper-page-label'),pageJump:need('paper-page-jump'),next:need('paper-page-next'),
       zoomOut:need('paper-zoom-out'),zoomLabel:need('paper-zoom-label'),zoomIn:need('paper-zoom-in'),
@@ -428,13 +432,21 @@
     const now=()=>typeof deps.now==='function'?deps.now():Date.now();
     const previewApi=()=>deps.preview||globalThis.FalsifyPreview||null;
     const editsApi=()=>deps.edits||globalThis.FalsifyPaperEdits||null;
+    const tableApi=()=>deps.tablePdf||globalThis.FalsifyTablePdf||null;
     const paragraphApi=()=>deps.paragraphPdf||globalThis.FalsifyParagraphPdf||null;
     const legacyExporterApi=()=>deps.exporter||globalThis.FalsifyBrowserPdf||null;
-    const exporterApi=()=>{
-      const edits=enabledEdits(),flow=paragraphApi();
+    const pipelineApi=()=>deps.pipeline||globalThis.FalsifyPdfEditPipeline||null;
+    const tableEdit=e=>String(e.segmentId||'').startsWith('table:');
+    function bodyExporter(edits){
+      const flow=paragraphApi();
       if(edits.some(e=>String(e.segmentId||'').startsWith('paragraph:')))return flow;
       if(flow&&edits.some(e=>e.origin==='ai-proposal'||e.origin==='external-ai-import'))return flow;
       return legacyExporterApi()||flow;
+    }
+    const exporterApi=()=>{
+      const edits=enabledEdits(),tables=edits.filter(tableEdit),body=edits.filter(e=>!tableEdit(e));
+      if(tables.length&&body.length)return pipelineApi()?.prepare&&legacyExporterApi()?.prepare&&bodyExporter(body)?.prepare?pipelineApi():null;
+      return tables.length?legacyExporterApi():bodyExporter(body);
     };
     const store=()=>{try{return deps.storage||globalThis.localStorage||null;}catch{return null;}};
     function blobApi(){
@@ -460,6 +472,7 @@
     }
     let epoch=0,source=null,session=null,unsub=null,snapshot=null,output=null,inline=null,pageText=null;
     let proposalQueue=null,accepted=new Set(),modelById=new Map(),draftRaw=null,pendingFocus=null,pendingResume=null;
+    let editMode='text',tableCtl=null,tableSeq=0,tableBindings=new Map();
     let inspectCtl=null,resumeCtl=null,afterPart=0,afterSourcePage=0;
     let page=1,pages=0,zoom=1,drawSeq=0,afterSeq=0,loadTask=null,textLayerHandle=null,genCtl=null,genId=0,generating=false,afterTask=null,afterRender=null;
 
@@ -529,6 +542,7 @@
     function renderChrome(){
       const pdf=!!(source&&source.pdf),ready=!!(source&&source.fileHash);
       ui.original.disabled=!source;
+      ui.modeTable.disabled=!pdf||!ready||!source.doc||!tableApi();
       ui.coreNote.textContent=editsApi()?'':'편집 코어가 아직 없습니다. 쪽 보기와 원본 다운로드는 사용할 수 있지만 편집은 저장되지 않습니다.';
       ui.exportNote.textContent=!pdf&&source?'PDF가 아니라 브라우저에서 생성본을 만들지 않습니다.':exporterApi()?'':'브라우저 PDF 편집 모듈이 아직 없습니다. 생성본을 만들지 않으며, 성공으로 표시하지 않습니다.';
       ui.generate.disabled=generating||!exporterApi()||!pdf||!enabledEdits().length;
@@ -566,14 +580,14 @@
       ui.inlineBefore.textContent=inline.before;
       ui.inlineAfter.value=typeof inline.after==='string'?inline.after:'';
       const box=inline.anchor&&inline.anchor.bbox;
-      ui.inlineMeta.textContent='쪽 '+(inline.pageIndex+1)+(Number.isSafeInteger(inline.anchor&&inline.anchor.occurrence)?' · occurrence '+inline.anchor.occurrence:'')+(box?' · 좌표 '+box.join(', '):'');
+      ui.inlineMeta.textContent='쪽 '+(inline.pageIndex+1)+(Number.isSafeInteger(inline.anchor&&inline.anchor.occurrence)?' · occurrence '+inline.anchor.occurrence:'')+(box?' · 좌표 '+box.map(round).join(', '):'');
       placeInline();
     }
     function segmentFor(before,anchor,pageIndex){
       const all=coreSegments(source&&source.segments).filter(s=>segmentPage(s)===pageIndex);
       // Paragraph discovery must not make a previously unique word selection ambiguous.
       // Keep the original extraction catalog as the first binding choice for selection edits.
-      for(const segs of [all.filter(s=>!s.id.startsWith('paragraph:')),all.filter(s=>s.id.startsWith('paragraph:'))]){
+      for(const segs of [all.filter(s=>!sourceAlias(s.id)),all.filter(s=>s.id.startsWith('paragraph:'))]){
         if(anchor&&Number.isSafeInteger(anchor.start)&&Number.isSafeInteger(anchor.end)&&anchor.end===anchor.start+before.length){
           const exact=segs.filter(s=>s.text.slice(anchor.start,anchor.end)===before);
           if(exact.length===1)return exact[0];
@@ -654,7 +668,9 @@
     }
     function onSnapshot(snap){
       try{
-        snapshot=snap;const copy=published(snap);if(copy)emit('falsify:paper-workspace-edits',copy);renderEdits();paintProposals();void drawAfter();
+        const changed=snapshot&&snapshot.revision!==snap.revision;
+        snapshot=snap;if(changed){clearTables(true);if(editMode==='table'&&pageText)void inspectTables(pageText,epoch,drawSeq);}
+        const copy=published(snap);if(copy)emit('falsify:paper-workspace-edits',copy);renderEdits();paintProposals();void drawAfter();
       }catch(e){setEditStatus('편집 목록을 그리지 못했습니다. '+safeMessage(e),true);}
     }
     function watchSession(next){
@@ -675,7 +691,7 @@
     }
     function adoptSegments(raw){
       if(!source)return;
-      const paragraphs=(source.segments||[]).filter(s=>s.id.startsWith('paragraph:'));
+      const paragraphs=(source.segments||[]).filter(s=>sourceAlias(s.id));
       source.segments=coreSegments(raw).filter(s=>!paragraphs.some(p=>p.id===s.id)).concat(paragraphs);
       if(session&&typeof session.addSegments==='function'){
         try{session.addSegments(coreSegments(source.segments));}
@@ -687,6 +703,7 @@
       paintProposals();
     }
     function stopPdf(){
+      clearTables(true);
       drawSeq++;
       if(resumeCtl){resumeCtl.abort();resumeCtl=null;}
       if(inspectCtl){inspectCtl.abort();inspectCtl=null;}
@@ -704,7 +721,7 @@
     function closeAfter(){afterSeq++;releaseAfter();afterNav.hidden=true;}
     function abortGen(){genId++;if(genCtl){genCtl.abort();genCtl=null;}generating=false;}
     function clearSource(){
-      epoch++;abortGen();stopPdf();closeAfter();
+      epoch++;tableBindings.clear();abortGen();stopPdf();closeAfter();
       if(typeof unsub==='function')unsub();
       unsub=null;session=null;snapshot=null;output=null;inline=null;pageText=null;proposalQueue=null;accepted=new Set();draftRaw=null;pendingResume=null;
       source=null;pages=0;page=1;zoom=1;
@@ -741,7 +758,7 @@
       setDraftStatus(row.source?'보관한 '+row.name+' 초안과 원본 PDF가 있습니다. 초안 복구를 누르면 이 브라우저에서 다시 엽니다.':'초안에는 편집만 있습니다. 이름이 '+row.name+' 이고 해시가 '+row.fileHash.slice(0,12)+'… 인 원본 PDF를 다시 선택한 뒤 초안 복구를 누르세요. 서버로 올리지 않습니다.');
     }
     async function openFile(file){
-      const mine=++epoch;
+      const mine=++epoch;tableBindings.clear();
       abortGen();stopPdf();closeAfter();
       if(typeof unsub==='function')unsub();
       unsub=null;session=null;snapshot=null;output=null;inline=null;pageText=null;proposalQueue=null;accepted=new Set();draftRaw=null;pendingResume=null;
@@ -799,6 +816,7 @@
     async function drawBefore(n,mine){
       mine=mine==null?epoch:mine;
       if(!source||!source.doc||!Number.isSafeInteger(n)||n<1||n>pages||epoch!==mine)return;
+      clearTables(true);
       const seq=++drawSeq,live=()=>epoch===mine&&seq===drawSeq;
       if(inspectCtl){inspectCtl.abort();inspectCtl=null;}
       pageText=null;
@@ -850,7 +868,7 @@
         clearStage(ui.beforeStage);ui.beforeStage.append(pageEl);
         pdfPage.cleanup&&pdfPage.cleanup();source.render=null;
         setBeforeStatus(n+' / '+pages+'쪽 · 원본 바이트'+(rotation?' · 회전된 쪽이라 좌표 편집은 받지 않습니다':''));
-        renderChrome();void drawAfter();void inspectParagraphs(pageText,mine,seq);
+        renderChrome();void drawAfter();if(editMode==='table')void inspectTables(pageText,mine,seq);else void inspectParagraphs(pageText,mine,seq);
       }catch(e){
         if(!live()||e&&e.name==='RenderingCancelledException')return;
         if(canvas){canvas.width=0;canvas.height=0;}
@@ -860,13 +878,13 @@
     }
     async function inspectParagraphs(display,mine,seq){
       const api=paragraphApi();
-      if(!api||typeof api.inspectPage!=='function'||!source||display.rotation)return;
+      if(!api||typeof api.inspectPage!=='function'||!source||display.rotation||editMode!=='text')return;
       const ctl=typeof AbortController==='function'?new AbortController():{abort(){},signal:undefined};
       inspectCtl=ctl;
       const file=source.file,hash=source.fileHash;
       try{
         const found=await api.inspectPage({file,fileHash:hash,pageIndex:display.pageIndex,signal:ctl.signal});
-        if(epoch!==mine||seq!==drawSeq||pageText!==display||!source||source.file!==file||ctl.signal?.aborted)return;
+        if(epoch!==mine||seq!==drawSeq||pageText!==display||!source||source.file!==file||ctl.signal?.aborted||editMode!=='text')return;
         if(found.fileHash!==hash||found.pageIndex!==display.pageIndex||found.rotation||!(found.width>0)||!(found.height>0))throw new Error('문단 위치가 원본과 맞지 않습니다.');
         display.paragraphs=(Array.isArray(found.paragraphs)?found.paragraphs:[]).filter(p=>p&&typeof p.id==='string'&&('paragraph:'+display.pageIndex+':'+p.id).length<=80&&typeof p.text==='string'&&p.text.trim()&&validBbox(p.bbox));
         display.paragraphWidth=found.width;display.paragraphHeight=found.height;
@@ -884,8 +902,62 @@
         setBeforeStatus((display.pageIndex+1)+' / '+pages+'쪽 · 문단을 읽지 못했습니다. 글 선택 편집은 사용할 수 있습니다. '+safeMessage(e),true);
       }finally{if(inspectCtl===ctl)inspectCtl=null;}
     }
+    function clearTables(closeInline){
+      tableSeq++;if(tableCtl){tableCtl.abort();tableCtl=null;}
+      if(pageText?.tableLayer){pageText.tableLayer.remove();pageText.tableLayer=null;}
+      if(pageText)pageText.tableCells=null;
+      if(closeInline&&inline?.table){inline=null;renderInline();}
+      say(ui.tableStatus,'');
+    }
+    function setEditMode(mode){
+      if(mode==='table'&&ui.modeTable.disabled)return;
+      clearTables(true);if(inspectCtl){inspectCtl.abort();inspectCtl=null;}
+      editMode=mode;ui.modeText.setAttribute('aria-pressed',String(mode==='text'));ui.modeTable.setAttribute('aria-pressed',String(mode==='table'));
+      ui.modeHelp.textContent=mode==='table'?'셀을 눌러 값을 고치세요. 점선 셀은 지원 범위를 확인하세요.':'문단을 누르거나 글자를 드래그하세요.';
+      if(inline){inline=null;renderInline();}
+      if(pageText){if(mode==='table')void inspectTables(pageText,epoch,drawSeq);else void inspectParagraphs(pageText,epoch,drawSeq);}
+    }
+    const tableReason=reason=>({'multi-run-cell':'여러 글 조각이 있어 직접 셀 편집을 지원하지 않습니다.','empty-cell':'빈 셀은 지원하지 않습니다.','ambiguous-quote':'같은 위치의 원문을 한 곳으로 확정하지 못했습니다.','overlapping-text':'겹친 글자가 있어 지원하지 않습니다.','cell-boundary-uncertain':'셀 경계를 확정하지 못했습니다.','rotated-text':'회전한 글자는 지원하지 않습니다.'}[reason]||'이 셀은 직접 편집을 지원하지 않습니다.');
+    async function inspectTables(display,mine,seq){
+      const api=tableApi();if(!api?.inspectPage||!source||display.rotation||editMode!=='table')return;
+      clearTables(true);const operation=tableSeq;
+      const ctl=new AbortController();tableCtl=ctl;
+      const file=source.file,hash=source.fileHash,revision=String(snapshot?.revision??0);
+      const live=()=>epoch===mine&&seq===drawSeq&&operation===tableSeq&&pageText===display&&source?.file===file&&source?.fileHash===hash&&String(snapshot?.revision??0)===revision&&editMode==='table'&&!ctl.signal.aborted;
+      say(ui.tableStatus,'이 쪽의 표 셀을 찾는 중입니다.');
+      try{
+        const found=await api.inspectPage({file,fileHash:hash,revision,pageIndex:display.pageIndex,signal:ctl.signal});
+        if(!live())return;
+        if(found.fileHash!==hash||found.revision!==revision||found.pageIndex!==display.pageIndex||!(found.width>0&&found.height>0)||!Array.isArray(found.cells)||found.cells.length>500)throw new Error('표 위치가 원본과 맞지 않습니다.');
+        display.tableCells=found.cells;const layer=doc.createElement('div');layer.className='paper-table-layer';layer.setAttribute('aria-label','원본 표 셀');display.tableLayer=layer;
+        for(const cell of found.cells){
+          if(!validBbox(cell.cellBbox))continue;
+          const b=cell.cellBbox,selection=cell.selection,ready=selection?.status==='ready';
+          const button=doc.createElement('button');button.type='button';button.className='paper-table-cell';
+          button.style.left=b[0]/found.width*100+'%';button.style.top=b[1]/found.height*100+'%';button.style.width=(b[2]-b[0])/found.width*100+'%';button.style.height=(b[3]-b[1])/found.height*100+'%';
+          button.setAttribute('aria-label',(cell.row+1)+'행 '+(cell.col+1)+'열'+(ready?' · '+selection.before:' · '+tableReason(selection?.reason)));
+          button.setAttribute('aria-disabled',String(!ready));button.title=ready?'이 셀 편집':tableReason(selection?.reason);
+          button.addEventListener('click',()=>{
+            if(!live())return;
+            if(!ready){say(ui.tableStatus,tableReason(selection?.reason),true);return;}
+            if(selection.sourceSha256!==hash||selection.revision!==revision||selection.pageIndex!==display.pageIndex||!validBbox(selection.anchor?.bbox)||!String(cell.alias||'').startsWith('table:'))return;
+            tableBindings.set(cell.alias,{fileHash:hash,cellBbox:cell.cellBbox.slice()});
+            const row={id:cell.alias,text:selection.before,pageIndex:display.pageIndex,label:'PDF p. '+(display.pageIndex+1)};
+            if(!session?.addSegments){say(ui.tableStatus,'편집 코어가 셀 원문을 연결하지 못했습니다.',true);return;}
+            try{session.addSegments([row]);source.segments=coreSegments(source.segments).filter(s=>s.id!==row.id).concat([row]);}catch(e){say(ui.tableStatus,'셀 원문을 연결하지 못했습니다.',true);return;}
+            const existing=(snapshot?.edits||[]).find(e=>e.segmentId===row.id),rect=display.pageEl.getBoundingClientRect(),anchor={start:0,end:selection.before.length,bbox:selection.anchor.bbox.slice(),coordinate:'top-left',rotation:0};
+            inline={table:true,before:selection.before,after:existing?existing.after:selection.before,anchor,pageIndex:display.pageIndex,segmentId:row.id,editId:existing?.id||null,
+              clientRect:{left:rect.left+b[0]*rect.width/found.width,bottom:rect.top+b[3]*rect.height/found.height,width:(b[2]-b[0])*rect.width/found.width}};
+            renderInline();ui.inlineAfter.focus();
+          });layer.append(button);
+        }
+        display.pageEl.append(layer);
+        say(ui.tableStatus,found.cells.length?'표 셀 '+found.cells.length+'곳 · 셀을 누르면 원문과 After를 편집합니다.'+(found.truncated?' 이 쪽은 처음 500셀만 표시했습니다.':''):'이 쪽에서 편집할 표를 찾지 못했습니다. 글 편집으로 돌아가 선택하세요.',!!found.truncated);
+      }catch(e){if(live())say(ui.tableStatus,'표를 읽지 못했습니다. 글 편집은 사용할 수 있습니다. '+safeMessage(e),true);}
+      finally{if(tableCtl===ctl)tableCtl=null;}
+    }
     function openParagraph(event){
-      if(!pageText||!pageText.paragraphs||inline||event.detail>1||fieldTarget(event.target))return;
+      if(editMode!=='text'||!pageText||!pageText.paragraphs||inline||event.detail>1||fieldTarget(event.target))return;
       const sel=typeof doc.getSelection==='function'?doc.getSelection():null;
       if(sel&&!sel.isCollapsed)return;
       const rect=pageText.pageEl.getBoundingClientRect();
@@ -942,6 +1014,7 @@
       return validBbox(box)?box:null;
     }
     function captureSelection(){
+      if(editMode!=='text')return;
       if(inline&&ui.inlineAfter.value!==inline.after)return;
       const sel=typeof doc.getSelection==='function'?doc.getSelection():null;
       if(!sel||sel.isCollapsed||!sel.rangeCount||!pageText||!pageText.textEl)return;
@@ -988,6 +1061,10 @@
       renderInline();ui.inlineAfter.focus();
     }
     function loadInline(edit){
+      if(String(edit.segmentId||'').startsWith('table:')){
+        const mine=epoch,open=()=>{if(epoch!==mine||!(snapshot?.edits||[]).some(e=>e.id===edit.id))return;inline={table:true,before:edit.before,after:edit.after,anchor:edit.anchor,pageIndex:edit.pageIndex,segmentId:edit.segmentId,editId:edit.id};renderInline();ui.inlineAfter.focus();};
+        if(page===edit.pageIndex+1&&pageText)open();else void drawBefore(edit.pageIndex+1).then(open);return;
+      }
       inline={before:edit.before,after:edit.after,anchor:edit.anchor,pageIndex:edit.pageIndex,segmentId:edit.segmentId,editId:edit.id};
       onJump(edit);renderInline();ui.inlineAfter.focus();
     }
@@ -1083,6 +1160,7 @@
       const rows=current.pageMap.filter(p=>p&&p.sourcePageIndex===page-1);
       if(rows.length!==1)return null;
       const row=rows[0];
+      if(Object.hasOwn(row,'contentOutputPageIndices')){const indices=row.contentOutputPageIndices;return Array.isArray(indices)&&indices.length>0&&indices.every((n,i)=>Number.isSafeInteger(n)&&n>=0&&n<count&&(i===0||indices[i-1]<n))?indices.slice():null;}
       if(!Array.isArray(row.continuationPageIndices))return null;
       const indices=[row.outputPageIndex,...row.continuationPageIndices];
       return indices.every(n=>Number.isSafeInteger(n)&&n>=0&&n<count)&&new Set(indices).size===indices.length?indices:null;
@@ -1134,6 +1212,20 @@
         setAfterStatus('생성본 쪽을 그리지 못했습니다. 해시가 맞는 파일은 다운로드할 수 있습니다.',true);
       }
     }
+    function tableOutputPages(result){
+      const map=result.pageMap,v=result.verification,final=Array.isArray(v?.stages)?v.stages.at(-1)?.verification:v;
+      const count=final?.pageCount?.output;
+      if(!Array.isArray(map)||map.length!==pages||!Number.isSafeInteger(count)||count<1)return null;
+      const sources=new Set(),outputs=new Set(),owned=new Set(),lookup=new Map();
+      for(const row of map){
+        if(!Number.isSafeInteger(row?.sourcePageIndex)||row.sourcePageIndex<0||row.sourcePageIndex>=pages||sources.has(row.sourcePageIndex)||!Number.isSafeInteger(row.outputPageIndex)||row.outputPageIndex<0||row.outputPageIndex>=count||outputs.has(row.outputPageIndex))return null;
+        if(!Array.isArray(row.continuationPageIndices))return null;
+        for(const index of [row.outputPageIndex,...row.continuationPageIndices]){if(!Number.isSafeInteger(index)||index<0||index>=count||owned.has(index))return null;owned.add(index);}
+        if(Object.hasOwn(row,'contentOutputPageIndices')&&(!Array.isArray(row.contentOutputPageIndices)||!row.contentOutputPageIndices.length||row.contentOutputPageIndices.some((n,i,a)=>!Number.isSafeInteger(n)||n<0||n>=count||i>0&&n<=a[i-1])))return null;
+        sources.add(row.sourcePageIndex);outputs.add(row.outputPageIndex);lookup.set(row.sourcePageIndex,row.outputPageIndex);
+      }
+      return owned.size===count?lookup:null;
+    }
     async function generate(){
       const api=exporterApi();
       if(!api||typeof api.prepare!=='function'){setGenStatus('브라우저 PDF 편집 모듈이 없어 생성하지 않았습니다. 원본 다운로드는 사용할 수 있습니다.',true);return;}
@@ -1146,12 +1238,30 @@
       genCtl=ctl;generating=true;renderChrome();
       setGenStatus('생성 중입니다. 끝나기 전에 성공으로 표시하지 않습니다.');
       try{
-        const request={file,fileHash:hash,edits:JSON.parse(JSON.stringify(edits)),signal:ctl.signal};
+        const exportEdits=JSON.parse(JSON.stringify(edits));
+        const mixed=exportEdits.some(tableEdit)&&exportEdits.some(e=>!tableEdit(e));
+        if(!mixed)for(const edit of exportEdits)if(tableEdit(edit)&&edit.anchor)delete edit.anchor.occurrence;
+        const request={file,fileHash:hash,edits:exportEdits,signal:ctl.signal};
         let result;
-        try{result=await api.prepare(request);}
+        try{
+          if(mixed){
+            const bodyApi=bodyExporter(edits.filter(e=>!tableEdit(e)));
+            const bodyAdapter={prepare:async bodyRequest=>{
+              try{return await bodyApi.prepare(bodyRequest);}
+              catch(e){
+                const rows=Array.isArray(bodyRequest.edits)?bodyRequest.edits:bodyRequest.edits?.edits,failures=e?.details?.edits;
+                const canFlow=bodyApi===legacyExporterApi()&&paragraphApi()&&Array.isArray(rows)&&!rows.some(tableEdit)&&e.code==='unsupported'&&Array.isArray(failures)&&failures.length&&failures.every(f=>f.code==='long-after-no-room');
+                if(!canFlow||ctl.signal?.aborted||mine!==genId||epoch!==epochAt||!source||source.fileHash!==hash||snapshot?.revision!==revision)throw e;
+                setGenStatus('표 편집을 유지한 파일에서 본문만 문단 흐름으로 생성하는 중입니다.');
+                return paragraphApi().prepare(bodyRequest);
+              }
+            }};
+            result=await api.prepare(request,{selectionPdf:legacyExporterApi(),paragraphPdf:bodyAdapter});
+          }else result=await api.prepare(request);
+        }
         catch(e){
           const failures=e&&e.details&&e.details.edits;
-          const canFlow=api===legacyExporterApi()&&paragraphApi()&&e.code==='unsupported'&&Array.isArray(failures)&&failures.length&&failures.every(f=>f.code==='long-after-no-room');
+          const canFlow=!edits.some(e=>String(e.segmentId||'').startsWith('table:'))&&api===legacyExporterApi()&&paragraphApi()&&e.code==='unsupported'&&Array.isArray(failures)&&failures.length&&failures.every(f=>f.code==='long-after-no-room');
           if(!canFlow||ctl.signal?.aborted||mine!==genId||epoch!==epochAt||!source||source.fileHash!==hash||snapshot?.revision!==revision)throw e;
           setGenStatus('선택 편집이 원래 공간에 들어가지 않아 전체 편집을 문단 흐름으로 생성하는 중입니다.');
           result=await paragraphApi().prepare({...request,edits:JSON.parse(JSON.stringify(edits))});
@@ -1160,13 +1270,36 @@
         if(!isFile(result&&result.file)||typeof result.sha256!=='string'||!HEX.test(result.sha256))throw new Error('생성 결과가 실제 파일이 아닙니다.');
         const bytes=new Uint8Array(await result.file.arrayBuffer());
         if(mine!==genId||epoch!==epochAt)return;
-        if(await sha256Hex(bytes)!==result.sha256)throw new Error('생성 파일의 바이트와 해시가 달라 받지 않았습니다.');
+        const actualHash=await sha256Hex(bytes);
+        if(mine!==genId||epoch!==epochAt||!source||source.file!==file||source.fileHash!==hash||ctl.signal?.aborted)return;
+        if(actualHash!==result.sha256)throw new Error('생성 파일의 바이트와 해시가 달라 받지 않았습니다.');
         if(new TextDecoder().decode(bytes.subarray(0,1024)).indexOf('%PDF-')<0)throw new Error('생성 결과에 PDF 서명이 없어 받지 않았습니다.');
-        output={file:result.file,sha256:result.sha256,verification:result.verification==null?null:result.verification,warnings:Array.isArray(result.warnings)?result.warnings:null,pageMap:clone(result.pageMap)||null,revision,blocked:false};
-        afterPart=0;afterSourcePage=page;
+        const candidate={file:result.file,sha256:result.sha256,originalSourceSha256:HEX.test(result.originalSourceSha256||'')?result.originalSourceSha256:hash,verification:result.verification==null?null:result.verification,warnings:Array.isArray(result.warnings)?result.warnings:null,pageMap:clone(result.pageMap)||null,revision,blocked:false};
+        let tableNote='';
+        const tableEdits=edits.filter(e=>String(e.segmentId||'').startsWith('table:'));
+        if(tableEdits.length){
+          tableNote=' 표의 원래 칸과 생성 글자를 확인하세요. 셀 크기는 자동으로 늘리지 않습니다.';
+          const mapping=tableOutputPages(result),cells=tableEdits.map(e=>({id:e.id,pageIndex:mapping?.get(e.pageIndex),after:e.after,bbox:tableBindings.get(e.segmentId)?.cellBbox}));
+          if(!mapping){
+            tableNote=' 경고: 출력 쪽 대응을 확인하지 못해 표 셀 배치를 검증하지 않았습니다. 실제 생성본을 확인하세요.';
+            candidate.verification={...(candidate.verification||{}),tableCellFit:{method:'mupdf-output-glyphs-against-source-cell',independent:false,reason:'output-page-map-unverified',results:tableEdits.map(e=>({id:e.id,status:'unverified'}))}};
+            candidate.warnings=[...(candidate.warnings||[]),...tableEdits.map(e=>({code:'table-cell-fit-unverified',severity:'warning',id:e.id}))];
+          }else if(tableApi()?.checkFit&&cells.every(c=>validBbox(c.bbox)&&Number.isSafeInteger(c.pageIndex))){
+            try{const fit=await tableApi().checkFit({file:result.file,fileHash:result.sha256,revision:String(revision),pageIndex:mapping.get(page-1)??cells[0].pageIndex,cells,signal:ctl.signal});
+              if(mine!==genId||epoch!==epochAt)return;
+              candidate.verification={...(candidate.verification||{}),tableCellFit:{method:'mupdf-output-glyphs-against-source-cell',independent:false,results:clone(fit.results)||[]}};
+              const cellWarnings=(fit.results||[]).filter(r=>r.status==='overflow'||r.status==='unverified').map(r=>({code:r.status==='overflow'?'table-cell-overflow':'table-cell-fit-unverified',severity:'warning',id:r.id}));
+              candidate.warnings=[...(candidate.warnings||[]),...cellWarnings];
+              if(fit.results?.some(r=>r.status==='overflow'))tableNote=' 경고: 생성 글자가 원래 표 셀 경계를 넘었습니다. After를 줄이고 다시 생성하세요.';
+              else if(fit.results?.some(r=>r.status==='unverified'))tableNote=' 경고: 생성 글자가 원래 표 셀 안에 드는지 확인하지 못했습니다. 생성본을 확인하세요.';
+            }catch(e){if(ctl.signal.aborted)return;tableNote=' 표 셀 안의 배치를 확인하지 못했습니다. 생성본에서 칸 경계를 확인하세요.';}
+          }
+        }
+        if(mine!==genId||epoch!==epochAt||!source||source.file!==file||source.fileHash!==hash||ctl.signal?.aborted)return;
+        output=candidate;afterPart=0;afterSourcePage=page;
         const noted=diagnosticText(output.warnings,output.verification);
         emit('falsify:paper-workspace-output',published({sha256:output.sha256,revision:output.revision,verification:scrub(output.verification,0)}));
-        setGenStatus(generationLead(output.verification,stale())+(noted?' '+noted:''));
+        setGenStatus(generationLead(output.verification,stale())+(noted?' '+noted:'')+tableNote);
         renderEdits();
         await drawAfter();
       }catch(e){
@@ -1252,6 +1385,30 @@
       }catch(e){if(!live())return false;throw e;}
       finally{if(resumeCtl===ctl)resumeCtl=null;}
     }
+    async function discoverDraftTables(restored){
+      const edits=(restored.edits||[]).filter(e=>String(e.segmentId||'').startsWith('table:'));
+      if(!edits.length)return true;
+      const api=tableApi();if(!api?.inspectPage)throw new Error('표 편집 모듈이 없어 초안의 셀 원문을 확인하지 못했습니다.');
+      if(resumeCtl)resumeCtl.abort();const ctl=new AbortController();resumeCtl=ctl;
+      const mine=epoch,file=source.file,hash=source.fileHash,revision='draft:'+restored.revision,rows=[];
+      const live=()=>epoch===mine&&source?.file===file&&source?.fileHash===hash&&!ctl.signal.aborted;
+      try{
+        for(const index of new Set(edits.map(e=>e.pageIndex))){
+          const found=await api.inspectPage({file,fileHash:hash,revision,pageIndex:index,signal:ctl.signal});
+          if(!live())return false;
+          if(found.fileHash!==hash||found.revision!==revision||found.pageIndex!==index||!Array.isArray(found.cells))throw new Error('초안 표의 원본 위치를 확인하지 못했습니다.');
+          for(const edit of edits.filter(e=>e.pageIndex===index)){
+            const cell=found.cells.find(c=>c.alias===edit.segmentId),selected=cell?.selection;
+            if(selected?.status!=='ready'||selected.sourceSha256!==hash||selected.revision!==revision||selected.pageIndex!==index||selected.before!==edit.before||JSON.stringify(selected.anchor?.bbox)!==JSON.stringify(edit.anchor?.bbox))throw new Error('초안 셀이 현재 원본 표와 다릅니다.');
+            tableBindings.set(cell.alias,{fileHash:hash,cellBbox:cell.cellBbox.slice()});
+            rows.push({id:cell.alias,text:selected.before,pageIndex:index,label:'PDF p. '+(index+1)});
+          }
+        }
+        if(!live())return false;
+        source.segments=coreSegments(source.segments).filter(s=>!rows.some(r=>r.id===s.id)).concat(rows);return true;
+      }catch(e){if(!live())return false;throw e;}
+      finally{if(resumeCtl===ctl)resumeCtl=null;}
+    }
     async function restoreDraft(){
       const api=editsApi();
       const box=store();
@@ -1292,7 +1449,8 @@
       let restored;
       try{restored=api.restoreDraft(envelope,{fileHash:source.fileHash,now:now()});}
       catch(e){setDraftStatus('초안을 복구하지 않았습니다. '+safeMessage(e),true);return;}
-      try{if((restored.edits||[]).some(e=>typeof e.segmentId==='string'&&e.segmentId.startsWith('paragraph:'))&&!await discoverDraftParagraphs(restored))return;}
+      try{if((restored.edits||[]).some(e=>String(e.segmentId||'').startsWith('table:'))&&!await discoverDraftTables(restored))return;
+        if((restored.edits||[]).some(e=>typeof e.segmentId==='string'&&e.segmentId.startsWith('paragraph:'))&&!await discoverDraftParagraphs(restored))return;}
       catch(e){setDraftStatus('초안의 원문을 확인하지 못해 복구하지 않았습니다. '+safeMessage(e),true);return;}
       applyResume(restored);
     }
@@ -1393,6 +1551,8 @@
     ui.blue.addEventListener('click',handoff);
     ui.undo.addEventListener('click',()=>{if(session&&snapshot&&snapshot.canUndo)session.undo();});
     ui.redo.addEventListener('click',()=>{if(session&&snapshot&&snapshot.canRedo)session.redo();});
+    ui.modeText.addEventListener('click',()=>setEditMode('text'));
+    ui.modeTable.addEventListener('click',()=>setEditMode('table'));
     ui.inlineApply.addEventListener('click',applyInline);
     ui.inlineCancel.addEventListener('click',()=>{inline=null;renderInline();ui.beforeStage.focus();});
     ui.draftOpt.addEventListener('change',renderChrome);
@@ -1415,7 +1575,7 @@
       acceptProposals,
       getSource(){if(!source||!source.file||!source.fileHash)return null;return Object.freeze({file:source.file,fileHash:source.fileHash,segments:published(source.segments)||[]});},
       getEditSnapshot(){const raw=session&&typeof session.snapshot==='function'?session.snapshot():snapshot;return raw?published(raw):null;},
-      getOutput(){if(!output||output.blocked)return null;return Object.freeze({file:output.file,sha256:output.sha256,verification:published(output.verification),revision:output.revision,pageMap:published(output.pageMap)});}
+      getOutput(){if(!output||output.blocked)return null;return Object.freeze({file:output.file,sha256:output.sha256,originalSourceSha256:output.originalSourceSha256,verification:published(output.verification),revision:output.revision,pageMap:published(output.pageMap)});}
     };
   }
   return {create,pageIndexFromLabel,classifyProposals,anchorFromSelection,clampScale,TTL};

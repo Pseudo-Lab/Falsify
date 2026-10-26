@@ -6,23 +6,26 @@ Public API (contract: falsify coordination image-occurrence-contract, v1):
   replace_occurrence(source, occurrence_id, replacement_png) -> (output_pdf_bytes, report)
 Failures raise ValueError(fixed_code); a missing dependency raises ValueError('dependency-unavailable').
 
-What is editable: a page-level `/Name Do` that paints an opaque raster Image XObject on an unrotated, uncropped page with
+What is editable: a page-level or simple Form-nested `/Name Do` that paints an opaque raster Image XObject on an unrotated, uncropped page with
 an axis-aligned positive-scale CTM, no clip that cuts the image, no transparency (ExtGState alpha/soft mask/blend, image
 SMask/Mask/ImageMask), no later-painted content intersecting its box, inside a page whose image paints line up one-to-one
 with MuPDF's paint log. The same xref may be painted elsewhere (twice on a page, on other pages, via inherited shared
-Resources): only the selected operator invocation is changed. Form-nested, inline, clipped, transparent, rotated or
-overlapped images are listed but not editable; nothing is guessed.
+Resources or repeated Forms): only the selected operator invocation is changed. Form ancestry is limited to three levels,
+with rectangular containing BBoxes, no transparency group/masks and a positive axis-aligned final CTM. Inline, clipped,
+transparent, rotated or overlapped images remain non-editable; nothing is guessed.
 
 Occurrence id = sha256(source sha256, page index, painting operator path). The path is (content stream index, operator
 index) for the page-level Do, extended by (form object, operator index) for nested paints, so two paints of one xref at
 an identical bbox get distinct ids, and an id never transfers to other source bytes.
 
-Edit: QPDF tokenizer raw-token surgery renames exactly one Do operand in one page content stream (all other tokens keep
-their raw bytes); the page gets its own content stream / Contents array entry and its own direct Resources and XObject
-dictionaries (shallow copies: every other entry keeps its original reference) holding a fresh collision-checked name for
-a new DeviceRGB image built from the replacement PNG. The shared xref and every other page object are untouched. The
+Edit: QPDF tokenizer raw-token surgery renames exactly one Do operand per selected page/Form ancestry stream (all other
+tokens keep their raw bytes). Each ancestor Form is cloned with its own Resources/XObject dictionaries; the page gets its
+own content stream / Contents array entry and direct Resources/XObject dictionaries. Other entries retain their original
+references. Fresh collision-checked names connect only that invocation chain to a new DeviceRGB replacement image. Shared
+original Forms/images and all other painting uses remain untouched. The
 output is accepted only after re-reading it: same page count/boxes/rotation, identical text words on every page,
-identical decoded content streams except the one renamed operand, identical occurrence list except the selected size,
+identical decoded content streams except the selected chain's renamed operands (including per-invocation Form checks),
+identical occurrence list except the selected size,
 pixel-identical renders of every other page and of the target page outside the image box (+2 px antialias bleed), and a
 visible change inside it. This is an engine render self-check (MuPDF), not an independent fidelity proof.
 
@@ -213,6 +216,10 @@ def _sub(pk, resources, category, name):
 
 
 def _image_opaque_issue(pk, image):
+    # Replacement image dictionaries do not clone optional-content membership or
+    # structure-tree associations. A normal visible render cannot prove these.
+    if any(key in image for key in ('/OC', '/StructParent', '/StructParents')):
+        return 'form-image'
     if image.get('/ImageMask') is True or image.get('/SMask') is not None or image.get('/Mask') is not None:
         return 'transparency'
     smid = image.get('/SMaskInData')
@@ -250,7 +257,8 @@ class _Scanner:
         self.path = {'rect': None, 'complex': False, 'clip': False}
         for k, stream in enumerate(_contents(self.pk, page)):
             ops = self._parse(stream)
-            state = self._run(ops, resources, state, [k], 0, set(), True)
+            state = self._run(ops, resources, state, [k], 0, set(), ())
+        if self.stack: raise _PageStop('malformed-pdf')
         return self.events
 
     def _parse(self, stream):
@@ -268,7 +276,7 @@ class _Scanner:
         if self.page_ops > LIMITS['maxPageOperators'] or self.budget[0] > LIMITS['maxOperators']:
             raise _PageStop('scan-limit')
 
-    def _run(self, ops, resources, state, prefix, depth, forms, page_level):
+    def _run(self, ops, resources, state, prefix, depth, forms, ancestry):
         pk = self.pk
         do_ordinal = 0
         for index, (operands, op) in enumerate(ops):
@@ -276,9 +284,12 @@ class _Scanner:
             op = str(op)
             try:
                 if op == 'q':
+                    if operands: raise _PageStop('malformed-pdf')
                     self.stack.append(dict(state))
                 elif op == 'Q':
-                    if self.stack: state = self.stack.pop()
+                    if operands: raise _PageStop('malformed-pdf')
+                    if not self.stack: raise _PageStop('malformed-pdf')
+                    state = self.stack.pop()
                 elif op == 'cm':
                     m = tuple(_num(x) for x in operands)
                     if len(m) != 6: raise _PageStop('malformed-pdf')
@@ -317,20 +328,20 @@ class _Scanner:
                     if not isinstance(xobj, pk.Stream): continue
                     subtype = xobj.get('/Subtype')
                     if subtype == pk.Name('/Image'):
-                        reason = None if page_level else 'form-image'
-                        reason = reason or _image_opaque_issue(pk, xobj)
+                        reason = _image_opaque_issue(pk, xobj)
                         self._event(state, 'xobject', prefix + [index], str(name), xobj.objgen,
                             int(xobj.get('/Width', 0)), int(xobj.get('/Height', 0)), reason,
-                            (prefix[0], ordinal) if page_level else None, xobj)
+                            {'stream': prefix[0], 'steps': ancestry + ((index, ordinal, str(name)),)}, xobj)
                     elif subtype == pk.Name('/Form'):
-                        self._form(xobj, resources, state, prefix + [index], depth, forms)
+                        self._form(xobj, resources, state, prefix + [index], depth, forms,
+                            ancestry + ((index, ordinal, str(name)),))
             except _PageStop:
                 raise
             except Exception:
                 raise _PageStop('malformed-pdf') from None
         return state
 
-    def _form(self, form, resources, state, prefix, depth, forms):
+    def _form(self, form, resources, state, prefix, depth, forms, ancestry):
         pk = self.pk
         key = form.objgen
         if depth + 1 > LIMITS['maxFormDepth'] or key in forms: raise _PageStop('scan-limit')
@@ -338,20 +349,27 @@ class _Scanner:
         if len(matrix) != 6: raise _PageStop('malformed-pdf')
         inner = dict(state)
         inner['ctm'] = _mul(matrix, state['ctm'])
-        if '/BBox' in form:
-            b = _box(form['/BBox'])
-            if _axis(inner['ctm']) and inner['clip'] != 'complex':
-                r = _rect_through(inner['ctm'], *b)
-                inner['clip'] = r if inner['clip'] is None else _intersect(inner['clip'], r)
-            else:
-                inner['clip'] = 'complex'
+        if '/BBox' not in form: raise _PageStop('malformed-pdf')
+        b = _box(form['/BBox'])
+        if _axis(inner['ctm']) and inner['clip'] != 'complex':
+            r = _rect_through(inner['ctm'], *b)
+            inner['clip'] = r if inner['clip'] is None else _intersect(inner['clip'], r)
+        else:
+            inner['clip'] = 'complex'
         if '/SMask' in form or '/Group' in form: inner['trans'] = True    # groups may composite; never editable inside
         res = form.get('/Resources')
         res = res if isinstance(res, pk.Dictionary) else resources
         saved_stack, saved_path = self.stack, self.path
         self.stack, self.path = [], {'rect': None, 'complex': False, 'clip': False}
         ops = self._parse(form)
-        self._run(ops, res, inner, prefix + [list(key)], depth + 1, forms | {key}, False)
+        # A cloned Form needs a separately updated ParentTree/MCR graph when it
+        # owns structural/marked content. Likewise /OC can change hidden-layer
+        # semantics. Keep these outside the simple-Form replacement contract.
+        if any(key in form for key in ('/OC', '/StructParent', '/StructParents')) or any(
+                str(op) in ('BDC', 'BMC', 'EMC') for _, op in ops):
+            inner['structure_unsupported'] = True
+        self._run(ops, res, inner, prefix + [list(key)], depth + 1, forms | {key}, ancestry)
+        if self.stack: raise _PageStop('malformed-pdf')
         self.stack, self.path = saved_stack, saved_path
 
     def _event(self, state, kind, path, name, xref, width, height, reason, surgery, xobj):
@@ -360,6 +378,8 @@ class _Scanner:
         bbox = _rect_through(ctm, 0.0, 0.0, 1.0, 1.0)
         if not _finite(bbox): raise _PageStop('malformed-pdf')
         reason = self.page_reason or reason
+        if reason is None and state.get('structure_unsupported'):
+            reason = 'form-image'
         if reason is None and not (_axis(ctm) and ctm[0] > 0 and ctm[3] > 0 and bbox[2] - bbox[0] > TOL
                 and bbox[3] - bbox[1] > TOL and width > 0 and height > 0):
             reason = 'unsupported-transform'
@@ -642,45 +662,80 @@ def _instructions(pk, scratch, data):
     return [pk.unparse_content_stream([(o, op)]) for o, op in pk.parse_content_stream(scratch.make_stream(data))]
 
 
+def _isolated_resources(pk, resources, name, replacement):
+    xobjects = resources.get('/XObject')
+    if not isinstance(xobjects, pk.Dictionary): raise ValueError('malformed-pdf')
+    copies = pk.Dictionary({key: xobjects.get(key) for key in xobjects.keys()})
+    copies[pk.Name('/' + name)] = replacement
+    result = pk.Dictionary({key: resources.get(key) for key in resources.keys()})
+    result.XObject = copies
+    return result
+
+
 def _rewrite(pk, source, target, rgb, size):
-    """(output bytes, expected decoded content streams of the target page). Only the target page is re-pointed."""
+    """Clone only the selected page/Form invocation chain. Other uses retain their original streams and resources."""
     pdf = _open_pike(pk, source)
     scratch = pk.new()
     try:
         scratch.add_blank_page()
         page = _page_dicts(pk, pdf)[target['pageIndex']]
         streams = _contents(pk, page)
-        k, ordinal = target['surgery']
+        k = target['surgery']['stream']
+        steps = target['surgery']['steps']
         try:
             datas = [_stream_bytes(pk, s) for s in streams]
         except _PageStop as exc:
             raise ValueError(exc.reason) from None
-        resources = _effective_resources(pk, page)
-        xobjects = resources.get('/XObject')
-        if not isinstance(xobjects, pk.Dictionary): raise ValueError('malformed-pdf')
-        n = 1
-        # Plain PDF image naming: the first /ImN unused by the page's resources and not named in its content streams.
-        while pk.Name('/Im%d' % n) in xobjects or any(b'/Im%d' % n in d for d in datas): n += 1
-        new_name = 'Im%d' % n
-        rewritten = _rename_do(pk, scratch, datas[k], ordinal, new_name)
-        before, after = _instructions(pk, scratch, datas[k]), _instructions(pk, scratch, rewritten)
-        index = target['path'][1]
-        expected_op = pk.unparse_content_stream([([pk.Name('/' + new_name)], pk.Operator('Do'))])
-        if len(before) != len(after) or after[index] != expected_op \
-                or any(a != b for i, (a, b) in enumerate(zip(before, after)) if i != index) \
-                or before[index] != pk.unparse_content_stream([([pk.Name(target['name'])], pk.Operator('Do'))]):
-            raise ValueError('malformed-pdf')
         image = pdf.make_stream(zlib.compress(rgb, 9))
         image.Type, image.Subtype = pk.Name('/XObject'), pk.Name('/Image')
         image.Width, image.Height = size
         image.ColorSpace, image.BitsPerComponent, image.Filter = pk.Name('/DeviceRGB'), 8, pk.Name('/FlateDecode')
-        new_xobjects = pk.Dictionary({key: xobjects.get(key) for key in xobjects.keys()})
-        new_xobjects[pk.Name('/' + new_name)] = image
-        new_resources = pk.Dictionary({key: resources.get(key) for key in resources.keys()})
-        new_resources.XObject = new_xobjects
-        page.Resources = new_resources
+        changed_forms = {}
+
+        def rewrite_stream(data, resources, level, positions, name_data):
+            index, ordinal, old_name = steps[level]
+            xobjects = resources.get('/XObject')
+            if not isinstance(xobjects, pk.Dictionary): raise ValueError('malformed-pdf')
+            original = xobjects.get(pk.Name(old_name))
+            if not isinstance(original, pk.Stream): raise ValueError('malformed-pdf')
+            if level + 1 == len(steps):
+                if original.get('/Subtype') != pk.Name.Image: raise ValueError('malformed-pdf')
+                replacement = image
+            else:
+                if original.get('/Subtype') != pk.Name.Form: raise ValueError('malformed-pdf')
+                child_resources = original.get('/Resources')
+                child_resources = child_resources if isinstance(child_resources, pk.Dictionary) else resources
+                try:
+                    child_data = _stream_bytes(pk, original)
+                except _PageStop as exc:
+                    raise ValueError(exc.reason) from None
+                child_positions = positions + (index,)
+                child_data, child_resources = rewrite_stream(child_data, child_resources, level + 1,
+                    child_positions, [child_data])
+                replacement = pdf.make_stream(zlib.compress(child_data, 9))
+                # Compression metadata belongs to the newly encoded stream; all Form semantics are retained.
+                for key in original.keys():
+                    if str(key) not in ('/Length', '/Filter', '/DecodeParms', '/Resources'):
+                        replacement[key] = original.get(key)
+                replacement.Filter = pk.Name.FlateDecode
+                replacement.Resources = child_resources
+                changed_forms[(k,) + child_positions] = child_data
+            n = 1
+            while pk.Name('/Im%d' % n) in xobjects or any(b'/Im%d' % n in d for d in name_data): n += 1
+            new_name = 'Im%d' % n
+            rewritten = _rename_do(pk, scratch, data, ordinal, new_name)
+            before, after = _instructions(pk, scratch, data), _instructions(pk, scratch, rewritten)
+            expected_op = pk.unparse_content_stream([([pk.Name('/' + new_name)], pk.Operator('Do'))])
+            if not 0 <= index < len(before) or len(before) != len(after) or after[index] != expected_op \
+                    or any(a != b for i, (a, b) in enumerate(zip(before, after)) if i != index) \
+                    or before[index] != pk.unparse_content_stream([([pk.Name(old_name)], pk.Operator('Do'))]):
+                raise ValueError('malformed-pdf')
+            return rewritten, _isolated_resources(pk, resources, new_name, replacement)
+
+        rewritten, resources = rewrite_stream(datas[k], _effective_resources(pk, page), 0, (), datas)
+        page.Resources = resources
         content = pdf.make_stream(zlib.compress(rewritten, 9))
-        content.Filter = pk.Name('/FlateDecode')
+        content.Filter = pk.Name.FlateDecode
         if isinstance(page.get('/Contents'), pk.Array):
             arr = pk.Array(list(page.Contents))
             arr[k] = content
@@ -692,7 +747,7 @@ def _rewrite(pk, source, target, rgb, size):
             fix_metadata_version=False, deterministic_id=True)
         expected = list(datas)
         expected[k] = rewritten
-        return buf.getvalue(), expected
+        return buf.getvalue(), {'pageStreams': expected, 'formStreams': changed_forms}
     finally:
         scratch.close()
         pdf.close()
@@ -708,6 +763,39 @@ def _page_streams(pk, pdf):
         except _PageStop:
             out.append(None)
     return out
+
+
+def _form_streams(pk, pdf):
+    """Decoded reachable Form streams keyed by page/stream/operator positions, including repeated invocations.
+    Object numbers may change during save; invocation positions may not. No unreferenced resources are traversed.
+    """
+    result, budget, scratch = {}, [0, 0], pk.new()
+    try:
+        def walk(data, resources, path, seen):
+            budget[0] += len(data)
+            if budget[0] > LIMITS['maxPageContentBytes'] * LIMITS['maxPages']: raise ValueError('scan-limit')
+            ops = pk.parse_content_stream(scratch.make_stream(data))
+            budget[1] += len(ops)
+            if budget[1] > LIMITS['maxOperators']: raise ValueError('scan-limit')
+            for index, (operands, op) in enumerate(ops):
+                if str(op) != 'Do': continue
+                if len(operands) != 1 or not isinstance(operands[0], pk.Name): raise ValueError('malformed-pdf')
+                form = _sub(pk, resources, '/XObject', operands[0])
+                if not isinstance(form, pk.Stream) or form.get('/Subtype') != pk.Name.Form: continue
+                if len(seen) >= LIMITS['maxFormDepth'] or form.objgen in seen: raise ValueError('scan-limit')
+                child = _stream_bytes(pk, form)
+                position = path + (index,)
+                result[position] = child
+                res = form.get('/Resources')
+                walk(child, res if isinstance(res, pk.Dictionary) else resources, position, seen | {form.objgen})
+        for pno, page in enumerate(_page_dicts(pk, pdf)):
+            for k, stream in enumerate(_contents(pk, page)):
+                walk(_stream_bytes(pk, stream), _effective_resources(pk, page), (pno, k), set())
+        return result
+    except _PageStop as exc:
+        raise ValueError(exc.reason) from None
+    finally:
+        scratch.close()
 
 
 def _zoom(rect, cap):
@@ -728,11 +816,14 @@ def _verify(pk, mu, Image, ImageChops, source, output, scan, target, expected_st
     a_pdf, b_pdf = _open_pike(pk, source), _open_pike(pk, output)
     try:
         a_streams, b_streams = _page_streams(pk, a_pdf), _page_streams(pk, b_pdf)
+        expected_forms = _form_streams(pk, a_pdf)
+        expected_forms.update({(pno,) + path: data for path, data in expected_streams['formStreams'].items()})
+        if _form_streams(pk, b_pdf) != expected_forms: raise fail
     finally:
         a_pdf.close(); b_pdf.close()
     if len(a_streams) != len(b_streams): raise fail
     for i, (a, b) in enumerate(zip(a_streams, b_streams)):
-        if b is None or b != (expected_streams if i == pno else a): raise fail
+        if b is None or b != (expected_streams['pageStreams'] if i == pno else a): raise fail
     a, b = _open_mu(mu, source), _open_mu(mu, output)
     try:
         if a.page_count != b.page_count: raise fail

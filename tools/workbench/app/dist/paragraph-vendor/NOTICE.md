@@ -40,3 +40,9 @@ upstream source checkout, not from this browser-adapter source directory).
 
 Browser PDF bytes stay local. The only fetches are fixed same-origin runtime
 assets; the implementation has no CLI, companion or model calls.
+
+Document-flow overlay also adds document-flow.mjs, document-flow-band.mjs,
+document-flow-links.mjs and document-flow-underlines.mjs. It reuses the same
+hash-pinned native runtime; the optional raw annotation adapter is Workbench
+source in app/src/document-flow-annotations.mjs using the existing MuPDF vendor.
+See build-source/DOCUMENT_FLOW.md and overlay.json for exact source scope.

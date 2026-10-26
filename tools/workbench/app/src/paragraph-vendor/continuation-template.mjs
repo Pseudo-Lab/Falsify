@@ -245,7 +245,7 @@ function glyphAvailable(M, font, size, u) {
  * body-flow objects that are not edges even while they overflow the band
  * (an edited paragraph before pagination moves it). No mutation.
  */
-export function snapshotPageEdges(engine, floor, bodyTop, exclude = null) {
+export function snapshotPageEdges(engine, floor, bodyTop, exclude = null, selection = null) {
   const M = engine.M;
   const fail = (code, extra = {}) => ({ ok: false, code, items: [], ...extra });
   if (!(Number.isFinite(floor) && Number.isFinite(bodyTop) && bodyTop > floor)) return fail("continuation_edge_band_invalid");
@@ -258,11 +258,12 @@ export function snapshotPageEdges(engine, floor, bodyTop, exclude = null) {
   for (let i = 0; i < n; i++) {
     const h = M._FPDFPage_GetObject(page, i) >>> 0;
     order.set(h, i);
+    if (selection && !selection.has(h)) continue;
     if (exclude?.has(h)) continue;
     const bx = objectBox(M, h);
     if (!bx) continue;
     const cy = (bx.b + bx.t) / 2;
-    if (cy >= lo && cy <= hi) continue;
+    if (!selection && cy >= lo && cy <= hi) continue;
     edges.push({ h, index: i, bounds: bx, band: cy > hi ? "top" : "bottom" });
   }
   const chars = charsByObject(M, page);
@@ -293,7 +294,7 @@ export function snapshotPageEdges(engine, floor, bodyTop, exclude = null) {
       skipped++;
       continue;
     }
-    const role = classifyEdgeText(text);
+    const role = selection ? "running" : classifyEdgeText(text);
     if (role === "number_unsupported") return fail("continuation_page_number_unsupported", at);
     const font = M._FPDFTextObj_GetFont(e.h);
     const size = readFloat(M, "_FPDFTextObj_GetFontSize", e.h);
@@ -351,6 +352,49 @@ export function snapshotPageEdges(engine, floor, bodyTop, exclude = null) {
   const snap = { ok: true, code: null, version: CONTINUATION_STYLE.version, pageW, pageH, floor, bodyTop, skipped, fixedGraphics, items };
   Object.defineProperty(snap, "order", { value: order });
   return snap;
+}
+
+// Same-document text reconstruction for document flow. Selection is explicit;
+// every selected handle must be a visible, horizontally positioned text object
+// accepted by the edge-clone style/clip checks. Never derives edit authority.
+export function snapshotTextObjects(engine, handles) {
+  const selected = new Set(handles.map(h => h >>> 0));
+  const snapshot = snapshotPageEdges(engine, 0, engine.pageHeight, null, selected);
+  if (!snapshot.ok) return snapshot;
+  if (snapshot.fixedGraphics || snapshot.skipped || snapshot.items.length !== selected.size) return { ok: false, code: "document_flow_text_snapshot_incomplete" };
+  if (snapshot.items.some(it => {
+    const [a,b,c,d] = it.style.matrix;
+    return !(a > 0 && d > 0 && Math.abs(b) < 1e-6 && Math.abs(c) < 1e-6)
+      || ![0,1,2].includes(it.style.renderMode)
+      || it.chars.some(c => c.u <= 0 || c.u > 0xffff)
+      || engine.M._FPDFPageObj_HasTransparency(it.h);
+  })) return { ok: false, code: "document_flow_text_style_unsupported" };
+  return snapshot;
+}
+
+export function cloneTextObject(engine, item) {
+  if (item.role !== "running") return null;
+  return cloneItem(engine, item, 1);
+}
+
+export function verifyTextObject(engine, page, item, handle, dy = 0) {
+  const M = engine.M;
+  const chars = charsByObject(M, page).get(handle >>> 0) || [];
+  if (textOf(chars) !== item.text || chars.length !== item.chars.length) return false;
+  for (let i = 0; i < chars.length; i++) for (const key of ["ox", "oy", "l", "b", "r", "t"]) {
+    const delta = ["oy", "b", "t"].includes(key) ? dy : 0;
+    if (!near(chars[i][key], item.chars[i][key] + delta, POS_TOL)) return false;
+  }
+  const matrix = readMatrix(M, handle), expected = [...item.style.matrix]; expected[5] += dy;
+  // cloneItem folds the source text origin into its matrix; glyph proof
+  // above checks the equivalent complete placement, rather than raw matrix.
+  if (!matrix || matrix.slice(0, 4).some((v, i) => Math.abs(v - expected[i]) > 1e-5)) return false;
+  return JSON.stringify(fontInfo(M, M._FPDFTextObj_GetFont(handle))) === JSON.stringify(item.style.font)
+    && Math.abs(readFloat(M, "_FPDFTextObj_GetFontSize", handle) - item.style.size) < 0.001
+    && JSON.stringify(readColor(M, "_FPDFPageObj_GetFillColor", handle)) === JSON.stringify(item.style.fill)
+    && JSON.stringify(readColor(M, "_FPDFPageObj_GetStrokeColor", handle)) === JSON.stringify(item.style.stroke)
+    && M._FPDFTextObj_GetTextRenderMode(handle) === item.style.renderMode
+    && Math.abs(readFloat(M, "_FPDFPageObj_GetStrokeWidth", handle) - item.style.strokeWidth) < 0.001;
 }
 
 // ---------- expected descriptors (pure) ----------

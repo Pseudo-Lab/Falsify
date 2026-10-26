@@ -329,22 +329,27 @@ function locate(edit, index, models, pageCount) {
   const { text, map } = normalized(model.chars);
   const needle = edit.before.replace(/\s+/g, " ").trim();
   const hits = [];
-  let from = 0;
-  while (hits.length < 8) {
+  let from = 0, ordinal = 0, foundQuote = false;
+  const requestedOrdinal = anchor?.occurrence;
+  while (true) {
     const at = text.indexOf(needle, from);
     if (at < 0) break;
+    from = at + 1;
     const chars2 = [];
     for (let i = at; i < at + needle.length; i++) if (map[i] !== null && map[i] !== void 0) chars2.push(model.chars[map[i]]);
-    if (chars2.length) hits.push({ at, chars: chars2 });
-    from = at + 1;
+    if (!chars2.length) continue;
+    foundQuote = true;
+    const occurrence = ordinal++;
+    if (requestedOrdinal !== void 0 && occurrence !== requestedOrdinal) continue;
+    if (anchor?.bbox) {
+      const box2 = union(chars2);
+      if (!contains(box2, anchor.bbox, Math.max(4, Math.min(8, (box2[3] - box2[1]) / 2)))) continue;
+    }
+    hits.push({ at, chars: chars2 });
+    if (requestedOrdinal !== void 0 || hits.length > 1) break;
   }
-  let pool = hits;
-  if (anchor && anchor.occurrence !== void 0) pool = pool[anchor.occurrence] ? [pool[anchor.occurrence]] : [];
-  if (anchor?.bbox) pool = pool.filter((hit) => {
-    const box2 = union(hit.chars);
-    return contains(box2, anchor.bbox, Math.max(4, Math.min(8, (box2[3] - box2[1]) / 2)));
-  });
-  if (!pool.length) return fail(hits.length ? "anchor-mismatch" : "not-found");
+  const pool = hits;
+  if (!pool.length) return fail(foundQuote ? "anchor-mismatch" : "not-found");
   if (pool.length > 1) return fail("ambiguous");
   const chars = pool[0].chars;
   const drawn = chars.filter((ch) => ch.c.trim());

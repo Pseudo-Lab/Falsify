@@ -205,7 +205,7 @@ test('page: image modules load before RED, CSS is linked, the disclosure sits in
   const panel=html.match(/<details class="red-help image-edit" id="image-edit" hidden>[\s\S]*?<\/details>/)?.[0];assert.ok(panel);
   assert.ok(html.indexOf('id="red-analysis"')<html.indexOf('id="image-edit"')&&html.indexOf('id="image-edit"')<html.indexOf('id="red-level"'));assert.ok(!html.match(/<div class="red-analysis"[\s\S]*?<\/details><\/div>/)[0].includes('image-'));
   for(const id of ['image-list','image-status','image-png','image-before','image-after','image-consent','image-export','image-download-pdf','image-download-report'])assert.ok(panel.includes('id="'+id+'"'),id);
-  assert.match(panel,/BLUE는 현재 사본의 텍스트만 읽습니다/);assert.match(panel,/RED 모델 성능이나 과학적 타당성 판정이 아니며/);assert.match(panel,/원본 파일은 바뀌지 않습니다/);assert.match(panel,/우회하지 않습니다/);
+  assert.match(panel,/BLUE는 현재 사본의 텍스트만 읽습니다/);assert.match(panel,/RED 모델 성능이나 과학적 타당성 판정이 아니며/);assert.match(panel,/원본 파일은 바뀌지 않습니다/);assert.match(panel,/단순한 Form 안의 불투명 그림은 한 곳만 바꿀 수 있습니다/);assert.match(panel,/인라인 그림·잘림\(clip\)·회전·투명도·복잡한 합성은 지원하지 않습니다/);
   assert.match(panel,/id="image-status" class="form-feedback" role="status" aria-live="polite"/);assert.ok(!/document-blue|blue-file/.test(panel));
   // Static CSS inspection is line-ending neutral: a Windows checkout may hold CRLF.
   const css=read('image-editor.css');assert.match(css,/@media\(max-width:700px\)\{\r?\n\.image-compare\{grid-template-columns:1fr/);});

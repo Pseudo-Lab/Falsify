@@ -299,25 +299,31 @@ function locate(edit, index, models, pageCount) {
   const {text, map} = normalized(model.chars);
   const needle = edit.before.replace(/\s+/g, ' ').trim();
   const hits = [];
-  let from = 0;
-  while (hits.length < 8) {
+  let from = 0, ordinal = 0, foundQuote = false;
+  const requestedOrdinal = anchor?.occurrence;
+  while (true) {
     const at = text.indexOf(needle, from);
     if (at < 0) break;
+    from = at + 1;
     const chars = [];
     for (let i = at; i < at + needle.length; i++) if (map[i] !== null && map[i] !== undefined) chars.push(model.chars[map[i]]);
-    if (chars.length) hits.push({at, chars});
-    from = at + 1;
+    if (!chars.length) continue;
+    foundQuote = true;
+    const occurrence = ordinal++;
+    // Numeric table values can repeat many times. Apply the caller's verified
+    // geometry while scanning; never truncate the page before reaching its cell.
+    if (requestedOrdinal !== undefined && occurrence !== requestedOrdinal) continue;
+    if (anchor?.bbox) {
+      const box = union(chars);
+      if (!contains(box, anchor.bbox, Math.max(4, Math.min(8, (box[3] - box[1]) / 2)))) continue;
+    }
+    hits.push({at, chars});
+    // Two surviving matches already prove ambiguity. A supplied ordinal still
+    // counts page-global quotes, before geometry, as in the original contract.
+    if (requestedOrdinal !== undefined || hits.length > 1) break;
   }
-  let pool = hits;
-  // The edit core counts occurrences in the whole page segment, before geometry filtering.
-  if (anchor && anchor.occurrence !== undefined) pool = pool[anchor.occurrence] ? [pool[anchor.occurrence]] : [];
-  if (anchor?.bbox) pool = pool.filter(hit => {
-    const box = union(hit.chars);
-    // PDF.js may use a browser fallback face for selection; redact the engine's glyphs,
-    // while tolerating at most half a glyph height (capped at 8pt) of metric drift.
-    return contains(box, anchor.bbox, Math.max(4, Math.min(8, (box[3] - box[1]) / 2)));
-  });
-  if (!pool.length) return fail(hits.length ? 'anchor-mismatch' : 'not-found');
+  const pool = hits;
+  if (!pool.length) return fail(foundQuote ? 'anchor-mismatch' : 'not-found');
   if (pool.length > 1) return fail('ambiguous');
   const chars = pool[0].chars;
   const drawn = chars.filter(ch => ch.c.trim());

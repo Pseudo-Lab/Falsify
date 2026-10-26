@@ -3,6 +3,7 @@
 import {canonicalParagraphText, editPdf} from './paragraph-vendor/editor.mjs';
 import {loadRuntime, RUNTIME} from './paragraph-pdf-runtime.mjs';
 import {hex} from './paragraph-pdf-crypto.mjs';
+import {createAnnotationTransport} from './document-flow-annotations.mjs';
 
 export const COORDINATE_SPACE = 'top-left-page';
 export const LIMITS = Object.freeze({maxFileBytes: 25 * 1024 * 1024});
@@ -73,6 +74,28 @@ export async function inspectPage(request = {}) {
   } finally { engine.close(); }
 }
 
+function lazyAnnotationAdapter(signal) {
+  let shared;
+  const load = () => shared || (shared = (async () => {
+    checkAbort(signal);
+    // Native code chooses whether it needs annotation proof. This fixed local
+    // namespace is shared with the existing browser writer; no request path or
+    // callback can select another implementation.
+    const mupdf = await import('./browser-pdf-vendor/mupdf.js');
+    checkAbort(signal);
+    return createAnnotationTransport({mupdf});
+  })());
+  const invoke = method => async input => {
+    checkAbort(signal);
+    const adapter = await load();
+    checkAbort(signal);
+    const result = await adapter[method](input);
+    checkAbort(signal);
+    return result;
+  };
+  return Object.freeze({inspect: invoke('inspect'), transport: invoke('transport'), validate: invoke('validate')});
+}
+
 export async function prepare(request = {}) {
   let requestedEdits = request.edits;
   let fileHash = request.fileHash || '';
@@ -95,7 +118,8 @@ export async function prepare(request = {}) {
   checkAbort(request.signal);
   // Matching remains exact and all-or-nothing. Duplicate Before text is an
   // explicit AMBIGUOUS_MATCH; selection metadata never silently relocates it.
-  const {pdf, report} = await editPdf({sourceBytes: bytes, edits, reflow: true}, {engineFactory, runtimeInfo: info, draft: true});
+  const {pdf, report} = await editPdf({sourceBytes: bytes, edits, reflow: true}, {engineFactory, runtimeInfo: info, draft: true,
+    documentFlow: 'compatible-groups', annotationAdapter: lazyAnnotationAdapter(request.signal)});
   checkAbort(request.signal);
   const sha256 = hex(pdf);
   const warnings = [...(report.warnings || []), ...(report.selfCheck?.warnings || []),

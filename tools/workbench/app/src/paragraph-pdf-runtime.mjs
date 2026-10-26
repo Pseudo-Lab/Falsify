@@ -1,12 +1,13 @@
 import {PdfEngine} from './paragraph-vendor/engine/core.js';
 import {hex} from './paragraph-pdf-crypto.mjs';
+import overlay from './paragraph-vendor/overlay.json' with {type: 'json'};
 
 export const RUNTIME = Object.freeze({
   engine: 'BentoPDF/PDFium', license: 'AGPL-3.0-only',
   bentopdfCommit: '3a5f146d1b89d54dc7ca576aa6797c8bd3e42b97',
   engineCommit: '813903c93c758dfb8df46dbd34ace3b7f7a8538b',
   moduleCommit: 'cd4ba2cdd68ae7e51198f615bd4ac6130206b162',
-  moduleOverlayCommit: '50abc7c10dac2f47033926e297484c0774328596',
+  moduleOverlayCommit: overlay.commit,
   jsSha256: '6e6989a9994715951720e05355111aca7eab898e92b519ebea160167875bb3eb',
   wasmSha256: '9b14b88937a9b21697565df94e82b28ac645547413606d4994d50d9200529c6e',
   sourceBuildVerified: false, trust: 'locally-supplied-hash-verified-artifacts',

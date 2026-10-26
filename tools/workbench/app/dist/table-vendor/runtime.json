@@ -1,0 +1,19 @@
+{
+  "engine": "mupdf.js",
+  "version": "1.28.1",
+  "shared": "../browser-pdf-vendor",
+  "files": {
+    "mupdf.js": {
+      "sha256": "5d237eadcb9640584e0050f6f958e547887b7a54d80a04043e12be9420931076",
+      "bytes": 103250
+    },
+    "mupdf-wasm.js": {
+      "sha256": "25382abbfbf5c52191e5ac59e1412a0da88647fecfab0c1d797bb5948443eea4",
+      "bytes": 28861
+    },
+    "mupdf-wasm.wasm": {
+      "sha256": "5a30ef7b027f541ea8fc54e7c73f16414b0b59940741a12efe5e55f1fd0a99d7",
+      "bytes": 10409826
+    }
+  }
+}

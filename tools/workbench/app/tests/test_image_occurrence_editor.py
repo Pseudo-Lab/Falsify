@@ -202,6 +202,158 @@ class SharedOccurrences(unittest.TestCase):
             self.assertEqual(p.Contents[2].read_bytes(), page[2])
 
 
+def form_source(depth=1, inner_data=None, image_extra=None, form_extra=None):
+    def build(pdf):
+        image = rgb_image(pdf, 1, **(image_extra or {}))
+        form = pdf.make_stream(inner_data or b'q 50 0 0 40 0 0 cm /Im1 %keep\n Do Q\n')
+        form.Type, form.Subtype, form.BBox = pikepdf.Name.XObject, pikepdf.Name.Form, pikepdf.Array([0, 0, 50, 40])
+        form.Resources = pdf.make_indirect(pikepdf.Dictionary(XObject=pdf.make_indirect(pikepdf.Dictionary(Im1=image))))
+        form.PieceInfo = pikepdf.Dictionary(Test=pikepdf.Dictionary(Private=pikepdf.String('preserve')))
+        for key, value in (form_extra or {}).items(): form[key] = value
+        if depth == 2:
+            outer = pdf.make_stream(b'q /Inner Do Q q 1 0 0 1 60 0 cm /Inner Do Q\n')
+            outer.Type, outer.Subtype = pikepdf.Name.XObject, pikepdf.Name.Form
+            outer.BBox = pikepdf.Array([0, 0, 110, 40])
+            outer.Resources = pdf.make_indirect(pikepdf.Dictionary(XObject=pikepdf.Dictionary(Inner=form)))
+            return outer
+        return form
+    first = b'q 1 0 0 1 30 280 cm /Fm Do Q\n'
+    second = b'q 1 0 0 1 170 280 cm /Fm Do Q\n'
+    return make_pdf([[b'% untouched stream\n', first + second + TEXT], first + TEXT], {'Fm': build})
+
+
+class FormOccurrences(unittest.TestCase):
+    def test_optional_content_and_tagged_form_associations_are_not_lost(self):
+        cases = [
+            form_source(image_extra={'OC': pikepdf.Dictionary(Type=pikepdf.Name.OCG, Name=pikepdf.String('Layer'))}),
+            form_source(image_extra={'StructParent': 0}),
+            form_source(form_extra={'/OC': pikepdf.Dictionary(Type=pikepdf.Name.OCG, Name=pikepdf.String('Layer'))}),
+            form_source(form_extra={'/StructParents': 0}),
+            form_source(inner_data=b'/Figure << /MCID 0 >> BDC q 50 0 0 40 0 0 cm /Im1 Do Q EMC'),
+            form_source(depth=2, form_extra={'/StructParents': 0}),
+        ]
+        for source in cases:
+            with self.subTest(digest=sha(source)):
+                original = sha(source)
+                occurrences = listing(source)
+                self.assertTrue(occurrences)
+                self.assertTrue(all(not item['editable'] and item['reason'] == 'form-image' for item in occurrences))
+                with self.assertRaises(ValueError):
+                    ed.replace_occurrence(source, occurrences[0]['id'], png())
+                self.assertEqual(sha(source), original)
+
+    def assertOnlyTargetChanged(self, source, output, target):
+        self.assertEqual(render(source, 1).samples, render(output, 1).samples)
+        a, b = render(source, 0), render(output, 0)
+        x0, y0, x1, y1 = target['bbox']
+        changed = 0
+        for y in range(a.height):
+            for x in range(a.width):
+                if a.pixel(x, y) != b.pixel(x, y):
+                    changed += 1
+                    self.assertTrue(x0 - 2 <= x <= x1 + 2 and y0 - 2 <= y <= y1 + 2)
+        self.assertGreater(changed, 4)
+        self.assertEqual(texts(source), texts(output))
+
+    def test_one_and_two_nested_shared_forms_isolate_selected_invocation(self):
+        for depth in (1, 2):
+            with self.subTest(depth=depth):
+                source = form_source(depth)
+                original = sha(source)
+                before = listing(source)
+                self.assertEqual(len(before), 3 if depth == 1 else 6)
+                self.assertTrue(all(o['editable'] and o['shared'] for o in before))
+                self.assertEqual(len({o['id'] for o in before}), len(before))
+                selected = before[0 if depth == 1 else 1]
+                output, report = ed.replace_occurrence(source, selected['id'], png(7, 9, 7))
+                self.assertEqual(sha(source), original)
+                self.assertEqual(report['changedOccurrences'], 1)
+                self.assertOnlyTargetChanged(source, output, selected)
+                self.assertEqual([(o['width'], o['height']) for o in listing(output)],
+                    [(9, 7) if o is selected else (6, 5) for o in before])
+                with pikepdf.open(io.BytesIO(source)) as a, pikepdf.open(io.BytesIO(output)) as b:
+                    old = a.Root.Pages.Kids[0].Resources.XObject.Fm
+                    kept = b.Root.Pages.Kids[0].Resources.XObject.Fm
+                    self.assertEqual(old.read_bytes(), kept.read_bytes())
+                    self.assertEqual(kept.objgen, b.Root.Pages.Kids[1].Resources.XObject.Fm.objgen)
+                    self.assertEqual(b.Root.Pages.Kids[0].Contents[0].read_bytes(), b'% untouched stream\n')
+                    cloned = b.Root.Pages.Kids[0].Resources.XObject.Im1
+                    self.assertNotEqual(cloned.objgen, kept.objgen)
+                    if depth == 2:
+                        # First inner invocation and all repeated outer uses retain the old Form.
+                        self.assertEqual(cloned.Resources.XObject.Inner.objgen, kept.Resources.XObject.Inner.objgen)
+                        cloned = cloned.Resources.XObject.Im1
+                    self.assertEqual(str(cloned.PieceInfo.Test.Private), 'preserve')
+                    self.assertIn(b'%keep\n', cloned.read_bytes())
+
+    def test_selected_form_on_later_page_does_not_change_earlier_repeated_uses(self):
+        source = form_source(2)
+        before = listing(source)
+        target = before[-1]
+        self.assertEqual(target['pageIndex'], 1)
+        output, report = ed.replace_occurrence(source, target['id'], png(5, 7, 9))
+        self.assertEqual(report['pageIndex'], 1)
+        self.assertEqual(render(source, 0).samples, render(output, 0).samples)
+        self.assertNotEqual(render(source, 1).samples, render(output, 1).samples)
+        self.assertEqual([(o['width'], o['height']) for o in listing(output)],
+            [(7, 9) if o is target else (6, 5) for o in before])
+
+    def test_form_matrix_and_containing_bbox_are_preserved(self):
+        source = form_source(form_extra={'/Matrix': pikepdf.Array([0.8, 0, 0, 0.75, 2, 3])})
+        target = listing(source)[0]
+        self.assertTrue(target['editable'])
+        self.assertEqual(target['bbox'], [32.0, 87.0, 72.0, 117.0])
+        output, _ = ed.replace_occurrence(source, target['id'], png(8))
+        self.assertOnlyTargetChanged(source, output, target)
+        with pikepdf.open(io.BytesIO(output)) as pdf:
+            old, new = pdf.Root.Pages.Kids[0].Resources.XObject.Fm, pdf.Root.Pages.Kids[0].Resources.XObject.Im1
+            self.assertEqual(list(old.Matrix), list(new.Matrix))
+            self.assertEqual(list(old.BBox), list(new.BBox))
+
+    def test_masks_groups_clipping_and_rotation_remain_unsupported(self):
+        cases = [
+            (form_source(image_extra={'ImageMask': True}), 'transparency'),
+            (form_source(image_extra={'Mask': pikepdf.Array([0, 0, 0, 0, 0, 0])}), 'transparency'),
+            (form_source(form_extra={'/SMask': pikepdf.Name.None_}), 'transparency'),
+            (form_source(form_extra={'/Group': pikepdf.Dictionary(S=pikepdf.Name.Transparency)}), 'transparency'),
+            (form_source(form_extra={'/BBox': pikepdf.Array([0, 0, 25, 40])}), 'clipped-image'),
+            (form_source(inner_data=b'0 0 10 10 re W n q 50 0 0 40 0 0 cm /Im1 Do Q'), 'clipped-image'),
+            (form_source(inner_data=b'0 0 m 50 0 l 0 40 l h W n q 50 0 0 40 0 0 cm /Im1 Do Q'), 'clipped-image'),
+            (form_source(form_extra={'/Matrix': pikepdf.Array([0, 1, -1, 0, 50, 0])}), 'unsupported-transform'),
+        ]
+        for source, reason in cases:
+            with self.subTest(reason=reason):
+                occ = listing(source)
+                self.assertTrue(occ)
+                self.assertTrue(all(not o['editable'] and o['reason'] == reason for o in occ))
+                with self.assertRaisesRegex(ValueError, '^' + reason + '$'):
+                    ed.replace_occurrence(source, occ[0]['id'], png())
+
+    def test_ambiguous_do_and_unbalanced_form_state_reject_entire_page(self):
+        for tail in (b'/Im1 /Im1 Do', b'Q', b'q', b'1 q', b'1 Q'):
+            with self.subTest(tail=tail):
+                source = form_source(inner_data=b'q 50 0 0 40 0 0 cm /Im1 Do Q ' + tail)
+                result = ed.list_occurrences(source)
+                self.assertFalse(result['complete'])
+                self.assertTrue(result['occurrences'])
+                self.assertTrue(all(not o['editable'] and o['reason'] == 'malformed-pdf' for o in result['occurrences']))
+
+    def test_form_stream_tampering_is_caught_even_without_pixel_change(self):
+        source = form_source(2)
+        target = listing(source)[1]
+        real = ed._rewrite
+        def tamper(pk, src, selected, rgb, size):
+            output, expected = real(pk, src, selected, rgb, size)
+            with pikepdf.open(io.BytesIO(output)) as pdf:
+                original = pdf.Root.Pages.Kids[1].Resources.XObject.Fm
+                original.write(original.read_bytes() + b'% unapproved modification\n')
+                buf = io.BytesIO(); pdf.save(buf)
+                return buf.getvalue(), expected
+        with patch.object(ed, '_rewrite', tamper):
+            with self.assertRaisesRegex(ValueError, '^check-failed$'):
+                ed.replace_occurrence(source, target['id'], png())
+
+
 class Identity(unittest.TestCase):
     def setUp(self):
         self.src = make_pdf([A + B + TEXT], IM)
@@ -273,7 +425,7 @@ class HonestRejection(unittest.TestCase):
         got, _ = self.reason([b'q 0 80 -100 0 130 280 cm /Im1 Do Q\n', b'q 100 0 0 -80 30 360 cm /Im1 Do Q\n'])
         self.assertEqual(got, [(False, 'unsupported-transform'), (False, 'unsupported-transform')])
 
-    def test_form_and_inline_images_listed_not_editable(self):
+    def test_simple_form_editable_but_inline_image_stays_rejected(self):
         def form(p):
             f = p.make_stream(b'q 50 0 0 50 0 0 cm /Im1 Do Q')
             f.Type, f.Subtype, f.BBox = pikepdf.Name.XObject, pikepdf.Name.Form, pikepdf.Array([0, 0, 50, 50])
@@ -283,8 +435,8 @@ class HonestRejection(unittest.TestCase):
         src = make_pdf([b'q 1 0 0 1 30 280 cm /Fm1 Do Q\n' + inline + C], dict(IM, Fm1=form))
         occ = listing(src)
         self.assertEqual([(o['editable'], o['reason']) for o in occ],
-            [(False, 'form-image'), (False, 'inline-image'), (True, None)])
-        self.assertRejects(src, occ[0]['id'], 'form-image')
+            [(True, None), (False, 'inline-image'), (True, None)])
+        ed.replace_occurrence(src, occ[0]['id'], png())
         self.assertRejects(src, occ[1]['id'], 'inline-image')
         ed.replace_occurrence(src, occ[2]['id'], png())
 

@@ -1,9 +1,9 @@
 {
   "schema": "falsify.paragraph-editor.overlay.v1",
   "base": "cd4ba2cdd68ae7e51198f615bd4ac6130206b162",
-  "commit": "50abc7c10dac2f47033926e297484c0774328596",
-  "branch": "feature/paragraph-reflow-20261027",
+  "commit": "b6fecf1fffe0d399c247424b850d6543fd3dd9e9",
+  "branch": "feature/document-flow-links-20261027",
   "repository": "https://github.com/Shinick-Han/falsify-pdf-editor",
   "patch": "patches/paragraph-flow-overlay.patch",
-  "patchSha256": "ec3edfacaf44be1c1c52214e9f9070832bc59cf6e30886eced3c864e326c7e75"
+  "patchSha256": "68f407645994c3059aee6edd308384ed1d4211217bd54b23c21db9ddc48ffa4b"
 }
