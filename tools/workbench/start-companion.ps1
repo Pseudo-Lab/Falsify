@@ -64,7 +64,9 @@ try {
         if ($instance.Status -eq 200) {
             $problem = Test-FalsifyCompanionDescriptor -Json $instance.Json -Occupant $occupant -ServerPath $serverPath
             if ($problem) { throw ($failClosed -f "its lifecycle identity could not be verified ($problem)") }
-            if ($instance.Json.busy) {
+            # A browser connect click must not replace a healthy idle instance:
+            # other tabs may already hold its capability/receipt binding.
+            if ($instance.Json.busy -or $Background) {
                 $requestedEditor = Resolve-FalsifyPdfEditorConfig -ProjectDirectory $projectDirectory -EditorRoot $PdfEditorRoot -EditorManifest $PdfEditorManifest -Disabled:$NoPdf
                 $mismatch = Get-FalsifyReuseMismatch -ExistingWebOrigin $instance.Json.webOrigin -RequestedWebOrigin $requestedWebOrigin -Occupant $occupant -RequestedEditor $requestedEditor
                 if ($mismatch) { throw "The Falsify companion on port $Port is busy with jobs or recent results, and $mismatch. $keptAdvice" }

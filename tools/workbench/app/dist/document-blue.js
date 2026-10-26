@@ -12,7 +12,7 @@
   function reportCaught(e){if(sticky||notice)return;msg(e.message+' 자동 재시도하지 않습니다.',true);}
   function panelLatched(){const n=document.querySelector('#doc-blue-failure');return !!(n&&!n.hidden&&n.textContent);}
   function terminalKind(record){if(!record)return null;if(record.disposition==='failed')return 'failed';if(record.disposition==='cancelled')return 'cancelled';return null;}
-  function clearSticky(){sticky=null;notice=false;for(const id of ['doc-blue-failure','doc-blue-pending-discard','doc-blue-failure-diagnostic','doc-blue-failure-request']){const node=document.querySelector('#'+id);if(!node)continue;if(id==='doc-blue-failure')node.textContent='';node.hidden=true;}}
+  function clearSticky(){sticky=null;notice=false;for(const id of ['doc-blue-failure','doc-blue-pending-discard','doc-blue-failure-diagnostic','doc-blue-failure-request','doc-blue-receipt-check']){const node=document.querySelector('#'+id);if(!node)continue;if(id==='doc-blue-failure')node.textContent='';node.hidden=true;}}
   function ensurePanel(){let n=document.querySelector('#doc-blue-failure');if(!n){n=document.createElement('p');n.id='doc-blue-failure';n.className='form-feedback error';$('#doc-blue-progress').after(n);}return n;}
   function ensureButton(id,label,onClick){let b=document.querySelector('#'+id);if(!b){b=document.createElement('button');b.type='button';b.id=id;b.className='button secondary';$('#doc-blue-progress').after(b);}if(!b.__recoveryBound){b.type='button';b.className=b.className||'button secondary';b.addEventListener('click',onClick);b.__recoveryBound=true;}b.textContent=label;b.hidden=false;return b;}
   function saveJSON(data,name){const url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
@@ -68,7 +68,34 @@
     request=held.record.request;
     const wire=JSON.stringify(request);
     if(await hash(new TextEncoder().encode(wire))!==held.record.requestBytesDigest)throw new Error('직렬화한 요청 바이트가 대기 기록과 달라 보내지 않았습니다.');
-    let started;try{started=await l.request('/api/blue/jobs',request);}catch(err){await P.note(held.record,{postReceipt:'unknown',disposition:'unknown',finishedAt:Date.now()});const saved=P.read('blue');if(saved.status==='record')showUnknown(saved.record);throw err;}
+    // Verify the authenticated live instance before sending. A connect click in
+    // another tab used to restart an idle server underneath this cached link.
+    try{
+      const live=await l.request('/api/capabilities');
+      if(live.companionInstance!==held.record.companionInstance)throw new Error('로컬 서버가 바뀌어 요청을 보내지 않았습니다. 내 PC를 다시 연결하세요.');
+    }catch(err){
+      const detail=P.safeFailure('요청 전 연결 확인 실패. '+err.message);
+      await P.note(held.record,{postReceipt:'rejected',disposition:'failed',serverFailure:detail,finishedAt:Date.now()});
+      const saved=P.read('blue');if(saved.status==='record')rememberTerminal(saved.record);throw err;
+    }
+    let started;try{started=await l.request('/api/blue/jobs',request);}catch(err){
+      if([400,401,403,409,413,422,429].includes(err.httpStatus)){
+        const detail=P.safeFailure('요청 접수 거부 (HTTP '+err.httpStatus+'). '+err.message);
+        await P.note(held.record,{postReceipt:'rejected',disposition:'failed',serverFailure:detail,finishedAt:Date.now()});
+        const saved=P.read('blue');if(saved.status==='record')rememberTerminal(saved.record);throw err;
+      }
+      await P.note(held.record,{postReceipt:'unknown',disposition:'unknown',finishedAt:Date.now()});
+      // A lost POST response is not a failed job. Reconcile once with GET only;
+      // exact id, instance, harness and wire digest must all match.
+      const outcome=await P.recover({...recoverOptions(),getJob:async id=>{
+        try{return {httpStatus:200,body:await l.request('/api/blue/jobs/'+encodeURIComponent(id))};}
+        catch{return {httpStatus:0,body:null};}
+      }});
+      if(['still-running','completed','failed','cancelled'].includes(outcome.status)){
+        await P.note(held.record,{postReceipt:'accepted'});clearSticky();return {id:request.requestId,state:outcome.job.state};
+      }
+      const saved=P.read('blue');if(saved.status==='record')showUnknown(saved.record);throw err;
+    }
     if(!started||started.id!==request.requestId){await P.note(held.record,{postReceipt:'unknown',disposition:'unknown',finishedAt:Date.now()});const saved=P.read('blue');if(saved.status==='record')showUnknown(saved.record);throw new Error('서버가 저장한 요청 ID와 다른 작업을 돌려줘 그 작업을 이어받지 않았습니다.');}
     await P.note(held.record,{postReceipt:'accepted'});return started;
   }
@@ -116,24 +143,24 @@
     const body=P.safeRequest(found.record);if(!body){msg('원래 요청을 저장하지 못했습니다. 실행하지 않았습니다.',true,true);return;}
     saveJSON(body,'falsify-document-blue-request.json');
   }
-  function showRecoveryActions(){ensureButton('doc-blue-pending-discard','이 대기 작업 버리기',onDiscard);ensureButton('doc-blue-failure-diagnostic','진단 정보 저장',exportDiagnostic);ensureButton('doc-blue-failure-request','원래 요청 저장',exportStoredRequest);}
+  function showRecoveryActions(){ensureButton('doc-blue-pending-discard','이 대기 작업 버리기',onDiscard);ensureButton('doc-blue-failure-diagnostic','진단 정보 저장',exportDiagnostic);ensureButton('doc-blue-failure-request','원래 요청 저장',exportStoredRequest);ensureButton('doc-blue-receipt-check','접수 상태 다시 확인',()=>void recoverBlue());}
   function rememberTerminal(record,opts={}){
     const kind=terminalKind(record);if(!kind)return;
     if(!doc&&record.request)adoptBlue(P.docFrom(record));
     request=record.request;sticky=kind;notice=false;
     const detail=kind==='failed'&&typeof record.serverFailure==='string'?record.serverFailure:'';
-    const head=kind==='failed'?'BLUE 실패. '+(detail?detail+' ':'')+'자동으로 다시 보내지 않습니다.':'BLUE 취소. 자동으로 다시 보내지 않습니다.';
+    const head=kind==='failed'?(record.postReceipt==='rejected'?'BLUE 요청이 접수되지 않았습니다. ':'BLUE 실패. ')+(detail?detail+' ':'')+'자동으로 다시 보내지 않습니다.':'BLUE 취소. 자동으로 다시 보내지 않습니다.';
     const foreign=opts.foreign?' 이번 조회는 저장된 요청·인스턴스·해시와 달라 서버 문구를 바꾸지 않았습니다.':'';
     const guidance=' 대기 작업은 다시 열거나 연결과 조회가 바뀌어도 버릴 때까지 유지됩니다. 다시 시작하려면 「이 대기 작업 버리기」를 누른 뒤 「BLUE 독립 검토 시작」을 직접 누르세요. 진단 정보와 원래 요청은 저장만 하며 실행하지 않습니다.';
     msg(head+foreign,true,true);
     const box=ensurePanel();box.hidden=false;box.textContent=head+foreign+guidance;
     showRecoveryActions();
   }
-  function showUnknown(record){
+  function showUnknown(record,reason=''){
     if(sticky)return;
     if(record&&record.request)request=record.request;
     notice=true;
-    const text='BLUE 상태 미확인. 접수 여부를 확인하지 못했습니다. 성공으로 보지 않았고 자동으로 다시 보내지 않습니다. 대기 작업은 버릴 때까지 유지됩니다. 다시 시작하려면 「이 대기 작업 버리기」 후 「BLUE 독립 검토 시작」을 직접 누르세요. 진단 정보와 원래 요청은 저장만 하며 실행하지 않습니다.';
+    const text='BLUE 상태 미확인. '+(reason||'접수 여부를 확인하지 못했습니다.')+' 성공으로 보지 않았고 자동으로 다시 보내지 않습니다. 「접수 상태 다시 확인」은 조회만 하며 모델을 실행하지 않습니다. 대기 작업은 버릴 때까지 유지됩니다. 다시 시작하려면 「이 대기 작업 버리기」 후 「BLUE 독립 검토 시작」을 직접 누르세요. 진단 정보와 원래 요청은 저장만 하며 실행하지 않습니다.';
     msg(text,true,true);
     const box=ensurePanel();box.hidden=false;box.textContent=text;
     showRecoveryActions();
@@ -165,7 +192,7 @@
   }
   async function resumeBlue(outcome){
     const l=B.session();if(!l){showPendingBlue({status:'unpaired',record:outcome.record});return;}
-    adoptBlue(outcome.doc);request=outcome.record.request;
+    clearSticky();adoptBlue(outcome.doc);request=outcome.record.request;
     if(outcome.record.postReceipt!=='accepted')await P.note(outcome.record,{postReceipt:'accepted'});
     const current=generation;busy=true;job=outcome.record.requestId;jobLink=l;controls();msg(P.text(outcome));
     try{await watchBlue(current,l,true);}catch(e){if(current===generation)reportCaught(e);}
@@ -208,6 +235,7 @@
     try{
       const outcome=await P.recover(recoverOptions());
       if(!outcome||outcome.status==='absent')return;
+      if(outcome.status==='server-restarted'){showUnknown(record,'저장된 요청 이후 로컬 서버가 재시작되어 현재 서버에서는 이전 접수를 확인할 수 없습니다.');return;}
       if(outcome.status==='still-running'){await resumeBlue(outcome);return;}
       if(outcome.status==='completed'){showRecoveredBlue(outcome);const rec=P.read('blue');if(rec.status==='record')await P.note(rec.record,{disposition:'completed',finishedAt:Date.now()});return;}
       if((outcome.status==='failed'||outcome.status==='cancelled')&&outcome.record){

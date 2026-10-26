@@ -189,6 +189,11 @@ class Handler(BaseHTTPRequestHandler):
         mark('POST ' + self.path)
         if self.path == '/test/quit':
             self.reply(200, {}); threading.Thread(target=self.server.shutdown, daemon=True).start(); return
+        if self.path == '/api/pair/register':
+            if not self.launcher_ok(): return self.reply(403, {'error': 'unauthorized'})
+            body = json.loads(self.rfile.read(int(self.headers.get('Content-Length', '0'))))
+            if body.get('schema') != 'falsify.pair-register.v1': return self.reply(400, {'error': 'invalid_request'})
+            return self.reply(200, {'registered': True})
         if self.path != '/api/launcher/restart' or MODE == 'legacy': return self.reply(404, {'error': 'not_found'})
         if not self.launcher_ok() or self.headers.get('Content-Type') != 'application/json': return self.reply(403, {'error': 'unauthorized'})
         body = self.rfile.read(int(self.headers.get('Content-Length', '0')))
@@ -344,6 +349,10 @@ if ($python) {
         $descriptor = Get-FalsifyCompanionDescriptor -Port $port -Token $oldToken
         Check 'real GET lifecycle descriptor validates against OS identity' ($descriptor.Status -eq 200 -and $null -eq (Test-FalsifyCompanionDescriptor -Json $descriptor.Json -Occupant $realOccupant -ServerPath $projectServer))
         Check 'native HTTP returns redirects without following them' ((Invoke-FalsifyLoopbackRequest -Port $port -Path '/redirect').Status -eq 302 -and (Read-Mark $oldMark) -notmatch 'GET /target')
+        $pairNonce = 'a' * 43
+        $paired = Invoke-Launcher $project @('-Port', [string]$port, '-Background', '-NoInstall', '-NoPdf', '-PairChallenge', $pairNonce, '-PairState', $pairNonce, '-PairProof', $pairNonce)
+        Check 'browser pairing reuses even an idle companion' ($paired.ExitCode -eq 0 -and -not $old.HasExited -and (Read-Mark $oldMark) -match 'POST /api/pair/register')
+        Check 'browser pairing never restarts the idle instance or reveals its token' ((Read-Mark $oldMark) -notmatch 'POST /api/launcher/restart' -and $paired.Output -notmatch [regex]::Escape($oldToken))
         $savedProxy = [System.Net.WebRequest]::DefaultWebProxy
         $savedEnvironment = @{}
         foreach ($name in @('HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY')) { $savedEnvironment[$name] = [Environment]::GetEnvironmentVariable($name) }

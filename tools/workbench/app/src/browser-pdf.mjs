@@ -143,7 +143,9 @@ async function prepareExclusive(request) {
       const turned = group.filter(plan => plan.rotation !== 0);
       if (turned.length) throw unsupported(turned.map(plan => failure(plan.edit, plan.pageIndex, 'rotated-page')), models);
       const page = doc.loadPage(pageIndex);
-      for (const plan of group) redact(page, plan.chars);
+      const selected = new Set(group.flatMap(plan => plan.chars));
+      const protectedBoxes = removalBoxes(models[pageIndex].chars.filter(ch => !selected.has(ch)));
+      for (const plan of group) redact(page, plan.chars, protectedBoxes);
       page.applyRedactions(false, mupdf.PDFPage.REDACT_IMAGE_NONE, mupdf.PDFPage.REDACT_LINE_ART_NONE, mupdf.PDFPage.REDACT_TEXT_REMOVE);
       const piece = group.map(plan => showText(doc, page, plan)).join('');
       if (piece) appendStream(doc, page, piece);
@@ -360,11 +362,100 @@ function layout(plan, model, page) {
   return placed(lines);
 }
 
-function redact(page, chars) {
-  const quads = chars.map(ch => ch.quad);
+/* MuPDF 1.28.1 sizes every horizontal glyph's redaction test from font
+ * ascender to descender (FontDescriptor Ascent/Descent), then insets that box
+ * by 10%. A raw structured-text quad is the same full metric box. On a tight
+ * title those boxes cross the next baseline, and applyRedactions then deletes
+ * each intersecting glyph whole. Edge contact counts as a hit. The quad used
+ * here stays inside the selected glyph's inset box and outside every other
+ * glyph's inset box. */
+const REDACTION_GAP = 0.05;
+const GLYPH_ORIGIN = 0.01;
+
+function quadBounds(points) {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (let i = 0; i + 1 < points.length; i += 2) {
+    x0 = Math.min(x0, points[i]);
+    y0 = Math.min(y0, points[i + 1]);
+    x1 = Math.max(x1, points[i]);
+    y1 = Math.max(y1, points[i + 1]);
+  }
+  return [x0, y0, x1, y1];
+}
+
+function removalBox(ch) {
+  const [x0, y0, x1, y1] = quadBounds(ch.quad);
+  const width = x1 - x0;
+  const height = y1 - y0;
+  if (!(width > 0) || !(height > 0)) return null;
+  return [x0 + width / 10, y0 + height / 10, x1 - width / 10, y1 - height / 10];
+}
+
+function removalBoxes(chars) {
+  const boxes = [];
+  for (const ch of chars) {
+    const box = removalBox(ch);
+    if (box) boxes.push(box);
+  }
+  return boxes;
+}
+
+function subtractRect(rect, obstacle) {
+  const [x0, y0, x1, y1] = rect;
+  const grown = [obstacle[0] - REDACTION_GAP, obstacle[1] - REDACTION_GAP, obstacle[2] + REDACTION_GAP, obstacle[3] + REDACTION_GAP];
+  if (x1 <= grown[0] || x0 >= grown[2] || y1 <= grown[1] || y0 >= grown[3]) return rect;
+  const candidates = [];
+  if (grown[1] > y0) candidates.push([x0, y0, x1, Math.min(y1, grown[1])]);
+  if (grown[3] < y1) candidates.push([x0, Math.max(y0, grown[3]), x1, y1]);
+  if (grown[0] > x0) candidates.push([x0, y0, Math.min(x1, grown[0]), y1]);
+  if (grown[2] < x1) candidates.push([Math.max(x0, grown[2]), y0, x1, y1]);
+  let best = null;
+  let area = 0;
+  for (const candidate of candidates) {
+    const width = candidate[2] - candidate[0];
+    const height = candidate[3] - candidate[1];
+    if (width > 0 && height > 0 && width * height > area) {
+      best = candidate;
+      area = width * height;
+    }
+  }
+  return best;
+}
+
+function safeRedactionRect(ch, protectedBoxes) {
+  let rect = removalBox(ch);
+  if (!rect) return null;
+  for (let guard = 0; guard < 12; guard++) {
+    let next = rect;
+    for (const box of protectedBoxes) {
+      next = subtractRect(next, box);
+      if (!next) return null;
+    }
+    if (next.every((value, index) => value === rect[index])) return next;
+    rect = next;
+  }
+  if (rect[2] - rect[0] <= 0.02 || rect[3] - rect[1] <= 0.02) return null;
+  return rect;
+}
+
+function redact(page, chars, protectedBoxes) {
+  const quads = [];
+  for (const ch of chars) {
+    const rect = safeRedactionRect(ch, protectedBoxes);
+    if (!rect) {
+      if (!ch.c.trim()) continue;
+      throw new BrowserPdfError('unsupported', '선택한 글자의 글꼴 상자가 인접 글자와 겹쳐 그 글자만 지울 수 없습니다. 부분 적용 파일은 만들지 않았습니다.', {
+        code: 'glyph-overlap',
+      });
+    }
+    const [x0, y0, x1, y1] = rect;
+    quads.push([x0, y1, x1, y1, x0, y0, x1, y0]);
+  }
+  if (!quads.length) return;
   const annot = page.createAnnotation('Redact');
-  const box = union(chars);
-  annot.setRect([box[0] - 0.15, box[1] - 0.15, box[2] + 0.15, box[3] + 0.15]);
+  /* quads.flat() is 8 numbers per glyph. The Rect has to cover every one. */
+  const box = quadBounds(quads.flat());
+  annot.setRect(box);
   annot.setQuadPoints(quads);
   annot.update();
 }
@@ -409,7 +500,11 @@ function verify(sourceBytes, outBytes, plans, models, unchanged) {
       const page = check.loadPage(i);
       const again = readPage(page);
       if (!sameImages(models[i].images, again.images)) checks.push({pageIndex: i, status: 'failed', code: 'figure-changed'});
-      if (!edited.has(i) && normalizeText(again.chars) !== normalizeText(models[i].chars)) checks.push({pageIndex: i, status: 'failed', code: 'untouched-text'});
+      if (!edited.has(i)) {
+        if (normalizeText(again.chars) !== normalizeText(models[i].chars)) checks.push({pageIndex: i, status: 'failed', code: 'untouched-text'});
+      } else if (!keptOutsideSelection(models[i].chars, again.chars, selectedCharIndexes(plans, i))) {
+        checks.push({pageIndex: i, status: 'failed', code: 'untouched-text'});
+      }
     }
     for (const plan of plans) {
       const text = normalizeText(readPage(check.loadPage(plan.pageIndex)).chars);
@@ -431,6 +526,39 @@ function verify(sourceBytes, outBytes, plans, models, unchanged) {
     try { check.destroy(); } catch { /* ignore */ }
   }
   return {warnings, checks};
+}
+
+function selectedCharIndexes(plans, pageIndex) {
+  const selected = new Set();
+  for (const plan of plans) {
+    if (plan.pageIndex !== pageIndex) continue;
+    for (const index of plan.charIndex) selected.add(index);
+  }
+  return selected;
+}
+
+/* Saved bytes of an edited page: every unselected drawn glyph must come back
+ * once, same character, within GLYPH_ORIGIN of its PDF origin. A miss is a
+ * failed check on the returned candidate. Spaces are outside the selection map. */
+function keptOutsideSelection(sourceChars, outputChars, selected) {
+  const pool = outputChars.map(ch => ({c: ch.c, x: ch.pdf[0], y: ch.pdf[1], used: false}));
+  for (let index = 0; index < sourceChars.length; index++) {
+    if (selected.has(index)) continue;
+    const ch = sourceChars[index];
+    if (!ch.c.trim()) continue;
+    let found = -1;
+    for (let i = 0; i < pool.length; i++) {
+      const item = pool[i];
+      if (item.used || item.c !== ch.c) continue;
+      if (Math.abs(item.x - ch.pdf[0]) <= GLYPH_ORIGIN && Math.abs(item.y - ch.pdf[1]) <= GLYPH_ORIGIN) {
+        found = i;
+        break;
+      }
+    }
+    if (found < 0) return false;
+    pool[found].used = true;
+  }
+  return true;
 }
 
 function unsupported(failures, models) {

@@ -49,6 +49,8 @@ def run_stdio(argv, stdin, cwd, stdout_path):
                     p.communicate(input=stdin if initial else None, timeout=.1)
                     break
                 except subprocess.TimeoutExpired: initial = False
+            if p.returncode == 124:
+                raise ValueError('adapter 응답 시간 초과. 출력/비밀정보는 기록하지 않았습니다. 자동으로 재시도하지 않습니다.')
             if p.returncode != 0: raise ValueError('adapter 종료 오류. 출력/비밀정보는 기록하지 않았습니다.')
         finally:
             if p.poll() is None:

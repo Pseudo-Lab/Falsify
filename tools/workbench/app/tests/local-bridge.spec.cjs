@@ -13,6 +13,12 @@ function harness(hostname='shinick-han.github.io',port='',queue=[]){
   return {bridge,calls,states,queue};
 }
 const hosted=()=>harness();
+test('known HTTP failure preserves numeric status for receipt classification',async()=>{
+  const h=hosted();h.queue.push(reply(CAP),reply({error:'이미 실행 중입니다.'},409));
+  await h.bridge.pair(TOKEN,'7816');
+  await assert.rejects(h.bridge.session().request('/api/blue/jobs',{requestId:'r1'}),e=>e.httpStatus===409&&e.message==='이미 실행 중입니다.');
+  assert.equal(h.calls.length,2);assert.equal(leaks(h),false);
+});
 const leaks=(h,token=TOKEN)=>JSON.stringify(h.states).includes(token)||JSON.stringify(h.bridge.state()).includes(token);
 function deferred(){let resolve;const promise=new Promise(r=>resolve=r);return {promise,resolve};}
 

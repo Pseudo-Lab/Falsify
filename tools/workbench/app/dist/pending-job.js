@@ -15,7 +15,7 @@
   const REQUEST_ID=/^[A-Za-z0-9_:-]{1,160}$/;
   const INSTANCE=/^ci1\.[0-9a-f]{64}$/,HEX=/^[0-9a-f]{64}$/;
   const SECRET=/^(token|authorization|bearer|cookie|password|secret|session|sessiontoken|file|bytes|pdf|pdfbytes)$/i;
-  const RECEIPTS=['pending','accepted','unknown'];
+  const RECEIPTS=['pending','accepted','unknown','rejected'];
   const DISPOSITIONS=['open','running','completed','failed','cancelled','expired','unknown'];
   const BLUE_KEYS=['schema','revision','requestId','sourceHash','segments','maxCalls','consent','harness','harnessCanonical','executionConsent'];
   function fail(status,message){const e=new Error(message);e.status=status;throw e;}

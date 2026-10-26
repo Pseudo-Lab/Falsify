@@ -323,7 +323,7 @@ async function bluePage(storage,hooks){
   const calls=[],downloads=[];
   const cap={red:true,blue:true,pdf:false,companionInstance:INSTANCE};
   const net={connected:true};
-  const bridge={busy(){},state:()=>({status:net.connected?'paired':'manual',connected:net.connected,cap}),capabilities:()=>cap,session:()=>({request:async(p,body)=>{calls.push({path:p,body});return hooks.reply(p,body,calls);}})};
+  const bridge={busy(){},state:()=>({status:net.connected?'paired':'manual',connected:net.connected,cap}),capabilities:()=>cap,session:()=>({request:async(p,body)=>{calls.push({path:p,body});if(p==='/api/capabilities')return hooks.liveCap||cap;return hooks.reply(p,body,calls);}})};
   const lab={busy(){},allowed:()=>true,ready:Promise.resolve(),bind:async(role,r)=>({...r,harness:H.builtin(role)}),record:async()=>'run-1'};
   const importer={extract:async()=>({text:'The claim is absolute.',format:'TXT',warnings:[],segments:[{label:'p',text:'The claim is absolute.'}]})};
   const ctx=vm.createContext({document,crypto:globalThis.crypto,localStorage:storage,FalsifyDocumentBlue:Blue,FalsifyHarness:H,FalsifyLocalBridge:bridge,FalsifyLab:lab,FalsifyImport:importer,TextEncoder,TextDecoder,CustomEvent,Event,AbortController,URL:{createObjectURL(blob){downloads.push(blob);return 'blob:'+downloads.length;},revokeObjectURL(){}},Blob,File,setTimeout,clearTimeout,confirm:()=>true,Uint8Array,Array,Promise,Error,Map,JSON,Number,String,Object,console});
@@ -503,6 +503,36 @@ test('unknown BLUE receipt survives reload and does not show a foreign server ph
   await until(()=>reloaded.get('doc-blue-failure').textContent.includes('BLUE 상태 미확인'),'reload unknown');
   assert.equal(jobPosts(reloaded.calls).length,0);assert.equal(reloaded.get('doc-blue-failure').textContent.includes(CITE),false);
   assert.equal(JSON.stringify(storedBlue(storage).request),snap);
+});
+test('BLUE known HTTP rejection is not an unknown receipt and never reposts',async()=>{
+  const storage=vmStorage();
+  const page=await bluePage(storage,{reply:async()=>{const e=new Error('이미 실행 중입니다.');e.httpStatus=409;throw e;}});
+  await page.load();page.get('doc-blue-consent').checked=true;page.get('doc-blue-start').click();
+  await until(()=>P.read('blue',storage).record?.postReceipt==='rejected','rejected receipt');
+  assert.equal(storedBlue(storage).disposition,'failed');
+  assert.match(storedBlue(storage).serverFailure,/HTTP 409/);
+  assert.equal(jobPosts(page.calls).length,1);
+  page.get('doc-blue-start').click();await new Promise(r=>setTimeout(r,20));
+  assert.equal(jobPosts(page.calls).length,1);
+});
+test('BLUE changed live companion rejects before any POST',async()=>{
+  const storage=vmStorage();const page=await bluePage(storage,{liveCap:{companionInstance:OTHER},reply:async()=>{throw new Error('must not post');}});
+  await page.load();page.get('doc-blue-consent').checked=true;page.get('doc-blue-start').click();
+  await until(()=>P.read('blue',storage).record?.postReceipt==='rejected','preflight rejected');
+  assert.equal(jobPosts(page.calls).length,0);
+  assert.match(storedBlue(storage).serverFailure,/서버가 바뀌어/);
+});
+test('BLUE lost POST receipt reconciles matching completed job by GET without replay',async()=>{
+  const storage=vmStorage();const page=await bluePage(storage,{reply:async(p)=>{
+    if(p==='/api/blue/jobs')throw new Error('lost response');
+    return completedBody(storedBlue(storage));
+  }});
+  await page.load();page.get('doc-blue-consent').checked=true;page.get('doc-blue-start').click();
+  await until(()=>P.read('blue',storage).record?.disposition==='completed','GET recovered completion');
+  assert.equal(jobPosts(page.calls).length,1);
+  assert.equal(storedBlue(storage).postReceipt,'accepted');
+  assert.match(page.get('doc-blue-result-summary').textContent,/abstain/);
+  assert.equal(page.get('doc-blue-failure').hidden,true);
 });
 (async()=>{let passed=0;for(const [name,fn] of tests){try{await fn();passed++;console.log('PASS '+name);}catch(e){console.error('FAIL '+name);console.error(e);process.exitCode=1;}}
   console.log(JSON.stringify({passed,failed:tests.length-passed}));if(passed!==tests.length)process.exit(1);})();

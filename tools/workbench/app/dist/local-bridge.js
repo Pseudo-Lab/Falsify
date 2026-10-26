@@ -92,6 +92,7 @@
         if(res.redirected||res.type==='opaqueredirect')throw new Error('로컬 broker 리디렉션을 거부했습니다.');
         let data=null;try{data=await res.json();}catch{}if(signal?.aborted)throw aborted();
         if(!res.ok){const e=res.status===401||res.status===403?new Error('로컬 broker가 인증을 거부했습니다 ('+res.status+'). 토큰·포트·--web-origin을 확인하세요.'):new Error(typeof data?.error==='string'?data.error.slice(0,300):'로컬 요청 실패 ('+res.status+')');
+          e.httpStatus=res.status;
           throw IMAGE_PATH.test(path)?imageError(e,res.status,data):e;}
         if(!data||typeof data!=='object')throw new Error('로컬 broker 응답이 JSON 객체가 아닙니다.');
         return data;
