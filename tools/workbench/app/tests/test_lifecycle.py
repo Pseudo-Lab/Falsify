@@ -205,9 +205,11 @@ class RestartTests(Base):
         self.thread.join(5);self.assertFalse(self.thread.is_alive())
         self.assertFalse(active_free())  # reservation held until the server closes
         self.http.server_close();self.assertTrue(active_free())
-        probe=socket.socket(socket.AF_INET,socket.SOCK_STREAM)
-        try:probe.bind(('127.0.0.1',self.port))
-        finally:probe.close()
+        # Match the replacement companion's platform socket policy. On Linux a
+        # bare non-reuse socket can fail on TIME_WAIT after the listener closes;
+        # Windows retains the production class's exclusive binding behavior.
+        replacement=server.ThreadingHTTPServer(('127.0.0.1',self.port),server.Handler)
+        replacement.server_close()
     def test_reserved_restart_blocks_admission_and_repeats(self):
         gate,called=self.gate_shutdown()
         self.assertEqual(self.restart()[0],200);self.assertTrue(called.wait(5))
