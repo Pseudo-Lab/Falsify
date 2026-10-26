@@ -633,13 +633,7 @@ function loadUmbrella(filename,src){
   return sandbox.module.exports;
 }
 function siblingSource(file){
-  const {execFileSync}=require('node:child_process');
-  const read=spec=>execFileSync('git',['show',spec],{encoding:'utf8',stdio:['ignore','pipe','pipe']});
-  try{return read('f5b696b:app/dist/'+file);}
-  catch{
-    execFileSync('git',['fetch','origin','feature/paper-workspace-20261026'],{stdio:['ignore','pipe','pipe']});
-    return read('origin/feature/paper-workspace-20261026:app/dist/'+file);
-  }
+  return fs.readFileSync(path.join(__dirname,'../dist',file),'utf8');
 }
 
 test('core: second alpha, CRLF, deletion, and resume keep the real edit id',async()=>{
