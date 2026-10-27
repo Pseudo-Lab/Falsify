@@ -1,0 +1,12 @@
+# PDF layout visual review — 2026-10-28
+
+Reviewed the application-aliased measured-continuous output (34 pages) and ordered-band output (37 pages) against the 36-page prepared source. All pages were rasterized and inspected as contact sheets, with representative pages inspected at larger size. These observations concern this sample, not a general renderer score or a text-completeness audit.
+
+- The measured output leaves page 2 almost empty with only the affiliation block; the source places that block on the title page. The small icon near “Check for updates” is also visible in the prepared source; its presence alone is not an output regression.
+- The measured output splits figure captions across intervening figure content: Figure 1 begins on page 3, continues on page 4, and resumes after Figure 2's caption on page 5. Figure 4 begins on page 9 and resumes after Figure 5's caption on page 10. The source keeps those captions together before their respective figures. Figure 3 also breaks across pages 6–7.
+- Figure 2's artwork and caption appear together on measured page 5, but the unrelated Figure 1 continuation below them disrupts reading. Ordered bands instead place captions on mostly empty pages 3, 7 and 10 ahead of their figures; the source integrates those captions with surrounding text.
+- Dense body and methods pages are substantially occupied in both outputs. The final four pages in each output have no extractable text but visibly contain reporting-summary artwork, matching the source; they are not blank.
+
+Those observations concern the earlier candidate, not the final web default. Later application-aliased runs grouped the source caption/artwork pairs, kept title-page notes with body flow and removed the isolated short-body page. A float/fitting combination that omitted body characters was rejected by the content check; the page-bound repair restored them. The eight-case run passed ordered logical content checks and found no issues under the implemented geometry checks.
+
+Further review found smaller plot labels after artwork fitting, source line-wrap hyphens visible mid-word and touching footer fields. The implementation records source-corroborated wrap projection and measures footer spacing. Artwork scaling remains a readability tradeoff. Institution markers 1–5 are present in both source and output extraction; the earlier visual suspicion of missing markers did not justify inventing replacements. These checks do not establish exhaustive visual equivalence or original typeface fidelity.

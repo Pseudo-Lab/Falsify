@@ -6,6 +6,8 @@ import {readSourceLinks} from './paper-source-links.mjs';
 import {createFontPlan} from './paper-fonts.mjs';
 import {composeDocument} from './paper-compose.mjs';
 import {checkRecomposition} from './paper-compose-check.mjs';
+import {buildOutputProfile} from './paper-output-profile.mjs';
+import {resolveOutputAssetSpans} from './paper-asset-spans.mjs';
 import {hex} from './paragraph-pdf-crypto.mjs';
 
 const abort = signal => { if (signal?.aborted) throw new DOMException('Recomposition cancelled', 'AbortError'); };
@@ -147,8 +149,30 @@ export function bindEdits(document, flow, edits, explicit=[]) {
   return {bindings,changes};
 }
 
+// Compare detected defects by type, rather than treating a score as proof of quality.
+const issueCounts = result => {
+  const counts={};
+  for(const issue of result.verification.checkReport?.layoutQuality?.issues || []) counts[issue.type]=(counts[issue.type]||0)+1;
+  for(const finding of result.verification.checkReport?.findings || []) if(finding.code==='text-outside-page') counts[finding.code]=(counts[finding.code]||0)+1;
+  return counts;
+};
+const attemptSummary = result => ({placement:result.enginePlan.figurePlacement,content:result.verification.outputTextCheck,layout:result.verification.checkReport?.layoutQuality?.status || 'unavailable',issues:issueCounts(result)});
+function repairIsBetter(first, candidate) {
+  const a=first.verification, b=candidate.verification, report=b.checkReport;
+  if(!['pass','normalized'].includes(b.outputTextCheck) || report?.readable!==true || report.checks?.independent?.status!=='declared') return false;
+  if(b.coverage?.status!=='covered' || b.sourceGlyphs?.unavailable?.length || b.assetFindings?.length) return false;
+  if(report.checks?.furniture?.status==='finding' || (b.furniture?.templates?.length && report.checks?.furniture?.status!=='checked')) return false;
+  if(candidate.warnings.some(w=>w.startsWith('Source assets and non-text'))) return false;
+  if(report.checks?.bounds?.status!=='checked' || report.layoutQuality?.status==='unavailable' || !report.layoutQuality) return false;
+  const before=issueCounts(first), after=issueCounts(candidate);
+  if(Object.keys(after).some(type=>after[type]>(before[type]||0))) return false;
+  return !['pass','normalized'].includes(a.outputTextCheck) || Object.keys(before).some(type=>(after[type]||0)<before[type]);
+}
+
 export async function prepare(request={}, options={}) {
   const signal=request.signal; abort(signal);
+  const layoutMode=request.layoutMode;
+  if(layoutMode !== undefined && layoutMode !== 'measured-continuous') fail('invalid','Unknown layout mode');
   const candidates=(options.fonts||[]).map(f=>({...f,bytes:f.bytes instanceof Uint8Array?Uint8Array.from(f.bytes):f.bytes instanceof ArrayBuffer?f.bytes.slice(0):f.bytes}));
   const snapshot=Array.isArray(request.edits)?{edits:request.edits}:request.edits;
   if(!snapshot || !Array.isArray(snapshot.edits) || (snapshot.schema && snapshot.schema!=='falsify.paper-edits.v1')) fail('invalid','Expected edit array or paper edit snapshot.');
@@ -177,9 +201,32 @@ export async function prepare(request={}, options={}) {
   }
   const captured=await readSourceAssets({bytes,document:{...document,blocks:[...document.blocks,...(flow.fragments||[])]},regions,signal}); abort(signal);
   const fontPlan=await createFontPlan({text:document.blocks.map(b=>b.text||'').join('\n')+edits.filter(e=>e?.enabled!==false).map(e=>e.after).join('\n'),fonts:candidates},{mupdf:options.mupdf}); abort(signal);
-  const result=await composeDocument({document,sourceBytes:bytes,flow,assets:captured,links,edits:changes,signal,runningFurniture:options.runningFurniture===true},{compile:options.compile,fonts:fontPlan,outputCheck:args=>checkRecomposition({...args,pdfjs:options.pdfjs,mupdf:options.mupdf,exporter:'Typst'})}); abort(signal);
+  const composeOptions={compile:options.compile,fonts:fontPlan,outputCheck:async args=>{
+    if(!options.pdfjs?.getDocument || !options.mupdf?.Document) return checkRecomposition({...args,pdfjs:options.pdfjs,mupdf:options.mupdf,exporter:'Typst'});
+    const outputFlow=args.flow||flow;
+    const assets=resolveOutputAssetSpans({bytes:args.bytes,mupdf:options.mupdf,flow:outputFlow,blockSpans:args.blockSpans});
+    const {profile,evidence}=buildOutputProfile({bytes:args.bytes,mupdf:options.mupdf,document:args.document||{...document,blocks:[...document.blocks,...(flow.fragments||[])]},flow:outputFlow,expectedBlocks:args.expectedBlocks,fontPlan,assetSpans:assets.spans});
+    const floatingCaptionBlockIds=profile.captions.map(c=>c.id);
+    const flowExpectations=layoutMode==='measured-continuous' && floatingCaptionBlockIds.length ? {floatingCaptionBlockIds} : undefined;
+    const report=await checkRecomposition({...args,flowExpectations,layoutProfile:{...args.layoutProfile,...profile},pdfjs:options.pdfjs,mupdf:options.mupdf,exporter:'Typst'});
+    return {...report,outputProfileEvidence:{...evidence,assets:assets.evidence}};
+  }};
+  const compose = figurePlacement => composeDocument({document,sourceBytes:bytes,flow,assets:captured,links,edits:changes,signal,runningFurniture:options.runningFurniture===true,layoutMode,figurePlacement},composeOptions);
+  const first=await compose('float'); abort(signal);
+  let result=first, attempts=[attemptSummary(first)], selectedAttempt=1;
+  if(first.enginePlan.actual==='measured-continuous' && (!['pass','normalized'].includes(first.verification.outputTextCheck) || Object.keys(issueCounts(first)).length)) {
+    try {
+      const second=await compose('page'); abort(signal);
+      attempts.push(attemptSummary(second));
+      if(repairIsBetter(first,second)) {result=second;selectedAttempt=2;}
+    } catch(error) {
+      abort(signal);
+      if(error?.name==='AbortError') throw error;
+      attempts.push({placement:'page',status:'failed'});
+    }
+  }
   const actual=new Uint8Array(await result.file.arrayBuffer()); abort(signal);
   if(hex(actual)!==result.sha256) fail('output-hash','Output bytes do not match their hash.');
-  return {...result,revision,bindings,sourceLinks:links,sourceBinding:{spacing:spacing.evidence,sourceSha256:document.sourceSha256,editCount:bindings.length,partCount:changes.length},sourceAssets:{regions:regions.length,diagnostics:captured.diagnostics}};
+  return {...result,repair:{attempts,selectedAttempt},revision,bindings,sourceLinks:links,sourceBinding:{spacing:spacing.evidence,sourceSha256:document.sourceSha256,editCount:bindings.length,partCount:changes.length},sourceAssets:{regions:regions.length,diagnostics:captured.diagnostics}};
 }
 

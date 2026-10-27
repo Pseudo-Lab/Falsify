@@ -1,3 +1,4 @@
+import {inspectLayoutQuality} from './paper-layout-quality.mjs';
 import {readOutputGlyphs} from './paper-output-glyphs.mjs';
 // Byte-derived text comparison for full-document recomposition. The caller supplies
 // logical content, not a destination map, as the expectation.
@@ -5,7 +6,7 @@ const normalize = value => value.replace(/\s+/gu, ' ').trim();
 
 // Only these two representations are treated as equivalent, with their
 // original offsets retained. Other character and word-space changes fail.
-function representationComparison(expected, observed) {
+function representationComparison(expected, observed, prefix=false) {
   let i=0,j=0; const differences=[];
   while(i<expected.length && j<observed.length) {
     const a=expected.codePointAt(i),b=observed.codePointAt(j);
@@ -14,10 +15,10 @@ function representationComparison(expected, observed) {
     if(a===0x00ad && expected.codePointAt(i+1)===b) {differences.push({kind:'discretionary-soft-hyphen-omitted',sourceOffset:i,outputOffset:j,source:'U+00AD',output:null});i++;continue;}
     return {matches:false,differences:[]};
   }
-  return {matches:i===expected.length && j===observed.length,differences};
+  return {matches:i===expected.length && (prefix || j===observed.length),differences,consumed:j};
 }
 
-export async function checkRecomposition({bytes, expectedBlocks, edits = {}, pdfjs, exporter, mupdf, expectedFurniture, outputFurniture, bodyFrame, blockSpans} = {}) {
+export async function checkRecomposition({bytes, expectedBlocks, edits = {}, pdfjs, exporter, mupdf, expectedFurniture, outputFurniture, bodyFrame, blockSpans, layoutProfile, flowExpectations, sourceBytes, sourcePageIndexes} = {}) {
   if (!(bytes instanceof Uint8Array) || !bytes.length || !pdfjs?.getDocument) throw new TypeError('PDF bytes and PDF.js are required');
   if (!Array.isArray(expectedBlocks) || !expectedBlocks.length || expectedBlocks.some(b => typeof b.id !== 'string' || typeof b.text !== 'string') || new Set(expectedBlocks.map(b => b.id)).size !== expectedBlocks.length) throw new TypeError('unique expected blocks are required');
   if (Object.keys(edits).some(id => !expectedBlocks.some(b => b.id === id) || typeof edits[id] !== 'string')) throw new TypeError('invalid edit');
@@ -57,7 +58,7 @@ export async function checkRecomposition({bytes, expectedBlocks, edits = {}, pdf
       const page = await doc.getPage(n), viewport = page.getViewport({scale: 1});
       const content = await page.getTextContent();
       const parts = [];
-      let previous = null, ordinal = 0, pendingQuoteSpace = null;
+      let previous = null, ordinal = 0, pendingQuoteSpace = null, lineHeight = 0;
       const boundaries = [], itemScalars = [];
       const frame = viewport.transform;
       const frameSupported = viewport.rotation === 0 && Array.isArray(frame) && frame.length === 6 && frame.every(Number.isFinite) &&
@@ -183,9 +184,12 @@ export async function checkRecomposition({bytes, expectedBlocks, edits = {}, pdf
             // PDF.js can discard an encoded trailing space before EOL. Resolve
             // hyphenated words and wrapped citations from encoded glyphs.
             const recent=parts.slice(-8).join('');
-            const paragraphGap=position && previous.position && Math.abs(position.y-previous.position.y)>Math.max(position.height,previous.position.height)*1.9;
+            const paragraphGap=position && previous.position && Math.abs(position.y-previous.position.y)>Math.max(position.height,previous.position.height,lineHeight)*1.9;
+            // A hyphen at a bottom-to-top right-column transition can be a
+            // wrapped word. Require glyph alignment and encoded whitespace below.
+            const columnTurn=/\S[–\-/]$/u.test(recent) && /^[\p{L}\p{N}_−]/u.test(item.str) && position && previous.position && previous.position.y > viewport.height * 0.8 && position.y < viewport.height * 0.2 && position.x > previous.position.x + previous.position.width;
             const url=/(?:https?:\/\/|www\.)[^\s]*$/iu.test(recent) && (/[./?=&-]$/u.test(recent) || (/\p{L}$/u.test(recent) && /^\p{N}/u.test(item.str)) || /^[\p{L}\p{N}_-]+[./]/u.test(item.str));
-            if (!paragraphGap && ((/[\p{L}\p{N}+][–\-/]$/u.test(recent) && /^[\p{L}\p{N}_−]/u.test(item.str)) || (/(?:^|\s)-$/u.test(recent) && /^\p{L}/u.test(item.str)) || (/\S$/u.test(previous.str) && /^\[/u.test(item.str)) || (/\S*\/\S*[?=&]$/u.test(previous.str) && /^[\p{L}\p{N}]/u.test(item.str)) || (url && /^[\p{L}\p{N}]/u.test(item.str)))) {
+            if ((!paragraphGap || columnTurn) && ((/\S[–\-/]$/u.test(recent) && /^[\p{L}\p{N}_−]/u.test(item.str)) || (/(?:^|\s)-$/u.test(recent) && /^\p{L}/u.test(item.str)) || (/\S$/u.test(previous.str) && /^\[/u.test(item.str)) || (/\S*\/\S*[?=&]$/u.test(previous.str) && /^[\p{L}\p{N}]/u.test(item.str)) || (url && /^[\p{L}\p{N}]/u.test(item.str)))) {
               boundaries.push({part:parts.length, ordinal, leftPosition:previous.position, rightPosition:position});
             }
             parts.push(' ');
@@ -200,6 +204,8 @@ export async function checkRecomposition({bytes, expectedBlocks, edits = {}, pdf
             else if (gap >= height * 0.3) parts.push(' ');
           }
         }
+        if (previous?.hasEOL && item.str) lineHeight = 0;
+        if (position) lineHeight = Math.max(lineHeight, position.height);
         parts.push(item.str);
         for (const scalar of item.str) if (!/\s/u.test(scalar)) { itemScalars.push(scalar); ordinal++; }
         if (item.str) previous = {str:item.str, hasEOL:item.hasEOL, position};
@@ -244,8 +250,39 @@ export async function checkRecomposition({bytes, expectedBlocks, edits = {}, pdf
   }
   const observed = normalize(pages.join(' '));
   const expected = normalize(expectedBlocks.map(b => Object.hasOwn(edits,b.id) ? edits[b.id] : b.text).join(' '));
+  const layoutQuality=inspectLayoutQuality({bytes,mupdf,profile:layoutProfile,sourceBytes,sourcePageIndexes});
+  let flow={status:'not-requested'}, flowMatches=false, flowDifferences=[];
+  if(flowExpectations !== undefined) {
+    const ids=flowExpectations?.floatingCaptionBlockIds, captions=layoutProfile?.captions;
+    const removeUnique=(stream,value,allowRepresentations=false)=>{
+      const matches=[];
+      for(let at=0;at<stream.length;at++) {
+        if(at && stream[at-1]!==' ') continue;
+        const match=allowRepresentations ? representationComparison(value,stream.slice(at),true) : {matches:stream.startsWith(value,at),consumed:value.length,differences:[]};
+        const end=at+match.consumed;
+        if(match.matches && (end===stream.length || stream[end]===' ')) matches.push({at,end,differences:match.differences});
+      }
+      if(matches.length!==1) return null;
+      const match=matches[0];return {stream:normalize(stream.slice(0,match.at)+' '+stream.slice(match.end)),differences:match.differences};
+    };
+    if(Array.isArray(ids) && ids.length && new Set(ids).size===ids.length && Array.isArray(captions)) {
+      let left=expected,right=observed,reason=null;
+      for(const id of ids) {
+        const block=expectedBlocks.find(b=>b.id===id), declarations=captions.filter(c=>c.id===id), observations=layoutQuality.captionObservations?.filter(c=>c.id===id && c.status==='observed');
+        const value=block && normalize(Object.hasOwn(edits,id)?edits[id]:block.text);
+        if(!value || declarations.length!==1 || normalize(declarations[0].text||'')!==value || observations?.length!==1) {reason='Caption declaration or independent image association is ambiguous or unavailable.';break;}
+        const sourceCaption=removeUnique(left,value), outputCaption=removeUnique(right,value,true);
+        if(!sourceCaption || !outputCaption) {reason='Caption occurrence is missing or ambiguous.';break;}
+        left=sourceCaption.stream; right=outputCaption.stream;
+        flowDifferences.push(...outputCaption.differences.map(d=>({...d,scope:'caption',captionId:id})));
+      }
+      if(reason) flow={status:'unavailable',reason};
+      else {const body=representationComparison(left,right);flowMatches=body.matches; if(flowMatches) flowDifferences.push(...body.differences.map(d=>({...d,scope:'body-after-caption-removal'})));flow={status:flowMatches?'checked':'finding',comparison:'Ordered body after removing uniquely observed declared captions, allowing documented representation differences.'};}
+    } else flow={status:'unavailable',reason:'Invalid floating caption declarations.'};
+  }
   const representation=representationComparison(expected,observed);
-  if (!representation.matches) findings.push({code:'content-mismatch', expected, observed});
+  const reportedDifferences=representation.matches ? representation.differences : flowMatches ? flowDifferences : [];
+  if (!representation.matches && !flowMatches) findings.push({code:'content-mismatch', expected, observed});
   const alignmentAvailable = observed === expected && !findings.some(f => f.code === 'ambiguous-text-geometry' || f.code === 'unsupported-text-geometry');
   if (alignmentAvailable) {
     // Both sequences are normalized as a whole, with one separator between
@@ -269,6 +306,5 @@ export async function checkRecomposition({bytes, expectedBlocks, edits = {}, pdf
     }
   }
   const independent = typeof exporter === 'string' && exporter.trim() && !/pdf\.?js/i.test(exporter) ? {status:'declared', reader:'PDF.js text extraction', exporter, limitation:'Distinct named engines only; exporter identity is caller supplied.'} : {status:'unavailable', reader:'PDF.js text extraction', reason:'Exporter path not supplied or uses PDF.js.'};
-  return {schema:'falsify.recomposition-check.v1', readable:true, checks:{furniture:furnitureEnabled ? {status:findings.some(f=>f.code==='missing-furniture' || f.code==='unexpected-margin-text' || f.code==='wrong-furniture-source') ? 'finding' : !furnitureValid || !selectedSources || findings.some(f=>f.code==='furniture-unavailable' || f.code==='ambiguous-furniture') ? 'unavailable' : 'checked', sourceAssociation, assets:furnitureAssets ? {status:'unavailable',reason:'Furniture assets require independent visual inspection.'} : {status:'not-applicable'}} : undefined,content:{status:findings.some(f=>f.code==='ambiguous-text-geometry' || f.code==='unsupported-text-geometry') ? 'unavailable' : observed===expected ? 'pass' : representation.matches ? 'normalized' : 'finding', comparison:'ordered text with whitespace runs collapsed; ambiguous item geometry is unavailable',representationDifferences:representation.matches ? representation.differences : [],spacingEvidence,offsetUnit:'UTF-16 offsets in whitespace-normalized source expectation and PDF.js output',limitation:representation.differences.length ? 'The listed representation differences are not byte-exact preservation.' : undefined}, bounds:{status:findings.some(f=>f.code==='text-outside-page')?'finding':!inspectedItems || findings.some(f=>f.code==='unsupported-text-geometry')?'unavailable':'checked', limitation:'Extracted upright text items only, estimated from font ascent and descent; PDF.js may omit off-page text. Not clipping or ink bounds.'}, movement:alignmentAvailable ? {status:'observed', locations} : {status:'unavailable', locations:null, reason:'Complete ordered text alignment or supported geometry is unavailable.'}, independent, visual:{status:'unavailable', reason:'No raster or visibility inspection.'}, overlap:{status:'unavailable', reason:'Text and asset ownership not established.'}, captionOwnership:{status:'unavailable', reason:'Relations not established from PDF bytes.'}}, findings};
+  return {schema:'falsify.recomposition-check.v1', readable:true, layoutQuality, checks:{flow, furniture:furnitureEnabled ? {status:findings.some(f=>f.code==='missing-furniture' || f.code==='unexpected-margin-text' || f.code==='wrong-furniture-source') ? 'finding' : !furnitureValid || !selectedSources || findings.some(f=>f.code==='furniture-unavailable' || f.code==='ambiguous-furniture') ? 'unavailable' : 'checked', sourceAssociation, assets:furnitureAssets ? {status:'unavailable',reason:'Furniture assets require independent visual inspection.'} : {status:'not-applicable'}} : undefined,content:{status:findings.some(f=>f.code==='ambiguous-text-geometry' || f.code==='unsupported-text-geometry') ? 'unavailable' : observed===expected || (flowMatches && !flowDifferences.length) ? 'pass' : representation.matches || flowMatches ? 'normalized' : 'finding', comparison:'ordered text with whitespace runs collapsed; ambiguous item geometry is unavailable',representationDifferences:reportedDifferences,spacingEvidence,offsetUnit:'UTF-16 offsets in whitespace-normalized source expectation and PDF.js output; scoped flow differences use caption-local or body-after-caption-removal offsets',limitation:reportedDifferences.length ? 'The listed representation differences are not byte-exact preservation.' : undefined}, bounds:{status:findings.some(f=>f.code==='text-outside-page')?'finding':!inspectedItems || findings.some(f=>f.code==='unsupported-text-geometry')?'unavailable':'checked', limitation:'Extracted upright text items only, estimated from font ascent and descent; PDF.js may omit off-page text. Not clipping or ink bounds.'}, movement:alignmentAvailable ? {status:'observed', locations} : {status:'unavailable', locations:null, reason:'Complete ordered text alignment or supported geometry is unavailable.'}, independent, visual:{status:'unavailable', reason:'No raster or visibility inspection.'}, overlap:{status:'unavailable', reason:'Text and asset ownership not established.'}, captionOwnership:{status:'unavailable', reason:'Relations not established from PDF bytes.'}}, findings};
 }
-

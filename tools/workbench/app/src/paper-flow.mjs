@@ -313,6 +313,60 @@ export function buildPaperFlow(document, {drawings=document?.drawings || [], lin
       first.box=union(members.map(x=>x.box)); first.source.bbox=[...first.box];
       for(const member of members.slice(1)) entries.splice(entries.indexOf(member),1);
     }
+    // Group only source-adjacent caption runs with matching measured font and
+    // line geometry. Inline runs retain their exact order and joiners. A column
+    // wrap requires aligned tops and a clear target column; other text is a
+    // barrier even when it happens to use the same small font.
+    const blockMap=new Map(flowBlocks.map(b=>[b.id,b]));
+    const signature=e=>{
+      const chars=e.blockIds.flatMap(id=>blockMap.get(id)?.source?.characters || []);
+      const counts=new Map();
+      for(const c of chars) {const s=styles.get(c.styleId); if(!s?.fontName || !Number.isFinite(s.size)) continue; const key=`${s.fontName.replace(/(?:Bold|Semibold|Italic|Oblique)/gi,'')}|${Math.round(s.size*10)/10}`; counts.set(key,(counts.get(key)||0)+1);}
+      return [...counts].sort((a,b)=>b[1]-a[1])[0]?.[0];
+    };
+    const bounds=e=>e.blockIds.map(id=>blockMap.get(id)?.source?.range).filter(Boolean);
+    const start=e=>Math.min(...bounds(e).map(r=>r.start));
+    // Inline inserts can have independent native ranges far from the host.
+    // Advance only through the host's contiguous source ranges, including all
+    // fragments after such an insert, without treating the insert as an end.
+    const end=e=>{
+      const ranges=bounds(e).sort((a,b)=>a.start-b.start || a.end-b.end);
+      let last=ranges[0]?.end;
+      for(const r of ranges.slice(1)) {if(r.start>last) break; last=Math.max(last,r.end);}
+      return last;
+    };
+    const lineCount=e=>e.blockIds.reduce((n,id)=>n+(blockMap.get(id)?.source?.lines?.length || 0),0);
+    for(const caption of entries.filter(e=>e.kind==='caption' && boxOK(e.box))) {
+      let last=caption;
+      const members=[caption];
+      while(true) {
+        const lastEnd=end(last), sig=signature(last);
+        if(!Number.isFinite(lastEnd) || !sig) break;
+        const next=entries.filter(e=>e.kind==='paragraph' && !members.includes(e) && boxOK(e.box) && start(e)===lastEnd && signature(e)===sig && lineCount(e)>=1);
+        const eligible=next.filter(e=>{
+          const h=median(last.blockIds.flatMap(id=>(blockMap.get(id)?.source?.lines || []).map(l=>boxOK(l.bbox)?l.bbox[3]-l.bbox[1]:0)).filter(Boolean));
+          if(!h) return false;
+          const sameColumn=Math.min(last.box[2],e.box[2])-Math.max(last.box[0],e.box[0])>Math.min(last.box[2]-last.box[0],e.box[2]-e.box[0])*.5;
+          const gap=e.box[1]-last.box[3];
+          const adjacent=sameColumn && gap>=-h && gap<=h;
+          const wrap=!sameColumn && e.box[0]>last.box[2] && lineCount(last)>=2 && lineCount(e)>=2 && Math.abs(e.box[1]-caption.box[1])<=h && last.box[3]>e.box[1]+2*h;
+          if(!adjacent && !wrap) return false;
+          const corridor=wrap ? [e.box[0],e.box[1],e.box[2],e.box[1]+h] : [Math.min(last.box[0],e.box[0]),Math.min(last.box[3],e.box[1]),Math.max(last.box[2],e.box[2]),Math.max(last.box[3],e.box[1])];
+          return !entries.some(x=>x!==last && x!==e && !members.includes(x) && !['header','footer'].includes(x.kind) && boxOK(x.box) && overlap(corridor,x.box));
+        });
+        if(eligible.length!==1) break;
+        last=eligible[0]; members.push(last);
+      }
+      if(members.length>1) {
+        const ids=[],joiners=[];
+        for(const member of members) {if(ids.length) joiners.push(' ');ids.push(...member.blockIds);if(member.inline) joiners.push(...member.joiners); else for(let i=1;i<member.blockIds.length;i++) joiners.push('');}
+        caption.blockIds=ids; caption.inline=true;caption.joiners=joiners;
+        caption.memberBoxes=members.map(e=>[...e.box]);
+        caption.box=union(caption.memberBoxes);caption.source.bbox=[...caption.box];
+        for(const member of members.slice(1)) entries.splice(entries.indexOf(member),1);
+        diagnostics.push({code:'caption-continuation-grouped',pageIndex:pi,itemId:caption.id,memberItemIds:members.map(e=>e.id),blockIds:[...ids]});
+      }
+    }
     // Match measured caption direction and distance; retain each caption as text.
     for(const caption of entries.filter(x=>x.kind==='caption' && boxOK(x.box))) {
       const text=caption.blockIds.map(id=>flowBlocks.find(b=>b.id===id)?.text || '').join('');
@@ -333,6 +387,7 @@ export function buildPaperFlow(document, {drawings=document?.drawings || [], lin
     }
     const headers=entries.filter(x=>x.kind==='header').sort(geom), footers=entries.filter(x=>x.kind==='footer').sort(geom);
     for(const edge of [...headers,...footers]) entries.splice(entries.indexOf(edge),1);
+    let continuousOrder=null;
     if(entries.some(x=>!boxOK(x.box)) || !Number.isFinite(page.width)) {
       diagnostics.push({code:'reading-order-fallback',pageIndex:pi,detail:'Missing geometry; reader order retained.'}); entries.sort(reading);
     } else {
@@ -349,6 +404,21 @@ export function buildPaperFlow(document, {drawings=document?.drawings || [], lin
       const g=candidates[0];
       if(!g) {entries.sort(geom); diagnostics.push({code:'single-column-or-unresolved',pageIndex:pi});}
       else {
+        // A union across two measured caption columns is not a single wide
+        // source line. Keep its first member as the reading-order anchor.
+        const splitCaption=x=>x.kind==='caption' && x.memberBoxes?.length>1 && x.memberBoxes.every(b=>b[2]<=g.mid || b[0]>=g.mid) && x.memberBoxes.some(b=>b[2]<=g.mid) && x.memberBoxes.some(b=>b[0]>=g.mid);
+        for(const item of entries.filter(splitCaption)) item.measuredColumns=2;
+        if(entries.some(splitCaption)) {
+          const layoutBox=x=>splitCaption(x)?x.memberBoxes[0]:x.box;
+          const spans2=entries.filter(x=>!splitCaption(x) && x.box[0]<g.mid && x.box[2]>g.mid).sort(geom);
+          const side2=entries.filter(x=>!spans2.includes(x)), groups2=[];
+          for(const s of spans2) {const last=groups2.at(-1); if(last && s.box[1]<last.bottom) {last.items.push(s);last.bottom=Math.max(last.bottom,s.box[3]);} else groups2.push({items:[s],top:s.box[1],bottom:s.box[3]});}
+          for(const c of side2.filter(x=>x.kind==='caption')) if(side2.some(x=>x!==c && x.kind==='paragraph' && x.box[3]<c.box[1]-5) && !groups2.some(g=>c.box[1]>=g.top && c.box[1]<g.bottom)) groups2.push({items:[],top:c.box[1],bottom:c.box[1]});
+          groups2.sort((a,b)=>a.top-b.top); const bands2=Array.from({length:groups2.length+1},()=>[]);
+          for(const x of side2) {let n=groups2.findIndex(g=>x.box[1]<g.bottom && x.box[3]>g.top);if(n>=0) groups2[n].items.push(x);else {n=groups2.findIndex(g=>x.box[3]<=g.top);bands2[n<0?groups2.length:n].push(x);}}
+          continuousOrder=[];
+          for(let i=0;i<bands2.length;i++) {const xs=bands2[i],left=xs.filter(x=>layoutBox(x)[2]<=g.mid).sort(geom),right=xs.filter(x=>layoutBox(x)[0]>=g.mid).sort(geom),both=(left.length && right.length)||xs.some(splitCaption);for(const x of xs) x.continuousColumns=both?2:1;continuousOrder.push(...left,...right);if(groups2[i]) continuousOrder.push(...groups2[i].items.sort(geom));}
+        }
         const spans=entries.filter(x=>x.box[0]<g.mid && x.box[2]>g.mid).sort(geom);
         const side=entries.filter(x=>!spans.includes(x));
         // Spanning objects define local bands; overlapping side objects stay in the same band.
@@ -366,8 +436,39 @@ export function buildPaperFlow(document, {drawings=document?.drawings || [], lin
     for(const header of headers) {
       const at=entries.findIndex(e=>boxOK(e.box) && e.box[1]>=header.box[1]);
       entries.splice(at<0?entries.length:at,0,header);
+      if(continuousOrder) {const n=continuousOrder.findIndex(e=>boxOK(e.box) && e.box[1]>=header.box[1]);continuousOrder.splice(n<0?continuousOrder.length:n,0,header);}
     }
-    items.push(...[...entries,...footers].map(({box,pos,index,...item})=>item));
+    if(continuousOrder) [...continuousOrder,...footers].forEach((item,i)=>item.continuousPosition=i);
+    items.push(...[...entries,...footers].map(({box,pos,index,memberBoxes,...item})=>item));
+  }
+  // Only a previously established artwork region can follow a bottom caption.
+  // Its labels and panels are owned together; independent text is a barrier.
+  const blockMap=new Map([...document.blocks,...fragments].map(b=>[b.id,b]));
+  const frameOK=p=>p && p.geometry?.frame==='mupdf-display' &&
+    sameNumbers(p.geometry.bounds,[0,0,p.width,p.height]) &&
+    Array.isArray(p.geometry.pageTransform) && p.geometry.pageTransform.length===6 && p.geometry.pageTransform.every(Number.isFinite);
+  for(const page of document.pages) {
+    const next=document.pages.find(p=>p.sourcePageIndex===page.sourcePageIndex+1);
+    if(!frameOK(page) || !frameOK(next) || !sameNumbers(page.geometry.bounds,next.geometry.bounds) || !sameNumbers(page.geometry.pageTransform,next.geometry.pageTransform)) continue;
+    const current=items.filter(i=>i.source.pageIndex===page.sourcePageIndex && !['header','footer'].includes(i.kind));
+    const caption=current.at(-1);
+    if(caption?.kind!=='caption' || !boxOK(caption.source.bbox) || caption.source.bbox[3]<page.height*.88 || relations.some(r=>r.kind==='caption' && r.captionItemId===caption.id)) continue;
+    const blocks=caption.blockIds.map(id=>blockMap.get(id));
+    if(blocks.some(b=>!b || b.source?.pageIndex!==page.sourcePageIndex || !b.source.range || page.text?.slice(b.source.range.start,b.source.range.end)!==b.text)) continue;
+    const text=blocks.map(b=>b.text).join('');
+    if(!/^\s*(?:extended\s+data\s+)?fig(?:ure)?\.?\s*\d/i.test(text) || !/[.!?][)\]"'\u2019\u201d]*\s*$/.test(text)) continue;
+    const following=items.filter(i=>i.source.pageIndex===next.sourcePageIndex && !['header','footer'].includes(i.kind));
+    if(following.length!==1 || following[0].kind!=='asset') continue;
+    const artwork=following[0], box=artwork.source.bbox;
+    const region=regions.find(r=>r.id===artwork.renderAssetId && r.pageIndex===next.sourcePageIndex && r.classification==='compound-figure');
+    if(!region || !boxOK(box) || !sameNumbers(region.bbox,box) || box[2]-box[0]<next.width*.7 || box[3]-box[1]<next.height*.7 || artwork.captionIds.length ||
+      region.blockIds.length!==artwork.blockIds.length || region.assetIds.length!==artwork.assetIds.length ||
+      region.blockIds.some(id=>!artwork.blockIds.includes(id)) || region.assetIds.some(id=>!artwork.assetIds.includes(id))) continue;
+    artwork.captionIds.push(...caption.blockIds); artwork.captionPositions ||= {};
+    for(const id of caption.blockIds) artwork.captionPositions[id]='above';
+    relations.push({kind:'caption',assetItemId:artwork.id,captionItemId:caption.id,position:'above',provenance:{rule:'adjacent-page-bottom-caption-full-page-artwork',sourceSha256:document.sourceSha256,captionPageIndex:page.sourcePageIndex,artworkPageIndex:next.sourcePageIndex,frame:'mupdf-display',regionId:region.id}});
+    const unresolved=diagnostics.findIndex(d=>d.code==='caption-association-unresolved' && d.itemId===caption.id);
+    if(unresolved>=0) diagnostics.splice(unresolved,1);
   }
   return {schema:'falsify.paper-flow.v1',sourceSha256:document.sourceSha256,items,relations,diagnostics,fragments,regions};
 }

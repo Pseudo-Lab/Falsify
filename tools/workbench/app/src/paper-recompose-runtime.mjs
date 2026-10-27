@@ -9,10 +9,12 @@ export function createRuntime({workerFactory = () => {
   return {prepare(request = {}) {
     const signal=request.signal;
     if(signal?.aborted) return Promise.reject(aborted());
-    let file=request.file, edits, bindings, revision, fileHash;
+    let file=request.file, edits, bindings, revision, fileHash, layoutMode;
     try {
       edits=structuredClone(request.edits); bindings=structuredClone(request.bindings ?? []);
       revision=structuredClone(request.edits?.revision ?? request.revision ?? null); fileHash=request.fileHash;
+      layoutMode=request.layoutMode;
+      if(layoutMode !== undefined && layoutMode !== 'measured-continuous') throw new TypeError('Unknown layout mode');
       if(request.revision != null && request.edits?.revision != null && request.revision!==request.edits.revision) throw new Error('Stale revision');
       if(file instanceof Uint8Array) file=Uint8Array.from(file);
       else if(file instanceof ArrayBuffer) file=file.slice(0);
@@ -42,7 +44,7 @@ export function createRuntime({workerFactory = () => {
         worker.onerror=e=>finish(reject,new Error(e.message || 'Recomposition worker failed'));
         worker.onmessageerror=()=>finish(reject,new Error('Recomposition worker message could not be decoded'));
         const buffer=file instanceof Uint8Array?file.buffer:file instanceof ArrayBuffer?file:file?.bytes?.buffer;
-        worker.postMessage({id,type:'prepare',request:{file,fileHash,edits,bindings,revision}},buffer?[buffer]:[]);
+        worker.postMessage({id,type:'prepare',request:{file,fileHash,edits,bindings,revision,layoutMode}},buffer?[buffer]:[]);
       } catch(error) {finish(reject,error);}
     });
   }};

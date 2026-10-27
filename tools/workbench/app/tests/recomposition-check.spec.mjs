@@ -139,6 +139,25 @@ test('encoded glyphs resolve only the matching hard-hyphen boundary', async () =
 });
 
 
+test('column-turn hyphens use encoded whitespace without hiding content changes', async () => {
+  const make = (left, right, x=160, y=370) => {
+    const d=new mupdf.PDFDocument(), f=d.addSimpleFont(new mupdf.Font('Helvetica'));
+    const stream=`BT /F 12 Tf 1 0 0 1 30 30 Tm (${left}) Tj ET\nBT /F 12 Tf 1 0 0 1 ${x} ${y} Tm (${right}) Tj ET\n`;
+    d.insertPage(-1,d.addPage([0,0,300,400],0,{Font:{F:f}},stream));
+    const buf=d.saveToBuffer(), bytes=buf.asUint8Array().slice(); buf.destroy(); d.destroy(); return bytes;
+  };
+  const run=(left,right,expected,x,y,reader=mupdf)=>checkRecomposition({bytes:make(left,right,x,y),expectedBlocks:[{id:'x',text:expected}],pdfjs,mupdf:reader});
+  const joined=await run('donor-','level 12','donor-level 12');
+  assert.equal(joined.checks.content.status,'pass');
+  assert.deepEqual(joined.checks.content.spacingEvidence.map(e=>[e.action,e.leftScalar,e.rightScalar,e.encodedWhitespace]),[['remove-inferred-space',45,108,[]]]);
+  assert.equal((await run('donor- ','level 12','donor- level 12')).checks.content.status,'pass');
+  for (const [left,right,expected] of [['donor- ','level 12','donor-level 12'],['donor-','level 12','donor- level 12'],['donor-','level 13','donor-level 12'],['donor-','levle 12','donor-level 12']])
+    assert.equal((await run(left,right,expected)).checks.content.status,'finding');
+  assert.equal((await run('donor-','level 12','donor-level 12',30,370)).checks.content.status,'finding');
+  assert.equal((await run('donor-','level 12','donor-level 12',160,300)).checks.content.status,'finding');
+  assert.equal((await run('donor-','level 12','donor-level 12',160,370,{})).checks.content.status,'unavailable');
+});
+
 test('glyph-resolved boundaries retain page movement and reject unknown scalars', async () => {
   const bytes = geometryCorpus('hyphen-page');
   const expectedBlocks = [{id:'a',text:'first'},{id:'b',text:'antero-posterior'}];
@@ -289,4 +308,44 @@ test('physical pages select the earliest covering source span', async () => {
   const extra=await run([['Journal','Journal','1 / 1']],[span('a',0,1,1)],[]);
   assert.ok(extra.findings.some(f=>f.code==='unexpected-margin-text'));
   assert.equal(extra.checks.content.status,'finding');
+});
+
+test('declared floating caption preserves exact body sequence and requires observed ownership', async()=>{
+  const make=(body=['First body.','Second body.'], caption='Figure 1.\nA useful illustration')=>{
+    const d=new mupdf.PDFDocument(),font=d.addSimpleFont(new mupdf.Font('Helvetica'));
+    const pix=new mupdf.Pixmap(mupdf.ColorSpace.DeviceRGB,[0,0,2,2],true);pix.clear(128);const image=new mupdf.Image(pix),im=d.addImage(image);
+    const line=(t,x,y)=>`BT /F 12 Tf ${x} ${y} Td (${t}) Tj ET\n`;
+    let stream='q 100 0 0 80 80 200 cm /Im Do Q\n';
+    caption.split('\n').forEach((t,i)=>stream+=line(t,80,185-i*14));
+    body.forEach((t,i)=>stream+=line(t,30,120-i*20));
+    d.insertPage(-1,d.addPage([0,0,300,400],0,{Font:{F:font},XObject:{Im:im}},stream));const buf=d.saveToBuffer(),bytes=buf.asUint8Array().slice();buf.destroy();image.destroy();pix.destroy();d.destroy();return bytes;
+  };
+  const expectedBlocks=[{id:'a',text:'First body.'},{id:'cap',text:'Figure 1. A useful illustration'},{id:'b',text:'Second body.'}];
+  const layoutProfile={coordinateSpace:'output',captions:[{id:'cap',text:expectedBlocks[1].text,assetPageIndex:0,assetBbox:[80,120,180,200]}]};
+  const run=(body,extra={})=>checkRecomposition({bytes:make(body),expectedBlocks,pdfjs,mupdf,layoutProfile,flowExpectations:{floatingCaptionBlockIds:['cap']},...extra});
+  const good=await run();assert.equal(good.checks.content.status,'pass',JSON.stringify(good));assert.equal(good.checks.flow.status,'checked');
+  assert.equal((await run(undefined,{flowExpectations:undefined})).checks.content.status,'finding');
+  for(const body of [['First body.'],['First changed.','Second body.'],['First body.','First body.','Second body.'],['Second body.','First body.']]) assert.equal((await run(body)).checks.content.status,'finding');
+  const duplicateCaption=await run(['First body.','Figure 1. A useful illustration','Second body.']);assert.equal(duplicateCaption.checks.flow.status,'unavailable');assert.equal(duplicateCaption.checks.content.status,'finding');
+  // Keep the real asset/caption geometry and substitute only the PDF.js body text.
+  const bodyReader = text => ({getDocument(options) {
+    const task=pdfjs.getDocument(options);
+    return {destroy:()=>task.destroy(),promise:task.promise.then(doc=>({numPages:doc.numPages,async getPage(n) {
+      const page=await doc.getPage(n);
+      return {getViewport:o=>page.getViewport(o),cleanup:()=>page.cleanup(),async getTextContent() {
+        const content=await page.getTextContent();
+        for(const item of content.items) if(item.str==='First body.') item.str=text;
+        return content;
+      }};
+    }}))};
+  }});
+  const represented=async (source,output)=>run(undefined,{expectedBlocks:[{id:'a',text:source},expectedBlocks[1],expectedBlocks[2]],pdfjs:bodyReader(output)});
+  const normalized=await represented('1 µM ki\u00adnase','1 μM kinase');
+  assert.equal(normalized.checks.flow.status,'checked');
+  assert.equal(normalized.checks.content.status,'normalized');
+  assert.deepEqual(normalized.checks.content.representationDifferences.map(d=>[d.kind,d.scope,d.sourceOffset,d.outputOffset]),[['micro-sign-to-greek-mu','body-after-caption-removal',2,2],['discretionary-soft-hyphen-omitted','body-after-caption-removal',7,7]]);
+  for(const [source,output] of [['2 µM ki\u00adnase','1 μM kinase'],['1 µM ki\u00adnase','1 μMkinase'],['1 μM kinase','1 µM kinase'],['1 µM kinase','1 μM ki\u00adnase']]) {
+    const result=await represented(source,output);assert.equal(result.checks.content.status,'finding',`${source} / ${output}`);
+  }
+  const unknown=await run(undefined,{layoutProfile:{coordinateSpace:'output',captions:[{...layoutProfile.captions[0],assetBbox:[1,1,10,10]}]}});assert.equal(unknown.checks.flow.status,'unavailable');assert.equal(unknown.checks.content.status,'finding');
 });

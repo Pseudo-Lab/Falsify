@@ -1,6 +1,8 @@
+import {deriveLayoutProfile} from './paper-style-profile.mjs';
 import {buildLinkPlan} from './paper-link-plan.mjs';
 import {readSourceGlyphs} from './paper-source-glyphs.mjs';
 import {inspectFonts} from './paper-fonts.mjs';
+import {findSourceWrapOmissions,sourceWrapOffsetsForBlock} from './paper-source-wrap.mjs';
 const abort = signal => { if (signal?.aborted) throw new DOMException('Composition cancelled', 'AbortError'); };
 const fail = message => { throw new Error(message); };
 const captionOrder = item => [...(item.captionIds || []).filter(id=>item.captionPositions?.[id]==='above'),...(item.captionIds || []).filter(id=>item.captionPositions?.[id]!=='above')];
@@ -60,7 +62,7 @@ function ambiguousBoundaries(block, changes) {
     !/\s/u.test(raw[i-1]) && !/\s/u.test(raw[i]) && raw[i-1]!=='-' &&
     !(raw[i-1]==='−' && /[0-9]/u.test(raw[i])));
 }
-export async function composeDocument({document, edits=[], flow, assets, links, signal, sourceBytes, runningFurniture=false}={}, {compile, fonts={}, outputCheck, furniturePlanner}={}) {
+export async function composeDocument({document, edits=[], flow, assets, links, signal, sourceBytes, runningFurniture=false, layoutPolicy, layoutMode, figurePlacement='float'}={}, {compile, fonts={}, outputCheck, furniturePlanner}={}) {
   abort(signal);
   // Own the data used by this attempt before any asynchronous operation.
   if (document) document = structuredClone(document);
@@ -68,6 +70,7 @@ export async function composeDocument({document, edits=[], flow, assets, links, 
   assets = assets == null ? null : structuredClone(assets);
   links = links == null ? null : structuredClone(links);
   edits = edits.map(e=>({...e}));
+  layoutPolicy = layoutPolicy == null ? layoutPolicy : structuredClone(layoutPolicy);
   sourceBytes = sourceBytes instanceof Uint8Array ? new Uint8Array(sourceBytes) : sourceBytes;
   const plannerDocument=structuredClone(document);
   const originalFonts=fonts, glyphLookup=fonts.hasGlyph;
@@ -93,6 +96,14 @@ export async function composeDocument({document, edits=[], flow, assets, links, 
     const list=changes.get(b.id)||[]; if(list.some(e=>start<e.end && end>e.start)) fail('Overlapping edit targets');
     list.push({start,end,after:edit.after,inherit:linkPlan?.changes.find(c=>c.blockId===edit.blockId && c.start===edit.start && c.end===edit.end)?.inherit || null}); changes.set(b.id,list);
   }
+  const sourceWrap=findSourceWrapOmissions({document,bytes:sourceBytes});
+  // Keep replacements literal, and leave link labels/URLs intact. This projects
+  // only unchanged source words, using their original source ranges.
+  const sourceWrapCandidates=sourceWrap.omissions.filter(o=>{
+    const r=o.evidence.sourceRange;
+    return !edits.some(e=>e.blockId===o.blockId && e.pageIndex===o.pageIndex && e.start<r.end && e.end>r.start) &&
+      !(links?.links||[]).some(l=>l.source?.pageIndex===o.pageIndex && l.relation?.ranges?.some(x=>x.blockId===o.blockId && x.start<r.end && x.end>r.start));
+  });
   const projectedSpaces=new Map(), projectedAmbiguous=[];
   if (flow?.fragments?.length) {
     const parents=new Map(document.blocks.map(b=>[b.id,b])), groups=new Map();
@@ -121,7 +132,6 @@ export async function composeDocument({document, edits=[], flow, assets, links, 
     document.blocks=document.blocks.flatMap(b=>groups.get(b.id)||[b]);
     for(const id of groups.keys()) ids.delete(id);
   }
-  const balanceGroups=[];
   if (flow) {
     if(flow.schema!=='falsify.paper-flow.v1' || flow.sourceSha256!==document.sourceSha256 || !Array.isArray(flow.items)) fail('Invalid paper flow');
     const owners=new Set();
@@ -132,19 +142,32 @@ export async function composeDocument({document, edits=[], flow, assets, links, 
     }
     for(const block of document.blocks) if(block.text && !owners.has(block.id)) fail('Flow omits text block');
   }
+  // The measured alternative is opt-in; retain default source order and
+  // column decisions when continuous layout has no qualifying body.
+  const bodyText=new Map(document.blocks.map(b=>[b.id,b.text||'']));
+  if(layoutMode==='measured-continuous' && flow?.items.some(i=>i.columns===2 && i.span!=='page' && i.kind==='paragraph' && (i.blockIds||[]).reduce((n,id)=>n+(bodyText.get(id)?.length||0),0)>=150)) {
+    const pages=new Map(); for(const item of flow.items) {const page=item.source?.pageIndex; if(!pages.has(page)) pages.set(page,[]);pages.get(page).push(item);}
+    for(const group of pages.values()) if(group.length && group.every(i=>Number.isInteger(i.continuousPosition))) {
+      const ordered=[...group].sort((a,b)=>a.continuousPosition-b.continuousPosition);let n=0;
+      flow.items=flow.items.map(i=>group.includes(i)?ordered[n++]:i);
+      for(const item of ordered) if(item.continuousColumns) {item.columns=item.continuousColumns;item.span=item.continuousColumns===2?'column':'page';}
+    }
+  }
   // An inline joiner already ending in whitespace supplies a fragment's leading separator.
   for(const item of flow?.items || []) if(item.inline && Array.isArray(item.joiners)) for(let i=1;i<(item.blockIds||[]).length;i++) {
     if (/\s$/u.test(item.joiners[i-1] || '')) projectedSpaces.get(item.blockIds[i])?.delete(0);
   }
   const spacesFor=b=>projectedSpaces.get(b.id) || separators(b);
   const assetOwned = new Set((flow?.items || []).filter(item=>item.kind==='asset').flatMap(item=>item.blockIds || []));
+  const wrapOmissions=sourceWrapCandidates.filter(o=>document.blocks.some(b=>!assetOwned.has(b.id) && sourceWrapOffsetsForBlock(b,[o]).length));
   const orderedById=new Map(document.blocks.map(b=>[b.id,b]));
   const linked=new Set((flow?.items||[]).filter(i=>i.kind==='asset').flatMap(i=>i.captionIds||[]));
   const orderedBlocks=flow ? flow.items.flatMap(i=>i.kind==='asset' ? captionOrder(i).map(id=>orderedById.get(id)) : (i.blockIds||[]).filter(id=>!linked.has(id)).map(id=>orderedById.get(id))) : document.blocks;
   const sourceGlyphResult=readSourceGlyphs({bytes:sourceBytes,document:{...document,blocks:document.blocks.filter(b=>!assetOwned.has(b.id))},changes});
   const glyphsByBlock=new Map();
   for(const glyph of sourceGlyphResult.glyphs) {const list=glyphsByBlock.get(glyph.blockId)||[]; list.push(glyph); glyphsByBlock.set(glyph.blockId,list);}
-  const omittedFor=b=>new Set((glyphsByBlock.get(b.id)||[]).flatMap(g=>Array.from({length:g.end-g.start},(_,i)=>g.start-b.source.range.start+i)));
+  const wrapOffsetsFor=b=>new Set(sourceWrapOffsetsForBlock(b,wrapOmissions));
+  const omittedFor=b=>new Set([...wrapOffsetsFor(b),...(glyphsByBlock.get(b.id)||[]).flatMap(g=>Array.from({length:g.end-g.start},(_,i)=>g.start-b.source.range.start+i))]);
   let expectedBlocks=orderedBlocks.filter(b=>typeof b?.text==='string' && b.text.length).map(b=>({id:b.id,text:logicalText(b,changes.get(b.id)||[],omittedFor(b),spacesFor(b))}));
   if(flow) for(const item of flow.items.filter(i=>i.inline)) {
     if(!Array.isArray(item.joiners) || item.joiners.length!==(item.blockIds||[]).length-1 || item.joiners.some(j=>typeof j!=='string')) fail('Invalid inline joiners');
@@ -170,12 +193,41 @@ export async function composeDocument({document, edits=[], flow, assets, links, 
   if(linkPlan) for(const label of suppressedLabels) linkPlan.diagnostics.push({code:'target-furniture-unresolved',label});
   if(linkPlan) for(const id of new Set(linkPlan.sourceAssets.map(a=>a.assetItemId))) { const candidates=linkPlan.sourceAssets.filter(a=>a.assetItemId===id); const destinations=new Set(candidates.map(a=>JSON.stringify([a.destinationLabel||null,a.destinationLabel?null:a.uri,a.destinationStatus||null]))); if(destinations.size>1) linkPlan.diagnostics.push({code:'source-asset-link-conflict',assetItemId:id,linkIds:[...new Set(candidates.flatMap(a=>a.linkIds))]}); }
   const margins=plan?.margins || {top:36,right:36,bottom:36,left:36};
+  const sourceProfile=deriveLayoutProfile(document,flow);
+  // The checker interprets geometry and font names as output observations.
+  // Source PDF subset names and source coordinates are not output evidence.
+  const layoutProfile={coordinateSpace:'output',sourceProfile,headings:sourceProfile.headings};
+  const policy=layoutPolicy ?? {};
+  if(!policy || typeof policy!=='object' || Array.isArray(policy)) fail('Invalid layout policy');
+  const bounds={lineHeightScale:[0.95,1.05],paragraphSpacingEm:[0.25,1],columnGutterEm:[0.8,2]};
+  for(const [key,value] of Object.entries(policy)) {
+    const limit=bounds[key];
+    if(!limit || !Number.isFinite(value) || value<limit[0] || value>limit[1]) fail('Invalid layout policy: '+key);
+    if(!sourceProfile.bodyFontSize || (key==='lineHeightScale' && !sourceProfile.bodyLineHeight)) fail('Layout policy requires source measurements: '+key);
+  }
+  if(layoutMode != null && layoutMode !== 'measured-continuous') fail('Invalid layout mode');
+  if(!['float','page'].includes(figurePlacement)) fail('Invalid figure placement');
+  // Require explicit column evidence; never promote an original single-column paper.
+  const flowBlockText=new Map(document.blocks.map(b=>[b.id,b.text || '']));
+  const firstBodyIndex=flow?.items.findIndex(i=>i.columns===2 && i.span!=='page' && i.kind==='paragraph' && (i.blockIds||[]).reduce((n,id)=>n+(flowBlockText.get(id)?.length||0),0)>=150) ?? -1;
+  const lastBodyIndex=flow?.items.findLastIndex(i=>i.columns===2 && i.span!=='page' && i.kind==='paragraph' && (i.blockIds||[]).reduce((n,id)=>n+(flowBlockText.get(id)?.length||0),0)>=150) ?? -1;
+  const measuredContinuous=layoutMode==='measured-continuous' && firstBodyIndex>=0;
+  const enginePlan={requested:layoutMode || 'existing',actual:measuredContinuous ? 'measured-continuous' : 'existing',figurePlacement:measuredContinuous ? figurePlacement : null,reason:layoutMode && !measuredContinuous ? 'no explicit two-column body' : null};
+  // Page-level flow is safe only when every item belongs to the same
+  // two-column stream; mixed spanning material stays in ordered bands.
+  const continuousColumns=measuredContinuous || (!!flow?.items.length && flow.items.every(i=>i.columns===2 && i.span!=='page' && i.kind!=='asset'));
   // Every paper string remains an argument to text(), never executable markup.
-  let source=`#set page(width: ${page.width}pt, height: ${page.height}pt, margin: (top: ${margins.top}pt, right: ${margins.right}pt, bottom: ${margins.bottom}pt, left: ${margins.left}pt))\n`;
+  let source=`#set page(width: ${page.width}pt, height: ${page.height}pt, margin: (top: ${margins.top}pt, right: ${margins.right}pt, bottom: ${margins.bottom}pt, left: ${margins.left}pt)${continuousColumns ? ", columns: 2" : ""})\n`;
   const candidates = fonts.candidates?.filter(c=>c.getBytes?.()) || [];
   const families = [...new Set([fonts.selected?.family, ...candidates.map(c=>c.family)].filter(Boolean))];
   if (!families.length && fonts.family) families.push(String(fonts.family));
-  if (families.length) source+=`#set text(font: (${families.map(typstString).join(', ')},), size: 10pt)\n`;
+  const bodySize=sourceProfile.bodyFontSize;
+  if (families.length || bodySize) source+=`#set text(${families.length ? `font: (${families.map(typstString).join(', ')},)` : ''}${families.length && bodySize ? ', ' : ''}${bodySize ? `size: ${bodySize}pt` : ''})\n`;
+  // Source baseline minus font size is not Typst leading: font ascent and
+  // descent differ across fonts. Let Typst use its natural leading by default.
+  // Generated hard hyphens have no source provenance; keep literal source hyphens.
+  source+=`#set par(justify: true${policy.paragraphSpacingEm!==undefined ? `, spacing: ${policy.paragraphSpacingEm*bodySize}pt` : ''})\n#set text(hyphenate: false)\n`;
+  if(policy.columnGutterEm!==undefined) source+=`#set columns(gutter: ${policy.columnGutterEm*bodySize}pt)\n`;
   const files = {};
   const assetList = Array.isArray(assets) ? assets : assets?.assets || document.assets || [];
   // Targets on unavailable assets must not produce dangling Typst labels.
@@ -194,6 +246,24 @@ export async function composeDocument({document, edits=[], flow, assets, links, 
   const blockById = new Map(document.blocks.map(b=>[b.id,b]));
   const styleById = new Map((document.styles || []).map(s=>[s.id,s]));
   const textById = new Map(document.blocks.filter(b=>typeof b.text==='string' && b.text.length && !assetOwned.has(b.id)).map(b=>[b.id,logicalText(b,changes.get(b.id)||[],new Set(),spacesFor(b))]));
+  // Set each paragraph's dominant source size as its local text context so
+  // natural em-based leading follows titles, body and captions independently.
+  function paragraphContext(blocks, kind, rendered) {
+    if(!rendered) return '';
+    const sizes=[];
+    for(const block of blocks) {
+      if(!block) continue;
+      const chars=block.source?.characters || [];
+      if(chars.length) for(const c of chars) {
+        const size=styleById.get(c.styleId)?.size;
+        if(Number.isFinite(size) && size>0) for(let n=0;n<Math.min(256,Math.max(1,(c.end||0)-(c.start||0)));n++) sizes.push(size);
+      } else {const size=styleById.get(block.styleId)?.size;if(Number.isFinite(size) && size>0) sizes.push(size);}
+    }
+    sizes.sort((a,b)=>a-b); const size=sizes[Math.floor(sizes.length/2)];
+    const heading=kind==='heading';
+    const settings=[size ? `#set text(size: ${size}pt)` : '',heading ? '#set par(justify: false)\n#set text(hyphenate: false)' : '',kind==='paragraph' && policy.lineHeightScale!==undefined ? `#set par(leading: ${0.65*policy.lineHeightScale}em)` : ''].filter(Boolean).join('\n');
+    return settings ? `#block[${settings}\n${rendered}]` : rendered;
+  }
   const furniture={enabled:runningFurniture===true, templates:[], retained:[]};
   const furnitureIds=new Set();
   furniture.plan=plan;
@@ -213,7 +283,7 @@ export async function composeDocument({document, edits=[], flow, assets, links, 
     const chars=block.source?.characters || [];
     if (!linkPlan && (!chars.length || !styleById.size) && !fonts.fallback?.length && !(glyphsByBlock.get(block.id)||[]).length && !text.includes('\t') && !(changes.get(block.id)||[]).some(e=>e.after.includes('\n'))) return marker+`#text(${typstString(text)})`+endMarker;
     // Build source-indexed styles, then apply the same line separators and edits.
-    const raw=block.text, spaces=spacesFor(block);
+    const raw=block.text, spaces=spacesFor(block), wrapOffsets=wrapOffsetsFor(block);
     let logical='', styles=[], glyphMap=[], destinations=[], offsets=[], before=[], after=[];
     const destinationAt=offset=>{const active=(linkPlan?.sourceRuns||[]).filter(r=>r.blockId===block.id && r.start<=offset && offset<r.end); const keys=new Map(active.map(r=>[JSON.stringify([r.destinationLabel||null,r.destinationLabel?null:r.uri,r.destinationStatus||null]),r])); const r=keys.size===1 ? [...keys.values()][0] : null;return r && !r.destinationStatus && !suppressedLabels.has(r.destinationLabel) ? r : null;};
     const sourceGlyphs=new Map((glyphsByBlock.get(block.id)||[]).map(g=>[g.start-block.source.range.start,g]));
@@ -222,7 +292,7 @@ export async function composeDocument({document, edits=[], flow, assets, links, 
       before[i]=logical.length;
       if(spaces.has(i)) {logical+=' ';styles.push(styleAt(Math.max(0,i-1)));glyphMap.push(null);destinations.push(null);offsets.push(null);}
       after[i]=logical.length;
-      if(i<raw.length) {logical+=raw[i];styles.push(styleAt(i));glyphMap.push(sourceGlyphs.get(i)||null);destinations.push(destinationAt(block.source.range.start+i));offsets.push(block.source.range.start+i);}
+      if(i<raw.length && !wrapOffsets.has(i)) {logical+=raw[i];styles.push(styleAt(i));glyphMap.push(sourceGlyphs.get(i)||null);destinations.push(destinationAt(block.source.range.start+i));offsets.push(block.source.range.start+i);}
     }
     let result='', mapped=[], mappedGlyphs=[], mappedDest=[], mappedOffsets=[], cursor=0;
     for(const edit of [...(changes.get(block.id)||[])].sort((a,b)=>a.start-b.start)) {
@@ -250,7 +320,7 @@ export async function composeDocument({document, edits=[], flow, assets, links, 
     }
     return marker+runs.join('')+endMarker;
   }
-  function renderAsset(id, item, mark=true) {
+  function renderAsset(id, item, mark=true, fit=null) {
     const asset=assetList.find(a=>a.id===id); const original=(document.assets||[]).find(a=>a.id===id);
     if(original?.source && (!asset?.source || asset.source.pageIndex!==original.source.pageIndex || JSON.stringify(asset.source.bbox)!==JSON.stringify(original.source.bbox))) {assetFindings.push({code:'asset-source-mismatch',assetId:id}); return '';}
     const content=asset?.content; const bytes=content?.bytes;
@@ -269,7 +339,7 @@ export async function composeDocument({document, edits=[], flow, assets, links, 
     // Scaling the width from the source rectangle preserves the capture's ratio.
     const maxHeight=Math.max(1,page.height-margins.top-margins.bottom-((item?.captionIds || []).length ? 20 : 0));
     const heightLimited=Number.isFinite(sourceHeight) && sourceHeight>0 && Number.isFinite(sourceWidth) && sourceWidth>0 ? maxHeight*sourceWidth/sourceHeight : Infinity;
-    const width=Number.isFinite(sourceWidth) && sourceWidth>0 ? `${Math.min(sourceWidth,available,heightLimited)}pt` : '100%';
+    const width=Number.isFinite(sourceWidth) && sourceWidth>0 ? (fit && Number.isFinite(sourceHeight) && sourceHeight>0 ? 'paper-fit-width' : `${Math.min(sourceWidth,available,heightLimited)}pt`) : '100%';
     const sourcePage=asset.source?.pageIndex ?? item?.source?.pageIndex;
     const marker=mark ? spanMarker(id,sourcePage,'start') : '', endMarker=mark ? spanMarker(id,sourcePage,'end') : '';
     const labels=mark ? (linkPlan?.targets||[]).filter(t=>t.label && !suppressedLabels.has(t.label) && t.assetItemId===item?.id).map(t=>`#box[]#label(${typstString(t.label)})`).join('') : '';
@@ -277,6 +347,14 @@ export async function composeDocument({document, edits=[], flow, assets, links, 
     const unique=new Map(candidates.map(a=>[JSON.stringify([a.destinationLabel||null,a.destinationLabel?null:a.uri,a.destinationStatus||null]),a])); const only=unique.size===1 ? [...unique.values()][0] : null; const dest=only && !only.destinationStatus && !suppressedLabels.has(only.destinationLabel) ? only : null;
     const image=`#image(${typstString(path)}, width: ${width})`;
     const linked=dest?.destinationLabel ? `#link(label(${typstString(dest.destinationLabel)}))[${image}]` : dest?.uri ? `#link(${typstString(dest.uri)})[${image}]` : image;
+    if(Number.isFinite(sourceWidth) && sourceWidth>0 && Number.isFinite(sourceHeight) && sourceHeight>0) {
+      const w=Math.min(sourceWidth,available,heightLimited),h=w*sourceHeight/sourceWidth;
+      if(fit) Object.assign(fit,{width:w,height:h,ratio:sourceWidth/sourceHeight});
+      const frameWidth=fit ? width : `${w}pt`, frameHeight=fit ? `(${width} * ${sourceHeight/sourceWidth})` : `${h}pt`;
+      // The image owns a measured frame. Zero-size anchors cannot wrap onto a
+      // preceding text line when an image fills the available width.
+      return `#box(width: ${frameWidth}, height: ${frameHeight}, baseline: ${frameHeight})[#place(top + left)[${linked}]#place(top + left)[#box(width: 0pt, height: 0pt)[${marker}${labels}]]#place(bottom + left)[#box(width: 0pt, height: 0pt)[${endMarker}]]]`;
+    }
     return `#box[${marker}${labels}${linked}${endMarker}]`;
   }
   if(plan) {
@@ -314,10 +392,31 @@ export async function composeDocument({document, edits=[], flow, assets, links, 
     source+=`#let paper-source-page() = { let p = here().page(); let starts = query(<paper-block>).filter(m => m.value.sourcePage != none); let ends = query(<paper-block-end>); let covering = starts.filter(s => { let e = ends.find(x => x.value.id == s.value.id); e != none and s.value.page <= p and e.value.page >= p }); if covering.len() > 0 { covering.first().value.sourcePage } else { none } }\n`;
     for(const kind of ['header','footer']) {
       const cases=plan.pages.filter(pg=>pg[kind].some(e=>rendered.has(e))).map(pg=>{
-        const parts=pg[kind].filter(e=>rendered.has(e)).map(entry=>{
-          const [x,y]=entry.bbox, dy=kind==='header' ? y : y-(page.height-margins.bottom);
-          const id=entry.blockId || entry.itemId;
-          return `#place(top + left, dx: ${x-margins.left}pt, dy: ${dy}pt)[#context [#let p = here().position();#metadata((id: ${typstString(id)}, sourcePage: ${pg.sourcePage}, page: p.page, x: p.x / 1pt, y: p.y / 1pt, kind: ${typstString(kind)}))#label("paper-furniture")]${rendered.get(entry)}]`;
+        // Group by source vertical overlap, then measure each actual Typst box.
+        // Source widths are not valid after font substitution. Keep source x when
+        // possible, shifting a whole packed row left only when it exceeds the page.
+        const rows=[];
+        for(const entry of pg[kind].filter(e=>rendered.has(e)).sort((a,b)=>a.bbox[1]-b.bbox[1] || a.bbox[0]-b.bbox[0])) {
+          const row=rows.find(r=>Math.min(r.bottom,entry.bbox[3])-Math.max(r.top,entry.bbox[1])>0);
+          if(row) {row.entries.push(entry); row.top=Math.min(row.top,entry.bbox[1]); row.bottom=Math.max(row.bottom,entry.bbox[3]);}
+          else rows.push({top:entry.bbox[1],bottom:entry.bbox[3],entries:[entry]});
+        }
+        const parts=rows.map((row,ri)=>{
+          const entries=row.entries.sort((a,b)=>a.bbox[0]-b.bbox[0]);
+          const defs=entries.map((entry,i)=>{
+            const content=rendered.get(entry), x=entry.bbox[0];
+            const bandTop=kind==='header' ? 0 : page.height-margins.bottom;
+            const bandBottom=kind==='header' ? margins.top : page.height;
+            const limit=Math.min(bandBottom, rows[ri+1]?.top ?? bandBottom);
+            return `let c${i} = box[${content}]; let size${i} = measure(c${i}); let w${i} = size${i}.width; let fits${i} = ${entry.bbox[1]}pt >= ${bandTop}pt and ${entry.bbox[1]}pt + size${i}.height <= ${limit}pt; let x${i} = ${i ? `calc.max(${x}pt, x${i-1} + w${i-1} + 3pt)` : `calc.max(0pt, ${x}pt)`};`;
+          }).join(' ');
+          const last=entries.length-1;
+          const placements=entries.map((entry,i)=>{
+            const y=entry.bbox[1], dy=kind==='header' ? y : y-(page.height-margins.bottom);
+            const id=entry.blockId || entry.itemId;
+            return `place(top + left, dx: (if fits { x${i} - shift } else { ${entry.bbox[0]}pt }) - ${margins.left}pt, dy: ${dy}pt)[#context [#let p = here().position();#box(width: 0pt, height: 0pt)[#metadata((id: ${typstString(id)}, sourcePage: ${pg.sourcePage}, page: p.page, x: p.x / 1pt, y: p.y / 1pt, kind: ${typstString(kind)}))#label("paper-furniture")]]#c${i}];`;
+          }).join(' ');
+          return `#context { ${defs} let shift = calc.max(0pt, x${last} + w${last} - ${page.width}pt); let fits = x0 - shift >= 0pt and ${entries.map((_,i)=>`fits${i}`).join(' and ')}; box(width: 0pt, height: 0pt)[#metadata((sourcePage: ${pg.sourcePage}, kind: ${typstString(kind)}, row: ${ri}, status: if fits { "measured" } else { "source-position-fallback" }))#label("paper-furniture-layout")]; ${placements} }`;
         });
         return `if sp == ${pg.sourcePage} [${parts.join('')}]`;
       });
@@ -327,58 +426,100 @@ export async function composeDocument({document, edits=[], flow, assets, links, 
   }
   if (flow) {
     if(flow.schema!=='falsify.paper-flow.v1' || flow.sourceSha256!==document.sourceSha256 || !Array.isArray(flow.items)) fail('Invalid paper flow');
-    let group=[], groupItems=[], columns=0;
-    const flush=next=>{if(!group.length)return; source+=columns===2 ? `#columns(2)[\n${group.join('\n\n')}\n]\n` : group.join('\n\n')+'\n';if(columns===2 && next?.kind==='asset' && next.span==='page') balanceGroups.push(groupItems);group=[];groupItems=[];};
+    let group=[], columns=0, bodyStarted=false;
+    const fullWidth=page.width-margins.left-margins.right, fullHeight=page.height-margins.top-margins.bottom;
+    const measured=content=>`#context { let group = [${content}]; if measure(block(width: ${fullWidth}pt, group)).height > ${Math.max(1,fullHeight-20)}pt { page(columns: 1, group) } else { place(top, float: true, scope: "parent", block(width: 100%, group)) } }`;
+    const flush=()=>{if(!group.length)return; const content=group.join('\n\n');
+      if(measuredContinuous && columns===1) source+=bodyStarted ? `#page(columns: 1)[${content}]\n` : measured(content)+'\n';
+      else source+=columns===2 && !continuousColumns ? `#columns(2)[\n${content}\n]\n` : content+'\n';
+      if(columns===2) bodyStarted=true; group=[];};
     const captionById=new Map(flow.items.filter(i=>i.kind==='caption').flatMap(i=>(i.blockIds||[]).map(id=>[id,i]))), linkedCaptions=new Set();
     for(const item of flow.items) if(item.kind==='asset') for(const id of item.captionIds||[]) {if(!captionById.has(id) || linkedCaptions.has(id)) fail('Unknown or duplicate caption link'); linkedCaptions.add(id);}
-    for(const item of flow.items) {
-      if(plan?.excludedItemIds.includes(item.id)) continue;
-      const count=item.span==='page'?1:(item.columns===2?2:1); if(count!==columns){flush(item);columns=count;}
-      let parts=[];
+    // Only move a complete, short source item across its own linked caption.
+    // Other content remains a barrier; furniture does not participate in flow.
+    const keepBeforeAsset=new Map(), deferredItems=new Set();
+    if(measuredContinuous && figurePlacement==='page') for(const [assetIndex,asset] of flow.items.entries()) {
+      if(assetIndex<firstBodyIndex || asset.kind!=='asset' || asset.span!=='page' || !asset.captionIds?.length) continue;
+      const significant=flow.items.slice(0,assetIndex).filter(i=>!plan?.excludedItemIds.includes(i.id));
+      const caption=significant.at(-1), item=significant.at(-2);
+      if(!caption || caption.kind!=='caption' || !item || item.kind!=='paragraph' || item.span==='page' || item.columns!==2) continue;
+      const ids=caption.blockIds||[];
+      if(!ids.length || ids.some(id=>!asset.captionIds.includes(id) || asset.captionPositions?.[id]!=='above') || asset.captionIds.length!==ids.length) continue;
+      const src=item.source, cs=caption.source, as=asset.source, box=src?.bbox, cb=cs?.bbox, sourcePage=document.pages[src?.pageIndex];
+      if(!sourcePage || src.pageIndex!==cs?.pageIndex || as?.pageIndex!==src.pageIndex+1 || !Array.isArray(box) || !Array.isArray(cb) || box.length!==4 || cb.length!==4 || !box.every(Number.isFinite) || !cb.every(Number.isFinite) || box[1]<sourcePage.height*0.5 || box[3]>cb[1] || cb[1]-box[3]>sourcePage.height*0.08) continue;
+      const blocks=(item.blockIds||[]).map(id=>blockById.get(id));
+      if(!blocks.length || blocks.some(b=>!b || b.source?.pageIndex!==src.pageIndex || !b.source?.range || b.source.range.end-b.source.range.start!==b.text?.length || !b.source.lines?.length)) continue;
+      const lines=blocks.reduce((n,b)=>n+b.source.lines.length,0);
+      const current=blocks.reduce((n,b)=>n+logicalText(b,changes.get(b.id)||[],omittedFor(b),spacesFor(b)).length,0)+(item.joiners||[]).reduce((n,j)=>n+j.length,0);
+      if(lines>3 || current>240) continue;
+      keepBeforeAsset.set(asset,item); deferredItems.add(item);
+    }
+    const renderFlowItem=item=>{
+      const blocks=(item.blockIds||[]).map(id=>blockById.get(id));
+      const parts=blocks.map(b=>renderBlock(b));
+      const rendered=item.inline ? parts.map((p,i)=>p+(i<parts.length-1 ? `#text(${typstString(item.joiners[i])})` : '')).join('') : parts.filter(Boolean).join('\n');
+      return paragraphContext(blocks,item.kind,rendered);
+    };
+    const renderCaption=renderFlowItem;
+    for(const [itemIndex,item] of flow.items.entries()) {
+      if(plan?.excludedItemIds.includes(item.id) || deferredItems.has(item)) continue;
+      if(item.kind==='caption' && (item.blockIds||[]).every(id=>linkedCaptions.has(id))) continue;
+      // Small, bottom-of-title-page notes may span both source columns but
+      // remain ordinary sequential text in the reflowed column stream.
+      const box=item.source?.bbox, noteBlocks=(item.blockIds||[]).map(id=>blockById.get(id));
+      const noteSizes=noteBlocks.flatMap(b=>(b?.source?.characters||[]).map(c=>styleById.get(c.styleId)?.size));
+      const titlePageNote=measuredContinuous && itemIndex>=firstBodyIndex && item.kind==='paragraph' && item.span==='page' && item.source?.pageIndex===0 && Array.isArray(box) && box.length===4 && box.every(Number.isFinite) && box[0]>=0 && box[2]<=page.width && box[2]>box[0] && box[1]>=page.height*0.8 && box[3]<=page.height && box[3]>box[1] && box[3]-box[1]<=page.height*0.08 && noteSizes.length>0 && Number.isFinite(bodySize) && noteSizes.every(size=>Number.isFinite(size) && size>0 && size<=bodySize*0.95);
+      const count=measuredContinuous && itemIndex<firstBodyIndex ? 1 : titlePageNote || (measuredContinuous && item.measuredColumns===2) ? 2 : item.span==='page'?1:(item.columns===2?2:1); if(count!==columns){flush();columns=count;}
+      let parts=[], fit=null;
       if(item.kind==='asset') {
+        if(measuredContinuous && itemIndex>=firstBodyIndex && item.span==='page' && item.captionIds?.length) fit={};
         if(item.renderAssetId) {
           const capture=assetList.find(a=>a.id===item.renderAssetId), owned=capture?.source?.assetIds || [], blocks=capture?.source?.blockIds || [];
           const same=(a,b)=>a.length===b.length && a.every(x=>b.includes(x));
           if(!capture || !same(owned,item.assetIds||[]) || !same(blocks,item.blockIds||[]) || capture.source.pageIndex!==item.source?.pageIndex || JSON.stringify(capture.source.bbox)!==JSON.stringify(item.source?.bbox)) assetFindings.push({code:'asset-capture-mismatch',assetId:item.renderAssetId});
-          else {parts=[renderAsset(item.renderAssetId,item)].filter(Boolean); if(parts.length) for(const id of item.assetIds||[]) placedAssets.add(id);}
+          else {parts=[renderAsset(item.renderAssetId,item,true,fit)].filter(Boolean); if(parts.length) for(const id of item.assetIds||[]) placedAssets.add(id);}
         } else if((item.assetIds||[]).length>1) assetFindings.push({code:'asset-union-required',assetIds:[...item.assetIds]});
-        else parts=(item.assetIds||[]).map(id=>renderAsset(id,item)).filter(Boolean);
-        const above=captionOrder(item).filter(id=>item.captionPositions?.[id]==='above').map(id=>renderBlock(blockById.get(id))).filter(Boolean);
-        const below=captionOrder(item).filter(id=>item.captionPositions?.[id]!=='above').map(id=>renderBlock(blockById.get(id))).filter(Boolean);
+        else parts=(item.assetIds||[]).map(id=>renderAsset(id,item,true,fit)).filter(Boolean);
+        const captionItems=[...new Set(captionOrder(item).map(id=>captionById.get(id)))];
+        for(const caption of captionItems) {
+          const ids=caption.blockIds||[], position=id=>item.captionPositions?.[id]==='above'?'above':'below';
+          if(ids.some(id=>!(item.captionIds||[]).includes(id) || position(id)!==position(ids[0]))) fail('Incomplete or inconsistent caption link');
+        }
+        const above=captionItems.filter(c=>item.captionPositions?.[c.blockIds[0]]==='above').map(renderCaption).filter(Boolean);
+        const below=captionItems.filter(c=>item.captionPositions?.[c.blockIds[0]]!=='above').map(renderCaption).filter(Boolean);
         if(parts.length && below.length) parts=[`#block(sticky: true)[${parts.join('\n')}]`];
-        parts=[...above.map(caption=>`#block(sticky: true)[${caption}]`),...parts,...below];
+        const kept=keepBeforeAsset.get(item);
+        const aboveParts=[...(kept ? [renderFlowItem(kept)] : []),...above.map(caption=>`#block(sticky: true)[${caption}]`)];
+        if(fit?.width && parts.length===1) {
+          // Measure caption and paragraph spacing with a zero-height frame.
+          // Keep at least half the original size or use the breakable page path.
+          const emptyFrame=`#box(width: ${fit.width}pt, height: 0pt)[]`;
+          const probe=[...aboveParts,below.length ? `#block(sticky: true)[${emptyFrame}]` : emptyFrame,...below].join('\n\n');
+          const content=[...aboveParts,...parts,...below].join('\n\n');
+          const budget=Math.max(1,fullHeight-20);
+          parts=[`#context { let overhead = measure(block(width: ${fullWidth}pt, [${probe}])).height; let remaining = ${budget}pt - overhead; let paper-fit-width = if remaining >= ${fit.height/2}pt { calc.min(${fit.width}pt, remaining * ${fit.ratio}) } else { ${fit.width}pt }; [${content}] }`];
+        } else parts=[...aboveParts,...parts,...below];
       } else {
         parts=(item.blockIds||[]).filter(id=>!linkedCaptions.has(id)).map(id=>blockById.get(id)).filter(Boolean).map(b=>renderBlock(b));
         if(!item.inline) parts=parts.filter(Boolean);
       }
-      if(parts.length) {const rendered=item.inline ? parts.map((p,i)=>p+(i<parts.length-1 ? `#text(${typstString(item.joiners[i])})` : '')).join('') : parts.join(item.kind==='asset'?'\n\n':'\n'); group.push(item.kind==='heading' ? `#block(sticky: true)[${rendered}]` : rendered);groupItems.push({kind:item.kind,inline:!!item.inline,ids:[...(item.blockIds||[])]});}
+      if(parts.length) {const rendered=item.inline ? parts.map((p,i)=>p+(i<parts.length-1 ? `#text(${typstString(item.joiners[i])})` : '')).join('') : parts.join(item.kind==='asset'?'\n\n':'\n'); const scoped=item.kind==='asset' ? rendered : paragraphContext((item.blockIds||[]).map(id=>blockById.get(id)),item.kind,rendered); const result=item.kind==='heading' ? `#block(sticky: true)[${scoped}]` : scoped;
+        if(measuredContinuous && itemIndex>=firstBodyIndex && item.kind==='asset' && item.span==='page') {
+          flush();
+          // An unpaired full-width figure cannot float through the preceding
+          // caption. Finish that column stream before its source artwork page.
+          source+=(figurePlacement==='float' && item.captionIds?.length && itemIndex<=lastBodyIndex ? measured(result) : `#page(columns: 1)[${result}]`)+'\n';
+        }
+        else group.push(result);}
+
     }
     flush();
   } else {
-    source+=`#columns(2)[\n${document.blocks.map(b=>renderBlock(b)).filter(Boolean).join('\n\n')}\n]`;
+    source+=`#columns(2)[\n${document.blocks.map(b=>paragraphContext([b],b.kind || 'paragraph',renderBlock(b))).filter(Boolean).join('\n\n')}\n]`;
   }
-  let compiled=await compile({source, fonts, files, signal}); abort(signal);
-  // A full-width figure ends a column group. Balance a left-only final page
-  // at an existing paragraph boundary, using the measured output.
-  if(Array.isArray(compiled?.blockSpans) && balanceGroups.length) {
-    const spans=new Map(compiled.blockSpans.map(s=>[s.id,s])); let revised=source;
-    for(const items of balanceGroups) {
-      const all=items.flatMap(item=>item.ids.map(id=>spans.get(id)));
-      if(!all.length || all.some(s=>!s?.start || !s.end || !Number.isInteger(s.end.page))) continue;
-      const last=Math.max(...all.map(s=>s.end.page));
-      const onPage=all.filter(s=>s.start.page<=last && s.end.page>=last);
-      const splitX=margins.left+(page.width-margins.left-margins.right)/2;
-      if(onPage.some(s=>(s.start.page===last && s.start.x>=splitX) || (s.end.page===last && s.end.x>=splitX))) continue;
-      const bottom=Math.max(...onPage.filter(s=>s.end.page===last).map(s=>s.end.y));
-      if(!Number.isFinite(bottom) || bottom>page.height-margins.bottom) continue;
-      const target=(margins.top+bottom)/2;
-      const eligible=items.filter(item=>!item.inline && ['paragraph','caption'].includes(item.kind) && item.ids.length===1).map(item=>spans.get(item.ids[0])).filter(s=>s?.start?.page===last && s.start.y>margins.top+25 && s.start.y<bottom-25).sort((a,b)=>Math.abs(a.start.y-target)-Math.abs(b.start.y-target));
-      const chosen=eligible[0]; if(!chosen) continue;
-      const marker=spanMarker(chosen.id,chosen.sourcePage,'start');
-      if(revised.includes(marker)) revised=revised.replace(marker,`#colbreak()${marker}`);
-    }
-    if(revised!==source) {source=revised;compiled=await compile({source,fonts,files,signal});abort(signal);}
-  }
+  // Forced column breaks after a measurement pass can create empty pages when
+  // the preceding group repaginates around full-width artwork.
+  const compiled=await compile({source, fonts, files, signal}); abort(signal);
   const returnedBytes=compiled instanceof Uint8Array ? compiled : compiled?.bytes;
   const bytes=returnedBytes instanceof Uint8Array ? new Uint8Array(returnedBytes) : returnedBytes;
   if (!(bytes instanceof Uint8Array) || new TextDecoder().decode(bytes.subarray(0,5))!=='%PDF-') fail('Compiler did not return PDF bytes');
@@ -387,19 +528,23 @@ export async function composeDocument({document, edits=[], flow, assets, links, 
   if(sourceGlyphResult.glyphs.length) warnings.push('Source glyph artwork has unknown Unicode and is excluded from searchable-text expectations.');
   if(sourceGlyphResult.unavailable.length) warnings.push('Source glyph artwork unavailable for '+sourceGlyphResult.unavailable.length+' character(s).');
   if(compiled?.queryError) warnings.push(`Output location query failed: ${compiled.queryError}`);
+  if(compiled?.furnitureLayout?.some(x=>x.status==='source-position-fallback')) warnings.push('일부 머리말·꼬리말은 여유 공간이 부족해 원래 위치를 유지했습니다.');
   if(document.assets?.some(a=>!placedAssets.has(a.id)) || document.blocks.some(b=>(b.assetIds?.length || b.kind==='figure' || b.kind==='table' || b.kind==='formula') && !(b.assetIds?.length && b.assetIds.every(id=>placedAssets.has(id))))) warnings.push('Source assets and non-text figure, table or formula content are not placed by this candidate, including image blocks without source ranges.');
   if(assetFindings.length) warnings.push('Source asset findings: '+assetFindings.map(f=>`${f.code} (${f.assetId || f.assetIds.join(', ')})`).join('; '));
   if(coverage.status!=='covered') warnings.push(`Font coverage ${coverage.status}; output may lose glyphs.`);
   let outputTextCheck='unavailable', checkReport=null;
   if (typeof outputCheck==='function') {
-    try { checkReport=await outputCheck({bytes:new Uint8Array(bytes), expectedBlocks:expectedBlocks.map(b=>({...b})), expectedFurniture:structuredClone(furniture.templates), outputFurniture:structuredClone(compiled?.furnitureMap ?? null),blockSpans:structuredClone(compiled?.blockSpans ?? null),bodyFrame:{left:margins.left,top:margins.top,right:page.width-margins.right,bottom:page.height-margins.bottom}}); abort(signal);
+    try { checkReport=await outputCheck({bytes:new Uint8Array(bytes), document:structuredClone(document), flow:structuredClone(flow), fontPlan:fonts, assetSpans:structuredClone(compiled?.blockSpans ?? null), expectedBlocks:expectedBlocks.map(b=>({...b})), expectedFurniture:structuredClone(furniture.templates), outputFurniture:structuredClone(compiled?.furnitureMap ?? null),blockSpans:structuredClone(compiled?.blockSpans ?? null),bodyFrame:{left:margins.left,top:margins.top,right:page.width-margins.right,bottom:page.height-margins.bottom},layoutProfile:structuredClone(layoutProfile)}); abort(signal);
       outputTextCheck=checkReport?.findings?.some(f=>f.code==='content-mismatch') ? 'finding' : checkReport?.checks?.content?.status || 'unavailable';
     } catch (error) { abort(signal); warnings.push(`Output text check unavailable: ${error.message}`); }
   }
+  const flowCheck=measuredContinuous ? (checkReport?.checks?.flow?.status==='checked' ? structuredClone(checkReport.checks.flow) : ['pass','normalized'].includes(outputTextCheck) ? {status:'checked',comparison:'Ordered content without caption relocation.'} : checkReport?.checks?.flow?.status==='finding' ? structuredClone(checkReport.checks.flow) : {status:'unavailable',reason:'Output caption ownership or ordered content is unavailable.'}) : {status:'not-requested'};
   if (ambiguous.length) {
     warnings.push('Ambiguous source line boundaries use a spacing convention; content verification is unavailable.');
   }
   if (outputTextCheck==='finding') warnings.push('Output text check found content loss or mismatch.');
-  const verification={status:outputTextCheck==='finding' || assetFindings.length?'finding':'warning', sourceSha256:document.sourceSha256, contentVerified:outputTextCheck==='pass' && !furniture.templates.length && !ambiguous.length && !assetOwned.size && !assetFindings.length && !sourceGlyphResult.glyphs.length && !sourceGlyphResult.unavailable.length, sourceGlyphs:sourceGlyphResult, layoutVerified:false, coverage, outputTextCheck, checkReport, artworkBlocks, assetFindings, ambiguousBoundaries:ambiguous, furniture:{...furniture,margins:{...margins},output:compiled?.furnitureMap ?? null}, edits:edits.map(e=>({blockId:e.blockId,start:e.start,end:e.end,status:'bound'}))};
-  return {linkPlan,file:new File([bytes],'recomposed.pdf',{type:'application/pdf'}),sha256,verification,pageMap:null,blockMap:compiled?.blockMap ?? null,blockSpans:compiled?.blockSpans ?? null,furnitureMap:compiled?.furnitureMap ?? null,warnings};
+  const verification={flowCheck,status:outputTextCheck==='finding' || assetFindings.length || flowCheck.status==='finding'?'finding':'warning', sourceSha256:document.sourceSha256, contentVerified:flowCheck.status!=='finding' && outputTextCheck==='pass' && !furniture.templates.length && !ambiguous.length && !assetOwned.size && !assetFindings.length && !sourceGlyphResult.glyphs.length && !sourceGlyphResult.unavailable.length, sourceGlyphs:sourceGlyphResult, layoutVerified:false, coverage, outputTextCheck, checkReport, artworkBlocks, assetFindings, ambiguousBoundaries:ambiguous, furniture:{...furniture,margins:{...margins},output:compiled?.furnitureMap ?? null}, edits:edits.map(e=>({blockId:e.blockId,start:e.start,end:e.end,status:'bound'}))};
+  verification.sourceNormalization={sourceSha256:sourceWrap.sourceSha256,lineWrapHyphens:wrapOmissions.map(o=>({pageIndex:o.pageIndex,start:o.start,end:o.end,corroboration:o.evidence.corroboration}))};
+  verification.furniture.spacing=Array.isArray(compiled?.furnitureLayout)?compiled.furnitureLayout:null;
+  return {linkPlan,layoutProfile,enginePlan,layoutPolicy:{...policy},file:new File([bytes],'recomposed.pdf',{type:'application/pdf'}),sha256,verification,pageMap:null,blockMap:compiled?.blockMap ?? null,blockSpans:compiled?.blockSpans ?? null,furnitureMap:compiled?.furnitureMap ?? null,warnings};
 }

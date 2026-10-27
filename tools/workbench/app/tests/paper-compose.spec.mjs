@@ -29,7 +29,9 @@ test('captions above and below an asset follow source position in output and che
  await composeDocument({document:d,sourceBytes:src,flow},{compile:async p=>(source=p.source,pdf),outputCheck:async p=>(expected=p.expectedBlocks,{checks:{content:{status:'pass'}},findings:[]})});
  assert.ok(source.indexOf(typstString('Table 1'))<source.indexOf('#image('));
  assert.ok(source.indexOf('#image(')<source.indexOf(typstString('Footnote')));
- assert.match(source,/\]\n\n#block\(sticky: true\)\[#box\[/);
+ assert.match(source,/\]\n\n#block\(sticky: true\)\[#box\(width: 300pt, height: 100pt, baseline: 100pt\)\[/);
+ assert.match(source,/#place\(top \+ left\)\[#box\(width: 0pt, height: 0pt\)/);
+ assert.match(source,/#place\(bottom \+ left\)\[#box\(width: 0pt, height: 0pt\)/);
  assert.match(source,/\]\]\n\n#context \[/);
  assert.deepEqual(expected.map(b=>b.text),['Table 1','Footnote']);assert.deepEqual(d,original);
 });
@@ -139,26 +141,26 @@ test('tall source artwork fits page height with a separate flowing caption',asyn
  assert.ok(generated.indexOf('#text("repeat hard-repeat')>generated.indexOf('width: 101.6pt)'));
 });
 
-test('sparse last column page before a full-width figure balances at a paragraph boundary',async()=>{
+test('sparse last column before a full-width figure does not force a column break',async()=>{
  const d=make(); d.blocks=Array.from({length:4},(_,i)=>({id:`p${i}`,text:`Paragraph ${i}`,source:{pageIndex:0,range:{start:i*20,end:i*20+11},lines:[]}}));
  const box=[0,0,100,100], svg=new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"></svg>');
  const flow={schema:'falsify.paper-flow.v1',sourceSha256:d.sourceSha256,items:[...d.blocks.map(b=>({kind:'paragraph',columns:2,blockIds:[b.id]})),{kind:'asset',span:'page',assetIds:['pic'],blockIds:[],source:{pageIndex:0,bbox:box}}]};
  const spans=d.blocks.map((b,i)=>({id:b.id,sourcePage:0,start:{page:1,x:36,y:50+i*60},end:{page:1,x:36,y:100+i*60}}));
- for(const [rightColumn,expectedCalls] of [[false,2],[true,1]]) {
+ for(const rightColumn of [false,true]) {
   let sources=[], expected;const mapped=structuredClone(spans);if(rightColumn) mapped[3].start.x=250;
   await composeDocument({document:d,sourceBytes:src,flow,assets:[{id:'pic',source:{pageIndex:0,bbox:box},content:{representation:'svg',bytes:svg}}]},{compile:async p=>(sources.push(p.source),{bytes:pdf,blockSpans:mapped}),outputCheck:async p=>(expected=p.expectedBlocks,{checks:{content:{status:'pass'}},findings:[]})});
-  assert.equal(sources.length,expectedCalls);assert.equal(sources.at(-1).includes('#colbreak()'),!rightColumn);assert.deepEqual(expected.map(x=>x.text),d.blocks.map(x=>x.text));
+  assert.equal(sources.length,1);assert.equal(sources.at(-1).includes('#colbreak()'),false);assert.deepEqual(expected.map(x=>x.text),d.blocks.map(x=>x.text));
  }
 });
 
-test('last left column balances across the old cutoff with only two starts',async()=>{
+test('spanning paragraphs do not trigger a synthetic column break',async()=>{
  const d=make();d.blocks=Array.from({length:3},(_,i)=>({id:`p${i}`,text:`Paragraph ${i}`,source:{pageIndex:0,range:{start:i*20,end:i*20+11},lines:[]}}));
  const box=[0,0,100,100],svg=new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"></svg>');
  const flow={schema:'falsify.paper-flow.v1',sourceSha256:d.sourceSha256,items:[...d.blocks.map(b=>({kind:'paragraph',columns:2,blockIds:[b.id]})),{kind:'asset',span:'page',assetIds:['pic'],blockIds:[],source:{pageIndex:0,bbox:box}}]};
- for(const [bottom,expectedCalls] of [[404,2],[406,2],[500,2],[565,1]]) {
+ for(const bottom of [404,406,500,565]) {
   const spans=[{id:'p0',sourcePage:0,start:{page:1,x:36,y:300},end:{page:2,x:36,y:60}},{id:'p1',sourcePage:0,start:{page:2,x:36,y:60},end:{page:2,x:36,y:250}},{id:'p2',sourcePage:0,start:{page:2,x:36,y:250},end:{page:2,x:36,y:bottom}}];let sources=[],checked;
   await composeDocument({document:d,sourceBytes:src,flow,assets:[{id:'pic',source:{pageIndex:0,bbox:box},content:{representation:'svg',bytes:svg}}]},{compile:async p=>(sources.push(p.source),{bytes:pdf,blockSpans:spans}),outputCheck:async p=>(checked=p.expectedBlocks,{checks:{content:{status:'pass'}},findings:[]})});
-  assert.equal(sources.length,expectedCalls,`bottom ${bottom}`);assert.equal(sources.at(-1).includes('#colbreak()'),expectedCalls===2);assert.deepEqual(checked.map(x=>x.text),d.blocks.map(x=>x.text));
+  assert.equal(sources.length,1,`bottom ${bottom}`);assert.equal(sources.at(-1).includes('#colbreak()'),false);assert.deepEqual(checked.map(x=>x.text),d.blocks.map(x=>x.text));
  }
 });
 

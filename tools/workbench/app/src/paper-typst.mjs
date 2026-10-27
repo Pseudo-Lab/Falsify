@@ -18,12 +18,13 @@ export function createTypstCompile({createTypstCompiler, createTypstFontBuilder,
       const result=world.get_artifact(1,3); abort();
       const bytes=result instanceof Uint8Array ? result : result?.result;
       if(!(bytes instanceof Uint8Array)) throw new Error('Typst PDF compilation failed: '+JSON.stringify(result));
-      let blockMap=null, blockEnds=null, blockSpans=null, furnitureMap=null, queryError=null;
+      let blockMap=null, blockEnds=null, blockSpans=null, furnitureMap=null, furnitureLayout=null, queryError=null;
       try {blockMap=JSON.parse(world.query(0,'<paper-block>','value'));} catch(error) {queryError=String(error?.message || error);}
       try {blockEnds=JSON.parse(world.query(0,'<paper-block-end>','value'));} catch(error) {queryError ||= String(error?.message || error);}
       if (Array.isArray(blockMap) && Array.isArray(blockEnds)) blockSpans=blockMap.map(start=>{const end=blockEnds.find(x=>x.id===start.id); return {id:start.id,sourcePage:start.sourcePage,start,end:end || null};});
       try {furnitureMap=JSON.parse(world.query(0,'<paper-furniture>','value'));} catch(error) {queryError ||= String(error?.message || error);}
-      return {bytes,blockMap,blockSpans,furnitureMap,queryError};
+      try {furnitureLayout=JSON.parse(world.query(0,'<paper-furniture-layout>','value'));} catch(error) {queryError ||= String(error?.message || error);}
+      return {bytes,blockMap,blockSpans,furnitureMap,furnitureLayout,queryError};
     } finally {
       world?.free();
       try {compiler.resetShadow?.();} finally {

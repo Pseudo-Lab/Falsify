@@ -1,6 +1,7 @@
 import {prepare as recompose, bindEdits} from './paper-recompose.mjs';
 import {readDocument} from './paper-document.mjs';
 import {buildPaperFlow} from './paper-flow.mjs';
+import {recoverSourceSpaces} from './paper-source-spacing.mjs';
 import {createTypstCompile} from './paper-typst.mjs';
 import * as mupdf from 'mupdf';
 import {hex} from './paragraph-pdf-crypto.mjs';
@@ -66,6 +67,8 @@ export function remapBindings(original, prepared, selections) {
 }
 
 export async function runRequest(request, deps={}) {
+  const layoutMode=request.layoutMode;
+  if(layoutMode !== undefined && layoutMode !== 'measured-continuous') fail('invalid','Unknown layout mode');
   const input=request.file instanceof Uint8Array?request.file:request.file instanceof ArrayBuffer?new Uint8Array(request.file):request.file?.bytes instanceof Uint8Array?request.file.bytes:new Uint8Array(await request.file.arrayBuffer());
   const original=Uint8Array.from(input), originalHash=await digest(original);
   const snapshot=Array.isArray(request.edits)?{edits:request.edits}:structuredClone(request.edits);
@@ -76,6 +79,7 @@ export async function runRequest(request, deps={}) {
   const cleaned=await clean({file:{bytes:original.slice()}}), bytes=cleaned.file?.bytes instanceof Uint8Array?Uint8Array.from(cleaned.file.bytes):new Uint8Array(await cleaned.file.arrayBuffer()), preparedHash=await digest(bytes);
   if(cleaned.sha256!==preparedHash) fail('source-binding','Cleaned source hash mismatch');
   let bindings=structuredClone(request.bindings || []);
+  let pdfjs=deps.pdfjs;
   if(cleaned.changed) {
     const read=deps.readDocument || readDocument;
     const old=await read({file:original,fileHash:originalHash}), now=await read({file:bytes,fileHash:preparedHash});
@@ -84,7 +88,10 @@ export async function runRequest(request, deps={}) {
     const covered=new Set(bindings.map(b=>b.id != null ? `id:${b.id}` : `index:${b.index}`));
     const unbound=snapshot.edits.map((e,i)=>({e,i})).filter(({e,i})=>e.enabled!==false && !covered.has(`id:${e.id}`) && !covered.has(`index:${i}`));
     if(unbound.length) {
-      const resolved=bindEdits(old,buildPaperFlow(old),unbound.map(x=>x.e));
+      pdfjs ||= await import(new URL('./vendor/pdf.mjs',import.meta.url).href);
+      if(pdfjs.GlobalWorkerOptions) pdfjs.GlobalWorkerOptions.workerSrc=new URL('./vendor/pdf.worker.mjs',import.meta.url).href;
+      const spaced=await recoverSourceSpaces({bytes:original,document:old,pdfjs});
+      const resolved=bindEdits(spaced.document,buildPaperFlow(spaced.document),unbound.map(x=>x.e));
       for(const [j,b] of resolved.bindings.entries()) originalBindings.push({index:unbound[j].i,sourceSha256:originalHash,parts:b.parts});
     }
     bindings=[...cleanedBindings,...remapBindings(old,now,originalBindings)];
@@ -93,9 +100,9 @@ export async function runRequest(request, deps={}) {
   const facade=deps.facade || await import(assets.compilerURL);
   const module=deps.compile ? null : await WebAssembly.compile(assets.wasm);
   const compile=deps.compile || createTypstCompile({...facade,getModule:()=>module});
-  const pdfjs=deps.pdfjs || await import(new URL('./vendor/pdf.mjs',import.meta.url).href);
+  pdfjs ||= await import(new URL('./vendor/pdf.mjs',import.meta.url).href);
   if(pdfjs.GlobalWorkerOptions) pdfjs.GlobalWorkerOptions.workerSrc=new URL('./vendor/pdf.worker.mjs',import.meta.url).href;
-  const result=await (deps.recompose || recompose)({file:bytes,fileHash:preparedHash,edits:{...snapshot,fileHash:preparedHash,revision:request.revision},bindings,revision:request.revision},{compile,fonts:assets.fonts,mupdf,pdfjs,runningFurniture:true});
+  const result=await (deps.recompose || recompose)({file:bytes,fileHash:preparedHash,edits:{...snapshot,fileHash:preparedHash,revision:request.revision},bindings,revision:request.revision,layoutMode},{compile,fonts:assets.fonts,mupdf,pdfjs,runningFurniture:true});
   return {...result,sourceBinding:{...result.sourceBinding,originalSha256:originalHash,preparedSha256:preparedHash,cleanup:cleaned.verification}};
 }
 

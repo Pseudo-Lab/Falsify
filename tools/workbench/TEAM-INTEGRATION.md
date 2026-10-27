@@ -1,11 +1,11 @@
-# Falsify Paper Workbench 0.2.0-alpha.22
+# Falsify Paper Workbench 0.2.0-alpha.23
 
 이 폴더는 웹앱의 공개 소스와 한국어 사용 설명서입니다. 팀의 논문·연구 계획·평가 기준은 변경하지 않습니다.
 
 - 웹앱: https://shinick-han.github.io/falsify-branch-preview/
 - 사용 설명서: https://shinick-han.github.io/falsify-branch-preview/guide.html
 - 공개 앱: https://shinick-han.github.io/falsify-workbench/
-- 소스: https://github.com/Shinick-Han/falsify-workbench/tree/9372e24189d433520ae62f04cde9812e86ef2ada
+- 소스: https://github.com/Shinick-Han/falsify-workbench/tree/40c58c17e0142d2071d70b7724387996ca50dae2
 
 RED에 PDF를 넣고 문단을 클릭하거나 글자를 드래그해 수정할 수 있습니다. 미리보기와 다운로드는 같은 생성 파일을 사용합니다. 전체 논문 재조판은 본문과 그림을 새 흐름으로 배치하므로 원본과 쪽수·배치가 달라질 수 있습니다. 기본 PDF 작업은 브라우저에서 실행하며, CLI 모델 실행과 일부 편집 기능은 각자의 PC companion을 사용합니다.
 
@@ -19,6 +19,6 @@ RED에 PDF를 넣고 문단을 클릭하거나 글자를 드래그해 수정할 
 
 ## 포함 범위
 
-애플리케이션 스냅샷은 `9372e24189d433520ae62f04cde9812e86ef2ada`이며 사용 설명서도 같은 커밋의 파일입니다. AGPL-3.0-only와 vendor별 LICENSE/NOTICE를 유지합니다. 패치된 브라우저 편집 WASM, Typst WASM과 공개 글꼴은 해당 고지와 함께 포함합니다. 사적인 논문·변경본·정답지·실험 응답·자격 증명·로컬 환경은 포함하지 않습니다. 이 라이선스는 팀 저장소 전체의 라이선스를 바꾸지 않습니다.
+애플리케이션 스냅샷은 `40c58c17e0142d2071d70b7724387996ca50dae2`이며 사용 설명서도 같은 커밋의 파일입니다. AGPL-3.0-only와 vendor별 LICENSE/NOTICE를 유지합니다. 패치된 브라우저 편집 WASM, Typst WASM과 공개 글꼴은 해당 고지와 함께 포함합니다. 사적인 논문·변경본·정답지·실험 응답·자격 증명·로컬 환경은 포함하지 않습니다. 이 라이선스는 팀 저장소 전체의 라이선스를 바꾸지 않습니다.
 
 중첩된 `.github/workflows`는 원본 앱의 CI 템플릿이며 팀 저장소 루트의 워크플로를 설치하지 않습니다. 미리보기는 별도의 개인 저장소에서 배포합니다. 출처는 `INTEGRATION-SOURCE.json`에 기록합니다.

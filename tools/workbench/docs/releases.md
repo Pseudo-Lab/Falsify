@@ -3,10 +3,10 @@
 Download a tagged source release from [GitHub Releases](https://github.com/Shinick-Han/falsify-workbench/releases).
 Each ZIP is produced from one exact committed tree; `release-manifest.json` identifies its commit/version and
 `SHA256SUMS.txt` identifies its SHA-256. Preview versions are explicitly marked prerelease.
-The current source version is 0.2.0-alpha.18; see [release notes](release-alpha18.md), [the changelog](../CHANGELOG.md) and the
+The current source version is 0.2.0-alpha.23; see [release notes](releases/0.2.0-alpha.23.md), [the changelog](../CHANGELOG.md) and the
 [shared-records contract and quick use](harness-contract.md#선택형-공동-기록). A source version is not proof of live API deployment.
 
-The archive includes the Workbench and companion source with license notices. It does not include private papers,
+The archive includes the Workbench, companion source, and pinned browser runtimes with license notices. It does not include private papers,
 harnesses, records, environments, model artifacts, account credentials, `.pdf-editor.local.json` or the locally patched
 editor WASM. The separate editor and its configured runtime are not silently replaced by a Workbench update.
 
