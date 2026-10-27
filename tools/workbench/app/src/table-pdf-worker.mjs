@@ -29,11 +29,36 @@ export async function checkFit(data){
   if(bytes.length>25*1024*1024||!Array.isArray(data.cells)||data.cells.length>24||data.cells.some(c=>typeof c.id!=='string'||!Number.isSafeInteger(c.pageIndex)||c.pageIndex<0||typeof c.after!=='string'||c.after.length>4000||!Array.isArray(c.bbox)||c.bbox.length!==4||!c.bbox.every(Number.isFinite)||c.bbox[0]>=c.bbox[2]||c.bbox[1]>=c.bbox[3]))throw new Error('invalid-request');
   if(hex(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)))!==data.fileHash)throw new Error('stale-source');
   const pages=readMuPdfTablePages(bytes,mupdf),contains=(a,b)=>a[0]-.5<=b[0]&&a[1]-.5<=b[1]&&a[2]+.5>=b[2]&&a[3]+.5>=b[3];
+  // Structured-text quads are font metric boxes, not painted glyph bounds.
+  // Inspect complete text drawing objects in the final PDF; partial objects,
+  // non-fill text and ambiguous matches cannot prove ownership.
+  const painted=new Map(),doc=mupdf.Document.openDocument(bytes,'application/pdf').asPDF();
+  try {
+    for(const index of new Set(data.cells.map(c=>c.pageIndex))){
+      if(index>=doc.countPages())continue;
+      const page=doc.loadPage(index),objects=[];let dev;
+      try {
+        dev=new mupdf.Device({
+          fillText(text,ctm,_cs,_color,alpha){
+            let value='';text.walk({showGlyph(_f,_trm,_gid,unicode){if(unicode>=0&&unicode<=0x10ffff)value+=String.fromCodePoint(unicode);}});
+            const bbox=text.getBounds(null,ctm);
+            if(alpha===1&&bbox.length===4&&bbox.every(Number.isFinite))objects.push({value:value.replace(/\s+/g,' ').trim(),bbox});
+          },
+          strokeText(text,stroke,ctm){objects.push({value:null,bbox:text.getBounds(stroke,ctm)});},
+          clipText(text,ctm){objects.push({value:null,bbox:text.getBounds(null,ctm)});},
+        });
+        page.run(dev,[1,0,0,1,0,0]);dev.close();painted.set(index,objects);
+      } finally {dev?.destroy();page.destroy();}
+    }
+  } finally {doc.destroy();}
   const results=data.cells.map(cell=>{
     if(!cell.after)return {id:cell.id,status:'empty'};
     const normalized=cell.after.replace(/\s+/g,' ').trim(),runs=pages[cell.pageIndex]?.runs||[];
     const hits=runs.filter(r=>r.text.replace(/\s+/g,' ').includes(normalized)&&r.bbox[0]<cell.bbox[2]&&r.bbox[2]>cell.bbox[0]&&r.bbox[1]<cell.bbox[3]&&r.bbox[3]>cell.bbox[1]);
-    return {id:cell.id,status:hits.length===1?(contains(cell.bbox,hits[0].bbox)?'inside':'overflow'):'unverified'};
+    const objects=(painted.get(cell.pageIndex)||[]).filter(o=>o.value===normalized&&o.bbox&&o.bbox[0]<cell.bbox[2]&&o.bbox[2]>cell.bbox[0]&&o.bbox[1]<cell.bbox[3]&&o.bbox[3]>cell.bbox[1]);
+    const uncertain=(painted.get(cell.pageIndex)||[]).some(o=>o.value===null&&o.bbox&&o.bbox[0]<cell.bbox[2]&&o.bbox[2]>cell.bbox[0]&&o.bbox[1]<cell.bbox[3]&&o.bbox[3]>cell.bbox[1]);
+    if(hits.length!==1||objects.length!==1||uncertain)return {id:cell.id,status:'unverified'};
+    return {id:cell.id,status:contains(cell.bbox,objects[0].bbox)?'inside':'overflow',glyphBounds:objects[0].bbox};
   });
   return {fileHash:data.fileHash,revision:data.revision,pageIndex:data.pageIndex,results};
 }

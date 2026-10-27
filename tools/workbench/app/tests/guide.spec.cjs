@@ -25,15 +25,15 @@ function anchors(html) {
 }
 
 const PHRASES = [
-  '편집 반영',
+  '적용',
   '원문과 과제 프롬프트 복사',
   '붙여넣은 응답',
   '고른 위치로 확정',
-  '현재 편집으로 생성',
+  '수정본 미리보기 만들기',
   '마지막 생성본 · 현재 편집과 다름',
   '원본 다운로드',
   'BLUE 검토 파일',
-  '이 생성본만 BLUE로',
+  '이 변경본을 BLUE에서 검토',
   '검수 기록 추가',
   '팀에 공개',
   '이 수동 기록을 팀원 모두에게 공개합니다',
@@ -63,7 +63,7 @@ test('quick three steps stay short and precede the collapsed reference', () => {
   const items = [...ol[0].matchAll(/<li>([\s\S]*?)<\/li>/g)].map(match => visible(match[1]));
   assert.equal(items.length, 3);
   assert.match(items[0], /PDF를 넣습니다/);
-  assert.match(items[1], /글자를 선택하고 After를 수정/);
+  assert.match(items[1], /글자를 선택하고 내용을 수정/);
   assert.match(items[2], /미리보고/);
   assert.match(items[2], /다운로드/);
   for (const text of items) {
@@ -105,7 +105,8 @@ test('required anchors and terms stay inside the collapsed reference', () => {
   assert.match(detail, /회전/);
   assert.match(detail, /1단/);
   assert.match(detail, /동의 체크가 화면에 하나뿐이면 그 체크와 저장 버튼을 따릅니다/);
-  assert.doesNotMatch(guide, /0\.2\.0-alpha(?:\.\d+)?/);
+  assert.ok(detail.includes(fs.readFileSync(path.resolve(__dirname, '../../VERSION'), 'utf8').trim()), 'guide identifies the current release');
+  for (const term of ['Web Locks', 'GET으로만', '서버 재시작 영속성', '한 영역', 'ODT도 단순 문단의 작은 수정만 지원', '비용은 알 수 없습니다']) assert.ok(detail.includes(term), term);
   assert.doesNotMatch(guide.slice(0, guide.indexOf('id="reference"')), /alpha\.\d+/);
 });
 

@@ -154,6 +154,14 @@ if [ "$os" = Darwin ]; then
       echo 'Refused: the macOS handler at the install location is not this launcher.' >&2
       exit 1
     fi
+    recorded_file=$app/Contents/Resources/falsify-script-path.txt
+    if [ ! -f "$recorded_file" ] || [ "$(sed -n '1p' "$recorded_file")" != "$handler" ]; then
+      echo 'Refused: the macOS handler points at a different checkout. Nothing was replaced.' >&2
+      exit 1
+    fi
+  elif [ -e "$app" ] || [ -L "$app" ]; then
+    echo 'Refused: the macOS handler location is not an owned applet.' >&2
+    exit 1
   fi
   falsify_other_handlers "$registrar" "$app"
   stage=$(mktemp -d)

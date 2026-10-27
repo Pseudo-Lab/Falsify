@@ -18,6 +18,7 @@ import json
 import os
 import re
 import stat
+import socket
 import sys
 import threading
 import time
@@ -208,7 +209,8 @@ def _sddl_aces(sddl):
 
 def _run_icacls(args):
     import subprocess
-    completed = subprocess.run(['icacls', *args], check=False, capture_output=True, text=True)
+    completed = subprocess.run(['icacls', *args], check=False, capture_output=True, text=True,
+                               **({'creationflags': subprocess.CREATE_NO_WINDOW} if os.name == 'nt' else {}))
     if completed.returncode != 0:
         raise PairingError('pairing_store_permissions')
     return completed.stdout or ''
@@ -217,7 +219,8 @@ def _run_icacls(args):
 def _windows_user_sid():
     import csv
     import subprocess
-    completed = subprocess.run(['whoami', '/user', '/fo', 'csv', '/nh'], check=False, capture_output=True, text=True)
+    completed = subprocess.run(['whoami', '/user', '/fo', 'csv', '/nh'], check=False, capture_output=True, text=True,
+                               **({'creationflags': subprocess.CREATE_NO_WINDOW} if os.name == 'nt' else {}))
     if completed.returncode != 0 or not completed.stdout.strip():
         raise PairingError('pairing_store_permissions')
     try:
@@ -580,7 +583,7 @@ def _local_json(port, method, path, headers, body=None):
     request = urllib.request.Request('http://127.0.0.1:%d%s' % (port, path), data=body, headers=headers, method=method)
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect)
     try:
-        with opener.open(request, timeout=5) as response:
+        with opener.open(request, timeout=1) as response:
             return response.status, response.read()
     except urllib.error.HTTPError as error:
         return error.code, error.read()
@@ -597,31 +600,71 @@ def approval_decision(origin, choice):
     return 'ask'
 
 
-def register_local(port, challenge, state, proof):
-    """Launcher-side register. Prints only registered or refused. Never prints the process token."""
+def _launcher_session(port, expected_server_path, expected_pid=None):
+    """Bootstrap and check the server-reported descriptor; this is not OS attestation."""
+    status, raw = _local_json(port, 'GET', '/api/session', {'Host': '127.0.0.1:%d' % port, 'Sec-Fetch-Site': 'same-origin'})
+    token = json.loads(raw.decode('utf-8')).get('token') if status == 200 else None
+    if not isinstance(token, str) or not token:
+        raise ValueError('invalid session')
+    status, raw = _local_json(port, 'GET', '/api/launcher/instance', {
+        'Host': '127.0.0.1:%d' % port, 'Authorization': 'Bearer ' + token,
+        'X-Falsify-Launcher': '1',
+    })
+    descriptor = json.loads(raw.decode('utf-8')) if status == 200 else None
+    if not isinstance(descriptor, dict):
+        raise ValueError('invalid descriptor')
+    pid = descriptor.get('pid')
+    path = descriptor.get('serverPath')
+    if (descriptor.get('schema') != 'falsify-companion-lifecycle/1'
+            or isinstance(pid, bool) or not isinstance(pid, int) or pid <= 0
+            or (expected_pid is not None and pid != expected_pid)
+            or not isinstance(path, str) or not Path(path).is_absolute()
+            or Path(path).resolve() != Path(expected_server_path).resolve()
+            or descriptor.get('webOrigin') != FIXED_ORIGIN):
+        raise ValueError('descriptor mismatch')
+    return token, pid
+
+
+def probe_local(port, expected_server_path, expected_pid=None):
+    """Print existing PID, absent, or foreign; never print the bootstrap token."""
+    if _port(port) is None:
+        print('foreign')
+        return 2
+    try:
+        with socket.create_connection(('127.0.0.1', port), timeout=0.5):
+            pass
+    except ConnectionRefusedError:
+        print('absent')
+        return 1
+    except OSError:
+        print('foreign')
+        return 2
+    try:
+        _token, pid = _launcher_session(port, expected_server_path, expected_pid)
+    except (OSError, ValueError, AttributeError, UnicodeError, urllib.error.URLError):
+        print('foreign')
+        return 2
+    print('existing %d' % pid)
+    return 0
+
+
+def register_local(port, challenge, state, proof, expected_server_path=None, expected_pid=None):
+    """Launcher-side register. Prints only registered or refused, never the token."""
     if _port(port) is None or not _nonce(challenge) or not _nonce(state) or not _nonce(proof):
         print('refused', flush=True)
         return 1
-    status, raw = _local_json(port, 'GET', '/api/session', {'Host': '127.0.0.1:%d' % port, 'Sec-Fetch-Site': 'same-origin'})
     try:
-        token = json.loads(raw.decode('utf-8')).get('token') if status == 200 else None
-    except (UnicodeError, json.JSONDecodeError, AttributeError):
-        token = None
-    if not isinstance(token, str) or not token:
-        print('refused', flush=True)
-        return 1
-    payload = json.dumps({'schema': REGISTER_SCHEMA, 'challenge': challenge, 'state': state, 'proof': proof},
-                         separators=(',', ':')).encode('utf-8')
-    status, raw = _local_json(port, 'POST', REGISTER_PATH, {
-        'Host': '127.0.0.1:%d' % port,
-        'Authorization': 'Bearer ' + token,
-        'X-Falsify-Launcher': '1',
-        'Content-Type': 'application/json',
-    }, payload)
-    del token
-    try:
+        token, _ = _launcher_session(port, expected_server_path or REPO_ROOT / 'app/local/server.py', expected_pid)
+        payload = json.dumps({'schema': REGISTER_SCHEMA, 'challenge': challenge, 'state': state, 'proof': proof},
+                             separators=(',', ':')).encode('utf-8')
+        status, raw = _local_json(port, 'POST', REGISTER_PATH, {
+            'Host': '127.0.0.1:%d' % port,
+            'Authorization': 'Bearer ' + token,
+            'X-Falsify-Launcher': '1',
+            'Content-Type': 'application/json',
+        }, payload)
         registered = status == 200 and json.loads(raw.decode('utf-8')).get('registered') is True
-    except (UnicodeError, json.JSONDecodeError, AttributeError):
+    except (OSError, ValueError, AttributeError, UnicodeError, urllib.error.URLError):
         registered = False
     print('registered' if registered else 'refused', flush=True)
     return 0 if registered else 1
@@ -635,9 +678,17 @@ def main(argv=None):
     reg.add_argument('--challenge', required=True)
     reg.add_argument('--state', required=True)
     reg.add_argument('--proof', required=True)
+    reg.add_argument('--expected-server-path', default=str(REPO_ROOT / 'app/local/server.py'))
+    reg.add_argument('--expected-pid', type=int)
+    probe = sub.add_parser('probe')
+    probe.add_argument('--port', type=int, required=True)
+    probe.add_argument('--expected-server-path', required=True)
+    probe.add_argument('--expected-pid', type=int)
     args = parser.parse_args(argv)
     if args.cmd == 'register':
-        return register_local(args.port, args.challenge, args.state, args.proof)
+        return register_local(args.port, args.challenge, args.state, args.proof, args.expected_server_path, args.expected_pid)
+    if args.cmd == 'probe':
+        return probe_local(args.port, args.expected_server_path, args.expected_pid)
     return 2
 
 

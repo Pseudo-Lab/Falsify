@@ -1,9 +1,9 @@
 {
   "schema": "falsify.paragraph-editor.overlay.v1",
   "base": "cd4ba2cdd68ae7e51198f615bd4ac6130206b162",
-  "commit": "b6fecf1fffe0d399c247424b850d6543fd3dd9e9",
-  "branch": "feature/document-flow-links-20261027",
+  "commit": "483a9abbd72ed2a7f853b5c0aaf2f2beaad16c5c",
+  "branch": "feature/fitr-native-wire-20261027",
   "repository": "https://github.com/Shinick-Han/falsify-pdf-editor",
   "patch": "patches/paragraph-flow-overlay.patch",
-  "patchSha256": "68f407645994c3059aee6edd308384ed1d4211217bd54b23c21db9ddc48ffa4b"
+  "patchSha256": "b0eb108bae54d22a0a44e33e92e5736de2621788d40c8d7ce6b5aace4cc2864e"
 }

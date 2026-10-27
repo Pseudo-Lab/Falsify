@@ -5,7 +5,7 @@
 .paper-workspace .muted,.paper-workspace .form-feedback{max-width:75ch}
 .paper-toolbar,.paper-workspace .button-row{flex-wrap:wrap;align-items:center}
 .paper-page-label{font-variant-numeric:tabular-nums;min-width:4.5em;text-align:center}
-.paper-page-jump{display:inline-flex;gap:6px;align-items:center;font-weight:600}
+.paper-page-jump{display:inline-flex;flex-direction:row;gap:6px;align-items:center;font-weight:600}
 .paper-page-jump input{width:4.5em}
 .paper-compare{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px;margin:12px 0}
 .paper-pane{min-width:0}
@@ -20,8 +20,8 @@
 .paper-text-layer ::selection{background:var(--yellow)}
 .paper-after-label{font-size:13px;font-weight:600;margin:0 0 8px}
 .paper-inline{margin:12px 0;padding:12px 0;border-top:1px solid var(--line)}
-.paper-inline.is-open{position:absolute;z-index:5;width:min(360px,calc(100% - 16px));margin:0;padding:12px;background:var(--paper);border:1px solid var(--line);border-radius:var(--radius)}
-.paper-inline.is-open.is-docked{position:fixed;left:8px;right:8px;bottom:8px;top:auto;width:auto}
+.paper-inline.is-open{min-width:0;margin:0;padding:12px;background:var(--paper);border:1px solid var(--line);border-radius:var(--radius);align-self:start}
+.paper-compare:has(.paper-inline.is-open) > .paper-pane:has(#paper-after-stage){display:none}
 .paper-inline-before{white-space:pre-wrap;background:var(--surface);padding:10px 12px;border-radius:var(--radius)}
 .paper-inline label{font-weight:600}
 .paper-edits{list-style:none;margin:8px 0 16px;padding:0}
@@ -39,7 +39,7 @@
 .paper-toolbar{flex-wrap:wrap}
 .paper-workspace .button-row button{width:100%}
 .paper-stage{max-height:min(70vh,720px)}
-.paper-inline.is-open{position:fixed;left:8px;right:8px;bottom:8px;top:auto;width:auto}
+.paper-compare:has(.paper-inline.is-open) #paper-before-stage{max-height:40vh}
 }
 
 .paper-after-nav{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px;margin:6px 0}.paper-after-nav[hidden]{display:none}
@@ -48,9 +48,22 @@
 .paper-edit-tools span{color:var(--muted);font-size:13px}
 .paper-edit-tools .button[aria-pressed="true"]{background:var(--yellow);color:var(--ink);border-color:var(--ink)}
 .paper-table-layer{position:absolute;inset:0;z-index:2;pointer-events:none}
+.paper-paragraph-list{padding:10px 12px;background:var(--paper);border-bottom:1px solid var(--line)}
+.paper-paragraph-list summary{cursor:pointer;font-weight:600}
+.paper-paragraph-list[open]{max-height:200px;overflow:auto}
+.paper-paragraph-button{display:block;width:100%;margin-top:8px;padding:8px;text-align:left;white-space:pre-wrap;overflow-wrap:anywhere;background:var(--paper);border:1px solid var(--line);border-radius:var(--radius);cursor:pointer}
+.paper-paragraph-button:hover,.paper-paragraph-button:focus-visible{border-color:var(--ink);outline:2px solid var(--ink);outline-offset:1px}
+.paper-paragraph-button:disabled{opacity:.6;cursor:not-allowed}
+.paper-paragraph-marker{position:absolute;z-index:2;box-sizing:border-box;border:2px solid var(--ink);background:color-mix(in srgb,var(--yellow) 25%,transparent);pointer-events:none}
 .paper-table-cell{position:absolute;box-sizing:border-box;min-width:0;min-height:0;padding:0;background:transparent;border:1px solid var(--ink);border-radius:0;pointer-events:auto;cursor:pointer}
 .paper-table-cell:hover,.paper-table-cell:focus-visible{background:color-mix(in srgb,var(--yellow) 38%,transparent);outline:2px solid var(--ink);outline-offset:1px}
 .paper-table-cell[aria-disabled="true"]{border-style:dashed;border-color:var(--muted);cursor:help}
 .paper-table-cell[aria-disabled="true"]:focus-visible{outline-color:var(--ink)}
 #paper-table-status.error{color:var(--red-ink)}
 @media(max-width:700px){.paper-edit-tools .button{flex:1 1 0}.paper-edit-tools span{flex-basis:100%}}
+@media(max-width:700px){.paper-workspace .paper-toolbar .button{width:auto;flex:0 0 auto}.paper-toolbar{gap:8px}.paper-inline .button-row{display:flex}.paper-inline .button-row .button{width:auto;flex:1}}
+/* Font access belongs to the existing editing toolbar. */
+.paper-font-tools{display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin:12px 0 18px}
+.paper-font-tools .muted{flex:1 1 220px;font-size:13px}
+.paper-font-tools button svg{width:18px;height:18px;flex:none}
+@media(max-width:700px){.paper-font-tools .button{flex:1 1 160px}.paper-font-tools .muted{flex-basis:100%}}

@@ -7,48 +7,54 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' http://127.0.0.1:* https://falsify-cloud-api.ai-gongbu.workers.dev; object-src 'none'; base-uri 'none'; form-action 'none'">
   <title>Falsify · Paper Workbench</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' fill='%23ffcc00'/%3E%3Cpath d='M11 10h20v5H17v5h11v5H17v10h-6z' fill='%23111315'/%3E%3C/svg%3E">
-  <link rel="stylesheet" href="styles.css?v=0.2.0-alpha.15">
-  <link rel="stylesheet" href="document-red.css?v=0.2.0-alpha.15">
-  <link rel="stylesheet" href="experiment-ledger.css?v=0.2.0-alpha.15">
-  <link rel="stylesheet" href="harness-wrapper.css?v=0.2.0-alpha.15">
-  <link rel="stylesheet" href="confluence-store.css?v=0.2.0-alpha.15">
-  <link rel="stylesheet" href="image-editor.css?v=0.2.0-alpha.15">
-  <link rel="stylesheet" href="visual-workflow.css?v=0.2.0-alpha.15">
-  <link rel="stylesheet" href="paper-workspace.css?v=0.2.0-alpha.15">
-  <link rel="stylesheet" href="external-red-ui.css?v=0.2.0-alpha.15">
-  <link rel="stylesheet" href="paper-manual-records.css?v=0.2.0-alpha.15">
-  <script src="harness-core.js?v=0.2.0-alpha.15" defer></script>
-  <script src="harness-wrapper.js?v=0.2.0-alpha.15" defer></script>
-  <script src="harness-profile.js?v=0.2.0-alpha.15" defer></script>
-  <script src="local-bridge.js?v=0.2.0-alpha.15" defer></script>
-  <script src="auto-pair.js?v=0.2.0-alpha.15" defer></script>
-  <script src="review-workbench.js?v=0.2.0-alpha.15" defer></script>
-  <script src="experiment-ledger.js?v=0.2.0-alpha.15" defer></script>
-  <script src="document-import.js?v=0.2.0-alpha.15" defer></script>
-  <script src="document-red-core.js?v=0.2.0-alpha.15" defer></script>
-  <script src="paper-analysis-core.js?v=0.2.0-alpha.15" defer></script>
-  <script src="document-export.js?v=0.2.0-alpha.15" defer></script>
-  <script src="app.js?v=0.2.0-alpha.15" defer></script>
-  <script src="document-preview.js?v=0.2.0-alpha.15" defer></script>
-  <script src="image-editor-core.js?v=0.2.0-alpha.15" defer></script>
-  <script src="image-editor.js?v=0.2.0-alpha.15" defer></script>
-  <script src="pending-job.js?v=0.2.0-alpha.15" defer></script>
-  <script src="paper-edits.js?v=0.2.0-alpha.15" defer></script>
-  <script src="external-red.js?v=0.2.0-alpha.15" defer></script>
-  <script src="browser-pdf.js?v=0.2.0-alpha.15" defer></script>
-  <script src="table-pdf.js?v=0.2.0-alpha.15" defer></script>
-  <script src="paragraph-pdf.js?v=0.2.0-alpha.15" defer></script>
-  <script src="pdf-edit-pipeline.js?v=0.2.0-alpha.15" defer></script>
-  <script src="paper-workspace.js?v=0.2.0-alpha.15" defer></script>
-  <script src="external-red-ui.js?v=0.2.0-alpha.15" defer></script>
-  <script src="paper-manual-records.js?v=0.2.0-alpha.15" defer></script>
-  <script src="document-red.js?v=0.2.0-alpha.15" defer></script>
-  <script src="document-blue-core.js?v=0.2.0-alpha.15" defer></script>
-  <script src="document-blue.js?v=0.2.0-alpha.15" defer></script>
-  <script src="cloud-config.js?v=0.2.0-alpha.15" defer></script>
-  <script src="vendor/file-drop.umd.js?v=0.2.0-alpha.15" defer></script>
-  <script src="visual-workflow.js?v=0.2.0-alpha.15" defer></script>
-  <script src="confluence-store.js?v=0.2.0-alpha.15" defer></script>
+  <link rel="stylesheet" href="styles.css?v=0.2.0-alpha.22">
+  <link rel="stylesheet" href="document-red.css?v=0.2.0-alpha.22">
+  <link rel="stylesheet" href="experiment-ledger.css?v=0.2.0-alpha.22">
+  <link rel="stylesheet" href="harness-wrapper.css?v=0.2.0-alpha.22">
+  <link rel="stylesheet" href="confluence-store.css?v=0.2.0-alpha.22">
+  <link rel="stylesheet" href="image-editor.css?v=0.2.0-alpha.22">
+  <link rel="stylesheet" href="visual-workflow.css?v=0.2.0-alpha.22">
+  <link rel="stylesheet" href="paper-workspace.css?v=0.2.0-alpha.22">
+  <link rel="stylesheet" href="external-red-ui.css?v=0.2.0-alpha.22">
+  <link rel="stylesheet" href="paper-manual-records.css?v=0.2.0-alpha.22">
+  <script src="harness-core.js?v=0.2.0-alpha.22" defer></script>
+  <script src="harness-wrapper.js?v=0.2.0-alpha.22" defer></script>
+  <script src="harness-profile.js?v=0.2.0-alpha.22" defer></script>
+  <script src="local-bridge.js?v=0.2.0-alpha.22" defer></script>
+  <script src="auto-pair.js?v=0.2.0-alpha.22" defer></script>
+  <script src="review-workbench.js?v=0.2.0-alpha.22" defer></script>
+  <script src="harness-comparison.js?v=0.2.0-alpha.22" defer></script>
+  <script src="experiment-ledger.js?v=0.2.0-alpha.22" defer></script>
+  <script src="document-import.js?v=0.2.0-alpha.22" defer></script>
+  <script src="document-red-core.js?v=0.2.0-alpha.22" defer></script>
+  <script src="paper-analysis-core.js?v=0.2.0-alpha.22" defer></script>
+  <script src="document-export.js?v=0.2.0-alpha.22" defer></script>
+  <script src="app.js?v=0.2.0-alpha.22" defer></script>
+  <script src="document-preview.js?v=0.2.0-alpha.22" defer></script>
+  <script src="image-editor-core.js?v=0.2.0-alpha.22" defer></script>
+  <script src="image-editor.js?v=0.2.0-alpha.22" defer></script>
+  <script type="module" src="paper-recompose-entry.mjs?v=0.2.0-alpha.22"></script>
+  <script src="attempt-ledger.js?v=0.2.0-alpha.22" defer></script>
+  <script src="pending-job.js?v=0.2.0-alpha.22" defer></script>
+  <script src="paper-edits.js?v=0.2.0-alpha.22" defer></script>
+  <script src="blind-pdf.js?v=0.2.0-alpha.22" defer></script>
+  <script src="external-red.js?v=0.2.0-alpha.22" defer></script>
+  <script src="browser-pdf.js?v=0.2.0-alpha.22" defer></script>
+  <script src="table-pdf.js?v=0.2.0-alpha.22" defer></script>
+  <script src="paragraph-pdf.js?v=0.2.0-alpha.22" defer></script>
+  <script src="pdf-edit-pipeline.js?v=0.2.0-alpha.22" defer></script>
+  <script src="paper-font-service.js?v=0.2.0-alpha.22" defer></script>
+  <script src="paper-workspace.js?v=0.2.0-alpha.22" defer></script>
+  <script src="external-red-ui.js?v=0.2.0-alpha.22" defer></script>
+  <script src="paper-manual-records.js?v=0.2.0-alpha.22" defer></script>
+  <script src="document-red.js?v=0.2.0-alpha.22" defer></script>
+  <script src="document-blue-core.js?v=0.2.0-alpha.22" defer></script>
+  <script src="blue-visual-input.js?v=0.2.0-alpha.22" defer></script>
+  <script src="document-blue.js?v=0.2.0-alpha.22" defer></script>
+  <script src="cloud-config.js?v=0.2.0-alpha.22" defer></script>
+  <script src="vendor/file-drop.umd.js?v=0.2.0-alpha.22" defer></script>
+  <script src="visual-workflow.js?v=0.2.0-alpha.22" defer></script>
+  <script src="confluence-store.js?v=0.2.0-alpha.22" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main">작업 영역으로 건너뛰기</a>
@@ -97,18 +103,18 @@
           <div class="step-head"><span class="step-code" aria-hidden="true">L</span><div><h2 id="bridge-title">로컬 실행 연결</h2><p id="bridge-status" role="status" aria-live="polite">로컬 실행 상태 확인 중</p></div></div>
           <div id="bridge-pair">
             <ol class="bridge-steps">
-              <li><strong>처음 한 번 · 연결 앱 설치 (Windows)</strong><span><a class="text-link" href="https://github.com/Shinick-Han/falsify-workbench/archive/refs/heads/main.zip" rel="noopener noreferrer">앱 ZIP 다운로드</a> → 압축 풀기 → 그 폴더의 터미널에서 <code id="bridge-install">powershell -NoProfile -ExecutionPolicy Bypass -File .\install-connection.ps1</code> 한 번 실행. 현재 사용자(HKCU)에만 falsify:// 연결을 등록하며 관리자 권한이 필요 없습니다. 이 페이지는 아무것도 자동 설치·실행하지 않습니다.</span></li>
+              <li><strong id="bridge-install-title">처음 한 번 · 연결 앱 설치 (Windows)</strong><span><a class="text-link" href="https://github.com/Shinick-Han/falsify-workbench/archive/refs/heads/main.zip" rel="noopener noreferrer">앱 ZIP 다운로드</a> → 압축 풀기 → 그 폴더의 터미널에서 <code id="bridge-install">powershell -NoProfile -ExecutionPolicy Bypass -File .\install-connection.ps1</code> 한 번 실행. <span id="bridge-install-note">현재 사용자(HKCU)에만 falsify:// 연결을 등록하며 관리자 권한이 필요 없습니다.</span> 이 페이지는 아무것도 자동 설치·실행하지 않습니다.</span></li>
               <li><strong>터미널 열기</strong><span>「연결 · 터미널 열기」를 누르고 브라우저가 물으면 열기를 허용합니다. 내 PC 터미널에 companion이 열립니다.</span></li>
               <li><strong>토큰으로 연결</strong><span>터미널에 표시된 페어링 토큰을 붙여넣고 「토큰으로 연결」을 누릅니다. 인증된 capabilities만 확인하며 실행·동의는 자동으로 하지 않습니다.</span></li>
             </ol>
             <div class="button-row"><button class="button primary" type="button" id="bridge-launch" hidden>연결 · 터미널 열기</button></div>
-            <p id="bridge-other-os" class="muted" hidden>터미널 열기는 Windows 연결 앱 전용입니다. 다른 OS는 아래 「수동 실행 · 포트 변경」의 명령으로 companion을 실행한 뒤 토큰을 붙여넣으세요.</p>
+            <p id="bridge-other-os" class="muted" hidden>이 OS에서는 아래 「수동 실행 · 포트 변경」의 명령으로 companion을 실행한 뒤 토큰을 붙여넣으세요.</p>
             <p id="bridge-launch-status" class="form-feedback" role="status" aria-live="polite"></p>
             <div class="bridge-token-row"><label for="bridge-token">페어링 토큰<input id="bridge-token" type="password" autocomplete="off" spellcheck="false" maxlength="512"></label><div class="button-row"><button class="button secondary" type="button" id="bridge-connect">토큰으로 연결</button><button class="text-button" type="button" id="bridge-disconnect" hidden>연결 해제</button></div></div>
             <p id="bridge-feedback" class="form-feedback" role="alert"></p>
             <details class="red-help"><summary>수동 실행 · 포트 변경 · 연결 문제</summary>
               <div class="red-settings"><label for="bridge-port">로컬 포트 (주소는 http://127.0.0.1 고정)<input id="bridge-port" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="5" value="7816" autocomplete="off" spellcheck="false"></label></div>
-              <p>터미널 열기와 수동 실행 모두 이 포트를 씁니다. 압축을 푼 폴더에서 직접 실행하려면 의존성을 프로젝트 폴더 안에 설치하는 launcher를 쓰세요: <code id="bridge-launcher">powershell -NoProfile -ExecutionPolicy Bypass -File .\start-companion.ps1</code> 의존성을 직접 설치한 뒤에는 <code id="bridge-command">python app/local/server.py --web-origin https://shinick-han.github.io</code>도 됩니다(새 PC에서 바로 실행하면 실패합니다). 포트를 바꾸면 같은 <code>-Port</code>/<code>--port</code>가 붙습니다. <a class="text-link" href="https://github.com/Shinick-Han/falsify-workbench/blob/main/docs/local-companion.md" target="_blank" rel="noopener noreferrer">로컬 companion 설치·실행 안내</a></p>
+              <p>터미널 열기와 수동 실행 모두 이 포트를 씁니다. 압축을 푼 폴더에서 직접 실행하려면 설치를 마친 뒤 다음 launcher를 쓰세요: <code id="bridge-launcher">powershell -NoProfile -ExecutionPolicy Bypass -File .\start-companion.ps1</code> 의존성을 직접 설치한 뒤에는 <code id="bridge-command">python app/local/server.py --web-origin https://shinick-han.github.io</code>도 됩니다(새 PC에서 바로 실행하면 실패합니다). 포트를 바꾸면 아래 명령에도 반영됩니다. <a class="text-link" href="https://github.com/Shinick-Han/falsify-workbench/blob/main/docs/local-companion.md" target="_blank" rel="noopener noreferrer">로컬 companion 설치·실행 안내</a></p>
               <p class="muted">「연결 · 터미널 열기」를 눌러도 아무 창이 뜨지 않으면 연결 앱이 설치되지 않았거나 브라우저가 실행을 막은 것입니다. 브라우저는 둘을 구분해 알려주지 않으므로 1단계 설치를 다시 하거나 위 명령으로 직접 실행하세요.</p>
               <p class="muted">기본 실행기는 이 PC에 로그인된 Codex CLI이고, CLI 선택을 지원하는 companion에서는 RED·BLUE마다 Codex/Claude CLI·모델·effort를 고를 수 있습니다. 다른 실행기는 신뢰한 stdio wrapper를 Harness 계약으로 등록해 씁니다. API 키는 요청하지 않습니다. 토큰은 이 탭의 메모리에만 있고 저장·기록·내보내기에 포함되지 않으며, 새로고침하면 다시 붙여넣어야 합니다.</p>
               <p class="muted">브라우저가 로컬 네트워크 접근 권한을 물으면 허용하세요. 권한 거부·CORS 거부·서버 미실행은 브라우저가 구분해 알려주지 않습니다. 127.0.0.1 HTTP 연결을 막는 브라우저는 <a class="text-link" data-bridge-local href="http://127.0.0.1:7816/" target="_blank" rel="noopener noreferrer">로컬 작업대 열기</a> 또는 수동 JSON 교환을 쓰세요. 결과 기록은 이 브라우저의 이 origin 저장소에만 있으며 클라우드 DB가 아닙니다.</p></details>
@@ -138,45 +144,51 @@
                 <span id="paper-mode-help">문단을 누르거나 글자를 드래그하세요.</span>
               </div>
               <p id="paper-table-status" class="form-feedback" role="status" aria-live="polite"></p>
+              <div class="paper-font-tools" role="group" aria-label="편집 글꼴">
+                <button type="button" class="button secondary" id="paper-font-local"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7V4h16v3M9 20h6M12 4v16"/></svg>내 글꼴 사용</button>
+                <button type="button" class="button secondary" id="paper-font-add">글꼴 파일 추가</button>
+                <input id="paper-font-files" type="file" accept=".ttf,.otf" multiple hidden aria-label="글꼴 파일 선택">
+                <span id="paper-font-status" class="muted" role="status" aria-live="polite">원본 글꼴 우선 · 부족한 문자는 공개 글꼴로 보충</span>
+              </div>
               <div class="paper-compare">
                 <section class="paper-pane" aria-labelledby="paper-before-title">
-                  <h4 id="paper-before-title">Before · 원본</h4>
+                  <h4 id="paper-before-title">원본 · 눌러서 편집</h4>
                   <div id="paper-before-stage" class="paper-stage" tabindex="0" role="group" aria-label="원본 PDF 한 쪽"></div>
                   <p id="paper-before-status" class="form-feedback" role="status" aria-live="polite"></p>
                 </section>
+                <section id="paper-inline" class="paper-inline" hidden aria-label="선택한 구간 편집">
+                  <p id="paper-inline-meta" class="muted" role="status" aria-live="polite"></p>
+                  <details class="paper-inline-source"><summary>원문 보기</summary><p id="paper-inline-before" class="paper-inline-before"></p></details>
+                  <label for="paper-inline-after">수정할 내용<textarea id="paper-inline-after" rows="5" maxlength="4000" spellcheck="false"></textarea></label>
+                  <div class="button-row"><button type="button" class="button primary" id="paper-inline-apply">적용</button><button type="button" class="button secondary" id="paper-inline-cancel">닫기</button></div>
+                </section>
                 <section class="paper-pane" aria-labelledby="paper-after-title">
-                  <h4 id="paper-after-title">After · 생성본</h4>
+                  <h4 id="paper-after-title">수정본 미리보기</h4>
                   <p id="paper-after-label" class="paper-after-label">아직 생성본이 없습니다</p>
                   <div id="paper-after-stage" class="paper-stage" role="group" aria-label="생성 PDF 한 쪽"></div>
                   <p id="paper-after-status" class="form-feedback" role="status" aria-live="polite"></p>
                 </section>
-              </div>
-              <div id="paper-inline" class="paper-inline" hidden>
-                <p id="paper-inline-meta" class="muted"></p>
-                <p class="paper-inline-label">Before</p>
-                <p id="paper-inline-before" class="paper-inline-before"></p>
-                <label for="paper-inline-after">After<textarea id="paper-inline-after" rows="3" maxlength="4000" spellcheck="false"></textarea></label>
-                <div class="button-row"><button type="button" class="button primary" id="paper-inline-apply">편집 반영</button><button type="button" class="button secondary" id="paper-inline-cancel">선택 취소</button></div>
               </div>
               <p id="paper-core-note" class="muted"></p>
               <p id="paper-edit-status" class="form-feedback" role="status" aria-live="polite"></p>
               <div class="button-row"><button type="button" class="button secondary" id="paper-undo" disabled>실행 취소</button><button type="button" class="button secondary" id="paper-redo" disabled>다시 실행</button></div>
               <ul id="paper-edits" class="paper-edits" aria-label="편집 목록"></ul>
               <p id="paper-export-note" class="muted"></p>
-              <div class="button-row"><button type="button" class="button primary" id="paper-generate" disabled>현재 편집으로 생성</button></div>
+              <label class="paper-recompose-option"><input type="checkbox" id="paper-recompose"> 전체 논문 재조판</label>
+              <div class="button-row"><button type="button" class="button primary" id="paper-generate" disabled>수정본 미리보기 만들기</button><button type="button" class="button secondary" id="paper-generate-cancel" hidden>취소</button></div>
               <p id="paper-generate-status" class="form-feedback" role="status" aria-live="polite"></p>
-              <code id="paper-output-hash" class="paper-output-hash"></code>
+              <details class="red-help paper-file-details"><summary>파일 정보</summary><code id="paper-output-hash" class="paper-output-hash"></code><p id="paper-output-notes" class="muted"></p></details>
               <div class="button-row" aria-label="다운로드"><button type="button" class="button secondary" id="paper-current-download" disabled>현재 생성본 다운로드</button></div>
               <div class="paper-share">
-                <div class="button-row"><button type="button" class="button secondary" id="paper-team-share" disabled>팀에 공개</button><button type="button" class="button secondary" id="paper-blue-handoff" disabled>이 생성본만 BLUE로</button></div>
-                <p id="paper-team-note" class="muted">다운로드와 별개입니다. 팀 공개는 동의 화면에서만 이어지며, 비공개 초안은 올리지 않습니다. BLUE에는 생성 PDF만 넘깁니다.</p>
+                <div class="button-row"><button type="button" class="button secondary" id="paper-team-share" disabled>팀에 공개</button><button type="button" class="button secondary" id="paper-blue-handoff" disabled>이 변경본을 BLUE에서 검토</button></div>
+                <p id="paper-team-note" class="muted">팀 공개 전에 공유 내용을 확인합니다. BLUE에는 생성 PDF만 전달합니다.</p>
               </div>
-              <div class="paper-draft">
+              <details class="paper-draft red-help"><summary>초안 저장 · 복구</summary>
                 <label class="check-row"><input type="checkbox" id="paper-draft-opt"><span>이 브라우저에 12시간 초안 보관<small>직접 켠 뒤에만 저장합니다. 편집 기록만 남고 원본 PDF와 토큰은 넣지 않습니다.</small></span></label>
                 <label class="check-row"><input type="checkbox" id="paper-draft-source"><span>원본 PDF도 이 브라우저에 12시간 보관<small>편집 초안과 별개의 동의입니다. 이 브라우저의 Blob 저장소에만 두고, 서버로 올리지 않습니다.</small></span></label>
                 <div class="button-row"><button type="button" class="button secondary" id="paper-draft-save" disabled>초안 저장</button><button type="button" class="button secondary" id="paper-draft-restore" hidden>초안 복구</button><button type="button" class="button secondary" id="paper-draft-delete" disabled>초안 삭제</button></div>
                 <p id="paper-draft-status" class="form-feedback" role="status" aria-live="polite"></p>
-              </div>
+              </details>
               <section id="paper-proposals" class="paper-proposals" hidden aria-labelledby="paper-proposals-title">
                 <h4 id="paper-proposals-title">받아들일 제안</h4>
                 <p class="muted">자동으로 적용하지 않습니다. 원문에서 정확히 한 곳인 제안만 받아들일 수 있습니다.</p>
@@ -192,7 +204,7 @@
               <label for="import-text">추출 텍스트<textarea id="import-text" rows="9" readonly spellcheck="false"></textarea></label>
               <p class="muted">미리보기 선택은 RED 입력 범위를 줄이지 않습니다. 기록하지 않은 입력은 새로고침하면 지워집니다.</p>
             </section>
-            <details class="red-help"><summary>도움말 · AMAS 원문 PDF로 실험하기</summary><ol><li><a class="text-link" href="https://journals.plos.org/plosone/article/file?id=10.1371/journal.pone.0352174&amp;type=printable" target="_blank" rel="noopener noreferrer">PLOS 원문 PDF 다운로드 (22쪽)</a> 후 위 파일 입력으로 가져오세요.</li><li>선택 harness로 전체 RED 검토를 시작하고 후보를 선택하세요. Before/After를 읽고 After를 직접 수정할 수 있습니다.</li><li>실험용 사본과 변경 계획 JSON을 저장하세요. 보존 검사가 실패하면 다운로드가 차단됩니다.</li><li>BLUE에는 수정 파일만 입력하세요. 변경 계획은 검수에서만 대조합니다.</li></ol><p class="muted">스캔 파일은 먼저 OCR, 구형 DOC·HWP·RTF는 PDF/DOCX/TXT로 변환하세요.</p></details>
+            <details class="red-help"><summary>도움말 · AMAS 원문 PDF로 실험하기</summary><ol><li><a class="text-link" href="https://journals.plos.org/plosone/article/file?id=10.1371/journal.pone.0352174&amp;type=printable" target="_blank" rel="noopener noreferrer">PLOS 원문 PDF 다운로드 (22쪽)</a> 후 위 파일 입력으로 가져오세요.</li><li>선택 harness로 전체 RED 검토를 시작하고 후보를 선택하세요. Before/After를 읽고 After를 직접 수정할 수 있습니다.</li><li>실험용 사본과 변경 계획 JSON을 저장하세요. 생성본과 검증 결과를 미리 본 뒤 PDF를 저장하세요.</li><li>BLUE에는 수정 파일만 입력하세요. 변경 계획은 검수에서만 대조합니다.</li></ol><p class="muted">스캔 파일은 먼저 OCR, 구형 DOC·HWP·RTF는 PDF/DOCX/TXT로 변환하세요.</p></details>
           </section>
 
           <section class="role-step document-red" aria-labelledby="red-execute-title">
@@ -219,7 +231,7 @@
               </details>
               <div class="red-settings"><label>공격 단계<select id="red-level"><option value="1">L1 · 명시적 모순</option><option value="2">L2 · 필요한 조건 누락</option><option value="3">L3 · 근거 없는 해석</option></select></label></div>
               <details class="red-help advanced"><summary>고급 설정 · 최대 모델 호출</summary><div class="red-settings"><label>최대 모델 호출 (1–32)<input id="red-budget" type="number" min="1" max="32" value="8"></label></div></details>
-              <label class="check-row"><input type="checkbox" id="red-consent"><span>전체 추출 텍스트를 선택 harness에 전송합니다.<small>원본 파일은 변경하지 않습니다. 사용자 코드/외부 서버는 자체 도구·격리를 관리합니다.</small></span></label>
+              <label class="check-row"><input type="checkbox" id="red-consent"><span>추출한 논문 전체를 선택한 도구에 보내 RED 검토를 실행합니다.<small>사용자 코드·외부 서버는 해당 도구의 실행 환경을 사용합니다.</small></span></label>
               <p class="storage-note">유효한 결과와 추출 논문 텍스트는 이 브라우저에 자동 저장됩니다. 클라우드에 공유되지 않습니다.</p>
               <div class="button-row"><button class="button primary" type="button" id="red-start" disabled>선택 harness로 전체 검토</button><button class="button secondary" type="button" id="red-cancel" hidden>검토 취소</button></div>
               <p id="red-progress" class="form-feedback" role="status" aria-live="polite"></p>
@@ -234,7 +246,7 @@
             <div class="step-head"><span class="step-code" aria-hidden="true">3</span><div><h2 id="red-result-title">결과 · 후보 선택과 사본</h2></div></div>
             <p id="red-empty" class="muted">아직 후보가 없습니다. 전체 검토를 시작하거나 수동 응답을 가져오세요.</p>
             <div id="red-candidates"></div>
-            <div class="red-export" id="red-export" hidden><p id="red-selection-summary"></p><p id="red-export-mode" class="red-export-mode" hidden></p><label class="check-row"><input type="checkbox" id="red-export-consent"><span>선택한 변경은 의도적 결함이 포함된 실험용 사본에만 반영합니다. 실제 논문·출판물로 제출하지 않습니다.</span></label><div class="button-row"><button class="button primary" type="button" id="red-download" disabled>보존 검사 후 완성본 다운로드</button><button class="button secondary" type="button" id="red-plan">변경 계획 JSON 저장</button></div><div id="red-export-status" class="form-feedback" role="status" aria-live="polite"></div><section class="red-preview" id="red-preview" aria-labelledby="red-preview-title" hidden><h3 id="red-preview-title">다운로드한 사본 미리보기</h3><p class="muted">방금 다운로드한 파일의 SHA-256을 다시 확인한 뒤에만 그 바이트를 이 브라우저에서 쪽 단위로 그립니다. 화면 확인용이며 시각 품질·독립 검사·과학적 타당성을 증명하지 않습니다.</p><code class="red-preview-hash" id="red-preview-hash"></code><div class="button-row"><button class="button secondary" type="button" id="red-preview-prev" disabled>이전 쪽</button><span class="red-preview-page" id="red-preview-page"></span><button class="button secondary" type="button" id="red-preview-next" disabled>다음 쪽</button><button class="button secondary" type="button" id="red-preview-download" disabled>같은 사본 다시 다운로드</button></div><p id="red-preview-status" class="form-feedback" role="status" aria-live="polite"></p><div class="red-preview-stage" id="red-preview-stage"></div></section><p class="muted">후보 선택은 도메인 검수·팀 승인·gold 판정이 아닙니다. 변경 근거는 별도 계획 JSON에만 기록합니다.</p></div>
+            <div class="red-export" id="red-export" hidden><p id="red-selection-summary"></p><details class="red-help"><summary>편집 엔진과 검사 범위</summary><p id="red-export-mode" class="red-export-mode" hidden></p></details><div class="button-row"><button class="button primary" type="button" id="red-download" disabled>수정본 다운로드</button><button class="button secondary" type="button" id="red-plan">변경 계획 JSON 저장</button></div><div id="red-export-status" class="form-feedback" role="status" aria-live="polite"></div><section class="red-preview" id="red-preview" aria-labelledby="red-preview-title" hidden><h3 id="red-preview-title">다운로드한 사본 미리보기</h3><p class="muted">다운로드한 파일의 해시를 확인한 뒤 쪽별로 표시합니다. 시각 품질과 과학적 타당성은 별도로 검수하세요.</p><code class="red-preview-hash" id="red-preview-hash"></code><div class="button-row"><button class="button secondary" type="button" id="red-preview-prev" disabled>이전 쪽</button><span class="red-preview-page" id="red-preview-page"></span><button class="button secondary" type="button" id="red-preview-next" disabled>다음 쪽</button><button class="button secondary" type="button" id="red-preview-download" disabled>같은 사본 다시 다운로드</button></div><p id="red-preview-status" class="form-feedback" role="status" aria-live="polite"></p><div class="red-preview-stage" id="red-preview-stage"></div></section><p class="muted">변경 근거는 별도 계획 JSON에 기록합니다.</p></div>
           </section>
         </section>
 
@@ -244,12 +256,17 @@
               <div class="step-head"><span class="step-code" aria-hidden="true">1</span><div><h2 id="blue-title">입력 · BLUE 논문 파일</h2><p>RED와 독립적으로 수정 사본, 원본 또는 대조군 파일을 직접 고르세요. RED 계획·검수 기록은 보내지 않습니다.</p></div></div>
               <label for="doc-blue-file">BLUE 검토 파일<input id="doc-blue-file" type="file" accept=".pdf,.txt,.md,.docx,.odt,.html,.htm"></label>
               <p id="doc-blue-summary">아직 파일을 입력하지 않았습니다.</p>
+              <div id="doc-blue-handoff-ready" class="blue-handoff-ready" hidden>
+                <p id="doc-blue-handoff-state" aria-live="polite"></p>
+                <button id="doc-blue-next" class="button primary" type="button">다음</button>
+              </div>
+              <details id="doc-blue-previous-failure" class="red-help" hidden><summary>이전 실패 기록</summary><div class="button-row"><button id="doc-blue-previous-diagnostic" class="button secondary" type="button">진단 정보 저장</button><button id="doc-blue-previous-request" class="button secondary" type="button">원래 요청 저장</button></div></details>
             </section>
             <section class="role-step document-red" aria-labelledby="blue-execute-title">
               <div class="step-head"><span class="step-code" aria-hidden="true">2</span><div><h2 id="blue-execute-title">실행 · BLUE harness</h2></div></div>
               <p id="doc-blue-connection" class="muted"></p>
               <details class="red-help advanced"><summary>고급 설정 · 최대 모델 호출</summary><div class="red-settings"><label>최대 모델 호출 (1–32)<input id="doc-blue-budget" type="number" min="1" max="32" value="8"></label></div></details>
-              <label class="check-row"><input id="doc-blue-consent" type="checkbox"><span>추출 텍스트를 선택 harness에 전송해 독립 BLUE 검토를 실행합니다.<small>문서에 제목·저자·출처가 남을 수 있습니다. 사용자 코드/서버의 내부 도구·격리는 보장하지 않습니다.</small></span></label>
+              <label class="check-row"><input id="doc-blue-consent" type="checkbox"><span>추출한 논문을 선택한 도구에 보내 독립 BLUE 검토를 실행합니다.<small>제목·저자·출처도 포함될 수 있습니다. 사용자 코드·외부 서버는 해당 도구의 실행 환경을 사용합니다.</small></span></label>
               <p class="storage-note">유효한 결과와 추출 논문 텍스트는 이 브라우저에 자동 저장됩니다. 클라우드에 공유되지 않습니다.</p>
               <div class="button-row"><button id="doc-blue-start" class="button primary" type="button" disabled>BLUE 독립 검토 시작</button><button id="doc-blue-cancel" class="button secondary" type="button" hidden>취소</button><button id="doc-blue-clear" class="text-button" type="button">BLUE 입력 초기화</button></div>
               <p id="doc-blue-progress" role="status" aria-live="polite"></p>

@@ -1,6 +1,6 @@
 # BLUE Evidence v0.3.4 (experimental) on your own PC
 
-Experimental bundle only. It does not change the 0.3.3 review strategy, requested model, call budget, schema limits or evidence checks. It does not register a release or deploy a service. Live evaluation is out of scope for this package.
+The v0.3.4 label identifies this experimental bundle, not a verified live model version. Existing profiles and their hashes remain unchanged. Experimental bundle only. It does not change the 0.3.3 review strategy, requested model, call budget, schema limits or evidence checks. It does not register a release or deploy a service. Live evaluation is out of scope for this package.
 
 ## Setup command
 

@@ -213,6 +213,7 @@ check 'no linux desktop from darwin install' "$([ ! -e "$test_home_dir/.local/sh
 plist=$app/Contents/Info.plist
 copied=$app/Contents/Resources/Scripts/main.applescript
 check 'applescript opens locations with quoted paths' "$(grep -q 'on open location' "$root/FalsifyConnect.applescript" && grep -q 'quoted form of' "$root/FalsifyConnect.applescript" && ! grep -q "$root" "$root/FalsifyConnect.applescript" && ! grep -q "$root" "$copied" && echo 1 || echo 0)"
+check 'applescript reads the checkout path as UTF-8' "$(grep -q 'as «class utf8»' "$root/FalsifyConnect.applescript" && echo 1 || echo 0)"
 check 'bundle claims falsify for intel and arm' "$(
   grep -q '<key>CFBundleURLTypes</key>' "$plist" &&
   grep -q '<string>Viewer</string>' "$plist" &&
@@ -283,6 +284,11 @@ mkdir -p "$other_home"
 other_app=$(falsify_darwin_app "$other_home")
 darwin_install "$other_home" "$root/install-connection.sh" >/dev/null
 printf '/other/open-connection.sh\n' > "$other_app/Contents/Resources/falsify-script-path.txt"
+if darwin_install "$other_home" "$root/install-connection.sh" >"$work/other-install.out" 2>&1; then
+  check 'install refuses a different checkout' 0
+else
+  check 'install refuses a different checkout' "$(grep -q 'different checkout' "$work/other-install.out" && [ "$(sed -n '1p' "$other_app/Contents/Resources/falsify-script-path.txt")" = /other/open-connection.sh ] && echo 1 || echo 0)"
+fi
 before=$(grep -c -F "$other_app" "$db" || true)
 if darwin_install "$other_home" "$root/uninstall-connection.sh" >"$work/other-uninstall.out" 2>&1; then
   check 'uninstall refuses a different checkout' 0

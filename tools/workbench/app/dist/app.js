@@ -22,8 +22,9 @@
     if(view==='results')return {gate:'A1',title:'기록을 저장하고 비교하세요',detail:'내 브라우저 기록과 팀 서랍의 기록을 확인합니다.',label:'팀 기록 열기',action:()=>$('#confluence-results-load')?.click()};
     if(view==='agents')return {gate:'C1',title:'도구를 골라 사용하세요',detail:'내 도구를 사용하거나 팀 서랍에서 가져옵니다.',label:'내 도구 보기',action:()=>$('#harness-library')?.scrollIntoView({block:'start'})};
     if(view==='blue'){
-      if(blueProgress?.busy)return {gate:'B1',title:'BLUE 검토 중입니다',detail:blueProgress.name,label:'진행 상태 보기',action:()=>focusTarget($('#doc-blue-progress'))};
+      if(blueProgress?.busy)return {gate:'B1',title:blueProgress.phase==='import'?'변경본을 읽고 있습니다':'BLUE 검토 중입니다',detail:blueProgress.name,label:'진행 상태 보기',action:()=>focusTarget($('#doc-blue-progress'))};
       if(blueProgress?.hasResult)return {gate:'B1',title:'BLUE 결과를 확인하세요',detail:blueProgress.name,label:'결과 보기',action:()=>$('#doc-blue-findings').closest('.role-step').scrollIntoView({block:'start'})};
+      if(blueProgress?.handoff&&blueProgress.name&&$('#doc-blue-next'))return {gate:'B1',title:$('#doc-blue-handoff-state').textContent,detail:blueProgress.name,label:$('#doc-blue-next').textContent,action:()=>$('#doc-blue-next').click()};
       if(blueProgress?.name)return {gate:'B1',title:'논문을 검토할 준비가 됐습니다',detail:blueProgress.name,label:'실행으로',action:()=>$('#doc-blue-start').closest('.role-step').scrollIntoView({block:'start'})};
       return {gate:'B1',title:'BLUE 검토 파일을 입력하세요',detail:'검토할 논문을 직접 고르세요.',label:'BLUE 파일 입력',action:()=>focusTarget($('#doc-blue-file'))};
     }
@@ -95,7 +96,7 @@
       const result=await FalsifyImport.extract(file,{signal:importController.signal,onProgress:message=>{if(epoch===importEpoch)$('#import-status').textContent=message;}});
       if(epoch!==importEpoch)return;showImport(result);
       document.dispatchEvent(new CustomEvent('falsify:document',{detail:{file,result}}));
-      $('#import-status').textContent='추출 완료. 2단계에서 전체 텍스트로 RED를 실행합니다.';
+      $('#import-status').textContent='논문을 열었습니다. 아래 원문에서 편집할 수 있습니다.';
     }catch(error){if(epoch===importEpoch){$('#paper-file').value='';importedFile=null;$('#import-status').classList.add('error');$('#import-status').textContent='파일 입력 실패: '+error.message+' 다른 파일을 선택하세요.';}}
     finally{if(epoch===importEpoch){importController=null;$('#import-cancel').hidden=true;}}
   });

@@ -89,6 +89,7 @@
     prepare: function (request) {
       if (!current) return Promise.reject(new Error('FalsifyBrowserPdf 로더는 script URL이 필요합니다.'));
       var signal = request && request.signal;
+      var fontSnapshot = request && request.fontSnapshot ? structuredClone(request.fontSnapshot) : undefined;
       if (signal && signal.aborted) return Promise.reject(abortedError());
       var id = nextId++;
       return new Promise(function (resolve, reject) {
@@ -134,6 +135,7 @@
                   name: request.file && request.file.name || 'document.pdf',
                   type: request.file && request.file.type || 'application/pdf',
                   fileHash: request.fileHash || '',
+                  fontSnapshot: fontSnapshot,
                   edits: request.edits,
                   bytes: buffer,
                 }, [buffer]);

@@ -1,9 +1,11 @@
 {
   "name": "falsify-paper-workbench",
-  "version": "0.2.0-alpha.15",
+  "version": "0.2.0-alpha.22",
   "license": "AGPL-3.0-only",
   "private": true,
   "scripts": {
+    "build:fonts": "node scripts/build-paper-fonts.mjs",
+    "build:blue-visual": "node scripts/build-blue-visual.mjs",
     "build:import": "node scripts/build-import.mjs",
     "build:preview": "node scripts/build-preview.mjs",
     "build:browser-pdf": "node scripts/build-browser-pdf.mjs",

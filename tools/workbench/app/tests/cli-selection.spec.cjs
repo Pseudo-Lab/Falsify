@@ -49,7 +49,7 @@ test('terminal launch: never on load, explicit click opens only the URI, locks a
   bridge.busy('red',true);assert.equal(bridge.launch('7817',u=>opened.push(u)).ok,false);bridge.busy('red',false);bridge.disconnect();
   bridge.busy('blue',true);assert.equal(bridge.launch('7817',u=>opened.push(u)).ok,false,'frozen while busy');bridge.busy('blue',false);assert.equal(opened.length,1);
   const local=L.create({fetch:()=>Promise.reject(new TypeError('x')),location:{hostname:'127.0.0.1',port:'7816'}});await local.ready;assert.equal(local.launch('7816',u=>opened.push(u)).ok,false);assert.equal(opened.length,1);
-  const other=panelDom();const otherBridge=bridgeWith().bridge;L.mount(otherBridge,other,{platform:'macOS',open:u=>opened.push(u)});assert.equal(other.els['bridge-launch'].hidden,false);assert.equal(other.els['bridge-other-os'].hidden,true);assert.match(other.els['bridge-install'].textContent,/^\.\/install-connection\.sh$/);assert.match(other.els['bridge-command'].textContent,/python3 -m venv/);otherBridge.disconnect();other.fire('falsify:local-bridge',otherBridge.state());assert.equal(other.els['bridge-launch'].hidden,false,'POSIX handler stays available after disconnect');});
+  const other=panelDom();const otherBridge=bridgeWith().bridge;L.mount(otherBridge,other,{platform:'macOS',open:u=>opened.push(u)});assert.equal(other.els['bridge-launch'].hidden,false);assert.equal(other.els['bridge-other-os'].hidden,true);assert.equal(other.els['bridge-install'].textContent,'python3 -m venv .venv && .venv/bin/python -m pip install -r app/local/requirements.txt && ./install-connection.sh');assert.match(other.els['bridge-command'].textContent,/python3 -m venv/);otherBridge.disconnect();other.fire('falsify:local-bridge',otherBridge.state());assert.equal(other.els['bridge-launch'].hidden,false,'POSIX handler stays available after disconnect');});
 
 test('capabilities: cliSelection catalogue is sanitized; old brokers report no CLI selection',async()=>{let h=bridgeWith([NEW_CAP]);await h.bridge.pair(TOKEN,'7816');const cap=h.bridge.capabilities();
   assert.equal(cap.cliSelection,true);assert.deepEqual(cap.cliAgents.map(a=>a.id),['codex','claude']);assert.deepEqual(cap.cliAgents[0].models,['gpt-6.1-sol','gpt-6-astra']);assert.ok(Object.isFrozen(cap.cliAgents[0].models));
@@ -152,6 +152,20 @@ test('recording a selection registers a new version without editing old ones and
   assert.equal(saved.harnesses.length,3,'two built-ins plus one derived version');
   const reloaded=await live(null,[['falsify.experiment-ledger.v1',JSON.stringify(saved)]]);assert.equal(reloaded.get('ledger-status').textContent,'','reload validates without recovery');
   const forged={...request,harness:{...request.harness,instructions:'unregistered'}};await assert.rejects(w.lab.record('blue',doc,forged,{schema:'falsify.document-blue.v1',revision:'r1',sourceHash,status:'refusal',findings:[]},'manual-unverified'),/등록되지 않은/);});
+test('library cleanup preserves immutable history, keeps chosen roles across reload, and restores',async()=>{
+  const old=H.builtin('blue'),latest={...old,id:'blue-new',version:'0.3.5',name:'최신 BLUE'},hash=await H.hash(latest),oldHash=await H.hash(old);
+  const w=await live(null);w.get('harness-editor').value=JSON.stringify(latest);w.get('harness-register').dispatchEvent(new Event('click'));await flush();
+  const source='synthetic paper',sourceHash=await require('node:crypto').webcrypto.subtle.digest('SHA-256',new TextEncoder().encode(source)).then(x=>Buffer.from(x).toString('hex'));
+  const doc={revision:'history',fileHash:'a'.repeat(64),sourceHash,segments:[{id:'s0',label:'p.1',text:source}]},request=await w.lab.bind('blue',{maxCalls:8});
+  await w.lab.record('blue',doc,request,{schema:'falsify.document-blue.v1',revision:'history',sourceHash,status:'refusal',findings:[]},'manual-unverified');
+  const before=await w.lab.cloudSnapshot();w.change('blue-harness',hash);w.get('harness-tidy').dispatchEvent(new Event('click'));
+  assert.equal(w.get('harness-library').children.length,2);assert.equal(w.get('blue-harness').children.length,1);assert.equal(w.get('blue-harness').value,hash);
+  assert.deepEqual(await w.lab.cloudSnapshot(),before,'cleanup never rewrites runs or harness history');
+  const reloaded=await live(null,[...w.store]);assert.equal(reloaded.get('blue-harness').value,hash);assert.equal(reloaded.get('harness-library').children.length,2);assert.equal(JSON.stringify((await reloaded.lab.cloudSnapshot()).runs),JSON.stringify(before.runs));
+  reloaded.lab.busy('red',true);reloaded.get('harness-restore').dispatchEvent(new Event('click'));assert.equal(reloaded.get('harness-library').children.length,2);reloaded.lab.busy('red',false);
+  reloaded.get('harness-restore').dispatchEvent(new Event('click'));assert.equal(reloaded.get('harness-library').children.length,3);assert.ok(reloaded.get('blue-harness').children.some(c=>c.value===oldHash));
+  const lastRed=reloaded.get('harness-library').children.find(c=>c.children[0].textContent.includes('RED'));lastRed.children.at(-1).children.at(-1).dispatchEvent(new Event('click'));assert.match(reloaded.get('harness-status').textContent,/하나씩/);
+});
 (async()=>{let passed=0;for(const [name,fn] of tests){try{await fn();passed++;console.log('PASS '+name);}catch(e){console.error('FAIL '+name+'\n'+(e.stack||e));process.exitCode=1;}}
   if(DELAY&&!settleWaits){console.error('FAIL delayed crypto never outlasted flush(); delay proof missing');process.exitCode=1;}
   console.log(JSON.stringify({passed,total:tests.length,...(DELAY?{delayTicks:DELAY,settleWaits}:{})}));if(passed!==tests.length||process.exitCode)process.exit(1);})();

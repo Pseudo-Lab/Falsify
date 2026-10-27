@@ -43,6 +43,48 @@ else
   check 'open rejects password' 1
 fi
 
+# Exercise launcher ownership with a deterministic interpreter stub, without binding a port.
+launch_tmp=$(mktemp -d)
+mkdir -p "$launch_tmp/.venv/bin" "$launch_tmp/app/local" "$launch_tmp/private"
+cp "$root/open-connection.sh" "$root/falsify-connection.sh" "$launch_tmp/"
+cat > "$launch_tmp/.venv/bin/python" <<'STUB'
+#!/usr/bin/env bash
+if [ "$1" = -c ]; then exit 0; fi
+case "$1:$2" in
+  */pairing.py:probe)
+    case "$PROBE_MODE" in
+      existing) echo "existing $$"; exit 0 ;;
+      foreign) echo foreign; exit 2 ;;
+      start)
+        case " $* " in *' --expected-pid '*) echo 'existing 1'; exit 0 ;; esac
+        echo absent; exit 1 ;;
+    esac ;;
+  */pairing.py:register)
+    if [ "$PROBE_MODE" = start ]; then echo refused; exit 1; fi
+    echo registered; exit 0 ;;
+  */server.py:*) echo $$ > "$CHILD_FILE"; exec sleep 60 ;;
+esac
+exit 1
+STUB
+chmod +x "$launch_tmp/.venv/bin/python"
+link="falsify://connect?port=40123&challenge=${nonce_a}&state=${nonce_b}&proof=${nonce_c}"
+if PROBE_MODE=existing CHILD_FILE="$launch_tmp/child" FALSIFY_CONNECT_APPROVAL=yes FALSIFY_PAIRING_DIR="$launch_tmp/private" "$launch_tmp/open-connection.sh" "$link" >/dev/null && [ ! -e "$launch_tmp/child" ]; then
+  check 'reuses matching companion without starting child' 1
+else
+  check 'reuses matching companion without starting child' 0
+fi
+if PROBE_MODE=foreign CHILD_FILE="$launch_tmp/child" FALSIFY_CONNECT_APPROVAL=yes FALSIFY_PAIRING_DIR="$launch_tmp/private" "$launch_tmp/open-connection.sh" "$link" >"$launch_tmp/out" 2>&1; then
+  check 'foreign port refused without starting child' 0
+else
+  check 'foreign port refused without starting child' "$(grep -q 'Port 40123 is occupied' "$launch_tmp/out" && [ ! -e "$launch_tmp/child" ] && echo 1 || echo 0)"
+fi
+if PROBE_MODE=start CHILD_FILE="$launch_tmp/child" FALSIFY_CONNECT_APPROVAL=yes FALSIFY_PAIRING_DIR="$launch_tmp/private" "$launch_tmp/open-connection.sh" "$link" >/dev/null 2>&1; then
+  check 'failed registration cleans started child' 0
+else
+  child=$(cat "$launch_tmp/child")
+  if kill -0 "$child" 2>/dev/null; then check 'failed registration cleans started child' 0; else check 'failed registration cleans started child' 1; fi
+fi
+
 test_home_dir=$(mktemp -d)
 FALSIFY_CONNECT_OS=Linux FALSIFY_CONNECT_HOME="$test_home_dir" FALSIFY_CONNECT_DRY_RUN=1 "$root/install-connection.sh" | grep -q 'DRY-RUN install linux'
 FALSIFY_CONNECT_OS=Linux FALSIFY_CONNECT_HOME="$test_home_dir" "$root/install-connection.sh" >/dev/null

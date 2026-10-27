@@ -4,6 +4,7 @@ import H from '../../../app/dist/harness-core.js';
 import Red from '../../../app/dist/document-red-core.js';
 import Blue from '../../../app/dist/document-blue-core.js';
 import Review from '../../../app/dist/review-workbench.js';
+import Attempt from '../../../app/dist/attempt-ledger.js';
 import * as reviewBundleModule from '../../../app/dist/review-bundle.mjs';
 
 export const SITE_URL = 'https://falsify.atlassian.net';
@@ -94,7 +95,7 @@ const decoder = new TextDecoder('utf-8', { fatal: true });
 let injectedReviewBundle = null;
 export function setReviewBundleForTests(api) { injectedReviewBundle = api; }
 
-const validators = () => ({ harness: H, red: Red, blue: Blue, review: Review });
+const validators = () => ({ harness: H, red: Red, blue: Blue, review: Review, attempt: Attempt });
 
 function reviewBundle() {
   return injectedReviewBundle || reviewBundleModule;
@@ -598,7 +599,7 @@ async function normalizeArchive(archive) {
     if (error instanceof GatewayError) throw error;
     fail(422, 'invalid_archive');
   }
-  if (!normalized || normalized.schema !== 'falsify.confluence-archive.v1' || !['experiment', 'harness', 'paper-edit'].includes(normalized.kind)) fail(422, 'invalid_archive');
+  if (!normalized || normalized.schema !== 'falsify.confluence-archive.v1' || !['experiment', 'harness', 'paper-edit', 'attempt'].includes(normalized.kind)) fail(422, 'invalid_archive');
   if (typeof normalized.id !== 'string' || !normalized.id || normalized.id.length > 200 || /[\u0000-\u001f]/.test(normalized.id)) fail(422, 'invalid_archive');
   if (typeof normalized.title !== 'string' || !normalized.title.trim() || normalized.title.length > 500 || /[\u0000-\u001f\u007f]/.test(normalized.title)) fail(422, 'invalid_archive');
   if (!normalized.data || typeof normalized.data !== 'object' || Array.isArray(normalized.data)) fail(422, 'invalid_archive');

@@ -1,66 +1,24 @@
-# Workbench runner proposal
+# Falsify Paper Workbench 0.2.0-alpha.22
 
-This subtree contains an isolated source snapshot of the runner-developed **Falsify Paper Workbench 0.2.0-alpha.4** plus its
-quickstart-first Korean HTML usage guide. It does not replace the team's existing README, research plan, defect taxonomy,
-evaluation gates, corpus or licensing decisions. Inclusion in this proposal branch is not team approval, scientific validation
-or a benchmark score. RED, BLUE and human review are separate workflows.
+이 폴더는 웹앱의 공개 소스와 한국어 사용 설명서입니다. 팀의 논문·연구 계획·평가 기준은 변경하지 않습니다.
 
-## Open the guide / use the application
+- 웹앱: https://shinick-han.github.io/falsify-branch-preview/
+- 사용 설명서: https://shinick-han.github.io/falsify-branch-preview/guide.html
+- 공개 앱: https://shinick-han.github.io/falsify-workbench/
+- 소스: https://github.com/Shinick-Han/falsify-workbench/tree/9372e24189d433520ae62f04cde9812e86ef2ada
 
-Download `app/dist/guide.html` and open it in a browser to read the standalone guide. GitHub's file viewer displays HTML source,
-not a hosted application. The branch preview is https://shinick-han.github.io/falsify-branch-preview/ and its online guide is
-https://shinick-han.github.io/falsify-branch-preview/guide.html . The deployment source is the separate runner-owned
-repository https://github.com/Shinick-Han/falsify-branch-preview . This is not a Pseudo-Lab official site, and this branch does
-**not** deploy a Pseudo-Lab GitHub Pages site. Model invocation and PDF export require each participant's own local companion;
-CLI login is required only for model invocation. The existing runner app at https://shinick-han.github.io/falsify-workbench/
-is published separately from the same application snapshot. Both personal Pages apps share one origin and browser storage; use a separate browser profile for isolated records.
+RED에 PDF를 넣고 문단을 클릭하거나 글자를 드래그해 수정할 수 있습니다. 미리보기와 다운로드는 같은 생성 파일을 사용합니다. 전체 논문 재조판은 본문과 그림을 새 흐름으로 배치하므로 원본과 쪽수·배치가 달라질 수 있습니다. 기본 PDF 작업은 브라우저에서 실행하며, CLI 모델 실행과 일부 편집 기능은 각자의 PC companion을 사용합니다.
 
-To get this branch rather than the main branch (which does not include this proposal):
+팀 서랍에서 하네스를 열고 **사용**을 누르면 RED 또는 BLUE에 선택됩니다. BLUE Evidence v0.3.5는 **이 PC에 BLUE 준비 후 사용**으로 실행 소스를 준비합니다. 실험 기록은 사용자가 **팀에 공개**를 누르면 Confluence에 저장됩니다.
 
-```sh
-git clone --branch feat/workbench-html-guide-20261012 https://github.com/Pseudo-Lab/Falsify.git
-cd Falsify/tools/workbench
-```
+## 설치와 검사
 
-Windows, from that folder:
+이 브랜치를 내려받은 뒤 `tools/workbench`에서 Windows는 `start-companion.ps1`를 실행합니다. macOS/Linux는 `docs/local-companion.md`의 가상환경 설치와 서버 실행 순서를 따릅니다. 상세 설치 조건은 `app/dist/guide.html`, `docs/local-companion.md`를 참고하세요. 두 Pages 앱은 같은 GitHub origin을 사용하므로 같은 브라우저 프로필에서는 저장 공간을 공유합니다.
 
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\start-companion.ps1
-```
+앱 검사는 `app`에서 `node scripts/test.mjs`, Python 검사는 저장소 루트에서 `python -m unittest discover -s app/tests -p 'test_*.py'`로 실행합니다. 선택 기능의 의존성과 실행 조건은 각 문서에 있습니다.
 
-The optional click-to-launch registration belongs to one fixed checkout. Read `docs/local-companion.md` before installing it;
-do not overwrite another registration or move the registered folder. Existing installations may continue using their original
-checkout. Pairing tokens must never be committed. Use `-LocalOnly` if you want only the loopback app and no hosted-origin access.
+## 포함 범위
 
-Python3.10+ is sufficient for the basic companion; the optional raster-image writer requires Python3.11+ and explicit
-`app/local/requirements-images.txt` installation. The separately configured text reflow editor needs Node24+ and a verified
-runtime. This snapshot does not bundle its patched WASM, so a fresh installation must not assume long-PDF export is ready.
-See the HTML guide and `docs/pdf-editor.md` for the real boundaries. The app itself should be served by a companion or an
-appropriate static host, not assumed fully functional when `index.html` is double-clicked as a local file.
+애플리케이션 스냅샷은 `9372e24189d433520ae62f04cde9812e86ef2ada`이며 사용 설명서도 같은 커밋의 파일입니다. AGPL-3.0-only와 vendor별 LICENSE/NOTICE를 유지합니다. 패치된 브라우저 편집 WASM, Typst WASM과 공개 글꼴은 해당 고지와 함께 포함합니다. 사적인 논문·변경본·정답지·실험 응답·자격 증명·로컬 환경은 포함하지 않습니다. 이 라이선스는 팀 저장소 전체의 라이선스를 바꾸지 않습니다.
 
-## Source and scope
-
-- Upstream: https://github.com/Shinick-Han/falsify-workbench
-- Frozen application snapshot: `d672e37dea55d8d475110a8bf99cccc43b917147` (tag `v0.2.0-alpha.4`).
-- The HTML guide and its focused test are a documentation-only overlay; its exact source commit and guide file hash are recorded in `INTEGRATION-SOURCE.json`.
-- Alpha4 includes optional invite-only team records and a deterministic wrapper profile builder. Static Pages and source
-  remain public; reading or writing the configured shared API requires an active invited-member session. See
-  `docs/team-access.md` for signup and operator-only invitation commands, and `docs/harness-wrapper.md` for program adapters.
-  Worker/D1 source and migration templates are included, not live data or operator credentials. Copying this subtree does
-  not deploy another backend. Wrapper execution needs an updated local companion, not merely a frontend refresh.
-- `LICENSE`, `NOTICE`, vendor notices and the original source layout are retained here. Workbench is AGPL-3.0-only; this does
-  not relabel all code in the team repository. Native optional dependencies retain their own licenses and are not bundled.
-- No private research papers, changed papers, gold labels, harnesses, recordings, run/review backups, tokens, environments,
-  `.pdf-editor.local.json`, model artifacts or locally patched editor WASM are included.
-- The nested `.github/workflows/` files are upstream CI templates, not active root workflows. Team automation or deployment
-  needs a separately reviewed change; none was installed or triggered by moving the template files into this subtree.
-
-## Maintainer checks
-
-From `tools/workbench/app`, `node scripts/test.mjs` checks the browser contracts; the guide's focused check is
-`node tests/guide.spec.cjs`. From `tools/workbench`, install the pinned Python requirements into your own `.venv`, then run
-`python -m unittest discover -s app/tests -p 'test_*.py'`. Do not upload the environment or test output.
-
-Rendering checks are not scientific approval. BLUE currently consumes extracted text, not figure pixels; manual raster
-replacement must not be counted as model-driven RED performance or as reasoning evasion. Runtime/source-only and support
-limits are detailed in the guide and retained technical docs.
+중첩된 `.github/workflows`는 원본 앱의 CI 템플릿이며 팀 저장소 루트의 워크플로를 설치하지 않습니다. 미리보기는 별도의 개인 저장소에서 배포합니다. 출처는 `INTEGRATION-SOURCE.json`에 기록합니다.

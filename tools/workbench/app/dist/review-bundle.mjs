@@ -9,7 +9,7 @@ export const LEDGER_CHAR_LIMIT=4500000;
 export const LIMITS=Object.freeze({harnesses:100,runs:100,reviews:1000,title:500,runId:160,segments:10000,source:1000000,verification:20000,paperEdits:200,paperReviews:100,editText:8000});
 
 const HEX=/^[a-f0-9]{64}$/;
-const RUN_KEYS=['id','createdAt','role','revision','fileHash','sourceHash','segments','harness','harnessHash','maxCalls','level','model','provenance','response','sourceName','format','finalState','sourceRunId','snapshotOf','requestId'];
+const RUN_KEYS=['id','createdAt','role','revision','fileHash','sourceHash','segments','harness','harnessHash','maxCalls','level','model','provenance','response','sourceName','format','finalState','sourceRunId','snapshotOf','requestId','visualEvidence','inputMode'];
 const PATCH_KEYS=['id','segmentId','label','before','after','offset','edited'];
 const MESSAGES={
   malformed:'Archive shape is not falsify.confluence-archive.v1.',
@@ -60,6 +60,13 @@ function finalState(run,f,red){
   const verification=f.verification??null;if(verification!==null&&(!plain(verification)||JSON.stringify(verification).length>LIMITS.verification))fail('oversize');
   return {selected,outputFileHash,verification:copy(verification)};
 }
+function checkVisualRefs(items,r){
+  const hasGold=x=>x&&typeof x==='object'&&(own(x,'gold')||Object.values(x).some(hasGold));
+  if(r.role!=='blue'||!Array.isArray(items)||items.length<1||items.length>2||hasGold(r.response))fail('malformed','Visual evidence is malformed.');
+  for(const v of items){
+    if(!exact(v,['fileHash','sourceHash','page','bbox','rotation','width','height','mime','sha256','provenance','artifact'])||v.fileHash!==r.fileHash||v.sourceHash!==r.sourceHash||!HEX.test(v.sha256)||v.mime!=='image/png'||v.provenance!=='client-declared-pdf-association'||v.artifact!=='unavailable'||!Number.isSafeInteger(v.page)||v.page<1||![0,90,180,270].includes(v.rotation)||!Array.isArray(v.bbox)||v.bbox.length!==4||!v.bbox.every(Number.isFinite)||v.bbox[0]<0||v.bbox[1]<0||v.bbox[2]<=0||v.bbox[3]<=0||!Number.isInteger(v.width)||!Number.isInteger(v.height)||v.width!==Math.ceil(v.bbox[2]*2)||v.height!==Math.ceil(v.bbox[3]*2)||v.width>4096||v.height>4096||v.width*v.height>8000000)fail('malformed','Visual evidence reference is malformed.');
+  }
+}
 async function checkRun(r,harnesses,prior,V){
   if(!plain(r)||Object.keys(r).some(k=>!RUN_KEYS.includes(k)))fail('malformed','Run record has an unknown field.');
   if(typeof r.id!=='string'||!r.id||r.id.length>LIMITS.runId||prior.some(x=>x.id===r.id)||!['red','blue'].includes(r.role)||typeof r.revision!=='string'||!r.revision||r.revision.length>160||!['local-codex','manual-unverified','imported-unverified'].includes(r.provenance)||!Number.isInteger(r.maxCalls)||r.maxCalls<1||r.maxCalls>32||typeof r.fileHash!=='string'||!HEX.test(r.fileHash)||typeof r.model!=='string'||!r.model||r.model.length>120||typeof r.createdAt!=='string'||!Number.isFinite(Date.parse(r.createdAt)))fail('malformed','Run identity or conditions are malformed.');
@@ -70,7 +77,9 @@ async function checkRun(r,harnesses,prior,V){
   if(!Array.isArray(r.segments)||!r.segments.length||r.segments.length>LIMITS.segments||r.segments.some(s=>!plain(s)||typeof s.id!=='string'||!s.id||s.id.length>80||typeof s.label!=='string'||s.label.length>200||typeof s.text!=='string'||!s.text.trim())||new Set(r.segments.map(s=>s.id)).size!==r.segments.length)fail('malformed','Run source segments are malformed.');
   const source=r.segments.map(s=>s.text).join('\n\n');if(source.length>LIMITS.source||await sha256(source)!==r.sourceHash)fail('hash_mismatch');
   const doc={revision:r.revision,sourceHash:r.sourceHash,segments:r.segments};
-  try{if(r.role==='blue')V.blue.validateResponse(doc,r.response);else{if(![1,2,3].includes(r.level))fail('malformed','RED level is malformed.');V.red.validateResponse(doc,r.response);}}catch(e){if(e instanceof ReviewBundleError)throw e;fail('malformed','Stored model response failed validation.');}
+  if('inputMode' in r&&(!['text','visual'].includes(r.inputMode)||(r.inputMode==='visual')!==('visualEvidence' in r)))fail('malformed','Input mode and visual evidence do not match.');
+  if('visualEvidence' in r)checkVisualRefs(r.visualEvidence,r);
+  try{if(r.role==='blue')V.blue.validateResponse(doc,r.response,'visualEvidence' in r?{visualEvidence:r.visualEvidence}:undefined);else{if(![1,2,3].includes(r.level))fail('malformed','RED level is malformed.');V.red.validateResponse(doc,r.response);}}catch(e){if(e instanceof ReviewBundleError)throw e;fail('malformed','Stored model response failed validation.');}
   if('finalState' in r&&(r.role!=='red'||stable(finalState(r,r.finalState,V.red))!==stable(r.finalState)))fail('conflict','RED final state does not match the stored response.');
   return copy(r);
 }
@@ -366,11 +375,27 @@ export async function buildPaperEditArchive(record){
   return archive;
 }
 
+function attemptOf(value,validators){
+  const A=validators?.attempt||globalThis.FalsifyAttemptLedger;
+  if(!A||typeof A.normalize!=='function')fail('validators','Attempt validator is unavailable.');
+  try{return A.normalize(value);}catch{fail('malformed','Attempt metadata is malformed.');}
+}
+export async function buildAttemptArchive(record,validators){
+  const attempt=attemptOf(copy(record),validators);
+  const id=attempt.role+':'+attempt.id;
+  const title=assertTitle(`${attempt.role.toUpperCase()} 시도 · ${attempt.harnessName||'이름 미상'} · ${attempt.status} · ${attempt.id}`);
+  return boundedJSON({schema:ARCHIVE_SCHEMA,kind:'attempt',id,title,data:attempt});
+}
 export async function validateArchive(archive,validators){
   const value=copy(archive);
   boundedJSON(value);
   if(!exact(value,['schema','kind','id','title','data'])||value.schema!==ARCHIVE_SCHEMA)fail('malformed');
   assertTitle(value.title);
+  if(value.kind==='attempt'){
+    const attempt=attemptOf(value.data,validators);
+    if(value.id!==attempt.role+':'+attempt.id)fail('conflict','Attempt archive identity differs.');
+    return {schema:ARCHIVE_SCHEMA,kind:'attempt',id:value.id,title:value.title,data:attempt};
+  }
   if(value.kind==='harness'){
     const V=validatorsOf(validators,'harness');
     if(typeof value.id!=='string'||!HEX.test(value.id)||!exact(value.data,['config','hash']))fail('malformed','Harness archive shape is malformed.');

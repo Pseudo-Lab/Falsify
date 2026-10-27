@@ -8,8 +8,6 @@
 (function(root){
   'use strict';
   const SCHEMA='falsify.pending-job.v1',RETENTION_MS=3600*1000,MAX_SECRET_DEPTH=64;
-  // Same page and JavaScript realm only. Not atomic across tabs. Web Locks are not used.
-  const admitting={red:false,blue:false};
   const RETENTION='대기 기록은 이 브라우저에만 있습니다. 추출 텍스트·요청 ID·harness 해시·원본 SHA-256·companion 인스턴스 식별을 보관하고, 원본 바이트와 연결 비밀은 보관하지 않습니다. 실행 중인 작업은 3600초로 지우지 않습니다. companion은 끝난 작업만 3600초 뒤에 메모리에서 지웁니다. 다시 열면 GET으로만 조회하고, 모델을 다시 호출하지 않습니다.';
   // Same request id rule as app/local/red_service.py validate_request.
   const REQUEST_ID=/^[A-Za-z0-9_:-]{1,160}$/;
@@ -17,7 +15,7 @@
   const SECRET=/^(token|authorization|bearer|cookie|password|secret|session|sessiontoken|file|bytes|pdf|pdfbytes)$/i;
   const RECEIPTS=['pending','accepted','unknown','rejected'];
   const DISPOSITIONS=['open','running','completed','failed','cancelled','expired','unknown'];
-  const BLUE_KEYS=['schema','revision','requestId','sourceHash','segments','maxCalls','consent','harness','harnessCanonical','executionConsent'];
+  const BLUE_KEYS=['schema','revision','requestId','sourceHash','segments','maxCalls','consent','harness','harnessCanonical','executionConsent','visualConsent','visualEvidence','fileHash'];
   function fail(status,message){const e=new Error(message);e.status=status;throw e;}
   function storageKey(role){return 'falsify.pending-job.'+role+'.v1';}
   function backing(storage){if(storage)return storage;try{return root.localStorage||null;}catch{return null;}}
@@ -50,6 +48,9 @@
     if(!s)return null;
     return s.slice(0,300);
   }
+  const FAILURE_MAP=Object.freeze({settings_mismatch:['preflight','refresh_harness','실행 설정이 저장된 harness와 다릅니다. harness를 새로 고르세요.'],executable_missing:['launch','install_executable','실행 파일을 찾지 못했습니다. 실행 파일 경로를 확인하세요.'],auth_required:['preflight','sign_in','인증이 필요합니다. 해당 CLI에 로그인하세요.'],timeout:['execution','retry_manually','실행 시간이 초과됐습니다. 다시 시도하세요.'],invalid_output:['output','check_adapter','adapter 출력 형식이 올바르지 않습니다. adapter 설정을 확인하세요.'],process_exit:['execution','check_adapter','adapter가 오류로 종료됐습니다. adapter 설정을 확인하세요.'],unknown:['unknown','inspect_configuration','실행에 실패했습니다. 설정을 확인하세요.']});
+  function structuredFailure(v){if(!v||typeof v!=='object'||Array.isArray(v)||Object.keys(v).sort().join(',')!=='code,recovery,schema,stage'||v.schema!=='falsify.adapter-failure.v1'||!Object.hasOwn(FAILURE_MAP,v.code))return null;const spec=FAILURE_MAP[v.code];if(v.stage!==spec[0]||v.recovery!==spec[1])return null;return {schema:v.schema,code:v.code,stage:v.stage,recovery:v.recovery};}
+  function failureText(record){const f=structuredFailure(record?.adapterFailure);return f?FAILURE_MAP[f.code][2]:(safeFailure(record?.serverFailure)||'실행에 실패했습니다. 설정을 확인한 뒤 다시 시도하세요.');}
   function safeRequest(record){
     if(!record||typeof record!=='object'||!record.request||typeof record.request!=='object')return null;
     let copy;try{copy=clone(record.request);secrets(copy,0);}catch{return null;}
@@ -94,6 +95,8 @@
     if(x.role==='blue'&&Object.keys(x.request).some(k=>!BLUE_KEYS.includes(k)))return false;
     // Optional, added only after a matched failure. Older records omit it and stay valid.
     if(Object.hasOwn(x,'serverFailure')&&(typeof x.serverFailure!=='string'||x.serverFailure.length<1||x.serverFailure.length>300||x.serverFailure!==safeFailure(x.serverFailure)))return false;
+    if(Object.hasOwn(x,'adapterFailure')&&!structuredFailure(x.adapterFailure))return false;
+    if(Object.hasOwn(x,'observedCalls')&&(!Number.isSafeInteger(x.observedCalls)||x.observedCalls<0))return false;
     return true;
   }
   function blocking(found){
@@ -107,6 +110,7 @@
     if(r.postReceipt==='unknown'||r.disposition==='unknown')return 'unknown';
     return 'unresolved';
   }
+  function captureAttempt(record,storage){try{root.FalsifyAttemptLedger?.capture(record,storage);return null;}catch(e){return e?.message||'시도 기록을 저장하지 못했습니다.';}}
   function docFrom(record){return {revision:record.revision,sourceHash:record.sourceHash,fileHash:record.fileHash,format:record.format,name:record.name,segments:record.request.segments.map(s=>({id:s.id,label:s.label,text:s.text}))};}
   function blockedResult(why,found){
     const corrupt=why==='corrupt';
@@ -115,12 +119,13 @@
   async function hold(options={}){
     const role=options.role;
     if(role!=='red'&&role!=='blue')return {ok:false,status:'rejected',message:'역할이 올바르지 않습니다.'};
-    if(admitting[role])return blockedResult('unresolved',read(role,options.storage));
-    admitting[role]=true;
-    try{
+    const locks=options.lockProvider || (root.navigator && root.navigator.locks);
+    if(!locks || typeof locks.request!=='function')return {ok:false,status:'lock-unavailable',message:'브라우저의 Web Locks를 사용할 수 없어 안전하게 실행하지 않았습니다.'};
+    try{return await locks.request('falsify.pending-job.'+role+'.v1',async()=>{
       const request=options.request,doc=options.doc,instance=options.companionInstance,storage=options.storage;
       const found=read(role,storage),why=blocking(found);
       if(why)return blockedResult(why,found);
+      if(found.status==='record')captureAttempt(found.record,storage);
       if(!INSTANCE.test(instance))fail('rejected','연결된 companion의 인스턴스 식별이 없어 실행하지 않았습니다.');
       if(!request||typeof request!=='object'||!doc||typeof doc!=='object')fail('rejected','요청 식별이 없어 실행하지 않았습니다.');
       if(typeof options.hashHarness!=='function')fail('rejected','harness 검증을 재사용하지 못해 실행하지 않았습니다.');
@@ -128,6 +133,7 @@
       const body=clone(request),text=segments(body.segments);
       if(!text||!REQUEST_ID.test(body.requestId))fail('rejected','요청 ID가 서버 규칙과 달라 실행하지 않았습니다.');
       if(role==='blue'&&Object.keys(body).some(k=>!BLUE_KEYS.includes(k)))fail('rejected','BLUE 대기 기록은 허용된 문서 필드만 보관합니다. RED 정답·파일명은 넣지 않습니다.');
+      if(body.visualEvidence!==undefined && (body.visualConsent!==true || body.fileHash!==doc.fileHash || !Array.isArray(body.visualEvidence) || body.visualEvidence.length<1 || body.visualEvidence.length>2 || body.visualEvidence.some(v=>!v || Object.keys(v).sort().join(',')!==['base64','bbox','fileHash','height','mime','page','rotation','sha256','sourceHash','width'].sort().join(',') || v.fileHash!==doc.fileHash || v.sourceHash!==doc.sourceHash)))fail('rejected','시각 증거 동의 또는 문서 식별이 맞지 않습니다.');
       if(body.revision!==doc.revision||body.sourceHash!==doc.sourceHash||!HEX.test(doc.sourceHash)||!HEX.test(doc.fileHash))fail('hash-mismatch','문서 식별이 요청과 달라 실행하지 않았습니다.');
       if(typeof doc.revision!=='string'||doc.revision.length<1||doc.revision.length>160)fail('rejected','문서 리비전이 올바르지 않습니다.');
       if(!body.harness||typeof body.harness!=='object')fail('rejected','harness가 없어 실행하지 않았습니다.');
@@ -148,30 +154,48 @@
       const raced=read(role,storage),whyPut=blocking(raced);
       if(whyPut)return blockedResult(whyPut,raced);
       return put(role,record,storage);
-    }catch(e){return {ok:false,status:e.status||'rejected',message:e.message||'대기 기록을 만들지 못했습니다.'};}
-    finally{admitting[role]=false;}
+    });}catch(e){return {ok:false,status:e.status||'rejected',message:e.message||'대기 기록을 만들지 못했습니다.'};}
   }
-  function note(record,patch={},storage){
+  async function note(record,patch={},storage,lockProvider){
     if(!record||(record.role!=='red'&&record.role!=='blue'))return {ok:false,status:'rejected',message:'대기 기록이 없습니다.'};
+    const locks=lockProvider || (root.navigator && root.navigator.locks);
+    if(!locks || typeof locks.request!=='function')return {ok:false,status:'lock-unavailable',message:'Web Locks를 사용할 수 없어 기록을 바꾸지 않았습니다.'};
+    try{return await locks.request('falsify.pending-job.'+record.role+'.v1',()=>{
     const found=read(record.role,storage);
     if(found.status==='corrupt')return {ok:false,status:'corrupt',message:'손상된 대기 기록은 덮어쓰지 않았습니다.'};
     if(found.status!=='record'||found.record.requestId!==record.requestId)return {ok:false,status:'absent',message:'저장한 요청 ID를 찾지 못했습니다.'};
     const next={...found.record,request:found.record.request};
+    const terminal=['completed','failed','cancelled'];
+    if(terminal.includes(next.disposition)&&Object.hasOwn(patch,'disposition')&&patch.disposition!==next.disposition)return {ok:false,status:'integrity-error',message:'이미 관찰한 종료 상태와 다른 상태입니다. 기존 대기 기록은 그대로입니다.'};
+    const repeated=terminal.includes(next.disposition)&&(!Object.hasOwn(patch,'disposition')||patch.disposition===next.disposition);
     if(Object.hasOwn(patch,'postReceipt')){if(!RECEIPTS.includes(patch.postReceipt))return {ok:false,status:'rejected',message:'접수 상태가 올바르지 않습니다.'};next.postReceipt=patch.postReceipt;}
     if(Object.hasOwn(patch,'disposition')){if(!DISPOSITIONS.includes(patch.disposition))return {ok:false,status:'rejected',message:'대기 상태가 올바르지 않습니다.'};next.disposition=patch.disposition;}
     if(Object.hasOwn(patch,'serverFailure')){const safe=safeFailure(patch.serverFailure);if(!safe)return {ok:false,status:'rejected',message:'서버 실패 문구를 보관하지 못했습니다. 기록은 바꾸지 않았습니다.'};next.serverFailure=safe;}
+    if(Object.hasOwn(patch,'observedCalls')){if(!Number.isSafeInteger(patch.observedCalls)||patch.observedCalls<0)return {ok:false,status:'rejected',message:'관찰한 호출 수가 올바르지 않습니다.'};next.observedCalls=patch.observedCalls;}
+    if(Object.hasOwn(patch,'adapterFailure')){const f=structuredFailure(patch.adapterFailure);if(!f)return {ok:false,status:'rejected',message:'실패 정보 형식이 올바르지 않습니다.'};next.adapterFailure=f;}
     if(next.disposition==='open'||next.disposition==='running'){next.finishedAt=null;next.expiresAt=null;}
-    else if(Object.hasOwn(patch,'finishedAt')){if(!Number.isFinite(patch.finishedAt))return {ok:false,status:'rejected',message:'완료 시각이 올바르지 않습니다.'};next.finishedAt=patch.finishedAt;next.expiresAt=patch.finishedAt+RETENTION_MS;}
+    else if(Object.hasOwn(patch,'finishedAt')&&!repeated){if(!Number.isFinite(patch.finishedAt))return {ok:false,status:'rejected',message:'완료 시각이 올바르지 않습니다.'};next.finishedAt=patch.finishedAt;next.expiresAt=patch.finishedAt+RETENTION_MS;}
     else if(next.finishedAt==null)return {ok:false,status:'rejected',message:'끝난 작업의 시각이 없습니다. 기록은 바꾸지 않았습니다.'};
     if(!valid(next))return {ok:false,status:'rejected',message:'대기 기록 검사가 통과하지 않아 덮어쓰지 않았습니다.'};
-    return put(record.role,next,storage);
+    const saved=put(record.role,next,storage);
+    if(saved.ok && !['open','running'].includes(next.disposition)){const historyError=captureAttempt(next,storage);if(historyError)saved.historyError=historyError;}
+    return saved;
+    });}catch{return {ok:false,status:'write-failed',message:'대기 기록을 바꾸지 못했습니다.'};}
   }
-  function discard(role,options={}){
+  async function discard(role,options={}){
     if(options.acknowledge!==true)return {ok:false,status:'rejected',message:'버리려면 확인이 필요합니다. 대기 기록은 그대로입니다.'};
     if(role!=='red'&&role!=='blue')return {ok:false,status:'rejected',message:'역할이 올바르지 않습니다.'};
+    const locks=options.lockProvider || (root.navigator && root.navigator.locks);
+    if(!locks || typeof locks.request!=='function')return {ok:false,status:'lock-unavailable',message:'Web Locks를 사용할 수 없어 기록을 지우지 않았습니다.'};
+    try{return await locks.request('falsify.pending-job.'+role+'.v1',()=>{
     const box=backing(options.storage);if(!box)return {ok:false,status:'write-failed',message:'브라우저 저장소를 쓸 수 없습니다. 대기 기록은 그대로입니다.'};
+    const found=read(role,options.storage);
+    if(found.status==='record' && (!options.expectedRequestId || found.record.requestId!==options.expectedRequestId))return {ok:false,status:'stale',message:'표시한 요청이 바뀌어 대기 기록을 지우지 않았습니다.'};
+    if(found.status==='corrupt' && options.expectedStatus!=='corrupt')return {ok:false,status:'stale',message:'표시한 기록이 바뀌어 지우지 않았습니다.'};
+    const historyError=found.status==='record'?captureAttempt(found.record,options.storage):null;
     try{box.removeItem(storageKey(role));}catch{return {ok:false,status:'write-failed',message:'대기 기록을 지우지 못했습니다.'};}
-    return {ok:true,status:'discarded'};
+    return {ok:true,status:'discarded',...(historyError?{historyError}:{})};
+    });}catch{return {ok:false,status:'write-failed',message:'대기 기록을 지우지 못했습니다.'};}
   }
   function bound(record,body){
     if(!body||typeof body!=='object'||Array.isArray(body))return 'unavailable';
@@ -209,7 +233,7 @@
     if(mismatch)return {status:mismatch,record,gets:1};
     const doc=docFrom(record);
     if(body.state==='running')return {status:'still-running',record,gets:1,job:body,doc};
-    if(body.state==='failed')return {status:'failed',record,gets:1,job:body,doc,error:safeFailure(body.error)||'실패'};
+    if(body.state==='failed')return {status:'failed',record,gets:1,job:body,doc,error:safeFailure(body.error)||'실패',failure:structuredFailure(body.failure)};
     if(body.state==='cancelled')return {status:'cancelled',record,gets:1,job:body,doc};
     if(body.state==='completed'){
       try{if(typeof options.validate!=='function')fail('invalid-result','검증기가 없습니다.');options.validate(doc,body.result);}
@@ -249,7 +273,7 @@
     };
     return base[outcome&&outcome.status]||base.unavailable;
   }
-  const api=Object.freeze({SCHEMA,RETENTION_MS,RETENTION,REQUEST_ID,storageKey,canonical,read,hold,note,discard,recover,matches:(record,body)=>!!record&&bound(record,body)===null,text,docFrom,safeFailure,safeRequest});
+  const api=Object.freeze({SCHEMA,RETENTION_MS,RETENTION,REQUEST_ID,storageKey,canonical,read,hold,note,discard,recover,matches:(record,body)=>!!record&&bound(record,body)===null,text,docFrom,safeFailure,safeRequest,structuredFailure,failureText});
   if(typeof module==='object'&&module.exports){module.exports=api;return;}
   root.FalsifyPendingJobs=api;
 })(typeof globalThis==='object'?globalThis:this);

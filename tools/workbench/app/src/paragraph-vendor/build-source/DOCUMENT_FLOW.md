@@ -155,8 +155,15 @@ then invokes adapter validation of all original annotation dictionary semantics,
 geometry and ownership. `pagination.annotationMoves` contains only numeric
 diagnostics and is never authority for this saved check.
 
-Resolved local targets must stay outside changed flow pages, including targets
-of annotations owned by other pages and nested actions. When the next proposed
+Resolved local targets normally stay outside changed flow pages, including targets
+of annotations owned by other pages and nested actions. A FitR target may cross
+this boundary only when every reference to that page has an explicit FitR
+descriptor and native source glyph ownership proves a single rigid translation
+in both staged and planned layouts. The final physical page index and translation
+are passed only to the trusted adapter. Saved QA independently derives the move
+from reopened glyphs and validates the saved destination graph. Partial glyph,
+multi-object, edited, split, ambiguous or unsupported targets remain barriers.
+When the next proposed
 source page is a target of the included prefix, the planner stops before that
 page and may use terminal tail pages. The minimum two-original-page chain still
 applies. Backlinks into the initial changed body are barriers: arbitrary FitH/XYZ

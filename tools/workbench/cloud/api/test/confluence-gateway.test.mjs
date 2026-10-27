@@ -4,7 +4,8 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { describe, test } from 'node:test';
 import harnessCore from '../../../app/dist/harness-core.js';
-import { archiveHash, validateArchive, buildHarnessArchive, buildPaperEditArchive } from '../../../app/dist/review-bundle.mjs';
+import { archiveHash, validateArchive, buildHarnessArchive, buildPaperEditArchive, buildAttemptArchive } from '../../../app/dist/review-bundle.mjs';
+import attemptLedger from '../../../app/dist/attempt-ledger.js';
 import worker from '../src/index.js';
 import {
   SESSION_HEADER,
@@ -1035,6 +1036,26 @@ describe('confluence gateway', { concurrency: false }, () => {
     assert.equal(listed.status,200);
     assert.equal(listed.json.items[0].title,built.title,'the team picker shows the human case title instead of only the storage hash');
     assert.equal(upstream.calls.some(call => call.host !== 'api.atlassian.com' && call.host !== 'auth.atlassian.com'), false);
+  });
+
+  test('failed attempt metadata round-trips through the real codec without a model response', async () => {
+    setReviewBundleForTests(null);
+    const data = {id:'synthetic-request-1',role:'blue',harnessHash:'a'.repeat(64),harnessName:'Synthetic BLUE',harnessVersion:'2',model:null,effort:null,budget:8,level:null,fileHash:'b'.repeat(64),sourceHash:'c'.repeat(64),startedAt:1000,finishedAt:4000,durationMs:3000,calls:null,status:'failed'};
+    const built = await buildAttemptArchive(data, {attempt:attemptLedger});
+    const minted = await mint(), upstream = mockUpstream();
+    const headers = {'Content-Type':'application/json',Authorization:`Bearer ${minted.session}`};
+    const published = await read(await gateway('/v1/confluence/archives', {method:'POST',headers,body:{archive:built,teamShare:true},fetchImpl:upstream.fetchImpl}));
+    assert.equal(published.status,201);
+    const readBack = await read(await gateway('/v1/confluence/archives/9001',{headers,fetchImpl:upstream.fetchImpl}));
+    assert.equal(readBack.status,200);
+    assert.equal(readBack.json.archive.kind,'attempt');
+    assert.deepEqual(readBack.json.archive.data,data);
+    assert.equal(readBack.json.archive.data.calls,null);
+    const tampered = {...built,data:{...data,response:{status:'ok'}}};
+    const refused = mockUpstream();
+    const invalid = await read(await gateway('/v1/confluence/archives',{method:'POST',headers,body:{archive:tampered,teamShare:true},fetchImpl:refused.fetchImpl}));
+    assert.equal(invalid.status,422);
+    assert.equal(refused.calls.some(call=>call.path.includes('/wiki/')),false);
   });
 
   test('paper-edit archive round-trips with team consent and without a source PDF', async () => {

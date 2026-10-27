@@ -1,0 +1,5 @@
+# macOS companion runtime
+
+For GUI-launched companions, CLI discovery and child processes use the inherited absolute PATH entries followed by `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin`, `/bin`, `/usr/sbin`, and `/sbin`. Relative and empty PATH entries are omitted on macOS. Install Codex or Claude Code in one of those locations, or start the companion with an absolute PATH entry for the installation. Version managers in other locations require an explicit PATH. No login shell is sourced. Custom stdio adapters still require an absolute executable path; arguments are passed without a shell, including paths containing spaces. Interpreter-based scripts need their interpreter on this PATH or an absolute interpreter path.
+
+Subprocess timeouts remain bounded. Job cancellation is cooperative between model calls; it does not immediately interrupt an already running CLI or custom adapter. The active call can continue until its timeout. Runtime tests with fake CLIs do not establish that either provider is installed, authenticated, or functional on a particular Mac. Validate on both supported Mac architectures with the desired CLI installations.

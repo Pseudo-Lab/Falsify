@@ -1,3 +1,5 @@
+import { latin, parsePdf, streamData, withObjStm } from './engine/shadingsurgery.js';
+
 // Source-preserving inline edits.
 //
 // Two decisions the plain run rebuild left to chance:
@@ -110,6 +112,97 @@ export function planInlineChange(paras, chars, map, hit, needle, after) {
   }
   const ins = [rk ? viaRight : null, lk ? viaLeft : null, viaRight, viaLeft].find((c) => c && style(c) === want);
   return ins ? { del, inserts: [ins] } : { failure: "AMBIGUOUS_STYLE" };
+}
+
+// A geometric chain can cross unrelated PDF object order. A shortening that
+// retains an exact prefix and ends in punctuation can keep that prefix at its
+// source coordinates, delete the remaining source characters in each run,
+// and attach the punctuation to the retained prefix. Do not generalize this
+// to a rewrite: its placement and style would need separate proof.
+export function planGeometricShortening(chars, map, hit, before, after) {
+  let n = 0;
+  while (n < before.length && n < after.length && before[n] === after[n]) n++;
+  const punctuation = after.slice(n);
+  if (!n || n >= before.length || !/^\p{P}{1,2}$/u.test(punctuation)) return null;
+  // Do not turn a partial word or normalized whitespace into an anchor.
+  if (/\s/.test(before[n - 1]) || (/\p{L}|\p{N}/u.test(before[n - 1]) && /\p{L}|\p{N}/u.test(before[n] || ""))) return null;
+  const last = map[hit + n - 1];
+  const anchor = chars[last[1]];
+  if (!anchor || anchor.pi < 0 || /\s/.test(anchor.ch)) return null;
+  const start = map[hit + n][0], end = map[hit + before.length - 1][1];
+  const del = chars.slice(start, end + 1).filter((c) => c.pi >= 0);
+  return { del, inserts: [{ pi: anchor.pi, ri: anchor.ri, o: anchor.o + 1, text: punctuation }] };
+}
+
+// Recover the exact source byte codes only from one uniquely positioned Tm
+// followed by a literal-string show operation in a page content stream.
+async function sourceLineCodes(engine, x, y) {
+  const bytes=engine._originalBytes;if(!bytes)return null;
+  const src=latin(bytes);let pdf=parsePdf(src);if(!pdf)return null;pdf=await withObjStm(bytes,src,pdf);if(!pdf)return null;
+  const page=pdf.objBody(pdf.pageNum(engine.pageIndex));if(!page)return null;
+  const arr=page.body.match(/\/Contents\s*\[([^\]]*)\]/),single=page.body.match(/\/Contents\s+(\d+)\s+\d+\s+R/);
+  const refs=arr?[...arr[1].matchAll(/(\d+)\s+\d+\s+R/g)].map(m=>+m[1]):single?[+single[1]]:[];
+  const matches=[],num='[-+]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)';
+  for(const id of refs){const rec=pdf.objBody(id);if(!rec)return null;const raw=await streamData(bytes,src,{num:id,...rec});if(raw==null)return null;const text=typeof raw==='string'?raw:latin(raw);
+    const re=new RegExp(`(${num})\\s+(${num})\\s+(${num})\\s+(${num})\\s+(${num})\\s+(${num})\\s+Tm\\b`,'g');
+    for(const m of text.matchAll(re)){if(Math.abs(+m[5]-x)>.02||Math.abs(+m[6]-y)>.02)continue;
+      const tail=text.slice(m.index+m[0].length);const show=tail.match(/^\s*(\[(?:[^\[\]]|\\.)*\]\s*TJ|\((?:[^()\\]|\\.)*\)\s*Tj)/);if(!show)continue;
+      const op=show[1],codes=[];let valid=true;
+      for(let i=0;i<op.length;i++){if(op[i]!=='(')continue;let depth=1;for(i++;i<op.length&&depth;i++){const ch=op[i];if(ch==='\\'){const oct=op.slice(i+1).match(/^[0-7]{1,3}/);if(oct){codes.push(parseInt(oct[0],8));i+=oct[0].length;}else{const v=op[++i];if(v==='\n'||v==='\r'||v===undefined){valid=false;break;}codes.push(({n:10,r:13,t:9,b:8,f:12})[v]??v.charCodeAt(0));}}else if(ch==='('){depth++;codes.push(40);}else if(ch===')'){if(--depth)codes.push(41);}else codes.push(ch.charCodeAt(0));}if(depth)valid=false;}
+      if(valid)matches.push(codes);
+    }
+  }
+  return matches.length===1?matches[0]:null;
+}
+
+// Preserve a final-line prefix in its original text object, with a strict
+// one-to-one glyph proof. Decline layouts that cannot establish ownership.
+export async function commitGeometricPrefix(engine, para, del, inserts) {
+  const M=engine.M, lines=para.lines||[];
+  const api=['_FPDFText_LoadPage','_FPDFText_CountChars','_FPDFText_GetUnicode','_FPDFText_GetTextObject','_FPDFText_GetCharOrigin','_FPDFText_GetCharBox','_FPDFText_ClosePage','_FPDFText_SetCharcodes','_FPDFText_SetPositions','_FPDFPageObj_GetMatrix'];
+  if (!lines.length || inserts.length!==1 || !api.every(k=>typeof M?.[k]==='function')) return null;
+  const flat=para.runs.map(r=>r.text).join(''), start=lines.at(-1).off, offsets=[];
+  let offset=0; para.runs.forEach((r,ri)=>{for(let o=0;o<r.text.length;o++,offset++)if(del.has(ri+':'+o))offsets.push(offset);});
+  const ins=inserts[0], at=para.runs.slice(0,ins.ri).reduce((n,r)=>n+r.text.length,0)+ins.o;
+  if(!offsets.length||at!==offsets[0]||offsets.some((v,k)=>v!==at+k)||offsets.at(-1)!==flat.length-1||at<=start||!/^\p{P}$/u.test(ins.text))return null;
+  const line=flat.slice(start),keep=at-start,handles=new Set((engine.paragraphObjects(para.id)||[]).map(h=>h>>>0)),buf=M._malloc(64);
+  const read=()=>{const tp=M._FPDFText_LoadPage(engine.page),rows=[];if(!tp)throw new LineRetentionError('glyph_read_failed');try{for(let i=0;i<M._FPDFText_CountChars(tp);i++){const h=M._FPDFText_GetTextObject(tp,i)>>>0;if(!handles.has(h)||!M._FPDFText_GetCharOrigin(tp,i,buf,buf+8))continue;const y=M.HEAPF64[(buf+8)>>3];if(Math.abs(y-lines.at(-1).y)<=0.5){const x=M.HEAPF64[buf>>3];if(!M._FPDFText_GetCharBox(tp,i,buf+16,buf+24,buf+32,buf+40))throw new LineRetentionError('glyph_box_unavailable');rows.push({h,u:M._FPDFText_GetUnicode(tp,i),x,y,box:[0,1,2,3].map(k=>M.HEAPF64[((buf+16)>>3)+k])});}}return rows;}finally{M._FPDFText_ClosePage(tp);}};
+  try {
+    const before=read();if(before.length!==line.length||before.some((g,i)=>g.u!==line.charCodeAt(i)||g.h!==before[0]?.h))return null;
+    const h=before[0].h;if(!M._FPDFPageObj_GetMatrix(h,buf))return null;
+    const [a,b,c,d,x,y]=[0,1,2,3,4,5].map(i=>M.HEAPF32[(buf>>2)+i]);if(!(a>0&&d>0)||Math.abs(b)>1e-4||Math.abs(c)>1e-4)return null;
+    const codes=await sourceLineCodes(engine,x,y);if(!codes || codes.length<line.length || codes.length>line.length+1 || ins.text!=='.')return null;
+    const text=line.slice(0,keep)+ins.text,tp=M._malloc(text.length*4),pp=M._malloc(keep*4);
+    try{for(let i=0;i<keep;i++)M.HEAPU32[(tp>>2)+i]=codes[i];M.HEAPU32[(tp>>2)+keep]=46;for(let i=1;i<=keep;i++)M.HEAPF32[(pp>>2)+i-1]=(before[i].x-before[0].x)/a;
+      if(!M._FPDFText_SetCharcodes(h,tp,text.length)||!M._FPDFText_SetPositions(h,pp,keep))throw new LineRetentionError('geometric_prefix_write_failed');
+    }finally{M._free(tp);M._free(pp);}
+    engine._pageDirty=true;engine._spliceOk=false;
+    const after=read();if(after.length!==text.length||after.some((g,i)=>g.h!==h||g.u!==text.charCodeAt(i)||Math.abs(g.x-before[i].x)>0.02||Math.abs(g.y-before[i].y)>0.02 || (i<keep && g.box.some((v,k)=>Math.abs(v-before[i].box[k])>0.02))))throw new LineRetentionError('geometric_prefix_proof_failed');
+    return {upd:{id:para.id,surgical:true,lines},lines:{status:'geometric_prefix',keptGlyphs:keep}};
+  }finally{M._free(buf);}
+}
+
+// Remove a fully deleted first-line object only when its text maps exactly to
+// the deleted source characters. The following source lines remain untouched.
+export function removeGeometricFirstLine(engine, para, del, inserts) {
+  const M=engine.M,lines=para.lines||[];
+  if(inserts.length || lines.length<2 || typeof M?._FPDFPage_RemoveObject!=='function' || typeof M._FPDFPageObj_Destroy!=='function' || typeof engine.retainDetachedObject!=='function')return false;
+  const flat=para.runs.map(r=>r.text).join(''), end=lines[1].off, line=flat.slice(0,end), visible=line.replace(/\s+$/,'');
+  if(!visible || !/^\s*$/.test(line.slice(visible.length)))return false;
+  const offsets=[];let n=0;para.runs.forEach((r,ri)=>{for(let o=0;o<r.text.length;o++,n++)if(del.has(ri+':'+o))offsets.push(n);});
+  if(offsets.length!==visible.length||offsets.some((v,i)=>v!==i))return false;
+  const handles=new Set((engine.paragraphObjects(para.id)||[]).map(h=>h>>>0)),buf=M._malloc(16),tp=M._FPDFText_LoadPage(engine.page),rows=[], other=[];
+  if(!tp){M._free(buf);return false;}
+  try{for(let i=0;i<M._FPDFText_CountChars(tp);i++){const h=M._FPDFText_GetTextObject(tp,i)>>>0;if(!handles.has(h)||!M._FPDFText_GetCharOrigin(tp,i,buf,buf+8))continue;const y=M.HEAPF64[(buf+8)>>3];if(Math.abs(y-lines[0].y)<=.5)rows.push({h,u:M._FPDFText_GetUnicode(tp,i)});else other.push(h);}}
+  finally{M._FPDFText_ClosePage(tp);M._free(buf);}
+  if(rows.length!==visible.length||other.includes(rows[0]?.h)||rows.some((g,i)=>g.h!==rows[0]?.h||g.u!==visible.charCodeAt(i)))return false;
+  const h=rows[0].h, before=pageObjectList(engine);
+  if(!M._FPDFPage_RemoveObject(engine.page,h))throw new LineRetentionError('geometric_remove_failed');
+  engine.retainDetachedObject(h);
+  engine._pageDirty=true;engine._spliceOk=false;
+  const after=pageObjectList(engine);
+  if(before.filter(x=>x!==h).join(',')!==after.join(','))throw new LineRetentionError('geometric_remove_proof_failed');
+  return true;
 }
 
 // ---------- source line retention ----------

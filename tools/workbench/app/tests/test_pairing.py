@@ -335,6 +335,45 @@ class HttpPairingTests(Client, unittest.TestCase):
                 code = error.code
         self.assertEqual(code, 2)
 
+    def test_probe_and_register_check_descriptor(self):
+        expected = str(Path(server.__file__).resolve())
+        out = io.StringIO()
+        with redirect_stdout(out):
+            self.assertEqual(pairing.probe_local(self.port, expected), 0)
+            self.assertEqual(pairing.probe_local(self.port, expected, os.getpid()), 0)
+            self.assertEqual(pairing.probe_local(self.port, expected, os.getpid() + 1), 2)
+            self.assertEqual(pairing.probe_local(self.port, expected + '.other'), 2)
+            self.assertEqual(pairing.register_local(self.port, CHALLENGE, STATE, PROOF, expected, os.getpid() + 1), 1)
+        self.assertNotIn(server.TOKEN, out.getvalue())
+        self.assertIn('existing %d' % os.getpid(), out.getvalue())
+        self.assertEqual(self.redeem()[2]['error'], 'unknown_challenge')
+        self.http.web_origin = 'https://other.example'
+        with redirect_stdout(io.StringIO()):
+            self.assertEqual(pairing.probe_local(self.port, expected), 2)
+
+    def test_absent_and_unrelated_http_listener(self):
+        import http.server
+        with patch.object(pairing.socket, 'create_connection', side_effect=ConnectionRefusedError), redirect_stdout(io.StringIO()):
+            self.assertEqual(pairing.probe_local(40123, server.__file__), 1)
+        class Foreign(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(b'not a companion')
+            def log_message(self, *args):
+                pass
+        foreign = http.server.HTTPServer(('127.0.0.1', 0), Foreign)
+        thread = threading.Thread(target=foreign.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with redirect_stdout(io.StringIO()):
+                self.assertEqual(pairing.probe_local(foreign.server_port, server.__file__), 2)
+            self.assertTrue(thread.is_alive())
+        finally:
+            foreign.shutdown()
+            foreign.server_close()
+            thread.join(timeout=5)
+
     def test_local_register_cli_does_not_print_the_process_token(self):
         out = io.StringIO()
         with redirect_stdout(out):

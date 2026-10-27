@@ -151,3 +151,52 @@ test('absent Names/Dests allow URI and proved-missing links; legacy-only catalog
   for(const kind of ['uri','missing','legacy']){const src=make(kind),model=await inspect(src);assert.equal(model.annotations[0].eligible,true);assert.equal(model.annotations[0].preservedMissingDestination===true,kind==='missing');const request={model,sourceBytes:src,outputBytes:src,sourcePageMap:[{sourcePageIndex:0,outputPageIndex:0},{sourcePageIndex:1,outputPageIndex:1}],moves:[{sourcePageIndex:0,annotationIndex:0,outputPageIndex:1,dx:20,dy:-80}],reflowedSourcePages:[0]};const out=await api.transport(request);assert.equal((await api.validate({...request,outputBytes:out.pdf})).ok,true);}
   const malformed=mutate(make('uri'),d=>d.getTrailer().get('Root').put('Names',[]));await assert.rejects(()=>inspect(malformed),{code:'annotation-destination-invalid'});
 });
+
+test('bounded internal descriptors identify shared named targets without exposing names or actions',async()=>{
+  const src=mutate(source(),d=>{
+    const names=d.getTrailer().get('Root','Names','Dests','Kids',0,'Names');
+    const target=d.addObject([d.findPage(2),'XYZ',25,375,null]);
+    names.put(1,{D:target});names.push(d.newString('privateAlias'));names.push(target);
+    d.findPage(0).get('Annots',0).put('A',{S:'GoTo',D:d.newString('privateAlias')});
+  });
+  const model=await inspect(src),first=model.annotations[0].internalDestinations[0],second=model.annotations[1].internalDestinations[0];
+  assert.deepEqual(first,{id:second.id,kind:'XYZ',targetSourcePageIndex:2,operands:[25,375,null]});
+  assert.ok(!JSON.stringify(model).includes('privateAlias'));
+  const changed=mutate(src,d=>d.getTrailer().get('Root','Names','Dests','Kids',0,'Names',1,'D').put(3,374));
+  const check=await api.validate(args(model,src,{outputBytes:changed,moves:[],reflowedSourcePages:[]}));
+  assert.equal(check.ok,false);
+});
+
+test('out-of-bound destination operands are never exposed or treated as an anchor',async()=>{
+  const src=mutate(source(),d=>d.getTrailer().get('Root','Names','Dests','Kids',0,'Names').put(1,{D:[d.findPage(2),'XYZ',100001,375,null]}));
+  const model=await inspect(src);assert.deepEqual(model.annotations[1].internalDestinations,[]);
+  await assert.rejects(()=>api.transport(args(model,src,{reflowedSourcePages:[0,1,2]})),{code:'annotation-destination-reflowed'});
+});
+
+
+test('FitR named aliases sharing one destination move once and survive save/reopen',async()=>{
+  const src=mutate(source(),d=>{
+    const names=d.getTrailer().get('Root','Names','Dests','Kids',0,'Names');
+    const target=d.addObject([d.findPage(2),'FitR',10,20,80,100]);
+    names.put(1,{D:target});names.push(d.newString('privateAlias'));names.push(target);
+    d.findPage(0).get('Annots',0).put('A',{S:'GoTo',D:d.newString('privateAlias')});
+  });
+  const model=await inspect(src),a=model.annotations[0].internalDestinations[0],b=model.annotations[1].internalDestinations[0];assert.equal(a.id,b.id);
+  const destinationMoves=[{id:a.id,sourcePageIndex:2,outputPageIndex:1,dx:20,dy:30}],request=args(model,src,{moves:[],reflowedSourcePages:[2],destinationMoves});
+  const out=await api.transport(request);assert.equal((await api.validate({...request,outputBytes:out.pdf})).ok,true);
+  const doc=new mupdf.PDFDocument(out.pdf);try{const names=doc.getTrailer().get('Root','Names','Dests','Kids',0,'Names'),one=names.get(1,'D'),two=names.get(3);assert.equal(one.asIndirect(),two.asIndirect());assert.equal(one.get(0).asIndirect(),doc.findPage(1).asIndirect());assert.deepEqual(values(one).slice(2),[30,50,100,130]);}finally{doc.destroy();}
+  for(const change of [d=>d.getTrailer().get('Root','Names','Dests','Kids',0,'Names',1,'D').put(2,31),d=>d.getTrailer().get('Root','Names','Dests','Kids',0,'Names',1,'D').put(0,d.findPage(0)),d=>d.getTrailer().get('Root','Names','Dests','Kids',0,'Names').put(3,[d.findPage(1),'FitR',30,50,100,130])])assert.equal((await api.validate({...request,outputBytes:mutate(out.pdf,change)})).ok,false);
+  for(const bad of [[...destinationMoves,...destinationMoves],[{...destinationMoves[0],dx:NaN}],[{...destinationMoves[0],id:999}],[{...destinationMoves[0],sourcePageIndex:1}],[{...destinationMoves[0],extra:true}]])assert.equal((await api.validate({...request,destinationMoves:bad})).ok,false);
+  await assert.rejects(()=>api.transport({...request,destinationMoves:[]}));
+});
+
+
+test('direct FitR reaches an inserted final page and rejects staged changes and unsupported modes',async()=>{
+  const src=mutate(source(),d=>d.findPage(0).get('Annots',1).put('Dest',[d.findPage(2),'FitR',10,20,80,100]));
+  const model=await inspect(src),id=model.annotations[1].internalDestinations[0].id;
+  const staged=mutate(src,d=>d.insertPage(1,d.addPage([0,0,300,400],0,{},''))),sourcePageMap=[{sourcePageIndex:0,outputPageIndex:0},{sourcePageIndex:1,outputPageIndex:2},{sourcePageIndex:2,outputPageIndex:3}];
+  const request=args(model,src,{outputBytes:staged,sourcePageMap,moves:[],reflowedSourcePages:[2],destinationMoves:[{id,sourcePageIndex:2,outputPageIndex:1,dx:5,dy:-5}]});
+  const output=await api.transport(request);assert.equal((await api.validate({...request,outputBytes:output.pdf})).ok,true);
+  const bad=mutate(staged,d=>d.findPage(0).get('Annots',1,'Dest').put(2,11));await assert.rejects(()=>api.transport({...request,outputBytes:bad}));
+  const other=source(),otherModel=await inspect(other),xyz=otherModel.annotations[1].internalDestinations[0];await assert.rejects(()=>api.transport(args(otherModel,other,{moves:[],reflowedSourcePages:[2],destinationMoves:[{id:xyz.id,sourcePageIndex:2,outputPageIndex:1,dx:0,dy:0}]})),{code:'annotation-destination-move-invalid'});
+});

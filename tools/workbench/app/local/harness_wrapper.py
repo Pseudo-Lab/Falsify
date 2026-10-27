@@ -196,8 +196,10 @@ class WrapperBackend:
             # Same trailing newline as the stdio AdapterBackend for JSON stdin; raw prompt text is sent as is.
             raw = self._run(target, mode, output, invocation, prompt, schema, body + b'\n' if mode in ('invocation', 'template') else body)
         else: raw = harness_adapter.post_https(target['url'], body, 'text/plain; charset=utf-8' if mode == 'prompt' else 'application/json')
-        response = transform_output(parse_output(raw, output['format']), output, stage_of(schema))
-        validate_shape(response, schema)
+        try:
+            response = transform_output(parse_output(raw, output['format']), output, stage_of(schema))
+            validate_shape(response, schema)
+        except (ValueError, TypeError, UnicodeError): raise harness_adapter.AdapterFailure('invalid_output') from None
         return {'status': 'ok', 'response': response}
     def _run(self, target, mode, output, invocation, prompt, schema, body):
         with tempfile.TemporaryDirectory(prefix='falsify-wrapper-') as cwd:
@@ -210,4 +212,5 @@ class WrapperBackend:
             with tempfile.TemporaryDirectory(prefix='falsify-wrapper-stdout-') as capture:
                 raw = harness_adapter.run_stdio(argv, body, cwd, os.path.join(capture, 'stdout'))
             # Read before the temp dir is removed; stdout is ignored for file output.
-            return read_output_file(paths['{output}']) if output['source'] == 'file' else raw
+            try: return read_output_file(paths['{output}']) if output['source'] == 'file' else raw
+            except (ValueError, OSError): raise harness_adapter.AdapterFailure('invalid_output') from None

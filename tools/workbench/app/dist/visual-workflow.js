@@ -46,7 +46,7 @@
         }catch{if(current===epoch)portrait.replaceChildren(icon('file-text'));} // Picking and extraction remain usable if thumbnail rendering fails.
       }
       let shown=null;
-      function sync(){const file=input.files?.[0]||null;if(file===shown)return;shown=file;drop.classList.toggle('has-file',!!file);title.textContent=file?file.name:'논문 놓기';meta.textContent=file?(file.size/1024/1024).toFixed(1)+' MB · 다른 파일로 바꾸기':'PDF · Word · 텍스트';error.textContent='';void thumbnail(file);}
+      function sync(supplied){const file=supplied instanceof File?supplied:input.files?.[0]||null;if(file===shown)return;shown=file;drop.classList.toggle('has-file',!!file);title.textContent=file?file.name:'논문 놓기';meta.textContent=file?(file.size/1024/1024).toFixed(1)+' MB · 다른 파일로 바꾸기':'PDF · Word · 텍스트';error.textContent='';void thumbnail(file);}
       drop.addEventListener('filedrop',event=>{
         const files=event.files||[];if(!files.length)return;
         if(files.length!==1){error.textContent='논문 한 개만 놓아주세요.';return;}
@@ -57,12 +57,19 @@
       });
       input.addEventListener('change',sync);
       document.addEventListener('falsify:workspace-reset',()=>{shown=null;sync();clearPreview();});
-      document.addEventListener(role==='red'?'falsify:document-clear':'falsify:blue-state',()=>{sync();});
+      document.addEventListener(role==='red'?'falsify:document-clear':'falsify:blue-state',e=>{sync(e.detail?.file);});
       // Read-only follow-up of extraction errors and declined replacement.
       const status=$(role==='red'?'#import-status':'#doc-blue-summary');if(status)new MutationObserver(sync).observe(status,{childList:true,subtree:true});
       sync();
     }
     intake('#paper-file','red');intake('#doc-blue-file','blue');
+
+    const paper=$('#paper-workspace');
+    if(paper){
+      const visibility=()=>{paper.hidden=!globalThis.FalsifyPaperWorkspace?.getSource?.();};
+      document.addEventListener('falsify:paper-workspace-source',visibility);visibility();
+      const external=$('#external-red');if(external){const d=disclosure('다른 AI에서 받은 변경 넣기',[]);external.before(d);d.append(external);}
+    }
 
     // Fold extracted text, never the real result or editing controls.
     const preview=$('#import-preview');if(preview){const d=disclosure('논문 내용 보기',[]);d.classList.add('visual-extraction');preview.before(d);d.append(preview);d.hidden=preview.hidden;new MutationObserver(()=>{d.hidden=preview.hidden;}).observe(preview,{attributes:true,attributeFilter:['hidden']});}
@@ -75,11 +82,10 @@
       const execute=items[1];if(execute){
         const incoming=el('div','visual-route');incoming.setAttribute('aria-hidden','true');incoming.append(icon('file-text'),icon('arrow-right'),icon(role==='red'?'pencil':'search'),icon('arrow-right'),icon('play'));execute.prepend(incoming);
       }
-      const start=$(role==='red'?'#red-start':'#doc-blue-start');if(start){start.replaceChildren(icon('play'),el('span','','실행'));start.classList.add('visual-run');}
+      const start=$(role==='red'?'#red-start':'#doc-blue-start');if(start){start.replaceChildren(icon('play'),el('span','',role.toUpperCase()+' 검토'));start.classList.add('visual-run');}
       const runNote=el('p','visual-next');runNote.setAttribute('role','status');start?.closest('.button-row')?.after(runNote);
       state[role].note=runNote;
-      const consent=$(role==='red'?'#red-consent':'#doc-blue-consent');const span=consent?.closest('label')?.querySelector('span');
-      if(span){const old=span.textContent;span.textContent='선택한 도구에 논문을 보내 실행';span.title=old;}
+      // Keep the visible transmission scope beside the consent checkbox.
       const selection=$('#'+role+'-harness')?.closest('.harness-selection');
       if(selection){
         const native=$('#'+role+'-harness'),trigger=button(role==='red'?'pencil':'search','',()=>{shelf.open=!shelf.open;trigger.setAttribute('aria-expanded',String(shelf.open));},'visual-tool');
@@ -113,16 +119,31 @@
       let note='';
       if(s.busy)note='검토 중';
       else if(!hasFile)note='먼저 논문을 놓아주세요.';
-      else if(role==='red'&&!hasResult)note='원본 쪽에서 직접 고칠 수 있습니다. AI 실행은 선택입니다.';
-      else if(!connected)note='내 PC를 연결하면 실행할 수 있습니다.';
-      else if(start?.disabled)note='실행 동의와 도구 설정을 확인해주세요.';
+      else if(!connected)note=''; // The connection action below opens the existing PC panel.
+      else if(!$(role==='red'?'#red-consent':'#doc-blue-consent')?.checked)note='논문 전송에 동의하면 검토를 시작할 수 있습니다.';
+      else if(start?.disabled&&!FalsifyLab.allowed(role))note='선택한 도구의 실행 설정을 확인하세요.';
+      const progress=$(role==='red'?'#red-progress':'#doc-blue-progress');
+      if(progress?.textContent.trim())note='';
       if(s.note&&s.note.textContent!==note)s.note.textContent=note;
+      if(s.note)s.note.hidden=!note;
+      const connect=s.connect;
+      if(connect)connect.hidden=!hasFile||connected||s.busy||!!progress?.textContent.trim();
       manualSign();
     }
     document.addEventListener('falsify:document-state',e=>render('red',e.detail));
     document.addEventListener('falsify:blue-state',e=>render('blue',e.detail));
     document.addEventListener('falsify:local-bridge',()=>{render('red');render('blue');});
-    for(const role of ['red','blue']){const start=$(role==='red'?'#red-start':'#doc-blue-start');if(start)new MutationObserver(()=>render(role)).observe(start,{attributes:true,attributeFilter:['disabled']});render(role);}
+    for(const role of ['red','blue']){
+      const start=$(role==='red'?'#red-start':'#doc-blue-start');
+      const connect=button('plug','내 PC 연결',()=>{
+        const panel=$('.visual-connection-details');if(!panel)return;
+        panel.open=true;panel.scrollIntoView({block:'nearest'});panel.querySelector('summary')?.focus({preventScroll:true});
+      });connect.hidden=true;state[role].connect=connect;state[role].note?.after(connect);
+      if(start)new MutationObserver(()=>render(role)).observe(start,{attributes:true,attributeFilter:['disabled']});
+      const progress=$(role==='red'?'#red-progress':'#doc-blue-progress');
+      if(progress)new MutationObserver(()=>render(role)).observe(progress,{childList:true,characterData:true,subtree:true});
+      render(role);
+    }
     manualSign();
     const signTitle=$('#sign-title');
     if(signTitle)new MutationObserver(()=>manualSign()).observe(signTitle,{childList:true,characterData:true,subtree:true});
@@ -150,9 +171,10 @@
     const manager=$('#harness-manager');if(manager){
       const library=$('#harness-library'),imported=$('#harness-preview'),feedback=$('#harness-status'),heading=el('h3','','내 도구'),author=disclosure('새 도구 만들기 · 파일 가져오기',[]);author.id='visual-harness-author';
       const introduction=manager.querySelector('p');if(introduction)introduction.hidden=true;
-      const keep=new Set([manager.querySelector('h2'),introduction,library,imported,feedback]);
+      const libraryTools=$('#harness-library-tools');
+      const keep=new Set([manager.querySelector('h2'),introduction,library,imported,feedback,libraryTools]);
       for(const n of [...manager.children])if(!keep.has(n)&&!n.matches('.confluence-store'))author.append(n);
-      manager.append(imported,feedback,heading,library,author);
+      manager.append(imported,feedback,heading,libraryTools,library,author);
       function libraryActions(){for(const a of library.children){if(a.dataset.visualReady)continue;a.dataset.visualReady='true';
         const hash=a.querySelector('code')?.textContent,match=a.querySelector('h4')?.textContent.match(/ · (RED|BLUE) · /),role=match?.[1].toLowerCase();if(!role||!hash)continue;
         const paragraphs=[...a.querySelectorAll(':scope > p')];if(paragraphs[1]){const more=disclosure('지침 보기',[paragraphs[1]]);a.append(more);}

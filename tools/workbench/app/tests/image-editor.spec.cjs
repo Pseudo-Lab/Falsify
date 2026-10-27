@@ -45,6 +45,12 @@ test('core: PNG preflight refuses size, header, side and pixel limits before dec
   const wrong=png(10,10);wrong.write('IDAT',12,'latin1');assert.throws(()=>I.png(new Uint8Array(wrong)),/IHDR/);const depth=png(10,10);depth[24]=3;assert.throws(()=>I.png(new Uint8Array(depth)),/IHDR/);
   assert.throws(()=>I.png(new Uint8Array(png(8193,10))),/8192/);assert.throws(()=>I.png(new Uint8Array(png(2001,2000))),/400만/);assert.throws(()=>I.png(new Uint8Array(png(0,10))),/IHDR/);});
 
+test('core: a real transparent RGBA PNG passes preflight and stays byte-identical in the export request',()=>{
+  const encoded='iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAYAAAD0In+KAAAAEUlEQVR4nGP4z8DQwMDwnwEADH8Cf4i6MZwAAAAASUVORK5CYII=';
+  assert.deepEqual({...I.png(new Uint8Array(Buffer.from(encoded,'base64')))},{width:2,height:1,alpha:true});
+  assert.equal(I.exportRequest(HASH,SRC.toString('base64'),ID[0],encoded).replacement,encoded);
+});
+
 test('core: export request carries only the selected id; export result is bound to source, id, page, box and output hash',()=>{
   const r=I.exportRequest(HASH,SRC.toString('base64'),ID[0],THUMB);assert.deepEqual(Object.keys(r),['schema','fileHash','file','occurrenceId','replacement','consent']);assert.equal(r.consent,true);assert.equal(r.schema,'falsify.image-export-request.v1');
   assert.throws(()=>I.exportRequest(HASH,SRC.toString('base64'),'c1',THUMB),/요청하지 않았습니다/);

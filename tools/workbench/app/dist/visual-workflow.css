@@ -10,6 +10,9 @@
 .visual-paper{flex:0 0 88px;min-height:112px;display:grid;place-items:center;background:var(--paper);border:1px solid var(--line)}
 .visual-paper>svg{width:42px;height:42px}.visual-paper canvas{display:block;width:88px;max-height:126px;object-fit:contain}
 .visual-drop.has-file{border-style:solid}.visual-drop.has-file .visual-file-label{min-height:168px;justify-content:flex-start}
+.visual-drop.has-file .visual-file-label{min-height:0;padding:14px!important}
+.visual-drop.has-file .visual-paper{flex-basis:48px;min-height:64px}
+.visual-drop.has-file .visual-paper canvas{width:48px;max-height:68px}
 .visual-drop+.form-feedback:empty,#import-status:empty{display:none}
 .visual-details{margin:12px 0;color:var(--ink)}.visual-details>summary{cursor:pointer;font-size:13px;font-weight:600;padding:9px 0;min-height:40px}
 .visual-details[open]>summary{margin-bottom:10px}.visual-details:focus-within>summary{color:var(--ink)}
@@ -47,3 +50,13 @@
 .visual-ready #evaluation-form>.visual-details label{display:block;margin:12px 0}
 @media(max-width:700px){.visual-file-label{flex-direction:column;gap:16px;padding:24px!important;min-height:250px;text-align:center}.visual-drop.has-file .visual-file-label{flex-direction:row;min-height:150px;text-align:left}.visual-file-title{font-size:18px}.visual-tool-list{grid-template-columns:1fr}.visual-route{gap:14px}.visual-tool{padding:14px}.visual-ready #harness-library>article{padding-left:36px}.visual-ready #evaluation-form>.ledger-fields{grid-template-columns:1fr}}
 @media(prefers-reduced-motion:reduce){.visual-drop{transition:none}}
+@media(max-width:700px){.visual-drop.has-file .visual-file-label{min-height:0}}
+
+.blue-picker-nav{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:12px 0}.blue-picker-nav button{min-height:40px}.blue-picker-stage{max-height:480px;overflow:auto;background:var(--surface);border:1px solid var(--line);touch-action:none}.blue-picker-stage canvas{display:block;max-width:100%;height:auto;cursor:crosshair}.blue-picker button:focus-visible{outline:3px solid var(--ink);outline-offset:2px}
+
+.blue-picker-frame{position:relative;display:inline-block;max-width:100%;vertical-align:top}.blue-picker-selection{position:absolute;box-sizing:border-box;border:2px solid #d2391f;background:rgba(255,80,40,.18);pointer-events:none}.blue-picker-selection[hidden]{display:none}
+
+/* RED to BLUE keeps the file receipt beside its next action. */
+.blue-handoff-ready{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:16px;background:var(--surface,#f3f4f4);margin-top:16px}
+.blue-handoff-ready[hidden]{display:none}.blue-handoff-ready p{margin:0}.blue-handoff-ready .button{flex-shrink:0}
+@media(max-width:640px){.blue-handoff-ready{flex-direction:column;align-items:stretch}.blue-handoff-ready .button{width:100%}}

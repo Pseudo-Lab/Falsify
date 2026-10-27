@@ -2,15 +2,15 @@
 (function(root){
   'use strict';
   const HOST='127.0.0.1',DEFAULT_PORT=7816,WEB_ORIGIN='https://shinick-han.github.io';
-  const PATH=/^\/api\/(?:capabilities|export|paper\/(?:inspect|images(?:\/export)?)|harness\/profile\/propose|(?:red|blue)\/jobs(?:\/[A-Za-z0-9%._~-]+(?:\/cancel)?)?)$/;
+  const PATH=/^\/api\/(?:capabilities|export|paper\/(?:inspect|images(?:\/export)?)|harness\/profile\/propose|harness\/deploy|(?:red|blue)\/jobs(?:\/[A-Za-z0-9%._~-]+(?:\/cancel)?)?)$/;
   // Strict decimal port only; host and scheme are never user input.
   function parsePort(value){const s=String(value??'').trim();if(s==='')return DEFAULT_PORT;if(!/^[1-9][0-9]{3,4}$/.test(s))return null;const n=Number(s);return n>=1024&&n<=65535?n:null;}
   function validToken(t){return typeof t==='string'&&t.length>=16&&t.length<=512&&/^[A-Za-z0-9._~+/-]+=*$/.test(t);}
   function platformKind(platform){const p=String(platform||'').toLowerCase();if(p.includes('win'))return 'windows';if(p.includes('mac'))return 'mac';if(p.includes('linux')||p.includes('x11')||p.includes('cros'))return 'linux';return 'other';}
   function command(port,kind){const extra=port&&port!==DEFAULT_PORT?' --port '+port:'';if(kind==='mac'||kind==='linux')return 'python3 -m venv .venv && .venv/bin/python -m pip install -r app/local/requirements.txt && .venv/bin/python app/local/server.py --web-origin '+WEB_ORIGIN+extra;return 'python app/local/server.py --web-origin '+WEB_ORIGIN+extra;}
-  function launcher(port,kind){if(kind==='mac'||kind==='linux')return './open-connection.sh';return 'powershell -NoProfile -ExecutionPolicy Bypass -File ./start-companion.ps1'+(port&&port!==DEFAULT_PORT?' -Port '+port:'');}
+  function launcher(port,kind){if(kind==='mac'||kind==='linux')return "./open-connection.sh 'falsify://connect?port="+(port||DEFAULT_PORT)+"'";return 'powershell -NoProfile -ExecutionPolicy Bypass -File ./start-companion.ps1'+(port&&port!==DEFAULT_PORT?' -Port '+port:'');}
   const INSTALL='powershell -NoProfile -ExecutionPolicy Bypass -File .\\install-connection.ps1';
-  function installCommand(kind){return kind==='mac'||kind==='linux'?'./install-connection.sh':INSTALL;}
+  function installCommand(kind){return kind==='mac'||kind==='linux'?'python3 -m venv .venv && .venv/bin/python -m pip install -r app/local/requirements.txt && ./install-connection.sh':INSTALL;}
   // The only URI this page opens: fixed scheme, host and path plus a strict port. Never a token, model, origin or command.
   function launchUri(value){const p=typeof value==='number'?(Number.isInteger(value)&&value>=1024&&value<=65535?value:null):parsePort(value);return p===null?null:'falsify://connect?port='+p;}
   const MODEL=/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,119}$/,EFFORTS=['low','medium','high'];
@@ -24,7 +24,7 @@
   function companionInstance(v){return typeof v==='string'&&/^ci1\.[0-9a-f]{64}$/.test(v)?v:null;}
   function capSnapshot(d){if(!d||typeof d!=='object'||Array.isArray(d)||typeof d.red!=='boolean'||typeof d.blue!=='boolean')return null;
     return Object.freeze({red:d.red,blue:d.blue,pdf:d.pdf===true,officeLayoutVerifiedExport:d.officeLayoutVerifiedExport===true,model:typeof d.model==='string'?d.model.slice(0,80):null,isolation:typeof d.isolation==='string'?d.isolation.slice(0,200):null,
-      cliSelection:d.cliSelection===true,harnessWrapper:d.harnessWrapper===true,cliAgents:d.cliSelection===true?agents(d.cliAgents):null,pdfEditor:pdfEditor(d.pdfEditor),paperAnalysis:paperAnalysis(d.paperAnalysis),imageEditor:imageEditor(d.imageEditor),harnessProfileProposal:profileProposal(d.harnessProfileProposal),workbenchVersion:workbenchVersion(d.workbenchVersion),companionInstance:companionInstance(d.companionInstance)});}
+      cliSelection:d.cliSelection===true,harnessWrapper:d.harnessWrapper===true,harnessDeployment:d.harnessDeployment===true,cliAgents:d.cliSelection===true?agents(d.cliAgents):null,pdfEditor:pdfEditor(d.pdfEditor),paperAnalysis:paperAnalysis(d.paperAnalysis),imageEditor:imageEditor(d.imageEditor),harnessProfileProposal:profileProposal(d.harnessProfileProposal),workbenchVersion:workbenchVersion(d.workbenchVersion),companionInstance:companionInstance(d.companionInstance)});}
   // Optional advisory PDF pre-analysis from a newer broker: exact descriptor or none. An older broker without it keeps every other path.
   const ANALYSIS_SCHEMA='falsify.pdf-analysis-summary.v1',WORKBENCH_VERSION=/^[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}(?:-[0-9A-Za-z]{1,16}(?:\.[0-9A-Za-z]{1,16}){0,3})?$/;
   function paperAnalysis(d){if(!d||typeof d!=='object'||Array.isArray(d)||Object.keys(d).length!==2||typeof d.available!=='boolean'||d.schema!==ANALYSIS_SCHEMA)return null;return Object.freeze({available:d.available,schema:ANALYSIS_SCHEMA});}
@@ -162,11 +162,13 @@
   function mount(bridge,doc,options={}){
     const $=id=>doc.getElementById(id),panel=$('local-bridge');if(!panel)return;
     const statusEl=$('bridge-status'),pairEl=$('bridge-pair'),portEl=$('bridge-port'),tokenEl=$('bridge-token'),connectEl=$('bridge-connect'),disconnectEl=$('bridge-disconnect'),commandEl=$('bridge-command'),launcherEl=$('bridge-launcher'),feedbackEl=$('bridge-feedback');
-    const launchEl=$('bridge-launch'),launchStatusEl=$('bridge-launch-status'),otherOsEl=$('bridge-other-os'),installEl=$('bridge-install');
+    const launchEl=$('bridge-launch'),launchStatusEl=$('bridge-launch-status'),otherOsEl=$('bridge-other-os'),installEl=$('bridge-install'),installTitleEl=$('bridge-install-title'),installNoteEl=$('bridge-install-note');
     // Windows, macOS and Linux keep the click handler visible after disconnect. The browser still cannot detect whether it is installed.
     const nav=doc.defaultView?.navigator,kind=platformKind(options.platform??nav?.userAgentData?.platform??nav?.platform??''),handler=kind==='windows'||kind==='mac'||kind==='linux';
     const open=options.open||(uri=>{const a=doc.createElement('a');a.href=uri;a.rel='noopener noreferrer';a.click();});
     if(installEl)installEl.textContent=installCommand(kind);
+    if(installTitleEl)installTitleEl.textContent='처음 한 번 · 연결 앱 설치 ('+({windows:'Windows',mac:'macOS',linux:'Linux'}[kind]||'Windows')+')';
+    if(installNoteEl)installNoteEl.textContent=kind==='mac'||kind==='linux'?'Python 3이 필요하며 프로젝트 안에 의존성을 설치한 뒤 사용자 연결 앱을 등록합니다.':'현재 사용자(HKCU)에만 falsify:// 연결을 등록하며 관리자 권한이 필요 없습니다.';
     function text(s){const c=s.cap,detail=c?versionText(c)+' · RED '+(c.red?'가능':'불가')+' · BLUE '+(c.blue?'가능':'불가')+pdfText(c)+' · CLI 선택 '+(c.cliSelection?'가능':'미지원(구버전 companion)'):'';
       if(s.status==='checking')return '로컬 작업대 세션 확인 중';
       if(s.status==='local')return '로컬 작업대 · same-origin 세션 (페어링 불필요)'+detail;

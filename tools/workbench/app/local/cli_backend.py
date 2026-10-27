@@ -18,7 +18,7 @@ import threading
 import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from experiments.selfplay_codex import bounded_transport, strict_json_object
+from experiments.selfplay_codex import bounded_transport, strict_json_object, macos_runtime_path
 from harness import CLI_AGENTS, EFFORTS, DEFAULT_EFFORT, MODEL_PATTERN
 
 MAX_OUTPUT_BYTES = 262144
@@ -33,7 +33,8 @@ BLOCKED_ENV_PREFIXES = ("ANTHROPIC_", "CLAUDE_CODE_", "CLAUDECODE", "CLAUDE_AGEN
 def _search_path():
     """PATH entries plus ~/.local/bin; absolute directories only (never the cwd)."""
     entries = []
-    for entry in os.environ.get("PATH", "").split(os.pathsep) + [str(Path.home() / ".local" / "bin")]:
+    path = macos_runtime_path() if sys.platform == "darwin" else os.environ.get("PATH", "")
+    for entry in path.split(os.pathsep) + [str(Path.home() / ".local" / "bin")]:
         if entry and Path(entry).is_absolute() and entry not in entries:
             entries.append(entry)
     return entries
@@ -73,9 +74,11 @@ def installed():
 
 def clean_environment():
     """Drop API keys, auth tokens, base URLs and third-party provider switches."""
-    return {key: value for key, value in os.environ.items()
+    env = {key: value for key, value in os.environ.items()
             if "API_KEY" not in key.upper() and "AUTH_TOKEN" not in key.upper()
             and not key.upper().startswith(BLOCKED_ENV_PREFIXES)}
+    if sys.platform == "darwin": env["PATH"] = macos_runtime_path()
+    return env
 
 
 def subscription_ok(raw):

@@ -6,7 +6,7 @@ A RED or BLUE run writes one browser record before `POST /api/{role}/jobs`. Afte
 
 The record lives in this browser under `falsify.pending-job.red.v1` or `falsify.pending-job.blue.v1`. It keeps the extracted text segments, the original `requestId`, the harness hash from `FalsifyHarness.hash` (the same digest `harness.resolve` returns), the source and file SHA-256, the document revision, the public companion instance descriptor `ci1.` plus 64 hex characters, the local canonical checksum, and `requestBytesDigest`.
 
-It does not keep the original PDF or any other file bytes, and it does not keep the pairing secret, the session secret, or a bearer token. BLUE records accept only the BLUE document fields. RED gold, a RED filename, and a RED plan are not stored on a BLUE record. Cloud sharing is unchanged. Objects nested deeper than 64 levels are rejected, and a secret-shaped key at any scanned depth is rejected. A deep key is not skipped.
+It does not keep original file bytes, the pairing secret, the session secret, or a bearer token. When visual BLUE is selected in alpha.16, the request also retains the explicitly selected, derived PNG evidence. BLUE records accept only the BLUE document fields. RED gold, a RED filename, and a RED plan are not stored on a BLUE record. Cloud sharing is unchanged. Objects nested deeper than 64 levels are rejected, and a secret-shaped key at any scanned depth is rejected. A deep key is not skipped.
 
 ## Identity required on GET
 
@@ -49,4 +49,4 @@ RED export after recovery stays blocked until the user selects the original file
 
 ## Admission
 
-The latch covers one page and one JavaScript realm. It is not atomic across browser tabs. Web Locks are not used, and this document does not promise that two tabs will admit only one job. Within that one page, each role latches its start synchronously, before `makeRequest` or `hold` awaits. A second click in that window does not start another hold or POST. `hold` also takes an in-memory latch and reads storage again after the harness and byte hashes, immediately before it writes. That re-check is still the same thread. An unresolved, failed, or corrupt record is not replaced. If `hold` fails, the results already on the page stay.
+Alpha.16 uses one Web Lock per role and origin for admission and pending-record updates. `hold` reads, validates, hashes and writes the record while holding that lock, so a competing tab cannot replace it. A stale tab cannot update or discard a newer request. Browsers without Web Locks refuse live admission and pending-record changes. An unresolved, failed, or corrupt record is not replaced. If `hold` fails, results already on the page stay. Installed alpha.15 uses the older, single-realm latch and does not provide this cross-tab guarantee.

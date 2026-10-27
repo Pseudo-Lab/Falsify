@@ -64,3 +64,11 @@ and source snapshots only. Current evidence is same-engine extraction/write
 and original-byte/control-text preservation, not independent pixel/scientific
 verification or paragraph reflow. Engine-native materialization is bounded by
 counts/worker lifetime, not an OS memory sandbox.
+
+
+Output fit checks use a complete matching MuPDF painted text object's conservative
+bounds in the final hash-verified output, alongside structured-text uniqueness.
+Metric quads alone can exceed the painted glyph bounds; incomplete or ambiguous
+objects and intersecting stroked/clipped text remain unverified. A 0.5 pt tolerance
+accounts for conservative bounds; this is not independent rendering verification.
+Empty cells and row/column resizing still require a separate geometric plan.

@@ -10,6 +10,7 @@ import queue
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -61,9 +62,17 @@ def classify_error_item(item):
     return "unknown"
 
 
+def macos_runtime_path():
+    """Retain absolute PATH entries and add standard GUI-launch locations on macOS."""
+    entries = os.environ.get("PATH", "").split(os.pathsep)
+    entries += [str(Path.home() / ".local" / "bin"), "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"]
+    return os.pathsep.join(dict.fromkeys(entry for entry in entries if entry and Path(entry).is_absolute()))
+
+
 def discover_codex():
     """Prefer the npm package's native binary over Windows shell launchers."""
-    launcher = shutil.which("codex") or shutil.which("codex.cmd")
+    path_arg = {"path": macos_runtime_path()} if sys.platform == "darwin" else {}
+    launcher = shutil.which("codex", **path_arg) or shutil.which("codex.cmd", **path_arg)
     if not launcher:
         raise FileNotFoundError("codex_unavailable")
     path = Path(launcher)
@@ -73,7 +82,7 @@ def discover_codex():
     binaries = list(package.glob("node_modules/@openai/codex-*/vendor/*/bin/codex.exe"))
     if binaries:
         return [str(binaries[0])]
-    node = shutil.which("node")
+    node = shutil.which("node", **path_arg)
     script = package / "bin" / "codex.js"
     if node and script.is_file():
         return [node, str(script)]
@@ -81,11 +90,13 @@ def discover_codex():
 
 
 def clean_environment():
-    return {key: value for key, value in os.environ.items()
+    env = {key: value for key, value in os.environ.items()
             if not ("API_KEY" in key.upper() or key.upper() in
                     {"OPENAI_BASE_URL", "OPENAI_ORG_ID", "OPENAI_PROJECT_ID",
                      "CODEX_THREAD_ID", "CODEX_SESSION_ID", "CODEX_PERMISSION_PROFILE",
                      "CODEX_CI"})}
+    if sys.platform == "darwin": env["PATH"] = macos_runtime_path()
+    return env
 
 
 def host_skill_folders():
@@ -132,7 +143,7 @@ def _kill_tree(process):
     if os.name == "nt":
         subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"],
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                       timeout=10, check=False)
+                       timeout=10, check=False, creationflags=subprocess.CREATE_NO_WINDOW)
     else:
         import signal
         os.killpg(process.pid, signal.SIGKILL)
@@ -144,7 +155,9 @@ def bounded_transport(command, *, cwd, env, stdin, timeout_seconds, max_output_b
     """Drain both pipes with bounded queue/chunks and kill the process tree on limit."""
     process = subprocess.Popen(command, cwd=cwd, env=env, stdin=subprocess.PIPE,
                                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                               shell=False, start_new_session=os.name != "nt")
+                               shell=False,
+                               **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt"
+                                  else {"start_new_session": True}))
     chunks = queue.Queue(maxsize=8)
     stop = threading.Event()
 

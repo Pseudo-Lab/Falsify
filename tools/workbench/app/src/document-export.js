@@ -21,3 +21,9 @@ export async function textFile(file, patches){
   for(const e of edits){out.set(bytes.subarray(input,e.start),output);output+=e.start-input;out.set(e.replacement,output);output+=e.replacement.length;input=e.end;}out.set(bytes.subarray(input),output);
   return {bytes:out,verification:{mode:'original-text-byte-patches',encoding,untouchedBytesPreserved:true,lineEndingsPreserved:true,visualLayoutVerified:false,limits:'글꼴·폭·줄바꿈 렌더링이 없는 원문 텍스트 형식. 표시 앱에서 자동 줄바꿈이 달라질 수 있습니다.'}};
 }
+
+export {docxFile} from './document-docx-export.js';
+
+export {htmlFile} from './document-html-export.js';
+
+export {odtFile} from './document-odt-export.js';

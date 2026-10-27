@@ -11,6 +11,7 @@ self.onmessage = async (event) => {
       file: {name: data.name || 'document.pdf', bytes: owned, type: data.type || 'application/pdf'},
       edits: data.edits,
       fileHash: data.fileHash || '',
+      fontSnapshot: data.fontSnapshot,
     });
     const out = new Uint8Array(await result.file.arrayBuffer());
     const copy = new ArrayBuffer(out.byteLength);

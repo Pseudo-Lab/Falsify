@@ -10,6 +10,17 @@ const input=pdf('original'),aBytes=pdf('table'),bBytes=pdf('table-and-body');
 const identity=[0,1].map(i=>({sourcePageIndex:i,outputPageIndex:i,continuationPageIndices:[]}));
 const edits=()=>[{id:'t',segmentId:'table:0:cell',pageIndex:0,before:'10',after:'11',anchor:{bbox:[20,20,30,30],occurrence:0}}, {id:'b',segmentId:'paragraph:1:body',pageIndex:1,before:'Before',after:'Long after',anchor:{bbox:[20,20,100,80],occurrence:3}}];
 const request=()=>({file:new File([input],'original.pdf'),fileHash:sha(input),edits:edits()});
+
+test('mixed stages retain binary font snapshots without sharing mutable buffers',async()=>{
+  const req=request();req.fontSnapshot={revision:1,digest:'font-digest',fonts:[{id:'font',bytes:new Uint8Array([1,2,3])}]};
+  const out=await prepare(req,engines({selectionPdf:{prepare:async r=>{
+    assert.ok(r.fontSnapshot.fonts[0].bytes instanceof Uint8Array);r.fontSnapshot.fonts[0].bytes[0]=99;
+    return result(aBytes,r.fileHash);
+  }},paragraphPdf:{prepare:async r=>{
+    assert.deepEqual([...r.fontSnapshot.fonts[0].bytes],[1,2,3]);return result(bBytes,r.fileHash);
+  }}}));
+  assert.deepEqual([...req.fontSnapshot.fonts[0].bytes],[1,2,3]);assert.equal(out.sha256,sha(bBytes));
+});
 function result(bytes,inputHash,status='applied',extra={}){return {file:new File([bytes],'actual.pdf'),sha256:sha(bytes),pageMap:structuredClone(identity),verification:{sourceSha256:inputHash,outputSha256:sha(bytes),status,pageCount:{source:2,output:2},checks:[],edits:[]},warnings:[],...extra};}
 function engines(overrides={}){return {selectionPdf:{prepare:async r=>result(aBytes,r.fileHash)},paragraphPdf:{prepare:async r=>result(bBytes,r.fileHash)},...overrides};}
 

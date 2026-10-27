@@ -36,7 +36,7 @@ function labStub(extraRuns=[]){
   return {calls,db,before,unchanged:()=>JSON.stringify(db)===before,ready:Promise.resolve(),
     cloudSnapshot:async()=>{calls.push('snapshot'); return JSON.parse(JSON.stringify(db));},
     reviewSnapshot:async(id)=>{calls.push(['reviewSnapshot',id]); const snap=JSON.parse(JSON.stringify(db)); if(labStub.unsent) snap.reviews=snap.reviews.concat([{id:'unsent-1',runId:id,note:'UNSENT_REVIEW_MARKER',findingAssessments:[{id:'F9',verdict:'pending'}],reviewContext:{mode:'blue-only'}}]); return snap;},
-    openArchive:async(archive)=>{const ref=archive.kind==='harness'?archive.data&&archive.data.hash:archive.kind==='paper-edit'?archive.id:archive.data&&archive.data.selectedRunId; calls.push(['open',archive.kind,ref]); if(labStub.fail) throw Error('임시 열람을 열지 못했습니다. 로컬 기록은 그대로입니다.'); if(archive.kind==='harness') return {kind:'harness',hash:archive.data.hash}; if(archive.kind==='paper-edit') return {kind:'paper-edit',id:archive.id}; return {kind:'experiment',runId:archive.data.selectedRunId};},
+    openArchive:async(archive)=>{const ref=archive.kind==='harness'?archive.data&&archive.data.hash:['paper-edit','attempt'].includes(archive.kind)?archive.id:archive.data&&archive.data.selectedRunId; calls.push(['open',archive.kind,ref]); if(labStub.fail) throw Error('임시 열람을 열지 못했습니다. 로컬 기록은 그대로입니다.'); if(archive.kind==='harness') return {kind:'harness',hash:archive.data.hash}; if(archive.kind==='paper-edit') return {kind:'paper-edit',id:archive.id}; if(archive.kind==='attempt') return {kind:'attempt',id:archive.id}; return {kind:'experiment',runId:archive.data.selectedRunId};},
     closeArchive:async()=>{calls.push('closeArchive');},
     restoreArchive:async()=>{calls.push('restore'); throw Error('persistent restore');},
     review:async(id)=>{calls.push(['review',id]); return true;},
@@ -54,6 +54,7 @@ function codecStub(){
       last={schema:'falsify.confluence-archive.v1',kind:'experiment',id:selectedRunId,title:'Synthetic '+((included.find(r=>r.id===selectedRunId)||{}).role||'run'),data:{schema:'falsify.review-bundle.v1',selectedRunId,ledger:{schema:'falsify.experiment-ledger.v1',harnesses:(snapshot.harnesses||[]).filter(h=>included.some(r=>r.harnessHash===h.hash)),runs:included,reviews:reviews.filter(v=>want.has(v.runId))}}};
       return JSON.parse(JSON.stringify(last));},
     buildHarnessArchive:async(record)=>{calls.push(['buildHarness',record.hash]); last={schema:'falsify.confluence-archive.v1',kind:'harness',id:record.hash,title:record.config.name,data:{config:record.config,hash:record.hash}}; return JSON.parse(JSON.stringify(last));},
+    buildAttemptArchive:async(record)=>{calls.push(['buildAttempt',record.id]); last={schema:'falsify.confluence-archive.v1',kind:'attempt',id:record.id,title:'Synthetic attempt',data:record}; return JSON.parse(JSON.stringify(last));},
     buildPaperEditArchive:async(record)=>{calls.push(['buildPaper',record&&record.id]); last={schema:'falsify.confluence-archive.v1',kind:'paper-edit',id:record.id,title:'Synthetic paper',data:{schema:'falsify.paper-edit-record.v1',record:{id:record.id},reviews:record.reviews||[]}}; return JSON.parse(JSON.stringify(last));},
     validateArchive:async(archive)=>{calls.push(['validate',archive.kind]); if(archive.schema!=='falsify.confluence-archive.v1'||!archive.kind) throw Error('bad archive'); last=JSON.parse(JSON.stringify(archive)); return JSON.parse(JSON.stringify(last));},
     archiveHash:async()=>HASH};}
@@ -86,7 +87,7 @@ function appRoutes(){
   assert.equal(found.review,'review'); assert.equal(found.agents,'harness');
   return found;
 }
-function setup({store=new Map(),routes,lab,codec,config,trace,sessionWrite}={}){
+function setup({store=new Map(),routes,lab,codec,config,trace,sessionWrite,clock=Date}={}){
   const body=new El('body'), review=new El('section'), results=new El('section'), agents=new El('section'), manager=new El('section'), board=new El('section');
   review.id='human-evaluation'; const run=new El('select'); run.id='evaluation-run'; review.append(run);
   results.id='view-results'; board.id='ledger-board'; const exp=new El('button'); exp.id='ledger-export'; exp.textContent='전체 기록 JSON 백업'; const imp=new El('input'); imp.id='ledger-import'; board.append(exp,imp); results.append(board);
@@ -103,7 +104,7 @@ function setup({store=new Map(),routes,lab,codec,config,trace,sessionWrite}={}){
   store.set(LEDGER_KEY,'{"schema":"falsify.experiment-ledger.v1","runs":[{"id":"keep-local"}]}');
   const document=new EventTarget(); Object.assign(document,{readyState:'complete',body,currentScript:null,createElement:t=>{const e=new El(t); e.ownerDocument=document; return e;},querySelector:s=>s.startsWith('#')?body.find(n=>n.id===s.slice(1)):null,querySelectorAll(sel){const m=String(sel).match(/^\[data-view="([^"]+)"\]$/); return m?[...body.walk()].filter(n=>n.getAttribute&&n.getAttribute('data-view')===m[1]):[];}});
   body.ownerDocument=document;
-  const ctx=vm.createContext({document,window,location,localStorage,fetch,crypto:globalThis.crypto,Date,FalsifyCloudConfig:config||{apiBase:BASE,provider:'confluence'},FalsifyLab:lab||labStub(),FalsifyReviewBundle:codec||codecStub(),URL,URLSearchParams,TextEncoder,TextDecoder,AbortController,Event,Uint8Array,btoa:b64,atob:ub64,setTimeout:(f,ms)=>{timers.push(ms); return setTimeout(f,ms>=15000?30:ms);},clearTimeout,setInterval:(fn,ms)=>{const id=setInterval(fn,ms); liveIntervals.add(id); return id;},clearInterval:(id)=>{liveIntervals.delete(id); return clearInterval(id);},console});
+  const ctx=vm.createContext({document,window,location,localStorage,fetch,crypto:globalThis.crypto,Date:clock,FalsifyCloudConfig:config||{apiBase:BASE,provider:'confluence'},FalsifyLab:lab||labStub(),FalsifyReviewBundle:codec||codecStub(),URL,URLSearchParams,TextEncoder,TextDecoder,AbortController,Event,Uint8Array,btoa:b64,atob:ub64,setTimeout:(f,ms)=>{timers.push(ms); return setTimeout(f,ms>=15000?30:ms);},clearTimeout,setInterval:(fn,ms)=>{const id=setInterval(fn,ms); liveIntervals.add(id); return id;},clearInterval:(id)=>{liveIntervals.delete(id); return clearInterval(id);},console});
   vm.runInContext(src,ctx,{filename:'confluence-store.js'});
   const $=id=>body.find(n=>n.id===id);
   return {ctx,calls,timers,store,body,window,opened,location,nav,$,registered:()=>registered,lab:ctx.FalsifyLab,codec:ctx.FalsifyReviewBundle,ready:ctx.FalsifyConfluenceStore.ready};
@@ -522,6 +523,22 @@ test('paper-edit uses the existing team session, keeps local ledger bytes, and d
   await broken.ready; await connect(broken);
   await assert.rejects((await broken.ready).publishPaperEdit({id:'pmr-2',reviews:[]},{teamShare:true}),/다시 보내지/);
   assert.equal(unknown,1); assert.equal(broken.store.get(LEDGER_KEY).includes('keep-local'),true);
+});
+
+test('attempt remote view expires after twelve hours on injected clock and timer without touching local ledger',async()=>{
+  let now=Date.now();class Clock extends Date{static now(){return now;}}const api=teamApi(),t=setup({routes:api.routes,clock:Clock});await t.ready;await connect(t);const app=await t.ready;
+  await app.publishAttempt({id:'attempt-expiry'},{teamShare:true});const local=t.store.get(LEDGER_KEY);t.$('confluence-review-load').click();await until(()=>/Synthetic attempt/.test(t.$('confluence-review-list').textContent),'attempt listed');openSaved(t,'confluence-review-list');await until(()=>t.lab.calls.some(c=>c[0]==='open'&&c[1]==='attempt')&&!t.$('confluence-review-close-temp').hidden,'attempt open');
+  now+=12*60*60*1000+1;await until(()=>t.lab.calls.includes('closeArchive')&&t.$('confluence-review-close-temp').hidden,'attempt timer expired');assert.equal(t.store.get(LEDGER_KEY),local);assert.ok(!t.$('confluence-review-list').textContent.includes('Synthetic attempt'));
+});
+
+test('attempt publication is explicit and never retries an unknown write',async()=>{
+  const api=teamApi(),t=setup({routes:api.routes});await t.ready;await connect(t);const app=await t.ready;
+  await assert.rejects(app.publishAttempt({id:'attempt-1'},{}),/동의/);
+  assert.equal(t.calls.some(c=>c.method==='POST'&&c.path==='/v1/confluence/archives'),false);
+  const result=await app.publishAttempt({id:'attempt-1'},{teamShare:true});assert.equal(result.stored,true);
+  const posts=t.calls.filter(c=>c.method==='POST'&&c.path==='/v1/confluence/archives');assert.equal(posts.length,1);assert.equal(posts[0].body.archive.kind,'attempt');
+  const before=t.store.get(LEDGER_KEY);t.$('confluence-review-load').click();await until(()=>/Synthetic attempt/.test(t.$('confluence-review-list').textContent),'attempt list');openSaved(t,'confluence-review-list');await until(()=>t.lab.calls.some(c=>c[0]==='open'&&c[1]==='attempt'),'attempt opened');assert.equal(t.store.get(LEDGER_KEY),before);
+  let count=0;const broken=setup({routes:(method,path,init)=>{if(method==='POST'&&path==='/v1/confluence/archives'){count++;return {status:502,body:{error:{code:'write_unknown'}}};}return api.routes(method,path,init);}});await broken.ready;await connect(broken);await assert.rejects((await broken.ready).publishAttempt({id:'attempt-2'},{teamShare:true}),/다시 보내지/);assert.equal(count,1);
 });
 
 (async()=>{let failed=0; for(const [name,fn] of tests){try{await fn(); console.log('ok - '+name);}catch(e){failed++; console.error('not ok - '+name+'\n'+(e.stack||e));}}

@@ -35,6 +35,16 @@ test('wrapper capability requires an explicit authenticated boolean',async()=>{f
 
 test('POST requests keep JSON body, bearer token and no manual Origin/cookies',async()=>{const h=hosted();h.queue.push(reply(CAP),reply({id:'r1',state:'running'},202));await h.bridge.pair(TOKEN,'7816');const out=await h.bridge.session().request('/api/red/jobs',{requestId:'r1'});assert.equal(out.id,'r1');
   const c=h.calls[1];assert.equal(c.url,'http://127.0.0.1:7816/api/red/jobs');assert.equal(c.init.method,'POST');assert.equal(c.init.body,'{"requestId":"r1"}');assert.deepEqual(Object.keys(c.init.headers).sort(),['Authorization','Content-Type']);assert.equal(c.init.credentials,'omit');assert.equal(c.init.redirect,'error');});
+
+test('local harness preparation uses the authenticated fixed route and explicit capability',async()=>{
+  const h=hosted(),request={schema:'falsify.harness-deployment-request.v1',family:'evidence-blue-v035'};
+  h.queue.push(reply({...CAP,harnessDeployment:true}),reply({schema:'falsify.harness-deployment.v1',sourceDigest:'a'.repeat(64),profile:{}}));
+  await h.bridge.pair(TOKEN,'7816');assert.equal(h.bridge.capabilities().harnessDeployment,true);
+  await h.bridge.session().request('/api/harness/deploy',request);
+  assert.equal(h.calls[1].init.body,JSON.stringify(request));assert.equal(h.calls[1].init.method,'POST');
+  assert.equal(h.calls[1].url,'http://127.0.0.1:7816/api/harness/deploy');
+  for(const value of [undefined,'true',1,false]){const older=hosted();older.queue.push(reply({...CAP,harnessDeployment:value}));await older.bridge.pair(TOKEN,'7816');assert.equal(older.bridge.capabilities().harnessDeployment,false);}
+});
 test('empty and malformed tokens never touch the network',async()=>{for(const t of ['','   ',null,undefined,'short','has space inside token value','tok\nen'+'x'.repeat(20),'<script>alert(1)</script>xxxxxxxx','x'.repeat(513),{toString:()=>TOKEN}]){const h=hosted();const r=await h.bridge.pair(t,'7816');assert.equal(r.ok,false,String(t));assert.equal(h.calls.length,0);assert.equal(h.bridge.state().status,'manual');}});
 test('port input is strict and cannot change host or scheme',async()=>{
   for(const bad of ['7816/evil','127.0.0.1:7816','http://evil.example','evil.example','80','1023','65536','99999','07816','7816.0','1e4','0x1E90','-7816','+7816','７８１６','7816#','7816?x','@evil.example','7816 7817']){assert.equal(L.parsePort(bad),null,bad);const h=hosted();const r=await h.bridge.pair(TOKEN,bad);assert.equal(r.ok,false,bad);assert.equal(h.calls.length,0,bad);}
@@ -81,6 +91,13 @@ test('page CSP permits loopback plus the one configured shared API; assets are r
   assert.ok(html.includes('https://github.com/Shinick-Han/falsify-workbench/archive/refs/heads/main.zip'));assert.ok(!/<a[^>]+main\.zip[^>]+download/.test(html));assert.ok(html.includes('https://github.com/Shinick-Han/falsify-workbench/blob/main/docs/local-companion.md'));assert.ok(html.includes('id="bridge-launcher"'));});
 test('launcher command runs the root start-companion.ps1 and follows the strict port',()=>{const root=path.resolve(__dirname,'../..'),ps1=path.join(root,'start-companion.ps1');assert.ok(fs.existsSync(ps1));assert.match(fs.readFileSync(ps1,'utf8'),/\[int\]\$Port = 7816,/);
   const argv=c=>c.split(' ');for(const [port,tail] of [[7816,[]],[7817,['-Port','7817']],[8000,['-Port','8000']]]){const a=argv(L.launcher(port));assert.deepEqual(a.slice(0,5),['powershell','-NoProfile','-ExecutionPolicy','Bypass','-File']);assert.equal(a[5],'./start-companion.ps1');assert.equal(path.resolve(root,a[5]),ps1);assert.deepEqual(a.slice(6),tail);}});
+test('platform instructions prepare dependencies and use the selected port without a token',async()=>{
+  for(const kind of ['mac','linux']){assert.equal(L.installCommand(kind),'python3 -m venv .venv && .venv/bin/python -m pip install -r app/local/requirements.txt && ./install-connection.sh');
+    assert.equal(L.launcher(7816,kind),"./open-connection.sh 'falsify://connect?port=7816'");assert.equal(L.launcher(8123,kind),"./open-connection.sh 'falsify://connect?port=8123'");}
+  assert.equal(L.installCommand('windows'),L.INSTALL);assert.equal(L.launcher(8123,'windows'),'powershell -NoProfile -ExecutionPolicy Bypass -File ./start-companion.ps1 -Port 8123');
+  for(const [platform,label] of [['MacIntel','macOS'],['Linux x86_64','Linux'],['Win32','Windows']]){const dom=fakeDom(),h=hosted();for(const id of ['bridge-install','bridge-install-title','bridge-install-note','bridge-launcher','bridge-launch'])dom.els[id]={textContent:'',hidden:false,disabled:false,addEventListener(){}};
+    L.mount(h.bridge,dom,{platform});await h.bridge.ready;assert.match(dom.els['bridge-install-title'].textContent,new RegExp(label));assert.equal(dom.els['bridge-install'].textContent,L.installCommand(L.platformKind(platform)));dom.els['bridge-port'].value='8123';dom.els['bridge-port']._l.input();assert.equal(dom.els['bridge-launcher'].textContent,L.launcher(8123,L.platformKind(platform)));dom.fire('falsify:local-bridge',h.bridge.state());assert.equal(h.calls.length,0);}
+});
 test('RED/BLUE route every broker call through the bridge and bind jobs to one link',()=>{for(const f of ['document-red.js','document-blue.js']){const src=read(f);assert.ok(!/\bfetch\(/.test(src),f);assert.ok(!src.includes('/api/session'),f);assert.ok(!/\btoken\b/.test(src),f);assert.ok(src.includes("B.busy('"+(f.includes('red')?'red':'blue')+"',busy)"),f);assert.match(src,/jobLink=l;/);assert.match(src,/const old=job,l=jobLink;job=null;jobLink=null;if\(old&&l\)void l\.request\(/);}});
 
 (async()=>{let passed=0;for(const [name,fn] of tests){try{await fn();passed++;console.log('PASS '+name);}catch(e){console.error('FAIL '+name);console.error(e);process.exitCode=1;}}

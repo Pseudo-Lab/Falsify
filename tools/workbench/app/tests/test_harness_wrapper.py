@@ -176,7 +176,7 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual([Path(p).name for p in r['paths']],['invocation.json','prompt.txt','schema.json','output.json'])
         for p in r['paths']:
             self.assertTrue(Path(p).is_absolute())
-            self.assertEqual(os.path.normcase(str(Path(p).parent)),os.path.normcase(r['cwd']))
+            self.assertEqual(os.path.normcase(str(Path(p).parent.resolve())),os.path.normcase(str(Path(r['cwd']).resolve())))
         self.assertFalse(Path(r['cwd']).exists())
     def test_placeholders_whole_tokens_only_no_shell(self):
         seen={}

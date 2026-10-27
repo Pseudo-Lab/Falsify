@@ -5,11 +5,11 @@
   "sourceModuleOverlay": {
     "schema": "falsify.paragraph-editor.overlay.v1",
     "base": "cd4ba2cdd68ae7e51198f615bd4ac6130206b162",
-    "commit": "b6fecf1fffe0d399c247424b850d6543fd3dd9e9",
-    "branch": "feature/document-flow-links-20261027",
+    "commit": "483a9abbd72ed2a7f853b5c0aaf2f2beaad16c5c",
+    "branch": "feature/fitr-native-wire-20261027",
     "repository": "https://github.com/Shinick-Han/falsify-pdf-editor",
     "patch": "patches/paragraph-flow-overlay.patch",
-    "patchSha256": "68f407645994c3059aee6edd308384ed1d4211217bd54b23c21db9ddc48ffa4b"
+    "patchSha256": "b0eb108bae54d22a0a44e33e92e5736de2621788d40c8d7ce6b5aace4cc2864e"
   },
   "upstream": {
     "bentopdfCommit": "3a5f146d1b89d54dc7ca576aa6797c8bd3e42b97",
@@ -47,14 +47,14 @@
   "sourceBuildVerified": false,
   "trust": "locally-supplied-hash-verified-artifacts",
   "editorModuleSha256": {
-    "editor.mjs": "478e50924d32b8f4af51c03da4a2548212e5aa3c18e7d65c71dd26b5142ab8a9",
-    "quality.mjs": "c0f29ac26aa3a67a521aa72cb46136ec3cf9d04d29daaa6d088e557c87f4a14a",
+    "editor.mjs": "188593711f015c606c21e49c06803fd469436387bae4c0eac8eeb03dbd5f9426",
+    "quality.mjs": "395f55600c880999398b05971c1d09cda96a924d243b8a5f7fb472e0867ff309",
     "pagination.mjs": "e66e6b630c426f9d80da87781590e59ed7b67ffdaeee7aa49bd139e7507438cb",
-    "inline-preservation.mjs": "4223e5431a5a616f3c9770439ac786519c71731e66ef95f06dead9e2af8d5d49",
+    "inline-preservation.mjs": "2ef15bddd2384148bef208319656fdd468434d3853c0d32428d61bef635e9fbb",
     "continuation-template.mjs": "94bfc49200818466e9ec99560d00a7e2dcf72a8003fa10d485852bbace124336",
-    "document-flow.mjs": "8e27039b807d6b7ce7e5309e817a00354cf68fd4a1c8b0e2bf7a8d971cb2fed5",
+    "document-flow.mjs": "2834b616e41159765bb3054e56a0b1c601eb888b635c6b0d332165133638539d",
     "document-flow-band.mjs": "1b44eb4198fe99a60c83b742ecf6911b153bfd082e4e92a69f798828d4689a3f",
-    "document-flow-links.mjs": "4a9fb27de3acdb90b0f9e81a2144cbbffd22fb5889d9a8dff16aced1074f9152",
+    "document-flow-links.mjs": "50e2a0812061a7d820a71881fedd3c0a5f7fc679b3b388cb9da1b62acdc194f9",
     "document-flow-underlines.mjs": "ce6aff33f329de3920b93d7f1bb7be453c11dc62391e70857366be571212d85b"
   },
   "provenance": "Runtime bytes match caller-supplied candidate digests; build from listed C++ sources/patches is not verified. Editor-module overlay, if any, must accompany source distribution."

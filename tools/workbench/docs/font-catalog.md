@@ -1,0 +1,12 @@
+# Public bundled font catalog
+
+`getBundledFonts(requirements, {fetch})` fetches same-origin files only when a requirement needs their family/style or script. SHA-256 is checked before use; returned byte arrays are copies. Unknown families receive both Liberation families as explicitly named alternatives. Family aliases are exact, not substring matches. Math and CJK alternatives are offered independently; the caller must check actual glyph coverage. The catalog does not claim that an offered font covers every requested code point, and Noto Korean faces only have regular weight and no italic. The caller should not present them as bold or italic. Fonts are not sent anywhere by this module.
+
+All files are static single-face OTF/TTF, not font collections. The CJK Korean faces are full upstream faces, not subsets. A CJK request may load 16,433,112 bytes (sans), 24,539,640 bytes (serif), or both for an unknown family. The newly bundled font files total 43,327,944 bytes; licenses add a few KB. Liberation Sans was already present.
+
+* Liberation Sans is the existing PDF.js standard-font asset; its existing `app/dist/vendor/standard_fonts/LICENSE_LIBERATION` is the actual GPLv2 with font embedding exception license. Hashes in the module pin the existing bytes.
+* Liberation Serif 2.1.5 is extracted from [Debian fonts-liberation 2.1.5-3](https://deb.debian.org/debian/pool/main/f/fonts-liberation/fonts-liberation_2.1.5-3_all.deb) (package SHA-256 `3d5c47480067b9615f6bf9b0eda6eefcab9d837af609827015445e8e759b5b8c`); license and copyright are in `app/dist/font-assets/LICENSE_LIBERATION2` (SIL OFL 1.1). Source: [liberation-fonts 2.1.5](https://github.com/liberationfonts/liberation-fonts/tree/2.1.5).
+* [STIX Two Math 2.13](https://github.com/stipub/stixfonts/tree/37308d44583ef882dc8b544aaa2e80ac8c406ebf/fonts/static_otf), SIL OFL 1.1, license `LICENSE_STIX`.
+* [Noto Sans CJK KR](https://github.com/notofonts/noto-cjk/blob/523d033d6cb47f4a80c58a35753646f5c3608a78/Sans/OTF/Korean/NotoSansCJKkr-Regular.otf) and [Noto Serif CJK KR](https://github.com/notofonts/noto-cjk/blob/9b0f1436e455d902de067a2501422e5dc71ad16b/Serif/OTF/Korean/NotoSerifCJKkr-Regular.otf), SIL OFL 1.1, licenses `LICENSE_NOTO_SANS` and `LICENSE_NOTO_SERIF`.
+
+The precise SHA-256 of each font is recorded in `app/src/bundled-fonts.mjs` and checked at runtime. Noto font metadata reports the Korean family and PostScript names and includes U+AC00; this is not a complete coverage test. Browser/PDF engine support for CFF OpenType requires integration testing in the consuming runtime.

@@ -1,5 +1,7 @@
 # BLUE Evidence v0.3.3 on your own PC
 
+The v0.3.3 name identifies this bundled profile, not a verified live model version or the newer experimental v0.3.4 bundle. Generating a local profile does not change existing Harness content or hashes.
+
 ## Quick start
 
 Use your own Python 3.12+ and Claude Code subscription login. No API registration or shared credentials are required. Download the Workbench source release, preserve its directory structure, and open a terminal in its root.
@@ -24,6 +26,6 @@ Final review may perform a lookup-plan call, two parallel specialist calls and a
 
 Raw responses and derived quote-binding observations stay in `.local/blue-evidence-v033-audits` on that PC. Paper evidence must bind exactly to supplied text; only unique whitespace-equivalent scan quotes may be reanchored. Final expert/challenge quotations are not rewritten. Refusal, abstention and zero findings are valid. Offline tests do not establish live compatibility or scientific accuracy.
 
-Team members may share the definition and execution summaries through invited accounts. Sharing is separate from local installation and scientific validation. Different local paths currently produce different full configuration hashes; cross-PC strategy identity is separate work. Record actual profiles, versions and conditions, and distinguish human judgments from model output.
+Team members may explicitly publish selected records and definitions to the Confluence team archive; the former invited Workbench accounts are retired. Sharing is separate from local installation and scientific validation. Different local paths currently produce different full configuration hashes; cross-PC strategy identity is separate work. Record actual profiles, versions and conditions, and distinguish human judgments from model output.
 
 RED and BLUE can be used independently. A blind BLUE input excludes RED plans, answer keys and prior BLUE responses.

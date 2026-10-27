@@ -4,6 +4,7 @@
  * Vendor notices: dist/browser-pdf-vendor/NOTICE.md
  */
 import * as mupdf from 'mupdf';
+import {parseFont, familyKey} from './browser-fonts.mjs';
 
 export const ENGINE = Object.freeze({
   name: 'mupdf.js',
@@ -78,12 +79,15 @@ function checkAbort(signal) {
 }
 
 export async function prepare(request) {
-  return exclusive(() => prepareExclusive(request || {}));
+  request ||= {};
+  const snapshot = captureFontSnapshot(request.fontSnapshot);
+  return exclusive(() => prepareExclusive({...request, fontSnapshot: snapshot}));
 }
 
 async function prepareExclusive(request) {
   checkAbort(request.signal);
   const parsed = parseRequest(request);
+  const snapshot = await validateFontSnapshot(request.fontSnapshot);
   checkAbort(request.signal);
   const bytes = await readBytes(parsed.file);
   checkAbort(request.signal);
@@ -111,7 +115,7 @@ async function prepareExclusive(request) {
     const plans = [];
     const failures = [];
     enabled.forEach((edit, index) => {
-      const result = locate(edit, index, models, pageCount);
+      const result = locate(edit, index, models, pageCount, snapshot);
       if (result.ok) plans.push(result.plan);
       else failures.push(result.failure);
     });
@@ -214,6 +218,7 @@ async function prepareExclusive(request) {
     throw new BrowserPdfError('engine', 'PDF 편집 중 엔진 오류가 났습니다. 출력 파일은 만들지 않았습니다.', {reason: error?.name || 'Error'});
   } finally {
     try { doc?.destroy(); } catch { /* already closed */ }
+    for (const face of snapshot || []) { try { face.font?.destroy(); } catch { /* already closed */ } }
   }
 }
 
@@ -278,7 +283,7 @@ function readPage(page) {
   return {chars, images, transform, bounds: page.getBounds(), rotation: rotationOf(page)};
 }
 
-function locate(edit, index, models, pageCount) {
+function locate(edit, index, models, pageCount, snapshot) {
   const id = typeof edit?.id === 'string' && edit.id ? edit.id : `edit-${index}`;
   const pageIndex = edit?.pageIndex;
   const fail = (code) => ({ok: false, failure: {id, pageIndex: Number.isInteger(pageIndex) ? pageIndex : null, status: 'unapplied', code}});
@@ -335,22 +340,24 @@ function locate(edit, index, models, pageCount) {
   if (fontsUsed.length !== 1 || sizes.length !== 1 || colors.length !== 1 || colors[0] === 'none') return fail(colors[0] === 'none' ? 'unsupported-color' : 'mixed-style');
   const face = base14(fontsUsed[0], drawn[0].font);
   if (!face) return fail('font-unavailable');
-  const encoded = textEncoding(face, edit.after);
+  const supplied = snapshot ? chooseSnapshotFont(snapshot, fontsUsed[0], drawn[0].font, edit.after) : null;
+  if (snapshot && !supplied) return fail('font-unavailable');
+  const encoded = supplied ? {encoding: 'glyph-id', substituted: supplied.substituted} : textEncoding(face, edit.after);
   if (encoded.error) return fail(encoded.error);
   const box = pdfSpan(model.transform, chars.filter(ch => ch.lineId === chars[0].lineId));
   const partialLine = model.chars.some(ch => ch.lineId === chars[0].lineId && !chars.includes(ch) && ch.c.trim());
   return {ok: true, plan: {
     edit: {...edit, id}, pageIndex, chars, charIndex: new Set(chars.map(ch => model.chars.indexOf(ch))),
     anchorApproximate: !!anchor?.bbox && !contains(union(chars), anchor.bbox, 4),
-    sourceFont: fontsUsed[0], face, encoding: encoded.encoding, substituted: encoded.substituted,
+    sourceFont: fontsUsed[0], face, supplied, encoding: encoded.encoding, substituted: encoded.substituted,
     size: sizes[0], color: drawn[0].color,
     origin: chars[0].pdf, hole: box[1] - box[0], partialLine, rotation: model.rotation,
   }};
 }
 
 function layout(plan, model, page) {
-  const font = plan.encoding === 'uniks-utf16' ? cjkFont() : metrics(plan.face.name);
-  const fontName = plan.encoding === 'uniks-utf16' ? 'ko' : plan.face.name;
+  const font = plan.supplied?.font || (plan.encoding === 'uniks-utf16' ? cjkFont() : metrics(plan.face.name));
+  const fontName = plan.supplied?.name || (plan.encoding === 'uniks-utf16' ? 'ko' : plan.face.name);
   const after = plan.edit.after;
   const placed = (lines) => ({lines, font: fontName, substituted: plan.substituted, encoding: plan.encoding});
   if (!after) return placed([]);
@@ -471,12 +478,12 @@ function redact(page, chars, protectedBoxes) {
 function showText(doc, page, plan) {
   if (!plan.layout.lines.length) return '';
   const cjk = plan.layout.encoding === 'uniks-utf16';
-  const resource = cjk ? ensureCjkFont(doc, page) : ensureFont(doc, page, plan.layout.font);
+  const resource = plan.supplied ? ensureSnapshotFont(doc, page, plan) : cjk ? ensureCjkFont(doc, page) : ensureFont(doc, page, plan.layout.font);
   const [r, g, b] = plan.color;
   const leading = plan.size * 1.2;
   let body = `q BT /${resource} ${num(plan.size)} Tf ${num(r)} ${num(g)} ${num(b)} rg\n`;
   plan.layout.lines.forEach((line, index) => {
-    const literal = cjk ? utf16hex(line) : winAnsi(line);
+    const literal = plan.supplied ? glyphHex(plan.supplied.font, line) : cjk ? utf16hex(line) : winAnsi(line);
     body += `1 0 0 1 ${num(plan.origin[0])} ${num(plan.origin[1] - index * leading)} Tm ${literal} Tj\n`;
   });
   return body + 'ET Q\n';
@@ -678,6 +685,87 @@ function horizontalLine(chars) {
   return true;
 }
 
+
+// A snapshot is immutable input to this request, never stored in the global metrics cache.
+function captureFontSnapshot(snapshot) {
+  if (snapshot == null) return null;
+  if (!Array.isArray(snapshot.fonts) || !Number.isSafeInteger(snapshot.revision) || snapshot.revision < 0 || typeof snapshot.digest !== 'string')
+    throw new BrowserPdfError('invalid', 'Invalid font snapshot.');
+  return {...snapshot, fonts: snapshot.fonts.map(face => {
+    if (!face || !(face.bytes instanceof Uint8Array)) throw new BrowserPdfError('invalid', 'Invalid font snapshot bytes.');
+    return {...face, bytes: face.bytes.slice()};
+  })};
+}
+async function validateFontSnapshot(snapshot) {
+  if (snapshot == null) return null;
+  if (!Array.isArray(snapshot.fonts) || !Number.isInteger(snapshot.revision) || typeof snapshot.digest !== 'string')
+    throw new BrowserPdfError('invalid', 'Invalid font snapshot.');
+  const faces = [];
+  for (const face of snapshot.fonts) {
+    if (!(face.bytes instanceof Uint8Array) || typeof face.sha256 !== 'string')
+      throw new BrowserPdfError('invalid', 'Invalid font snapshot bytes.');
+    const bytes = face.bytes.slice();
+    if (await sha256(bytes) !== face.sha256.toLowerCase())
+      throw new BrowserPdfError('invalid', 'Font snapshot bytes do not match their SHA-256.');
+    let parsed;
+    try { parsed = parseFont(bytes); } catch { throw new BrowserPdfError('unsupported', 'Font is invalid or embedding is restricted.'); }
+    if (typeof face.id !== 'string' || !['local', 'file', 'bundled'].includes(face.source) ||
+        ['family', 'postscriptName', 'weight', 'italic', 'fsType'].some(field => face[field] !== parsed[field]))
+      throw new BrowserPdfError('invalid', 'Font snapshot metadata does not match its bytes.');
+    // MuPDF addFont embeds the complete font. Never invoke save-time font subsetting.
+    faces.push({...face, bytes});
+  }
+  const metadata = snapshot.fonts.map(({bytes, ...rest}) => rest);
+  if (await sha256(new TextEncoder().encode(JSON.stringify(metadata))) !== snapshot.digest.toLowerCase())
+    throw new BrowserPdfError('invalid', 'Font snapshot metadata digest does not match.');
+  return faces;
+}
+
+function chooseSnapshotFont(faces, sourceName, sourceFont, text) {
+  const source = familyKey(sourceName);
+  const matches = face => source && (source === familyKey(face.postscriptName) || source === familyKey(face.family));
+  const ranked = faces.filter(face => matches(face) || face.source === 'bundled').sort((a, b) =>
+    (matches(a) ? 0 : 10000) - (matches(b) ? 0 : 10000) +
+    (a.italic === sourceFont.isItalic() ? 0 : 1000) - (b.italic === sourceFont.isItalic() ? 0 : 1000) +
+    Math.abs(a.weight - (sourceFont.isBold() ? 700 : 400)) - Math.abs(b.weight - (sourceFont.isBold() ? 700 : 400)));
+  for (const face of ranked) {
+    let font;
+    try { font = face.font || new mupdf.Font(face.postscriptName || face.family, face.bytes); }
+    catch { continue; }
+    if ([...text].every(ch => font.encodeCharacter(ch.codePointAt(0))))
+      { face.font = font; return {font, name: font.getName(), substituted: !matches(face), face}; }
+    if (!face.font) font.destroy();
+  }
+  return null;
+}
+function glyphHex(font, text) {
+  return '<' + [...text].map(ch => font.encodeCharacter(ch.codePointAt(0)).toString(16).padStart(4, '0')).join('') + '>';
+}
+function ensureSnapshotFont(doc, page, plan) {
+  const resources = ownResources(doc, page);
+  let dict = resources.get('Font');
+  if (dict.isNull()) { dict = doc.newDictionary(); resources.put('Font', dict); }
+  else dict = dict.resolve();
+  const taken = new Set(); dict.forEach((_value, key) => taken.add(String(key)));
+  let name = 'FwEmbedded'; while (taken.has(name)) name += 'x';
+  const pdfFont = doc.addFont(plan.supplied.font);
+  const mappings = new Map();
+  for (const line of plan.layout.lines) for (const ch of line) {
+    const gid = plan.supplied.font.encodeCharacter(ch.codePointAt(0));
+    if (mappings.has(gid) && mappings.get(gid) !== ch) throw new BrowserPdfError('unsupported', 'Font maps multiple Unicode characters to one glyph.');
+    mappings.set(gid, ch);
+  }
+  const entries = [...mappings].map(([gid, ch]) => `<${gid.toString(16).padStart(4, '0')}> ${utf16hex(ch)}`);
+  let cmap = '/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def\n/CMapName /FwUnicode def\n/CMapType 2 def\n1 begincodespacerange\n<0000> <FFFF>\nendcodespacerange\n';
+  for (let i = 0; i < entries.length; i += 100) {
+    const chunk = entries.slice(i, i + 100); cmap += `${chunk.length} beginbfchar\n${chunk.join('\n')}\nendbfchar\n`;
+  }
+  cmap += 'endcmap\nCMapName currentdict /CMap defineresource pop\nend\nend\n';
+  pdfFont.put('ToUnicode', doc.addStream(new TextEncoder().encode(cmap), {}));
+  dict.put(name, pdfFont);
+  return name;
+}
+
 function base14(fontName, font) {
   const bare = String(fontName || '').replace(/^[A-Z]{6}\+/, '');
   if (BASE14.includes(bare)) return {name: bare, substituted: false};
@@ -729,7 +817,7 @@ function utf16hex(text) {
 function measure(font, size, text) {
   let width = 0;
   for (const ch of text) {
-    const gid = font.encodeCharacter(ch);
+    const gid = font.encodeCharacter(ch.codePointAt(0));
     if (!gid) return null;
     width += font.advanceGlyph(gid) * size;
   }

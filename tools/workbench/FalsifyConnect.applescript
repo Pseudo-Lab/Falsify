@@ -5,6 +5,6 @@
 on open location theURL
 	set linkText to theURL as text
 	set pathFile to POSIX path of (path to resource "falsify-script-path.txt")
-	set scriptPath to paragraph 1 of (read POSIX file pathFile)
+	set scriptPath to paragraph 1 of (read POSIX file pathFile as «class utf8»)
 	do shell script "/bin/bash " & quoted form of scriptPath & " " & quoted form of linkText
 end open location

@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 import { capturePageLayout, expectedPageText } from './quality.mjs';
 import { groupLines } from './pagination.mjs';
 import { deriveDocumentFlowBand, checkDocumentFlowPageBudget } from './document-flow-band.mjs';
-import { deriveNativeLinkMoves, plannedLinkGlyphs } from './document-flow-links.mjs';
+import { deriveNativeLinkMoves, deriveNativeFitRMoves, nativeFitRTargetPages, plannedLinkGlyphs } from './document-flow-links.mjs';
 import { snapshotTinyUnderline, matchStagedUnderlines, cloneUnderline, underlineEqual } from './document-flow-underlines.mjs';
 import { snapshotTextObjects, cloneTextObject, verifyTextObject, snapshotPageEdges, applyPageEdges, verifyPageEdges } from './continuation-template.mjs';
 
@@ -83,7 +83,7 @@ export async function compactDocumentFlow(engineFactory, sourceBytes, intermedia
       for(;end<preliminaryMap.length;end++){
         const included=bands.map(b=>b.sourcePageIndex);
         const targetBoundary=annotationModel?.annotations.some(a=>included.includes(a.sourcePageIndex)&&(a.internalDestinationSourcePageIndices||[a.destination?.targetSourcePageIndex].filter(Number.isInteger)).includes(end));
-        if(end>start&&targetBoundary){
+        if(end>start&&targetBoundary&&!nativeFitRTargetPages(annotationModel,[end]).has(end)){
           if(bands.length<2)fail('document_flow_link_target_in_changed_body');
           warnings.push({code:'document_flow_internal_target_boundary',severity:'info',pageIndex:start,boundarySourcePageIndex:end});
           end--;break;
@@ -108,9 +108,12 @@ export async function compactDocumentFlow(engineFactory, sourceBytes, intermedia
       // Clone preflight is part of eligibility, before any group mutates.
       for(const part of parts)if(!part.items.length)fail('document_flow_empty_body_unsupported');
       const plan={start,end,bands,parts,lines,pages:planned};
-      plan.linkMoves=deriveNativeLinkMoves(src,bands,plannedLinkGlyphs(plan),edits,annotationModel,expectedPageText);
+      const authorized=nativeFitRTargetPages(annotationModel,bands.map(b=>b.sourcePageIndex));
+      plan.destinationMoves=deriveNativeFitRMoves(src,bands,plannedLinkGlyphs(plan),edits,annotationModel,expectedPageText);
+      plan.linkMoves=deriveNativeLinkMoves(src,bands,plannedLinkGlyphs(plan),edits,annotationModel,expectedPageText,authorized);
       const stagedGlyphs=parts.flatMap(part=>part.lines.flatMap(line=>line.items.flatMap(({it})=>it.chars.filter(c=>c.u>32).map(c=>({u:c.u,outputPageIndex:part.pageIndex,box:{l:c.l,r:c.r,b:c.b,t:c.t}})))));
-      const stagedMoves=deriveNativeLinkMoves(src,bands,stagedGlyphs,edits,annotationModel,expectedPageText);
+      deriveNativeFitRMoves(src,bands,stagedGlyphs,edits,annotationModel,expectedPageText);
+      const stagedMoves=deriveNativeLinkMoves(src,bands,stagedGlyphs,edits,annotationModel,expectedPageText,authorized);
       plan.underlines=matchStagedUnderlines(bands,parts,stagedMoves);
       plans.push(plan);start=end;
       } catch(error) {
@@ -125,7 +128,8 @@ export async function compactDocumentFlow(engineFactory, sourceBytes, intermedia
       const actionOwnershipUnsupported=annotationModel?.actionOwnershipUnsupported===true;
       const blocked=annotationModel?.annotations.some(a=>{
         const targets=a.internalDestinationSourcePageIndices||[a.destination?.targetSourcePageIndex].filter(Number.isInteger);
-        return targets.some(i=>own.includes(i))||own.includes(a.sourcePageIndex)&&targets.some(i=>allSourcePages.includes(i));
+        const authorized=nativeFitRTargetPages(annotationModel,own);
+        return targets.some(i=>own.includes(i)&&!authorized.has(i))||own.includes(a.sourcePageIndex)&&targets.some(i=>allSourcePages.includes(i)&&!own.includes(i));
       });
       const reason=actionOwnershipUnsupported?'document_flow_link_action_ownership_unsupported':unresolved?'document_flow_link_unresolved_target':'document_flow_link_target_in_changed_body';
       if(unresolved||actionOwnershipUnsupported){
@@ -207,10 +211,11 @@ export async function compactDocumentFlow(engineFactory, sourceBytes, intermedia
       }
       out+=1+n;
     }
-    const annotationMoves=[];
+    const annotationMoves=[],destinationMoves=[];
     for(const p of plans){
       const indices=[...p.bands.map(b=>map[b.sourcePageIndex].outputPageIndex),...map[p.end].continuationPageIndices];
       annotationMoves.push(...p.linkMoves.map(move=>({...move,outputPageIndex:indices[move.outputPageIndex]})));
+      destinationMoves.push(...p.destinationMoves.map(move=>({...move,outputPageIndex:indices[move.outputPageIndex]})));
       const contentMap=p.bands.map(b=>({sourcePageIndex:b.sourcePageIndex,outputPageIndices:indices.filter((_,i)=>p.clones[i].some(c=>c.origin===b.sourcePageIndex))}));
       for(const c of contentMap)map[c.sourcePageIndex].contentOutputPageIndices=[...c.outputPageIndices];
       groups.push({version:1,sourcePages:p.bands.map(({sourcePageIndex,bodyTop,flowTop,floor,x0,x1})=>({sourcePageIndex,bodyTop,flowTop,floor,x0,x1})),outputPages:indices.map((outputPageIndex,i)=>({outputPageIndex,...Object.fromEntries(['bodyTop','flowTop','floor'].map(k=>[k,p.pages[i][k]])),x0:Math.min(...p.bands.map(b=>b.x0)),x1:Math.max(...p.bands.map(b=>b.x1)),lineCount:p.pages[i].lines.length})),contentMap});
@@ -218,7 +223,7 @@ export async function compactDocumentFlow(engineFactory, sourceBytes, intermedia
     e.pageCount=M._FPDF_GetPageCount(e.doc);
     let pdf=new Uint8Array(e.save());if(!pdf.length)fail('document_flow_save_failed');
     if(annotationAdapter&&annotationModel.annotations.length){
-      const transported=await annotationAdapter.transport({model:annotationModel,sourceBytes,outputBytes:pdf,sourcePageMap:map,moves:annotationMoves,reflowedSourcePages:plans.flatMap(p=>p.bands.map(b=>b.sourcePageIndex))});
+      const transported=await annotationAdapter.transport({model:annotationModel,sourceBytes,outputBytes:pdf,sourcePageMap:map,moves:annotationMoves,destinationMoves,reflowedSourcePages:plans.flatMap(p=>p.bands.map(b=>b.sourcePageIndex))});
       pdf=new Uint8Array(transported?.pdf??transported);if(!pdf.length)fail('document_flow_annotation_transport_failed');
     }
     return {pdf,sourcePageMap:map,flowGroups:groups,annotationMoves,addedPages:e.pageCount-map.length,warnings};

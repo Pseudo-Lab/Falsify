@@ -9,11 +9,21 @@ import test from 'node:test';
 import {
   MUPDF_WASM, MUPDF_WASM_SHA256, PDFJS_WASM, PARAGRAPH_WASM, PARAGRAPH_WASM_SHA256,
   assertShippableSource, unexpectedReleasePaths, verifyVendoredMupdfWasm, verifyParagraphRuntime,
+  RECOMPOSITION_WASM, RECOMPOSITION_WASM_SHA256, verifyRecompositionRuntime,
 } from './package-release.mjs';
 import { assertChromeLoaderExecuted, CHROME_TEST } from './assert-browser-pdf-executed.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const workflow = readFileSync(join(root, '.github/workflows/pages.yml'), 'utf8');
+
+test('recomposition compiler, font assets and notices survive source packaging', () => {
+  const proof = verifyRecompositionRuntime(root);
+  assert.equal(proof.wasmSha256, RECOMPOSITION_WASM_SHA256);
+  assert.equal(proof.fonts, 12);
+  assert.deepEqual(unexpectedReleasePaths([RECOMPOSITION_WASM]), []);
+  assertShippableSource([RECOMPOSITION_WASM], root);
+  assert.throws(() => assertShippableSource(['app/dist/recomposition-vendor/arbitrary.wasm'], root), /Unexpected private/);
+});
 
 test('pinned MuPDF 1.28.1 wasm matches the vendor manifest and NOTICE', () => {
   const manifest = JSON.parse(readFileSync(join(root, 'app/dist/browser-pdf-vendor/manifest.json'), 'utf8'));

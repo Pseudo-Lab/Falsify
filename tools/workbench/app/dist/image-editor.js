@@ -98,7 +98,7 @@
         const bytes=new Uint8Array(await f.arrayBuffer());if(id!==pngSeq)return;const info=I.png(bytes),base64=I.encode(bytes);
         png=Object.freeze({bytes,base64,info,name:String(f.name||'').slice(0,120)});
         if(after){after.src='data:image/png;base64,'+base64;after.alt='교체할 PNG 미리보기 · '+info.width+'×'+info.height+' px';after.hidden=false;}
-        say('image-png-status','PNG '+info.width+'×'+info.height+' px'+(info.alpha?' · 알파 채널이 있습니다. 투명한 픽셀이 있으면 companion이 거부합니다.':''));}
+        say('image-png-status','PNG '+info.width+'×'+info.height+' px'+(info.alpha?' · 알파 채널 포함':''));}
       catch(e){if(id!==pngSeq)return;png=null;say('image-png-status',e.image?e.message:'PNG를 읽지 못했습니다.',true);}
       render();});
     $('image-consent')?.addEventListener('change',render);

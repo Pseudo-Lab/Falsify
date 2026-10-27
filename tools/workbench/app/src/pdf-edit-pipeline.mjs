@@ -75,7 +75,8 @@ export async function prepare(request={}, {selectionPdf,paragraphPdf}={}){
   if(!tables.length)return prepareOf(paragraphPdf)(request);
   if(!body.length)return prepareOf(selectionPdf)(request);
   const {file:capturedFile,signal,...rest}=request;
-  const controls={...copy(rest),file:capturedFile,signal};
+  const {fontSnapshot,...metadata}=rest;
+  const controls={...copy(metadata),...(fontSnapshot?{fontSnapshot:structuredClone(fontSnapshot)}:{}),file:capturedFile,signal};
   if(enabled.length>24||enabled.some(e=>!e||typeof e.before!=='string'||typeof e.after!=='string'))fail('invalid-edits');
   disjoint(tables,body);
   const envelope=Array.isArray(request.edits)?null:copy(request.edits);
@@ -91,7 +92,7 @@ export async function prepare(request={}, {selectionPdf,paragraphPdf}={}){
   // source geometry instead of using that stale ordinal against new bytes.
   const tablePages=new Set(tableEdits.map(e=>e.pageIndex));
   for(const e of bodyEdits)if(tablePages.has(e.pageIndex)&&validBox(e.anchor?.bbox))delete e.anchor.occurrence;
-  const scoped=(edits,file,fileHash)=>({...controls,file,fileHash,signal,edits:envelope?{...copy(envelope),fileHash,edits}:edits});
+  const scoped=(edits,file,fileHash)=>({...controls,...(controls.fontSnapshot?{fontSnapshot:structuredClone(controls.fontSnapshot)}:{}),file,fileHash,signal,edits:envelope?{...copy(envelope),fileHash,edits}:edits});
   const stageA=await prepareOf(selectionPdf)(scoped(tableEdits,originalBytes.slice(),original));abort(signal);
   const a=await verifyResult(stageA,original,signal),first=descriptor('table-selection',original,a.result,a);
   if(a.status!=='applied'&&a.status!=='warning')return composite(a.result,original,[first],bodyEdits,'failed',[{code:'mixed-table-stage-not-passed',severity:'warning',bodyPending:true}]);

@@ -17,7 +17,7 @@
   // Kept apart from REASONS so a list entry never accepts an export-only reason.
   const REFUSALS=Object.freeze({'occurrence-not-found':['선택한 그림 위치를 원본에서 다시 찾지 못함','그림 목록을 다시 불러온 뒤 다시 고르세요.'],
     'not-editable':['엔진이 이 위치를 교체할 수 없다고 판정함','목록에서 교체 가능한 다른 위치를 고르세요.'],'replacement-transparent':['교체 PNG에 투명한 픽셀이 있음','투명 픽셀 없이(불투명하게) 저장한 PNG를 고르세요.'],
-    'replacement-invalid':['엔진이 교체 PNG를 읽지 못함','8비트 RGB 또는 불투명 RGBA PNG로 다시 저장해 고르세요.'],'replacement-too-large':['교체 PNG가 엔진 한도를 넘음','더 작은 PNG(4 MiB·한 변 8192 px·400만 픽셀 이하)를 고르세요.'],
+    'replacement-invalid':['엔진이 교체 PNG를 읽지 못함','8비트 RGB 또는 RGBA PNG로 다시 저장해 고르세요.'],'replacement-too-large':['교체 PNG가 엔진 한도를 넘음','더 작은 PNG(4 MiB·한 변 8192 px·400만 픽셀 이하)를 고르세요.'],
     'output-too-large':['교체한 PDF가 64 MiB 출력 한도를 넘음','더 작은 PNG를 쓰세요.'],'check-failed':['엔진 자체 렌더 검사가 교체 결과를 통과시키지 않음','다른 PNG나 다른 위치로 시도하세요. 통과하지 못한 결과는 내려받지 않습니다.'],
     'no-op':['교체 PNG가 원래 그림과 보기에 달라지지 않음(시각적으로 같은 결과)','원래 그림과 눈에 띄게 다른 PNG를 고르세요.'],'engine-error':['그림 엔진이 이 요청을 처리하지 못함(세부 사유는 공개하지 않음)','다른 위치나 PNG로 시도하거나 companion을 다시 시작하세요.']});
   const EXPORT_REASONS=Object.freeze([...Object.keys(REASONS),...Object.keys(REFUSALS)]);

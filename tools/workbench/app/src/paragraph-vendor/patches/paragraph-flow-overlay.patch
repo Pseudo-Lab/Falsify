@@ -1,9 +1,9 @@
 diff --git a/docs/DOCUMENT_FLOW.md b/docs/DOCUMENT_FLOW.md
 new file mode 100644
-index 0000000..c4f257b
+index 0000000..b798f28
 --- /dev/null
 +++ b/docs/DOCUMENT_FLOW.md
-@@ -0,0 +1,201 @@
+@@ -0,0 +1,208 @@
 +# Opt-in flow through existing source pages
 +
 +`editPdf(request, { documentFlow: true })` enables strict post-edit compaction.
@@ -161,8 +161,15 @@ index 0000000..c4f257b
 +geometry and ownership. `pagination.annotationMoves` contains only numeric
 +diagnostics and is never authority for this saved check.
 +
-+Resolved local targets must stay outside changed flow pages, including targets
-+of annotations owned by other pages and nested actions. When the next proposed
++Resolved local targets normally stay outside changed flow pages, including targets
++of annotations owned by other pages and nested actions. A FitR target may cross
++this boundary only when every reference to that page has an explicit FitR
++descriptor and native source glyph ownership proves a single rigid translation
++in both staged and planned layouts. The final physical page index and translation
++are passed only to the trusted adapter. Saved QA independently derives the move
++from reopened glyphs and validates the saved destination graph. Partial glyph,
++multi-object, edited, split, ambiguous or unsupported targets remain barriers.
++When the next proposed
 +source page is a target of the included prefix, the planner stops before that
 +page and may use terminal tail pages. The minimum two-original-page chain still
 +applies. Backlinks into the initial changed body are barriers: arbitrary FitH/XYZ
@@ -494,10 +501,10 @@ index 0000000..2500ee5
 +}
 diff --git a/src/document-flow-links.mjs b/src/document-flow-links.mjs
 new file mode 100644
-index 0000000..f102866
+index 0000000..f762c5b
 --- /dev/null
 +++ b/src/document-flow-links.mjs
-@@ -0,0 +1,129 @@
+@@ -0,0 +1,189 @@
 +// Exact native glyph association for a trusted raw-dictionary adapter. This
 +// module never reads URI targets, follows actions or recreates dictionaries.
 +const fail=code=>{throw Object.assign(new Error(code),{code});};
@@ -560,9 +567,8 @@ index 0000000..f102866
 +  return {text,indices};
 +}
 +
-+export function deriveNativeLinkMoves(sourceEngine,sourceBands,targetGlyphs,edits,model,expectedPageText) {
-+  if(!model||!model.annotations.some(a=>sourceBands.some(b=>b.sourcePageIndex===a.sourcePageIndex)))return [];
-+  const ids=sourceBands.map(b=>b.sourcePageIndex),expected=[],mapping=new Map(),sources=new Map();
++function mapSourceGlyphs(sourceEngine,sourceBands,targetGlyphs,edits,expectedPageText) {
++  const expected=[],mapping=new Map(),sources=new Map();
 +  for(const band of sourceBands){
 +    const chars=readLinkPageCharacters(sourceEngine,band.sourcePageIndex);sources.set(band.sourcePageIndex,chars);
 +    const normalized=normalizedSource(chars,band);
@@ -587,11 +593,18 @@ index 0000000..f102866
 +    append(at,normalized.text.length);
 +  }
 +  if(expected.length!==targetGlyphs.length||expected.some((u,i)=>u!==targetGlyphs[i].u))fail('document_flow_link_text_mapping_mismatch');
++  return {mapping,sources};
++}
++
++export function deriveNativeLinkMoves(sourceEngine,sourceBands,targetGlyphs,edits,model,expectedPageText,authorizedTargets=new Set()) {
++  if(!model||!model.annotations.some(a=>sourceBands.some(b=>b.sourcePageIndex===a.sourcePageIndex)))return [];
++  const ids=sourceBands.map(b=>b.sourcePageIndex);
++  const {mapping,sources}=mapSourceGlyphs(sourceEngine,sourceBands,targetGlyphs,edits,expectedPageText);
 +  const moves=[],claimed=new Set();
 +  for(const descriptor of model.annotations.filter(a=>ids.includes(a.sourcePageIndex))){
 +    if(descriptor.eligible!==true||descriptor.kind!=='link')fail(descriptor.reason||'document_flow_annotation_unsupported');
 +    const targets=descriptor.internalDestinationSourcePageIndices||[descriptor.destination?.targetSourcePageIndex].filter(Number.isInteger);
-+    if(targets.some(i=>ids.includes(i)))fail('document_flow_link_target_in_changed_body');
++    if(targets.some(i=>ids.includes(i)&&!authorizedTargets.has(i)))fail('document_flow_link_target_in_changed_body');
 +    const chars=sources.get(descriptor.sourcePageIndex),band=sourceBands.find(b=>b.sourcePageIndex===descriptor.sourcePageIndex);
 +    const [l,b,r,t]=descriptor.rect,rect={l,b,r,t};
 +    const owned=chars.filter(c=>c.box&&intersects(c.box,rect));
@@ -620,12 +633,66 @@ index 0000000..f102866
 +  return moves;
 +}
 +
++// A FitR rectangle is only transportable when its entire area belongs to one
++// source text object and every intersecting glyph has one rigid correspondence.
++// Multi-object and partial-glyph ownership deliberately remain barriers.
++export function deriveNativeFitRMoves(sourceEngine,sourceBands,targetGlyphs,edits,model,expectedPageText) {
++  const ids=new Set(sourceBands.map(b=>b.sourcePageIndex));
++  const destinations=new Map();
++  for(const a of model?.annotations||[])for(const d of a.internalDestinations||[]){
++    if(!ids.has(d.targetSourcePageIndex))continue;
++    const previous=destinations.get(d.id);
++    if(previous&&JSON.stringify(previous)!==JSON.stringify(d))fail('document_flow_destination_alias_mismatch');
++    destinations.set(d.id,d);
++  }
++  if(!destinations.size)return [];
++  const {mapping,sources}=mapSourceGlyphs(sourceEngine,sourceBands,targetGlyphs,edits,expectedPageText);
++  const moves=[];
++  for(const d of destinations.values()){
++    if(d.kind!=='FitR'||!Array.isArray(d.operands)||d.operands.length!==4||!d.operands.every(Number.isFinite))fail('document_flow_destination_unsupported');
++    const [l,b,r,t]=d.operands,rect={l,b,r,t};
++    if(l>=r||b>=t)fail('document_flow_destination_unsupported');
++    const band=sourceBands.find(x=>x.sourcePageIndex===d.targetSourcePageIndex),chars=sources.get(d.targetSourcePageIndex);
++    const owned=chars.filter(c=>c.box&&intersects(c.box,rect));
++    if(!owned.length||owned.some(c=>!bodyGlyph(c,band)||!c.object||c.generated))fail('document_flow_destination_ownership_ambiguous');
++    const object=owned[0].object;
++    if(owned.some(c=>c.object!==object||c.box.l<l-.001||c.box.r>r+.001||c.box.b<b-.001||c.box.t>t+.001))fail('document_flow_destination_ownership_ambiguous');
++    const objectChars=chars.filter(c=>c.box&&c.object===object&&bodyGlyph(c,band));
++    const bounds={l:Math.min(...objectChars.map(c=>c.box.l)),r:Math.max(...objectChars.map(c=>c.box.r)),b:Math.min(...objectChars.map(c=>c.box.b)),t:Math.max(...objectChars.map(c=>c.box.t))};
++    if(l<bounds.l-.001||r>bounds.r+.001||b<bounds.b-.001||t>bounds.t+.001)fail('document_flow_destination_ownership_ambiguous');
++    let dx,dy,outputPageIndex;const targetIndices=new Set();
++    for(const c of owned){
++      const at=mapping.get(`${d.targetSourcePageIndex}:${c.index}`);if(at===undefined)fail('document_flow_destination_edited');
++      const target=targetGlyphs[at];targetIndices.add(at);
++      if(dx===undefined){dx=target.box.l-c.box.l;dy=target.box.b-c.box.b;outputPageIndex=target.outputPageIndex;}
++      if(target.outputPageIndex!==outputPageIndex||!near(target.box.l,c.box.l+dx)||!near(target.box.r,c.box.r+dx)||!near(target.box.b,c.box.b+dy)||!near(target.box.t,c.box.t+dy))fail('document_flow_destination_not_rigid');
++    }
++    const translated={l:l+dx,r:r+dx,b:b+dy,t:t+dy};
++    const outputOwned=targetGlyphs.flatMap((c,i)=>c.outputPageIndex===outputPageIndex&&intersects(c.box,translated)?[i]:[]);
++    if(outputOwned.length!==targetIndices.size||outputOwned.some(i=>!targetIndices.has(i)))fail('document_flow_destination_ownership_ambiguous');
++    moves.push({id:d.id,sourcePageIndex:d.targetSourcePageIndex,outputPageIndex,dx,dy});
++  }
++  return moves;
++}
++
 +export function plannedLinkGlyphs(plan) {
 +  return plan.pages.flatMap((page,outputPageIndex)=>page.lines.flatMap(({index,dy})=>plan.lines[index].items.flatMap(({it})=>it.chars.filter(c=>c.u>32).map(c=>({u:c.u,outputPageIndex,box:{l:c.l,r:c.r,b:c.b+dy,t:c.t+dy}})))));
 +}
 +
 +export function savedLinkGlyphs(engine,outputBands) {
 +  return outputBands.flatMap(b=>readLinkPageCharacters(engine,b.outputPageIndex).filter(c=>c.u>32&&bodyGlyph(c,b)).map(c=>({...c,outputPageIndex:b.outputPageIndex})));
++}
++
++// A page is eligible only if every reference to it has a corresponding FitR
++// descriptor. Missing or mixed destination forms remain a barrier.
++export function nativeFitRTargetPages(model, pages) {
++  return new Set(pages.filter(page => {
++    const refs=(model?.annotations||[]).filter(a=>(a.internalDestinationSourcePageIndices||[a.destination?.targetSourcePageIndex].filter(Number.isInteger)).includes(page));
++    return refs.length>0 && refs.every(a=>{
++      const ds=(a.internalDestinations||[]).filter(d=>d.targetSourcePageIndex===page);
++      return ds.length>0 && ds.every(d=>d.kind==='FitR' && d.id!==undefined);
++    });
++  }));
 +}
 diff --git a/src/document-flow-underlines.mjs b/src/document-flow-underlines.mjs
 new file mode 100644
@@ -770,10 +837,10 @@ index 0000000..ecc232c
 +}
 diff --git a/src/document-flow.mjs b/src/document-flow.mjs
 new file mode 100644
-index 0000000..195ee96
+index 0000000..e04589e
 --- /dev/null
 +++ b/src/document-flow.mjs
-@@ -0,0 +1,231 @@
+@@ -0,0 +1,236 @@
 +// Bounded post-edit text-chain compaction. Objects are reconstructed with the
 +// same document's fonts because existing PDFium objects retain foreign stream
 +// indices when transferred. No rasterization, font scaling or text shortening.
@@ -781,7 +848,7 @@ index 0000000..195ee96
 +import { capturePageLayout, expectedPageText } from './quality.mjs';
 +import { groupLines } from './pagination.mjs';
 +import { deriveDocumentFlowBand, checkDocumentFlowPageBudget } from './document-flow-band.mjs';
-+import { deriveNativeLinkMoves, plannedLinkGlyphs } from './document-flow-links.mjs';
++import { deriveNativeLinkMoves, deriveNativeFitRMoves, nativeFitRTargetPages, plannedLinkGlyphs } from './document-flow-links.mjs';
 +import { snapshotTinyUnderline, matchStagedUnderlines, cloneUnderline, underlineEqual } from './document-flow-underlines.mjs';
 +import { snapshotTextObjects, cloneTextObject, verifyTextObject, snapshotPageEdges, applyPageEdges, verifyPageEdges } from './continuation-template.mjs';
 +
@@ -859,7 +926,7 @@ index 0000000..195ee96
 +      for(;end<preliminaryMap.length;end++){
 +        const included=bands.map(b=>b.sourcePageIndex);
 +        const targetBoundary=annotationModel?.annotations.some(a=>included.includes(a.sourcePageIndex)&&(a.internalDestinationSourcePageIndices||[a.destination?.targetSourcePageIndex].filter(Number.isInteger)).includes(end));
-+        if(end>start&&targetBoundary){
++        if(end>start&&targetBoundary&&!nativeFitRTargetPages(annotationModel,[end]).has(end)){
 +          if(bands.length<2)fail('document_flow_link_target_in_changed_body');
 +          warnings.push({code:'document_flow_internal_target_boundary',severity:'info',pageIndex:start,boundarySourcePageIndex:end});
 +          end--;break;
@@ -884,9 +951,12 @@ index 0000000..195ee96
 +      // Clone preflight is part of eligibility, before any group mutates.
 +      for(const part of parts)if(!part.items.length)fail('document_flow_empty_body_unsupported');
 +      const plan={start,end,bands,parts,lines,pages:planned};
-+      plan.linkMoves=deriveNativeLinkMoves(src,bands,plannedLinkGlyphs(plan),edits,annotationModel,expectedPageText);
++      const authorized=nativeFitRTargetPages(annotationModel,bands.map(b=>b.sourcePageIndex));
++      plan.destinationMoves=deriveNativeFitRMoves(src,bands,plannedLinkGlyphs(plan),edits,annotationModel,expectedPageText);
++      plan.linkMoves=deriveNativeLinkMoves(src,bands,plannedLinkGlyphs(plan),edits,annotationModel,expectedPageText,authorized);
 +      const stagedGlyphs=parts.flatMap(part=>part.lines.flatMap(line=>line.items.flatMap(({it})=>it.chars.filter(c=>c.u>32).map(c=>({u:c.u,outputPageIndex:part.pageIndex,box:{l:c.l,r:c.r,b:c.b,t:c.t}})))));
-+      const stagedMoves=deriveNativeLinkMoves(src,bands,stagedGlyphs,edits,annotationModel,expectedPageText);
++      deriveNativeFitRMoves(src,bands,stagedGlyphs,edits,annotationModel,expectedPageText);
++      const stagedMoves=deriveNativeLinkMoves(src,bands,stagedGlyphs,edits,annotationModel,expectedPageText,authorized);
 +      plan.underlines=matchStagedUnderlines(bands,parts,stagedMoves);
 +      plans.push(plan);start=end;
 +      } catch(error) {
@@ -901,7 +971,8 @@ index 0000000..195ee96
 +      const actionOwnershipUnsupported=annotationModel?.actionOwnershipUnsupported===true;
 +      const blocked=annotationModel?.annotations.some(a=>{
 +        const targets=a.internalDestinationSourcePageIndices||[a.destination?.targetSourcePageIndex].filter(Number.isInteger);
-+        return targets.some(i=>own.includes(i))||own.includes(a.sourcePageIndex)&&targets.some(i=>allSourcePages.includes(i));
++        const authorized=nativeFitRTargetPages(annotationModel,own);
++        return targets.some(i=>own.includes(i)&&!authorized.has(i))||own.includes(a.sourcePageIndex)&&targets.some(i=>allSourcePages.includes(i)&&!own.includes(i));
 +      });
 +      const reason=actionOwnershipUnsupported?'document_flow_link_action_ownership_unsupported':unresolved?'document_flow_link_unresolved_target':'document_flow_link_target_in_changed_body';
 +      if(unresolved||actionOwnershipUnsupported){
@@ -983,10 +1054,11 @@ index 0000000..195ee96
 +      }
 +      out+=1+n;
 +    }
-+    const annotationMoves=[];
++    const annotationMoves=[],destinationMoves=[];
 +    for(const p of plans){
 +      const indices=[...p.bands.map(b=>map[b.sourcePageIndex].outputPageIndex),...map[p.end].continuationPageIndices];
 +      annotationMoves.push(...p.linkMoves.map(move=>({...move,outputPageIndex:indices[move.outputPageIndex]})));
++      destinationMoves.push(...p.destinationMoves.map(move=>({...move,outputPageIndex:indices[move.outputPageIndex]})));
 +      const contentMap=p.bands.map(b=>({sourcePageIndex:b.sourcePageIndex,outputPageIndices:indices.filter((_,i)=>p.clones[i].some(c=>c.origin===b.sourcePageIndex))}));
 +      for(const c of contentMap)map[c.sourcePageIndex].contentOutputPageIndices=[...c.outputPageIndices];
 +      groups.push({version:1,sourcePages:p.bands.map(({sourcePageIndex,bodyTop,flowTop,floor,x0,x1})=>({sourcePageIndex,bodyTop,flowTop,floor,x0,x1})),outputPages:indices.map((outputPageIndex,i)=>({outputPageIndex,...Object.fromEntries(['bodyTop','flowTop','floor'].map(k=>[k,p.pages[i][k]])),x0:Math.min(...p.bands.map(b=>b.x0)),x1:Math.max(...p.bands.map(b=>b.x1)),lineCount:p.pages[i].lines.length})),contentMap});
@@ -994,7 +1066,7 @@ index 0000000..195ee96
 +    e.pageCount=M._FPDF_GetPageCount(e.doc);
 +    let pdf=new Uint8Array(e.save());if(!pdf.length)fail('document_flow_save_failed');
 +    if(annotationAdapter&&annotationModel.annotations.length){
-+      const transported=await annotationAdapter.transport({model:annotationModel,sourceBytes,outputBytes:pdf,sourcePageMap:map,moves:annotationMoves,reflowedSourcePages:plans.flatMap(p=>p.bands.map(b=>b.sourcePageIndex))});
++      const transported=await annotationAdapter.transport({model:annotationModel,sourceBytes,outputBytes:pdf,sourcePageMap:map,moves:annotationMoves,destinationMoves,reflowedSourcePages:plans.flatMap(p=>p.bands.map(b=>b.sourcePageIndex))});
 +      pdf=new Uint8Array(transported?.pdf??transported);if(!pdf.length)fail('document_flow_annotation_transport_failed');
 +    }
 +    return {pdf,sourcePageMap:map,flowGroups:groups,annotationMoves,addedPages:e.pageCount-map.length,warnings};
@@ -1274,7 +1346,7 @@ index 767c634..3f2f25d 100644
 +  return { ok: true, warnings, repairs, added: r.added, lineCounts: r.lineCounts, keptLines: r.keptLines, bodyTop: plan.bodyTop, flowTop: plan.flowTop, floor: plan.floor, continuationStyle };
  }
 diff --git a/src/quality.mjs b/src/quality.mjs
-index 5ba1eec..db4badb 100644
+index 5ba1eec..b135a66 100644
 --- a/src/quality.mjs
 +++ b/src/quality.mjs
 @@ -16,6 +16,10 @@
@@ -1283,7 +1355,7 @@ index 5ba1eec..db4badb 100644
  import { createHash } from "node:crypto";
 +import { resolvePageFraction } from "./continuation-template.mjs";
 +import { deriveDocumentFlowBand } from "./document-flow-band.mjs";
-+import { deriveNativeLinkMoves, savedLinkGlyphs } from "./document-flow-links.mjs";
++import { deriveNativeLinkMoves, deriveNativeFitRMoves, nativeFitRTargetPages, savedLinkGlyphs } from "./document-flow-links.mjs";
 +import { verifySavedUnderlines } from "./document-flow-underlines.mjs";
  
  const TOL = 1;
@@ -1378,8 +1450,8 @@ index 5ba1eec..db4badb 100644
 +      annotationModel=await annotationAdapter.inspect({sourceBytes,sourceSha256:createHash('sha256').update(sourceBytes).digest('hex')});
 +      if(!annotationModel||!Array.isArray(annotationModel.annotations))throw new Error('document_flow_annotation_inventory_mismatch');
 +    }
-+    const annotationMoves=[];
-+    const grouped = inspectDocumentGroups(src, out, map, options.flowGroups ?? [], byPage, failures, warnings, !!options.includeText, annotationModel, annotationMoves);
++    const annotationMoves=[], destinationMoves=[];
++    const grouped = inspectDocumentGroups(src, out, map, options.flowGroups ?? [], byPage, failures, warnings, !!options.includeText, annotationModel, annotationMoves, destinationMoves);
      for (let i = 0; i < n; i++) {
        const m = map ? map[i] : { outputPageIndex: i, continuationPageIndices: [] };
        const s = readGlyphs(src, i);
@@ -1399,18 +1471,18 @@ index 5ba1eec..db4badb 100644
        }
      }
 +    if(annotationAdapter&&annotationModel){
-+      const verified=await annotationAdapter.validate({model:annotationModel,sourceBytes,outputBytes,sourcePageMap:map,moves:annotationMoves,reflowedSourcePages:[...grouped.keys()]});
++      const verified=await annotationAdapter.validate({model:annotationModel,sourceBytes,outputBytes,sourcePageMap:map,moves:annotationMoves,destinationMoves,reflowedSourcePages:[...grouped.keys()]});
 +      if(verified?.ok!==true)failures.push({code:typeof verified?.code==='string'&&/^[a-z_]{1,64}$/.test(verified.code)?verified.code:'document_flow_annotation_verification_failed'});
 +      report.annotationCheck={ok:verified?.ok===true,moves:annotationMoves.length};
 +    }
      report.ok = failures.length === 0;
      warnings.push({ code: "self_check_not_independent", detail: "same PDFium build; independent extraction and rendering review still required" });
    } catch (err) {
-@@ -787,6 +835,117 @@ export async function inspectSavedPdf(engineFactory, sourceBytes, outputBytes, e
+@@ -787,6 +835,120 @@ export async function inspectSavedPdf(engineFactory, sourceBytes, outputBytes, e
    return report;
  }
  
-+function inspectDocumentGroups(src, out, map, groups, byPage, failures, warnings, includeText, annotationModel=null, annotationMoves=[]) {
++function inspectDocumentGroups(src, out, map, groups, byPage, failures, warnings, includeText, annotationModel=null, annotationMoves=[], destinationMoves=[]) {
 +  const covered=new Map(), outputs=new Set();
 +  const bad=()=>failures.push({code:'document_flow_map_invalid'});
 +  if(!Array.isArray(groups)||groups.length>64){bad();return covered;}
@@ -1442,7 +1514,10 @@ index 5ba1eec..db4badb 100644
 +        return ['bodyTop','flowTop','floor'].some(key=>!near(b[key],destination[key]))||!near(b.x0,expectedX0)||!near(b.x1,expectedX1);
 +      })) {bad();continue;}
 +    try {
-+      const moves=deriveNativeLinkMoves(src,derived,savedLinkGlyphs(out,oo),[...byPage.values()].flat(),annotationModel,expectedPageText);
++      const glyphs=savedLinkGlyphs(out,oo), edits=[...byPage.values()].flat();
++      const destinations=deriveNativeFitRMoves(src,derived,glyphs,edits,annotationModel,expectedPageText);
++      destinationMoves.push(...destinations);
++      const moves=deriveNativeLinkMoves(src,derived,glyphs,edits,annotationModel,expectedPageText,nativeFitRTargetPages(annotationModel,ids));
 +      annotationMoves.push(...moves);
 +      verifySavedUnderlines(out,derived,oo,moves);
 +    }catch(error){failures.push({code:error?.code??'document_flow_link_mapping_failed',pageIndex:ids[0]});}
@@ -1524,7 +1599,7 @@ index 5ba1eec..db4badb 100644
  const sameGlyphs = (a, b) => a.length === b.length && a.every((c, k) => {
    const d = b[k];
    return c.u === d.u && Math.abs(c.l - d.l) <= 0.5 && Math.abs(c.b - d.b) <= 0.5;
-@@ -817,6 +976,7 @@ export function normalizePageMap(map, sourcePageCount) {
+@@ -817,6 +979,7 @@ export function normalizePageMap(map, sourcePageCount) {
        next++;
      }
      if (cont.length && !(Number.isFinite(m.bodyTop) && Number.isFinite(m.floor) && m.bodyTop > m.floor)) return null;
@@ -1532,7 +1607,7 @@ index 5ba1eec..db4badb 100644
      if (cont.length && !(Array.isArray(m.lineCounts) && m.lineCounts.length === cont.length)) return null;
      if (m.continuationStyle !== undefined && !(cont.length && validContinuationStyle(m.continuationStyle))) return null;
      out.push({ ...m, continuationPageIndices: [...cont] });
-@@ -867,7 +1027,9 @@ const textOf = (cs) => String.fromCharCode(...cs.map((c) => c.u));
+@@ -867,7 +1030,9 @@ const textOf = (cs) => String.fromCharCode(...cs.map((c) => c.u));
  // Source page numbers: edge text objects whose visible glyphs are only
  // Arabic digits. Two such objects with different values are ambiguous.
  function sourcePageNumbers(es) {
@@ -1543,7 +1618,7 @@ index 5ba1eec..db4badb 100644
    return { items, ambiguous: new Set(items.map((x) => x.text)).size > 1 };
  }
  
-@@ -991,6 +1153,31 @@ export function joinFlowParts(parts, expected) {
+@@ -991,6 +1156,31 @@ export function joinFlowParts(parts, expected) {
    return { text: normStr(acc), softJoins };
  }
  
@@ -1575,7 +1650,7 @@ index 5ba1eec..db4badb 100644
  // A source page whose flow continues on new pages: the body-band text of
  // the output page followed by every continuation page must equal the
  // source body-band text with the edits applied, in order; everything
-@@ -999,11 +1186,18 @@ function inspectContinued(s, o, out, m, pageEdits, row, failures, warnings, incl
+@@ -999,11 +1189,18 @@ function inspectContinued(s, o, out, m, pageEdits, row, failures, warnings, incl
    const i = row.pageIndex;
    const { floor, bodyTop } = m;
    const lo = floor - 0.5, hi = bodyTop + 0.5;
@@ -1596,7 +1671,7 @@ index 5ba1eec..db4badb 100644
    const joined = joinFlowParts(parts, exp.ok ? exp.text : "");
    const got = joined.text;
    row.body_band = { floor: +floor.toFixed(2), bodyTop: +bodyTop.toFixed(2) };
-@@ -1012,6 +1206,27 @@ function inspectContinued(s, o, out, m, pageEdits, row, failures, warnings, incl
+@@ -1012,6 +1209,27 @@ function inspectContinued(s, o, out, m, pageEdits, row, failures, warnings, incl
      failures.push({ code: "expected_text_uncomputable", pageIndex: i, id: exp.id, reason: exp.reason });
    } else {
      row.text_equal = exp.text === got;
@@ -1758,10 +1833,10 @@ index d115852..93883f8 100644
 +});
 diff --git a/test/document-flow.test.mjs b/test/document-flow.test.mjs
 new file mode 100644
-index 0000000..2251112
+index 0000000..6920207
 --- /dev/null
 +++ b/test/document-flow.test.mjs
-@@ -0,0 +1,334 @@
+@@ -0,0 +1,398 @@
 +import assert from 'node:assert/strict';
 +import { test } from 'node:test';
 +import { loadRuntime } from '../src/runtime.mjs';
@@ -1769,7 +1844,7 @@ index 0000000..2251112
 +import { planDocumentLines } from '../src/document-flow.mjs';
 +import { inspectSavedPdf, capturePageLayout, expectedPageText } from '../src/quality.mjs';
 +import { deriveDocumentFlowBand } from '../src/document-flow-band.mjs';
-+import { deriveNativeLinkMoves, readLinkPageCharacters } from '../src/document-flow-links.mjs';
++import { deriveNativeLinkMoves, deriveNativeFitRMoves, readLinkPageCharacters } from '../src/document-flow-links.mjs';
 +import { resolve } from 'node:path';
 +import { pathToFileURL } from 'node:url';
 +
@@ -1976,6 +2051,27 @@ index 0000000..2251112
 + } finally {source.close();}
 +});
 +
++test('FitR glyph association only accepts a wholly owned rigid source object',real,async()=>{
++ const source=await runtime.engineFactory(flowFixture());
++ try {
++  const bands=[0,1].map(i=>deriveDocumentFlowBand(source,i,capturePageLayout));
++  const pages=bands.map(b=>readLinkPageCharacters(source,b.sourcePageIndex).filter(c=>c.u>32&&c.box&&(c.box.b+c.box.t)/2>=b.floor-.5&&(c.box.b+c.box.t)/2<=b.bodyTop+.5));
++  const obj=pages[1][0].object,chars=pages[1].filter(c=>c.object===obj);
++  const rect=[Math.min(...chars.map(c=>c.box.l)),Math.min(...chars.map(c=>c.box.b)),Math.max(...chars.map(c=>c.box.r)),Math.max(...chars.map(c=>c.box.t))];
++  const d={id:1,kind:'FitR',targetSourcePageIndex:1,operands:rect};
++  const model={annotations:[{internalDestinations:[d]},{internalDestinations:[d]}]};
++  const target=pages.flatMap((cs,page)=>cs.map(c=>({...c,outputPageIndex:page?2:0,box:{l:c.box.l+3,r:c.box.r+3,b:c.box.b-28,t:c.box.t-28}})));
++  const moves=deriveNativeFitRMoves(source,bands,target,[],model,expectedPageText);
++  assert.equal(moves.length,1);assert.equal(moves[0].outputPageIndex,2);assert.ok(Math.abs(moves[0].dy+28)<.001);
++  const partial={annotations:[{internalDestinations:[{...d,operands:[rect[0]+1,...rect.slice(1)]}]}]};
++  assert.throws(()=>deriveNativeFitRMoves(source,bands,target,[],partial,expectedPageText),e=>e.code==='document_flow_destination_ownership_ambiguous');
++  const outside={annotations:[{internalDestinations:[{...d,operands:[rect[0]-10,rect[1],rect[2],rect[3]]}]}]};
++  assert.throws(()=>deriveNativeFitRMoves(source,bands,target,[],outside,expectedPageText),e=>e.code==='document_flow_destination_ownership_ambiguous');
++  const split=structuredClone(target);split[pages[0].length+1].outputPageIndex=3;
++  assert.throws(()=>deriveNativeFitRMoves(source,bands,split,[],model,expectedPageText),e=>e.code==='document_flow_destination_not_rigid');
++ }finally{source.close();}
++});
++
 +// Optional app-owned raw dictionary adapter; explicit path injects the
 +// already-vendored runtime without adding a second engine dependency here.
 +let annotationRuntime;
@@ -2095,6 +2191,49 @@ index 0000000..2251112
 +  assert.equal(b.get(0).asIndirect(),out.findPage(p.sourcePageMap[2].outputPageIndex).asIndirect());
 +  for(let i=1;i<a.length;i++)assert.equal(b.get(i).toString(),a.get(i).toString());
 + }finally{old.destroy();out.destroy();}
++});
++
++
++test('FitR target is proven against planned and saved glyphs and transported to its final page',annotationsReal,async()=>{
++ const original=await annotatedFixture({targetPage:1}), source=await runtime.engineFactory(original);
++ let rect;
++ try {
++  const chars=readLinkPageCharacters(source,1).filter(c=>c.u>32&&c.box&&c.box.b>80&&c.box.t<720);
++  const owned=chars.filter(c=>c.object===chars[0].object);
++  rect=[Math.min(...owned.map(c=>c.box.l)),Math.min(...owned.map(c=>c.box.b)),Math.max(...owned.map(c=>c.box.r)),Math.max(...owned.map(c=>c.box.t))];
++ } finally {source.close();}
++ const doc=new annotationRuntime.mupdf.PDFDocument(original);let sourceBytes;
++ try {
++  doc.getTrailer().get('Root').get('Dests').put('outsideTarget',[doc.findPage(1),'FitR',...rect]);
++  const b=doc.saveToBuffer('garbage=0,compress=false');try{sourceBytes=b.asUint8Array().slice();}finally{b.destroy();}
++ } finally {doc.destroy();}
++ const edits=[{id:'grow',pageIndex:0,before,after}], calls=[];
++ const adapter={...annotationRuntime.adapter,
++  async transport(args){calls.push({type:'transport',moves:structuredClone(args.destinationMoves)});return annotationRuntime.adapter.transport(args);},
++  async validate(args){calls.push({type:'validate',moves:structuredClone(args.destinationMoves)});return annotationRuntime.adapter.validate(args);}
++ };
++ const result=await editPdf({sourceBytes,edits,reflow:true},{documentFlow:true,engineFactory:runtime.engineFactory,annotationAdapter:adapter});
++ assert.equal(result.report.ok,true);
++ assert.equal(calls.length,2);assert.equal(calls[0].moves.length,1);assert.deepEqual(calls[0].moves,calls[1].moves);
++ const move=calls[0].moves[0];assert.equal(move.sourcePageIndex,1);assert.ok(Number.isInteger(move.outputPageIndex));assert.ok(Math.abs(move.dy)>.1);
++ const out=new annotationRuntime.mupdf.PDFDocument(result.pdf);try{
++  const dest=out.getTrailer().get('Root').get('Dests').get('outsideTarget');
++  assert.equal(dest.get(0).asIndirect(),out.findPage(move.outputPageIndex).asIndirect());
++  for(let i=0;i<4;i++)assert.ok(Math.abs(dest.get(i+2).asNumber()-(rect[i]+(i%2?move.dy:move.dx)))<.05);
++ }finally{out.destroy();}
++ const corrupt=new annotationRuntime.mupdf.PDFDocument(result.pdf);let damaged;
++ try {
++  const dest=corrupt.getTrailer().get('Root').get('Dests').get('outsideTarget');dest.put(2,dest.get(2).asNumber()+5);
++  const b=corrupt.saveToBuffer('garbage=0,compress=false');try{damaged=b.asUint8Array().slice();}finally{b.destroy();}
++ }finally{corrupt.destroy();}
++ const check=await inspectSavedPdf(runtime.engineFactory,sourceBytes,damaged,edits,{sourcePageMap:result.report.pagination.sourcePageMap,flowGroups:result.report.pagination.flowGroups,annotationAdapter:annotationRuntime.adapter});
++ assert.equal(check.ok,false);assert.equal(check.annotationCheck.ok,false);
++ const partial=new annotationRuntime.mupdf.PDFDocument(sourceBytes);let unsafe;
++ try{
++  const dest=partial.getTrailer().get('Root').get('Dests').get('outsideTarget');dest.put(2,rect[0]+1);
++  const b=partial.saveToBuffer('garbage=0,compress=false');try{unsafe=b.asUint8Array().slice();}finally{b.destroy();}
++ }finally{partial.destroy();}
++ await assert.rejects(editPdf({sourceBytes:unsafe,edits,reflow:true},{documentFlow:true,engineFactory:runtime.engineFactory,annotationAdapter:annotationRuntime.adapter}),e=>e.code==='LAYOUT_UNSUPPORTED');
 +});
 diff --git a/test/pagination.test.mjs b/test/pagination.test.mjs
 index c74c13e..e62a578 100644

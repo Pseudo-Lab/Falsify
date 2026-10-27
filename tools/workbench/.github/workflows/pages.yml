@@ -29,13 +29,21 @@ jobs:
           npx playwright install chromium
       - name: Browser contracts
         working-directory: app
-        run: npm test
+        run: |
+          npm run build:fonts
+          node --test tests/browser-fonts.spec.mjs tests/bundled-fonts.spec.mjs tests/paragraph-fonts.spec.mjs tests/browser-pdf-fonts.spec.mjs
+          npm test
       - name: File intake and human verdict browser regression (synthetic only)
         run: |
           python -m http.server 7851 --bind 127.0.0.1 --directory app/dist > "$RUNNER_TEMP/falsify-ui.log" 2>&1 &
           ui_server_pid=$!
           trap 'kill "$ui_server_pid"' EXIT
           npm run test:browser --prefix app
+          node app/tests/paper-editor-ux.browser.cjs
+          node app/tests/red-output.browser.cjs
+          FALSIFY_UI_TEST_URL=http://127.0.0.1:7851/ node app/tests/paper-direct-recompose.browser.cjs
+          node app/tests/harness-comparison.browser.cjs
+          node --test scripts/packaging.spec.mjs
       - name: Browser PDF MuPDF contracts
         working-directory: app
         run: |
@@ -74,6 +82,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
+      - name: Adapter home and CLI directory propagation (no models)
+        run: python -m unittest discover -s app/tests -p test_adapter_environment.py -q
       - name: Connection launcher dry-run contracts (PowerShell 7)
         shell: pwsh
         run: ./scripts/test-connection.ps1
@@ -102,6 +112,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Adapter home and CLI directory propagation (no models)
+        run: python -m unittest discover -s app/tests -p test_adapter_environment.py -q
       - name: Portable POSIX connection tests
         run: bash scripts/test-posix-connection.sh
       - name: Run real macOS handler bundle test
@@ -116,6 +128,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Adapter home and CLI directory propagation (no models)
+        run: python -m unittest discover -s app/tests -p test_adapter_environment.py -q
       - name: Portable POSIX connection tests
         run: bash scripts/test-posix-connection.sh
       - name: Run real macOS handler bundle test

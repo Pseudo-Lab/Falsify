@@ -1,3 +1,4 @@
+import { removeForeignObjectGapSpaces } from './foreign-gap.mjs';
 import { createEngineModule, ENGINE_BUILD } from './engine-loader.js';
 
 export const EC_BUILD = ENGINE_BUILD;
@@ -341,8 +342,9 @@ export class PdfEngine {
   static localFonts = new Map();
   static fallbackFonts = new Map();
 
-  constructor(module) {
+  constructor(module, fontSnapshot = null) {
     this.M = module;
+    this.fontSnapshot = fontSnapshot;
     this.doc = 0;
     this.page = 0;
     this.session = 0;
@@ -383,6 +385,39 @@ export class PdfEngine {
         fam = fam.replace(/ (serif|mono)$/, '');
         const want = [];
         for (let i = 0; i < n; i++) want.push(M.HEAPU32[(cps >> 2) + i]);
+        if (this.fontSnapshot) {
+          const key = s => {
+            let name = String(s || '').replace(/^[A-Z]{6}\+/, '');
+            name = name.replace(/^(TimesNewRomanPS|Arial)-(BoldItalic|BoldOblique|Bold|Italic|Oblique)MT$/i, (_, family, variant) => `${/^arial$/i.test(family) ? 'Arial' : 'TimesNewRoman'}-${variant}`);
+            name = name.replace(/[-,](?:bolditalic|boldoblique|bold|italic|oblique|regular|roman)$/i, '').toLowerCase().replace(/[\s_-]+/g, '');
+            return ({timesnewromanpsmt: 'timesnewroman', arialmt: 'arial'})[name] || name;
+          };
+          const target = key(fam);
+          const faces = this.fontSnapshot.fonts;
+          const matches = f => target && (key(f.family) === target || key(f.postscriptName) === target);
+          const rank = f => (f.italic === !!italic ? 0 : 2000) + Math.abs(f.weight - (bold ? 700 : 400));
+          const covering = f => f.bytes.length && (!want.length || sfntCovers(f.bytes, want));
+          // Prefer an exact family/style even if another style occurs earlier.
+          const same = faces.filter(matches).sort((a, b) => rank(a) - rank(b));
+          const bestRank = same.length ? rank(same[0]) : Infinity;
+          let face = same.find(f => rank(f) === bestRank && covering(f));
+          // A different face is an explicit fallback, never a family alias.
+          if (!face) face = faces.filter(f => !matches(f) && covering(f)).sort((a, b) => rank(a) - rank(b))[0];
+          if (!face) return 0;
+          const selection = {requestedFamily: fam, bold: !!bold, italic: !!italic,
+            family: face.family, postscriptName: face.postscriptName || null,
+            weight: face.weight, faceItalic: face.italic, source: face.source,
+            sha256: face.sha256, fallback: !matches(face),
+            styleSubstitution: (face.weight >= 600) !== !!bold || face.italic !== !!italic};
+          if (!this.fontSnapshot.selections.some(s => JSON.stringify(s) === JSON.stringify(selection)))
+            this.fontSnapshot.selections.push(selection);
+          const buf = M._ec_buffer_alloc(face.bytes.length);
+          if (!buf) return 0;
+          M.HEAPU8.set(face.bytes, buf);
+          M.HEAPU32[outData >> 2] = buf;
+          M.HEAPU32[outSize >> 2] = face.bytes.length;
+          return 1;
+        }
         const styleKey = (bold ? 1 : 0) + '' + (italic ? 1 : 0);
         const sk = '|' + styleKey;
         const names = [fam, ...scriptFallbackFamilies(want)];
@@ -645,6 +680,10 @@ export class PdfEngine {
     }
   }
 
+  retainDetachedObject(handle) {
+    (this._detachedObjects ||= new Set()).add(handle >>> 0);
+  }
+
   close() {
     const M = this.M;
     if (this._pageCache) {
@@ -654,6 +693,10 @@ export class PdfEngine {
     }
     if (this.page) M._FPDF_ClosePage(this.page);
     if (this.session) M._ec_session_destroy(this.session);
+    // Layout/history may still reference removed source objects until the
+    // edit session closes. The page no longer owns these objects.
+    for (const handle of this._detachedObjects || []) M._FPDFPageObj_Destroy(handle);
+    this._detachedObjects?.clear();
     if (this.doc) M._FPDF_CloseDocument(this.doc);
     if (this._docBuf) M._free(this._docBuf);
     this.page = this.session = this.doc = this._docBuf = 0;
@@ -798,7 +841,9 @@ export class PdfEngine {
     const json = M.UTF8ToString(ptr);
     M._ec_string_free(ptr);
     this._readPageTransform();
-    return JSON.parse(json).paragraphs;
+    const paragraphs = JSON.parse(json).paragraphs;
+    this._gapModel = { pageIndex: this.pageIndex, paragraphs: paragraphs.map(p => ({id: p.id, runs: p.runs.map(r => ({text: r.text}))})) };
+    return paragraphs;
   }
 
   _readPageTransform() {
@@ -893,8 +938,29 @@ export class PdfEngine {
     return JSON.parse(j);
   }
 
+  _sourceGapRuns(id, runs) {
+    const model = this._gapModel?.pageIndex === this.pageIndex && this._gapModel.paragraphs.find(p => p.id === id);
+    const M = this.M;
+    const required = ['_FPDFText_LoadPage', '_FPDFText_CountChars', '_FPDFText_GetUnicode', '_FPDFText_GetTextObject', '_FPDFText_GetCharBox', '_FPDFText_ClosePage'];
+    if (!model || required.some(f => typeof M[f] !== 'function')) return runs;
+    const owned = new Set((this.paragraphObjects(id) || []).map(h => h >>> 0));
+    if (!owned.size) return runs;
+    const tp = M._FPDFText_LoadPage(this.page);
+    if (!tp) return runs;
+    const ptr = M._malloc(32), chars = [];
+    try {
+      const n = M._FPDFText_CountChars(tp);
+      for (let i = 0; i < n; i++) {
+        const u = M._FPDFText_GetUnicode(tp, i), obj = M._FPDFText_GetTextObject(tp, i) >>> 0;
+        const ok = M._FPDFText_GetCharBox(tp, i, ptr, ptr + 8, ptr + 16, ptr + 24);
+        chars.push({index: i, ch: String.fromCharCode(u), obj, box: ok ? [0, 8, 16, 24].map(k => M.HEAPF64[(ptr + k) >> 3]) : null});
+      }
+      return removeForeignObjectGapSpaces(model.runs, runs, chars, owned);
+    } finally { M._free(ptr); M._FPDFText_ClosePage(tp); }
+  }
+
   previewParagraph(id, runs, fmt) {
-    const a = this._writeRuns(runs);
+    const a = this._writeRuns(this._sourceGapRuns(id, runs));
     const f = this._writeFmt(fmt);
     const ptr = this.M._ec_preview_paragraph(
       this.session,
@@ -918,7 +984,7 @@ export class PdfEngine {
 
   commitParagraph(id, runs, fmt) {
     this._pageDirty = true;
-    const a = this._writeRuns(runs);
+    const a = this._writeRuns(this._sourceGapRuns(id, runs));
     const f = this._writeFmt(fmt);
     const out = this._decode(
       this.M._ec_commit_paragraph(

@@ -387,6 +387,37 @@
       }catch(e){if(stamp!==state.stamp) throw local('연결이 바뀌어 수동 편집 보관을 확인하지 못했습니다. 자동으로 다시 보내지 않습니다.'); throw e?.code==='local'?e:local(failure(e,'write'));}
       finally{if(stamp===state.stamp) release();}
     }
+    async function publishAttempt(record, options={}){
+      if(!options||options.teamShare!==true) throw local('Falsify 팀 전체 공개에 동의한 실행 시도만 올릴 수 있습니다. 아직 보내지 않았습니다.');
+      if(state.busy||state.expiring||misconfigured) throw local('지금은 실행 시도을 보내지 않습니다. 자동으로 다시 보내지 않습니다.');
+      if(!state.session) throw local('먼저 Confluence에 연결하세요. 연결 전에는 아무것도 올리지 않습니다.');
+      state.busy=true; const stamp=state.stamp; paint();
+      try{
+        const caps=await loadCaps(stamp); if(stamp!==state.stamp) return {cancelled:true};
+        if(!caps?.configured) throw local('운영자가 Atlassian OAuth 연결을 마쳐야 팀 보관을 쓸 수 있습니다. 올리지 않았습니다.');
+        await refreshSession(stamp); if(stamp!==state.stamp) return {cancelled:true};
+        const c=await codec();
+        if(typeof c.buildAttemptArchive!=='function'||typeof c.validateArchive!=='function'||typeof c.archiveHash!=='function') throw local('실행 시도 보관 형식을 만들지 못했습니다. 올리지 않았습니다.');
+        const built=await c.buildAttemptArchive(clone(record), validators());
+        if(stamp!==state.stamp) return {cancelled:true};
+        const archive=await c.validateArchive(built, validators());
+        const hash=await c.archiveHash(archive);
+        if(!archive||archive.kind!=='attempt'||archive.schema!=='falsify.confluence-archive.v1'||typeof hash!=='string'||!/^[a-f0-9]{64}$/.test(hash)) throw local('실행 시도 보관이 아니어서 올리지 않았습니다.');
+        const encoded=JSON.stringify(archive);
+        if(encoded.includes('%PDF-')||/"(?:pdf|pdfBytes|sourcePdf|sourcePDF|binary|bytes|contentBase64|gold|harness|attestation|response|segments|request)"\s*:/.test(encoded)) throw local('원본 PDF·gold·Harness는 실행 시도 보관에 넣지 않습니다. 올리지 않았습니다.');
+        const body={archive,teamShare:true};
+        const bytes=new TextEncoder().encode(JSON.stringify(body)).length, cap=caps.maxArchiveBytes||MAX_BYTES;
+        if(encoded.length>MAX_CHARS) throw local('보관 글자 수가 로컬 기록 한도(450만 자)를 넘습니다. 잘라서 보내지 않았습니다. 로컬 기록은 그대로입니다.');
+        if(bytes>cap||bytes>MAX_BYTES) throw local('보관이 UTF-8 크기 한도를 넘습니다. 잘라서 보내지 않았고 자동으로 다시 보내지 않습니다. 로컬 기록은 그대로입니다.');
+        if(stamp!==state.stamp) return {cancelled:true};
+        const data=await api('POST','/v1/confluence/archives',{auth:true,body,stamp,phase:'write'});
+        if(stamp!==state.stamp) return {cancelled:true};
+        if(data.stored!==true||typeof data.pageId!=='string'||!PAGE_ID.test(data.pageId)||data.archiveSha256!==hash) throw local('보관을 마쳤는지 확인하지 못했습니다. 자동으로 다시 보내지 않습니다. 팀 기록 불러오기로 읽어 확인하세요. 로컬 기록은 그대로입니다.');
+        say((data.alreadyExisted?'같은 실행 시도 보관이 이미 Falsify 팀 공간에 있습니다. ':'실행 시도 JSON을 Falsify 팀 공간에 올렸습니다. ')+'시도 메타데이터만 올렸습니다. 팀 전원이 읽을 수 있습니다. 로컬 AI 기록은 그대로입니다.');
+        return {stored:true,pageId:data.pageId,archiveSha256:hash,alreadyExisted:data.alreadyExisted===true};
+      }catch(e){if(stamp!==state.stamp) throw local('연결이 바뀌어 실행 시도 보관을 확인하지 못했습니다. 자동으로 다시 보내지 않습니다.'); throw e?.code==='local'?e:local(failure(e,'write'));}
+      finally{if(stamp===state.stamp) release();}
+    }
     function itemView(item){
       const link=allowedPageUrl(item.webUrl);
       const row=el('article',{className:'confluence-item','data-page-id':item.pageId}, el('h3',{textContent:String(item.title||'제목 없음').slice(0,180)}));
@@ -458,6 +489,10 @@
           clearConsent('harness');
           showView('agents');
           say('Harness를 임시 열람으로 열었습니다. Harness 화면으로 이동했습니다. 등록하거나 실행하지 않았고 로컬 기록에 넣지 않았습니다. 원본 PDF가 아닙니다.');
+        }else if(normalized.kind==='attempt'){
+          if(!opened||opened.kind!=='attempt'||opened.id!==normalized.id)throw local('시도 임시 열람을 열지 못했습니다.');
+          state.temp={pageId,kind:'attempt',id:opened.id,expiresAt:Date.now()+TEMP_MS};armTeamTimer();showView('results');
+          say('팀 시도를 메모리에서 12시간 동안 임시 열람합니다. 로컬 기록에 합치지 않았습니다.');
         }else if(normalized.kind==='paper-edit'){
           if(!opened||opened.kind!=='paper-edit'||typeof opened.id!=='string'||!opened.id) throw local('수동 편집 임시 열람 결과가 아니어서 검수로 열지 않았습니다. 로컬 기록은 그대로입니다.');
           state.temp={pageId,kind:'paper-edit',id:opened.id,expiresAt:Date.now()+TEMP_MS};
@@ -536,7 +571,7 @@
         const p=panels.find(p=>p.mode==='harness');p.confirmation.hidden=false;p.confirmation.open=true;paint();showView('agents');p.target.scrollIntoView?.({block:'center'});if(!state.session||Date.parse(state.session.expiresAt)<=Date.now()){p.connect.closest?.('details')?.setAttribute('open','');p.connect.focus?.();}else p.consent.focus?.();return true;
       }catch(e){say(failure(e,'write'),true);return false;}
     }
-    return {restore,paint,requestHarnessShare,publishPaperEdit};
+    return {restore,paint,requestHarnessShare,publishPaperEdit,publishAttempt};
   }
 
   let mounted=null;

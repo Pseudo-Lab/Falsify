@@ -1,0 +1,82 @@
+{
+  "version": "falsify.recomposition-runtime.v1",
+  "compilerModule": "../recomposition-typst.mjs",
+  "wasm": {
+    "url": "typst_ts_web_compiler_bg.wasm",
+    "sha256": "1fc968438a672366dfec39c96c842c26ed29caff4eb1bcaab19a6c60867de5fd"
+  },
+  "fonts": [
+    {
+      "id": "NotoSerif-Regular",
+      "family": "Noto Serif",
+      "url": "NotoSerif-Regular.ttf",
+      "sha256": "97f25608791ba8b7e7bcfc761caaed09e54a47ae3d27b57c958a561b98c4306d"
+    },
+    {
+      "id": "NotoSerif-Bold",
+      "family": "Noto Serif",
+      "url": "NotoSerif-Bold.ttf",
+      "sha256": "bd04ea002ca7d793a4d45f5d7ba81bcd0c4af5c23f50be73479e03b61e876059"
+    },
+    {
+      "id": "NotoSerif-Italic",
+      "family": "Noto Serif",
+      "url": "NotoSerif-Italic.ttf",
+      "sha256": "67263ab35346d102b5ad7f02743a405f50ff1c0fc2a8ad75bcff8d9bfb894ce1"
+    },
+    {
+      "id": "NotoSerif-BoldItalic",
+      "family": "Noto Serif",
+      "url": "NotoSerif-BoldItalic.ttf",
+      "sha256": "dc188bc4240fb7a0a342df5022c12524977c252250feed09c2774e63acf5f62a"
+    },
+    {
+      "id": "NotoSans-Regular",
+      "family": "Noto Sans",
+      "url": "NotoSans-Regular.ttf",
+      "sha256": "16a1ee5229882c1ba577d265014a85d8a4ddbcf5e45bd30bcfbabfdaf89cabf3"
+    },
+    {
+      "id": "NotoSans-Bold",
+      "family": "Noto Sans",
+      "url": "NotoSans-Bold.ttf",
+      "sha256": "5a0ee56d5fa69689702d64bef03a4a24d58a93f5ae950ff5a004705102668833"
+    },
+    {
+      "id": "NotoSans-Italic",
+      "family": "Noto Sans",
+      "url": "NotoSans-Italic.ttf",
+      "sha256": "4187bd3eed08928c38695ad7702515c2f4c1999e37958e6001d9a7a6bbba1e55"
+    },
+    {
+      "id": "NotoSans-BoldItalic",
+      "family": "Noto Sans",
+      "url": "NotoSans-BoldItalic.ttf",
+      "sha256": "a8749f56b38e50a0073475fab205c0cf174e1d50b2e27fc509098ec57969a108"
+    },
+    {
+      "id": "LiberationSans-Regular",
+      "family": "Liberation Sans",
+      "url": "LiberationSans-Regular.ttf",
+      "sha256": "f8ace1f892b2bd9dc1792ba7f097fa7588f84fed48321480e04de5390828221f"
+    },
+    {
+      "id": "LiberationSans-Bold",
+      "family": "Liberation Sans",
+      "url": "LiberationSans-Bold.ttf",
+      "sha256": "361c61b82d575c5c35fd9157fda8b0194bcfcd0d88ea8521a4fb5dd53d33dddc"
+    },
+    {
+      "id": "LiberationSans-Italic",
+      "family": "Liberation Sans",
+      "url": "LiberationSans-Italic.ttf",
+      "sha256": "832b4406dbef23628800d3aaad21048534ac84d7e3ad955be83b8172ed8ef512"
+    },
+    {
+      "id": "LiberationSans-BoldItalic",
+      "family": "Liberation Sans",
+      "url": "LiberationSans-BoldItalic.ttf",
+      "sha256": "a224075ac17495ad0a3af3bc0a419ac0704a8b3fd1095456201fb9b095fc281d"
+    }
+  ]
+}

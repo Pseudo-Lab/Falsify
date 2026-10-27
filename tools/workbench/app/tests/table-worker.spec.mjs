@@ -50,3 +50,26 @@ test('generated table glyphs crossing immutable cell bounds produce overflow war
   const after='123456789012345678901234567890',result=await prepare({file:bytes,fileHash:sha(bytes),edits:[{id:'last',pageIndex:0,before:'10',after,anchor:cell.selection.anchor}]});
   const out=new Uint8Array(await result.file.arrayBuffer()),fit=await checkFit({...request(out),cells:[{id:'last',pageIndex:0,bbox:cell.cellBbox,after}]});assert.equal(fit.results[0].status,'overflow');
 });
+
+
+test('fit uses complete painted text bounds, refuses unmatched and stale output',async()=>{
+  const bytes=fixture(),model=await inspectTables(request(bytes)),cell=model.cells.find(c=>c.row===12&&c.col===1),{prepare}=await import('../dist/browser-pdf.mjs');
+  const result=await prepare({file:bytes,fileHash:sha(bytes),edits:[{id:'last',pageIndex:0,before:'10',after:'11',anchor:cell.selection.anchor}]});
+  const out=new Uint8Array(await result.file.arrayBuffer()),input={...request(out),cells:[{id:'last',pageIndex:0,bbox:cell.cellBbox,after:'11'}]};
+  const fit=await checkFit(input);assert.equal(fit.results[0].status,'inside');assert.equal(fit.results[0].glyphBounds.length,4);
+  assert.equal((await checkFit({...input,cells:[{...input.cells[0],after:'1'}]})).results[0].status,'unverified');
+  await assert.rejects(()=>checkFit({...input,fileHash:'0'.repeat(64)}),/stale-source/);
+});
+
+
+test('painted bounds can fit even when font metric quads exceed a cell',async()=>{
+  const bytes=fixture(),model=await inspectTables(request(bytes)),cell=model.cells.find(c=>c.row===12&&c.col===1),{prepare}=await import('../dist/browser-pdf.mjs');
+  const result=await prepare({file:bytes,fileHash:sha(bytes),edits:[{id:'last',pageIndex:0,before:'10',after:'11',anchor:cell.selection.anchor}]});
+  const out=new Uint8Array(await result.file.arrayBuffer()),input={...request(out),cells:[{id:'last',pageIndex:0,bbox:cell.cellBbox,after:'11'}]};
+  const bounds=(await checkFit(input)).results[0].glyphBounds;
+  const {readMuPdfTablePages}=await import('../src/table-adapter.mjs'),mupdf=await import('../dist/browser-pdf-vendor/mupdf.js');
+  const quad=readMuPdfTablePages(out,mupdf)[0].runs.find(r=>r.text==='11').bbox;
+  const tight=[bounds[0]-.1,bounds[1]-.1,bounds[2]+.1,bounds[3]+.1];
+  assert.ok(quad.some((v,i)=>i<2?v<tight[i]-.5:v>tight[i]+.5));
+  assert.equal((await checkFit({...input,cells:[{...input.cells[0],bbox:tight}]})).results[0].status,'inside');
+});

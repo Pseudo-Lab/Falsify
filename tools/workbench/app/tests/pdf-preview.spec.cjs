@@ -152,7 +152,7 @@ test('markup: toolbar and status sit before the page stage in DOM order; copy is
   assert.ok(section.indexOf('id="red-preview-status"')>section.indexOf('id="red-preview-download"'),'status follows the toolbar');
   // The minified bundle escapes Hangul, so fixed copy is checked in the source it is built from (the RED/failure tests cover the bundle's output).
   assert.match(section,/<button[^>]*id="red-preview-download"[^>]*>같은 사본 다시 다운로드<\/button>/);assert.match(SOURCE,/「같은 사본 다시 다운로드」로/);assert.doesNotMatch(SOURCE,/아래에서|위에서|아래의|위의/,'no direction in fixed copy');
-  assert.match(section,/SHA-256을 다시 확인한 뒤에만/);assert.doesNotMatch(section,/SHA-256 일치/,'note does not assert equality before the async re-check');
+  assert.match(section,/파일의 해시를 확인한 뒤/);assert.doesNotMatch(section,/SHA-256 일치/,'note does not assert equality before the async re-check');
   const rules=CSS.match(/[^{}]*\.red-preview[^{}]*\{[^}]*\}/g)||[];assert.ok(rules.length>=5);for(const r of rules)assert.doesNotMatch(r,/box-shadow/,r);
   assert.match(CSS,/\.red-preview-canvas\{[^}]*border:1px solid var\(--line\)/);});
 
@@ -160,7 +160,7 @@ test('markup: canvas-only preview with labelled controls; no iframe/object/embed
   const section=HTML.slice(HTML.indexOf('<section class="red-preview"'),HTML.indexOf('</section>',HTML.indexOf('<section class="red-preview"')));
   assert.ok(section.includes('aria-labelledby="red-preview-title"'));assert.match(section,/id="red-preview-status"[^>]*role="status"[^>]*aria-live="polite"/);
   for(const id of ['prev','next','download'])assert.match(section,new RegExp('<button class="button secondary" type="button" id="red-preview-'+id+'" disabled>[^<]+</button>'));
-  assert.doesNotMatch(HTML,/<iframe|<object|<embed/i);assert.ok(HTML.includes("object-src 'none'"));assert.match(section,/증명하지 않습니다/);
+  assert.doesNotMatch(HTML,/<iframe|<object|<embed/i);assert.ok(HTML.includes("object-src 'none'"));assert.match(section,/별도로 검수/);
   const order=[...HTML.matchAll(/<script src="([^"]+)"/g)].map(m=>m[1].split('?')[0]);
   assert.ok(order.indexOf('document-preview.js')>=0&&order.indexOf('document-red.js')>=0&&order.indexOf('document-preview.js')<order.indexOf('document-red.js'),'bundle loads before RED');
   assert.doesNotMatch(BUNDLE,/https?:\/\/(?!127\.0\.0\.1)[a-z]/i,'no remote URL in the bundle');});
@@ -222,7 +222,7 @@ test('RED: render failure keeps the verified export, success status and BLUE han
   const r=red({pdf:{badPages:new Set([1])}});
   await r.ready();r.reply=async()=>({file:OUT.toString('base64'),outputFileHash:sha(OUT),verification:{mode:'pdf-original-font-single-line',pages:3}});
   await r.export();await until(()=>/1쪽을 그리지 못했습니다/.test(r.pstatus()),'render failed');
-  assert.match(r.status(),/^실험용 사본과 별도 변경 계획을 다운로드했습니다/);assert.equal(r.get('red-handoff').hidden,false);r.handoff();assert.equal(r.handoffs.length,1);
+  assert.match(r.status(),/^수정본을 다운로드했습니다/);assert.equal(r.get('red-handoff').hidden,false);r.handoff();assert.equal(r.handoffs.length,1);
   assert.ok(Buffer.from(await r.handoffs[0].file.arrayBuffer()).equals(OUT));assert.equal(r.get('red-preview-download').disabled,false);
   const m=red({cap:{red:true,blue:true,pdf:true,pdfEditor:{available:true,engine:'falsify-pdf-editor',version:'0.4.1',wasmSha256:'ab'.repeat(32),reflow:true,pagination:true}}});await m.ready();
   m.reply=async()=>({file:OUT.toString('base64'),outputFileHash:sha(OUT),verification:{engine:'falsify-pdf-editor',layoutVerified:true,pagination:{inputPages:3,outputPages:3},reflow:{wrappedLines:0},independentQA:'passed',independentChecks:{schema:'falsify.pdf-quality.v1',status:'passed',method:'x',checks:[]}}});

@@ -3,6 +3,7 @@ import json
 from harness import resolve, guidance, backend, model_label, builtin, record
 from red_service import (CodexBackend, ClaudeBackend, strict_object, STRING, EVIDENCE, SCAN,
                          evidence_check, validate_request as validate_document)
+from blue_visual import validate_visual, infer_visual
 from blue_evidence_refs import build_evidence_refs, is_evidence_ref_id, resolve_evidence_ref
 
 VERSION = 'falsify.document-blue.v1'
@@ -11,6 +12,8 @@ FINDING = strict_object({'id': STRING, 'segmentId': STRING, 'quote': STRING,
     'rationale': STRING, 'evidence': {'type': 'array', 'items': EVIDENCE, 'minItems': 1, 'maxItems': 6},
     'uncertainty': STRING})
 RESULT = strict_object({'status': STATUS, 'findings': {'type': 'array', 'items': FINDING, 'maxItems': 12}})
+VISUAL_OBSERVATION = strict_object({'id': STRING, 'sha256': STRING, 'page': {'type': 'integer'}, 'bbox': {'type': 'array', 'items': {'type': 'number'}, 'minItems': 4, 'maxItems': 4}, 'observation': STRING, 'uncertainty': STRING})
+VISUAL_RESULT = strict_object({'status': STATUS, 'findings': {'type': 'array', 'items': FINDING, 'maxItems': 12}, 'visualObservations': {'type': 'array', 'items': VISUAL_OBSERVATION, 'maxItems': 12}})
 KEYS = {'schema', 'revision', 'requestId', 'sourceHash', 'segments', 'maxCalls', 'consent'}
 # Multi-chunk evidence reread: N scans -> 1 target selection -> 1 final pass over raw windows.
 MAX_PROMPT = 100000          # backend max_prompt_chars; selection/final prompts incl. harness guidance stay within it
@@ -38,19 +41,22 @@ def external_literature_enabled(harness):
         and settings.get('externalLookup') == {'enabled': True, 'providers': ['crossref', 'europepmc']})
 
 def validate_request(data):
-    if not isinstance(data, dict) or not KEYS <= set(data) or set(data) - KEYS - {'harness','harnessCanonical','executionConsent'} or data.get('schema') != VERSION:
+    if not isinstance(data, dict) or not KEYS <= set(data) or set(data) - KEYS - {'harness','harnessCanonical','executionConsent','visualEvidence','visualConsent','fileHash'} or data.get('schema') != VERSION:
         raise ValueError('BLUE는 허용된 문서 텍스트 필드만 받습니다. RED 계획·정답·파일명은 보내지 마세요.')
     for s in data.get('segments', []) if isinstance(data.get('segments'), list) else []:
         if not isinstance(s, dict) or set(s) != {'id', 'label', 'text'}:
             raise ValueError('BLUE 문단에 추가 메타데이터를 넣을 수 없습니다.')
     if type(data.get('maxCalls')) is not int or not 1 <= data['maxCalls'] <= 32:
         raise ValueError('호출 예산(1–32)을 확인하세요.')
+    images = validate_visual(data)
     harness, _ = resolve(data, 'blue')
+    if images and harness.get('adapter', {}).get('type', 'codex') != 'codex':
+        raise ValueError('visual_provider_unsupported')
     if not builtin(harness) and data.get('executionConsent') is not True:
         raise ValueError('사용자 harness 실행/전송 동의가 필요합니다.')
     # Shared document validation must not treat BLUE strategy as a RED harness. The budget is checked
     # here because multi-chunk BLUE needs N scans + selection + final (N+2), not RED's N+1.
-    chunks, required = validate_document({**{k:v for k,v in data.items() if k not in ('harness','harnessCanonical')}, 'schema': 'falsify.document-red.v1', 'level': 1,
+    chunks, required = validate_document({**{k:v for k,v in data.items() if k not in ('harness','harnessCanonical','visualEvidence','visualConsent','fileHash')}, 'schema': 'falsify.document-red.v1', 'level': 1,
                                           'maxCalls': 32, 'harness': {**harness, 'role': 'red', 'maxCalls': 32}})
     if len(chunks) > 1: required = len(chunks) + 2
     if required > min(data['maxCalls'], harness['maxCalls']):
@@ -153,6 +159,7 @@ def reread_record(status, targets=(), windows=(), truncated=False):
 
 def run_review(data, progress, cancelled, backend_factory=CodexBackend, claude_factory=ClaudeBackend):
     chunks, required = validate_request(data)
+    images = validate_visual(data)
     harness, harness_hash = resolve(data, 'blue')
     source = {s['id']: s['text'] for s in data['segments']}
     calls, notes = 0, []
@@ -198,10 +205,26 @@ def run_review(data, progress, cancelled, backend_factory=CodexBackend, claude_f
         if len(prompt) > MAX_PROMPT: raise ValueError('BLUE 프롬프트 상한 초과. 호출하지 않습니다.')
         progress({'completedCalls': calls, 'requiredCalls': required, 'phase': phase})
         calls += 1
-        result = engine.infer(prompt, schema)
+        if images and schema is RESULT:
+            refs = [{k: v for k, v in item.items() if k not in ('base64', 'mime', 'fileHash', 'sourceHash', 'width', 'height', 'rotation')} for item in data['visualEvidence']]
+            prompt += '\nSupplemental images in order, identified by these references: ' + json.dumps(refs) + '. Return visualObservations separately; never fabricate text quotes. Reference exact sha256, page and bbox. An observation is a model judgment, not verified image correctness.'
+            if len(prompt) > MAX_PROMPT: raise ValueError('BLUE visual prompt limit')
+            result = infer_visual(engine, prompt, VISUAL_RESULT, images)
+        else:
+            result = engine.infer(prompt, schema)
         if cancelled.is_set(): raise ValueError('BLUE 취소됨. 결과 폐기')
         if result['status'] != 'ok': raise ValueError('CLI BLUE 중단: ' + str(result.get('error_code') or result['status']))
-        return result['response']
+        response = result['response']
+        if images and schema is RESULT:
+            observations = response.get('visualObservations', [])
+            if response['status'] != 'ok' and observations: raise ValueError('visual_observations_invalid')
+            ids = set()
+            for observation in observations:
+                if not observation['id'].strip() or len(observation['id']) > 80 or observation['id'] in ids or not observation['observation'].strip() or len(observation['observation']) > 3000 or not observation['uncertainty'].strip() or len(observation['uncertainty']) > 1500: raise ValueError('visual_observations_invalid')
+                ids.add(observation['id'])
+                if not any(all(observation[k] == item[k] for k in ('sha256','page','bbox')) for item in data['visualEvidence']): raise ValueError('visual_reference_invalid')
+        return response
+    visual_observations = []
     def finish(status, findings, completed, reread, complete=True, windows=()):
         coverage = {'complete': complete, 'calls': calls, 'chunks': len(chunks), 'completedChunks': completed, 'reread': reread,
                     'rereadWindows': [{'segmentId': w['segmentId'], 'start': w['start'], 'end': w['end']} for w in windows]}
@@ -210,12 +233,14 @@ def run_review(data, progress, cancelled, backend_factory=CodexBackend, claude_f
             coverage['externalLiterature'] = {'requested': True,
                 'providers': ['crossref', 'europepmc'], 'verification': 'custom-script-unverified',
                 'meaning': '사용자 코드의 외부 문헌 조회 허용. 실제 조회 성공·범위는 harness 감사기록에서 확인; 앱이 독립 검증하지 않음.'}
-        return {'schema': VERSION, 'revision': data['revision'], 'sourceHash': data['sourceHash'], 'status': status, 'findings': findings,
+        extra = {'visualObservations': visual_observations, 'visualScope': 'Image bytes and hashes verified; PDF and extracted text association is client-declared; image interpretation is unverified.'} if images else {}
+        return {**extra, 'schema': VERSION, 'revision': data['revision'], 'sourceHash': data['sourceHash'], 'status': status, 'findings': findings,
             'harness': harness, 'harnessHash': harness_hash, 'model': model_label(harness), **record(harness),
             'coverage': coverage, 'isolation': ISOLATION}
     if len(chunks) == 1:
         response = invoke(first[0], RESULT, 'reviewing')
         validate_findings(response, data['segments'])
+        if images: visual_observations.extend(response['visualObservations'])
         return finish(response['status'], response['findings'], 1, reread_record('not-needed'))
     for i, prompt in enumerate(first):
         note = invoke(prompt, SCAN, 'reviewing')
@@ -278,5 +303,6 @@ def run_review(data, progress, cancelled, backend_factory=CodexBackend, claude_f
     for w in windows: delivered.setdefault(w['segmentId'], []).append(w['text'])
     for e in (e for n in notes for e in n['evidence']): delivered.setdefault(e['segmentId'], []).append(e['quote'])
     validate_findings(response, data['segments'], delivered)
+    if images: visual_observations.extend(response['visualObservations'])
     return finish(response['status'], response['findings'], len(chunks),
                   reread_record('incomplete' if truncated else 'completed', targets, windows, truncated), windows=windows)

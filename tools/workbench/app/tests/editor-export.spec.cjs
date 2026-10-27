@@ -47,9 +47,8 @@ function world(cap){
     boxes:()=>created.filter(e=>e.type==='checkbox'),area:i=>created.find(e=>e.id==='red-after-'+i),
     check(i){const b=w.boxes()[i];b.checked=true;b.dispatchEvent(new Event('change'));},
     edit(i,v){const a=w.area(i);a.value=v;a.dispatchEvent(new Event('input'));},
-    consent(){const c=get('red-export-consent');c.checked=true;c.dispatchEvent(new Event('change'));},
     clickDoc(sel){const ev=new Event('click');Object.defineProperty(ev,'target',{value:{closest:s=>s===sel?{}:null}});document.dispatchEvent(ev);},
-    async ready(){await w.load();await w.candidates();w.check(1);w.edit(1,'in every cohort, including the untreated one');w.consent();}};
+    async ready(){await w.load();await w.candidates();w.check(1);w.edit(1,'in every cohort, including the untreated one');}};
   w.inflight=0;current=w;return w;
 }
 const ok=(verification,file=OUT)=>async()=>({file:file.toString('base64'),sourceFileHash:sha(SRC),outputFileHash:sha(file),verification});
@@ -112,7 +111,7 @@ test('success: header/footer copy only when the output report declares it, in it
   assert.doesNotMatch(w.status(),/본문만 있고|표기했습니다|10\.1|독립 검증|보이지 않/,'no numbering fact in the report: no past tense, no example as this output');assert.equal(text(check.children[0]),'같은 엔진 자체검사');
   const body=async(label,over)=>{const x=world(STYLED);await x.ready();x.reply=ok({...ACTUAL,continuationStyle:OK,...over});x.get('red-download').click();await flush();const s=x.status();
     assert.equal(outcomes(x)[1].textContent,'추가 페이지 머리말·꼬리말·쪽번호 적용 여부는 엔진이 확인 가능한 형태로 보고하지 않았습니다.',label);
-    assert.doesNotMatch(s,/본문만 있고|머리말·꼬리말·쪽번호가 없으며|이어 붙였습니다|10\.1/,label);assert.equal(x.downloads.length,2,label);};
+    assert.doesNotMatch(s,/본문만 있고|머리말·꼬리말·쪽번호가 없으며|이어 붙였습니다|10\.1/,label);assert.equal(x.downloads.length,1,label);};
   for(const bad of [undefined,null,'yes',{...OK,applied:'true'},{...OK,copiedPages:3},{...OK,copiedPages:1},{...OK,copiedPages:-1},{...OK,copiedPages:1.5},{...OK,copiedPages:'2'},
       {policy:'source-number-suffix',applied:true},{...OK,policy:'renumber'},{...OK,copiedPages:0}])await body(JSON.stringify(bad),{continuationStyle:bad});
   for(const [label,over] of [['addedPages missing',{addedPages:undefined}],['addedPages mismatch',{addedPages:1}],['addedPages string',{addedPages:'2'}]])await body(label,over);
@@ -129,7 +128,7 @@ test('success: header/footer copy only when the output report declares it, in it
 
 test('styled capability: failed export keeps selection, edited After and source; nothing downloads',async()=>{const w=world(STYLED);await w.ready();
   w.reply=async()=>{throw new Error('synthetic: EDGE_SUFFIX_GLYPH_MISSING');};w.get('red-download').click();await flush();
-  assert.match(w.status(),/^다운로드 차단: synthetic: EDGE_SUFFIX_GLYPH_MISSING/);assert.match(w.status(),/After는 그대로 남아 있습니다/);assert.equal(w.downloads.length,0);assert.equal(w.get('red-handoff').hidden,true);
+  assert.match(w.status(),/^다운로드 차단: synthetic: EDGE_SUFFIX_GLYPH_MISSING/);assert.equal(w.downloads.length,0);assert.equal(w.get('red-handoff').hidden,true);
   assert.equal(w.boxes()[1].checked,true);assert.equal(w.area(1).value,'in every cohort, including the untreated one');
   w.reply=ok({...ACTUAL,continuationStyle:{policy:'source-number-suffix',applied:true,copiedPages:2}});w.get('red-download').click();await flush();
   assert.equal(w.calls[1].body.file,w.calls[0].body.file,'same source bytes on retry');assert.deepEqual(Object.keys(w.calls[1].body).sort(),['file','fileHash','format','patches'],'no style field sent');});
@@ -138,17 +137,17 @@ test('export mode line distinguishes reflow engine, legacy single-line and missi
   let w=world(NEW);await w.ready();const m=w.get('red-export-mode'),mt=text(m);
   assert.equal(m.hidden,false);assert.match(mt,/falsify-pdf-editor 0\.4\.1/);assert.match(mt,/줄바꿈 재배치와 필요 시 이어지는 페이지 추가/);assert.match(mt,/엔진 자체검사 결과로만/);assert.equal(w.get('red-download').disabled,false);
   assert.match(mt,/1단·회전 없음·잘림 없음인 최상위 본문 텍스트뿐/);assert.match(mt,/본문만 담고 머리말·꼬리말·쪽번호가 없으며, 뒤쪽 원래 페이지의 쪽번호는 다시 매기지 않습니다/);
-  assert.equal(w.get('red-download').textContent,'재배치·자체검사 후 실험용 사본 다운로드');
+  assert.equal(w.get('red-download').textContent,'PDF 다운로드');
   w=world(OLD);await w.ready();assert.match(text(w.get('red-export-mode')),/^기존 한 줄 보존 편집/);assert.match(text(w.get('red-export-mode')),/최신 companion/);assert.equal(w.get('red-download').disabled,false);
-  assert.equal(w.get('red-download').textContent,'보존 검사 후 완성본 다운로드','legacy single-line label unchanged');
-  w=world({...OLD,pdfEditor:{...EDITOR,reflow:false,pagination:false}});await w.ready();assert.match(text(w.get('red-export-mode')),/줄바꿈 재배치를 지원하지 않아/);assert.equal(w.get('red-download').textContent,'보존 검사 후 완성본 다운로드');
+  assert.equal(w.get('red-download').textContent,'PDF 다운로드','legacy single-line label unchanged');
+  w=world({...OLD,pdfEditor:{...EDITOR,reflow:false,pagination:false}});await w.ready();assert.match(text(w.get('red-export-mode')),/줄바꿈 재배치를 지원하지 않아/);assert.equal(w.get('red-download').textContent,'PDF 다운로드');
   w=world({...OLD,pdfEditor:{...EDITOR,available:false}});await w.ready();assert.match(text(w.get('red-export-mode')),/아직 준비되지 않았습니다.*연결 패널/);
   w=world({red:true,blue:true,pdf:false,pdfEditor:{...EDITOR,available:false}});await w.ready();
   assert.equal(w.get('red-download').disabled,true);assert.equal(w.get('red-export-mode').hidden,true);assert.match(w.status(),/연결 패널.*After는 그대로/);assert.equal(w.get('red-plan').disabled,false,'plan JSON still available');});
 
-test('nothing is auto-selected or auto-run; export needs a checked candidate and consent',async()=>{const w=world(NEW);await w.load();await w.candidates();
+test('nothing is auto-selected or auto-run; export needs a checked candidate',async()=>{const w=world(NEW);await w.load();await w.candidates();
   assert.equal(w.boxes().every(b=>!b.checked),true);assert.equal(w.get('red-download').disabled,true);assert.equal(w.calls.length,0);
-  w.check(0);assert.equal(w.get('red-download').disabled,true,'consent still required');w.consent();assert.equal(w.get('red-download').disabled,false);assert.equal(w.calls.length,0);});
+  w.check(0);assert.equal(w.get('red-download').disabled,false);assert.equal(w.calls.length,0);});
 
 test('same /api/export body: only checked candidates with the user-edited After; pending locks and honest progress',async()=>{const w=world(NEW);await w.ready();
   let release;w.reply=()=>new Promise(r=>{release=r;});w.get('red-download').click();await flush();
@@ -166,15 +165,15 @@ test('verified success reports wrapping and new pages, downloads copy + separate
   assert.match(s,/머리말·꼬리말·쪽번호가 없으며/,'continuation limitation whenever pages grow');assert.doesNotMatch(s,/엔진 검증 결과/);
   assert.match(s,/엔진 자체검사 · 독립성 미보고/,'legacy payload without selfCheck claims no independence');assert.match(s,/독립 검수 상태 미보고/);
   assert.equal(w.get('red-export-status').classList.contains('error'),false);
-  assert.equal(w.downloads.length,2);assert.equal(Buffer.from(await w.downloads[0].arrayBuffer()).equals(OUT),true);
-  const plan=JSON.parse(await w.downloads[1].text());assert.equal(plan.outputFileHash,sha(OUT));assert.deepEqual(plan.verification.pagination,REFLOWED.pagination);assert.equal(plan.status.gold,'pending');
+  assert.equal(w.downloads.length,1);assert.equal(Buffer.from(await w.downloads[0].arrayBuffer()).equals(OUT),true);
+  w.get('red-plan').click();await flush();assert.equal(w.downloads.length,2);const plan=JSON.parse(await w.downloads[1].text());assert.equal(plan.outputFileHash,sha(OUT));assert.deepEqual(plan.verification.pagination,REFLOWED.pagination);assert.equal(plan.status.gold,'pending');
   assert.equal(w.get('red-handoff').hidden,false);assert.equal(w.handoffs.length,0,'BLUE never started automatically');
   w.clickDoc('#red-handoff');await flush();assert.equal(w.handoffs.length,1);const h=w.handoffs[0];
   assert.deepEqual(Object.keys(h).sort(),['file','sourceRunId'],'BLUE receives only the copy and the run relation');assert.equal(Buffer.from(await h.file.arrayBuffer()).equals(OUT),true);assert.equal(typeof h.sourceRunId,'string');});
 
 test('engine error is actionable and keeps candidates, selection, edited After and the source',async()=>{const w=world(NEW);await w.ready();
   w.reply=async()=>{throw new Error('synthetic: rotated text block cannot be reflowed');};w.get('red-download').click();await flush();
-  const s=w.status();assert.match(s,/^다운로드 차단: synthetic: rotated text block/);assert.match(s,/After는 그대로 남아 있습니다/);assert.match(s,/선택을 해제하거나 After를 직접 조정/);assert.match(s,/연결 패널/);
+  const s=w.status();assert.match(s,/^다운로드 차단: synthetic: rotated text block/);
   assert.equal(w.get('red-export-status').classList.contains('error'),true);assert.equal(w.downloads.length,0);
   assert.equal(w.boxes()[1].checked,true);assert.equal(w.boxes()[0].checked,false);assert.equal(w.area(1).value,'in every cohort, including the untreated one');
   assert.equal(w.get('red-download').disabled,false,'retry possible');assert.equal(w.get('red-handoff').hidden,true);
@@ -183,7 +182,7 @@ test('engine error is actionable and keeps candidates, selection, edited After a
 
 test('legacy broker error points to the single-line limit and a reflow-capable companion',async()=>{const w=world(OLD);await w.ready();
   w.reply=async()=>{throw new Error('줄바꿈이 필요한 변경입니다.');};w.get('red-download').click();await flush();
-  assert.match(w.status(),/원래 줄 공간에 들어가는 변경만 지원/);assert.match(w.status(),/줄바꿈 재배치 엔진이 있는 companion/);assert.match(w.calls[0].body.patches[0].after,/untreated/);});
+  assert.match(w.status(),/줄바꿈이 필요한 변경입니다/);assert.match(w.calls[0].body.patches[0].after,/untreated/);});
 
 test('reset during a pending export discards the late result without downloading',async()=>{const w=world(NEW);await w.ready();
   let release;w.reply=()=>new Promise(r=>{release=r;});w.get('red-download').click();await flush();
@@ -197,13 +196,13 @@ test('no blanket success: unverified layout, hash mismatch and missing paginatio
   assert.match(w.status(),/출력 해시와 받은 파일이 달라/);assert.equal(w.downloads.length,0);
   w=world(NEW);await w.ready();w.reply=ok({engine:'falsify-pdf-editor',layoutVerified:true,reflow:{wrappedLines:'3'},pagination:{inputPages:10,outputPages:9},diagnostics:['Hyphenation differs from source']});w.get('red-download').click();await flush();
   assert.match(w.status(),/줄바꿈 결과 미보고/);assert.match(w.status(),/페이지 수 변화 미검증/);assert.match(w.status(),/심각도 미보고 · 엔진 진단 \(Hyphenation differs/);assert.doesNotMatch(w.status(),/새 페이지|머리말·꼬리말/);
-  assert.match(w.status(),/다운로드했습니다/,'honest missing counters only with layoutVerified true');assert.equal(w.downloads.length,2);
+  assert.match(w.status(),/다운로드했습니다/,'honest missing counters only with layoutVerified true');assert.equal(w.downloads.length,1);
   w=world(OLD);await w.ready();w.reply=ok({mode:'pdf-original-font-single-line',pages:10,limits:'96dpi'});w.get('red-download').click();await flush();
   assert.match(w.status(),/기존 한 줄 교체 · 줄바꿈·페이지 추가 없음 · 10쪽/);assert.doesNotMatch(w.status(),/새 페이지|재배치 \d/);});
 
 test('actual engine payload: ink outcome, same-engine self-check state, mapped diagnostics with severity and codes',async()=>{const w=world(NEW);await w.ready();w.reply=ok(ACTUAL);w.get('red-download').click();await flush();
-  const e=w.get('red-export-status'),[outcome,cont]=outcomes(w),check=part(w,'red-export-check'),notes=part(w,'red-export-notes');assert.equal(outcomes(w).length,2);assert.equal(e.classList.contains('error'),false);assert.equal(w.downloads.length,2);
-  assert.equal(outcome.className,'red-export-outcome');assert.match(outcome.textContent,/^실험용 사본과 별도 변경 계획을 다운로드했습니다\. 엔진 자체검사 결과: 페이지 2 → 4 \(새 페이지 2쪽\) · 줄바꿈 결과 미보고\./);
+  const e=w.get('red-export-status'),[outcome,cont]=outcomes(w),check=part(w,'red-export-check'),notes=part(w,'red-export-notes');assert.equal(outcomes(w).length,2);assert.equal(e.classList.contains('error'),false);assert.equal(w.downloads.length,1);
+  assert.equal(outcome.className,'red-export-outcome');assert.match(outcome.textContent,/다운로드했습니다.*페이지 2 → 4 \(새 페이지 2쪽\) · 줄바꿈 결과 미보고/);assert.doesNotMatch(outcome.textContent,/별도 변경 계획을 다운로드/);
   assert.equal(cont.className,'red-export-outcome');assert.match(cont.textContent,/^추가된 이어지는 페이지에는 본문만 있고 머리말·꼬리말·쪽번호가 없으며, 뒤쪽 원래 페이지의 쪽번호는 다시 매기지 않았습니다/);assert.doesNotMatch(outcome.textContent,/머리말/);
   assert.doesNotMatch(outcome.textContent,/engine_|pagination_required|주의/,'diagnostics stay out of the outcome line');
   assert.equal(check.className,'red-export-check');assert.equal(check.children[0].className,'status-label');assert.equal(check.children[0].textContent,'같은 엔진 자체검사');
@@ -235,12 +234,12 @@ test('independent QA: passed, warning and unavailable are distinct from the self
   const self=part(w,'red-export-check');assert.equal(text(self.children[0]),'같은 엔진 자체검사','self-check chip unchanged');assert.doesNotMatch(text(self),/대기 ·|미보고|독립 검사/);
   let q=qaPart(w);assert.equal(q.children[0].className,'status-label');assert.equal(q.children[0].textContent,'독립 검사 통과');
   assert.equal(text(q),'독립 검사 통과 제한된 독립 추출·렌더 검사 2항목 통과 (pdfjs-text-render). 전체 시각 품질·성능을 증명하지는 않습니다. 사람의 과학 검수는 아직 대기 중입니다.');
-  assert.equal(w.downloads.length,2);assert.equal(w.get('red-export-status').classList.contains('error'),false);
+  assert.equal(w.downloads.length,1);assert.equal(w.get('red-export-status').classList.contains('error'),false);
   w=await runQA(QA('warning',[{code:'text_extract',status:'passed',pages:[1]},{code:'render_diff_high',status:'warning',pages:[3,3,4]},{code:'C:/Users/x/<b>secret</b>',status:'warning',pages:[2]}],{method:'C:/tools/qa.exe'}));
   q=qaPart(w);assert.equal(q.children[0].textContent,'독립 검사 주의');assert.match(text(q),/확인할 항목: render_diff_high 2쪽, 형식 외 코드 1쪽\. 다운로드는 그대로 진행했습니다\. 사람의 과학 검수는 아직 대기 중입니다\.$/);
-  assert.doesNotMatch(w.status(),/C:\/|<b>|secret|qa\.exe|검사 통과|Bounded check/);assert.equal(w.downloads.length,2);assert.equal(w.get('red-export-status').classList.contains('error'),false);assert.equal(w.get('red-handoff').hidden,false,'warning still hands off');
+  assert.doesNotMatch(w.status(),/C:\/|<b>|secret|qa\.exe|검사 통과|Bounded check/);assert.equal(w.downloads.length,1);assert.equal(w.get('red-export-status').classList.contains('error'),false);assert.equal(w.get('red-handoff').hidden,false,'warning still hands off');
   w=await runQA(QA('unavailable',[{code:'renderer_missing',status:'unavailable',pages:[]}]));q=qaPart(w);
-  assert.equal(q.children[0].textContent,'독립 검사 미실행');assert.match(text(q),/이 환경에서 독립 추출·렌더 검사를 하지 못했습니다 \(renderer_missing\)\. 사람의 과학 검수는 아직 대기 중입니다\.$/);assert.equal(w.downloads.length,2);
+  assert.equal(q.children[0].textContent,'독립 검사 미실행');assert.match(text(q),/이 환경에서 독립 추출·렌더 검사를 하지 못했습니다 \(renderer_missing\)\. 사람의 과학 검수는 아직 대기 중입니다\.$/);assert.equal(w.downloads.length,1);
   w=await runQA(ACTUAL);assert.equal(qaPart(w),undefined,'legacy pending keeps the self-check line');assert.match(text(part(w,'red-export-check')),/독립 추출\/렌더링·사람 검수 대기/);});
 
 test('independent QA: unknown or malformed states never read passed',async()=>{
@@ -248,7 +247,7 @@ test('independent QA: unknown or malformed states never read passed',async()=>{
   for(const [label,v] of [['schema',QA('passed',one,{schema:'falsify.pdf-quality.v2'})],['status mismatch',{...QA('passed',one),independentChecks:QA('warning',one).independentChecks}],['passed with warning item',QA('passed',[{code:'a',status:'warning',pages:[1]}])],
       ['empty passed',QA('passed',[])],['zero page',QA('passed',[{code:'a',status:'passed',pages:[0]}])],['string page',QA('passed',[{code:'a',status:'passed',pages:['1']}])],['bad item status',QA('passed',[{code:'a',status:'ok',pages:[1]}])],
       ['checks object missing',{...ACTUAL,independentQA:'passed'}],['limitations not strings',QA('passed',one,{limitations:[1]})],['method missing',QA('passed',one,{method:undefined})],['warning with failed item is not warning',QA('warning',[{code:'a',status:'failed',pages:[1]}])]]){
-    const w=await runQA(v);assert.equal(qaPart(w).children[0].textContent,'독립 검사 형식 확인 불가',label);assert.doesNotMatch(w.status(),/검사 통과|항목 통과/,label);assert.equal(w.downloads.length,2,label);}
+    const w=await runQA(v);assert.equal(qaPart(w).children[0].textContent,'독립 검사 형식 확인 불가',label);assert.doesNotMatch(w.status(),/검사 통과|항목 통과/,label);assert.equal(w.downloads.length,1,label);}
   for(const s of ['PASSED','passed ',null,42]){const w=await runQA({...QA('passed',one),independentQA:s});assert.equal(qaPart(w),undefined,String(s));assert.match(w.status(),/독립 검수 상태 미보고/,String(s));assert.doesNotMatch(w.status(),/통과/,String(s));}});
 
 test('independent QA failed never downloads even when the companion returns bytes; selection and After stay',async()=>{

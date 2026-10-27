@@ -14,6 +14,8 @@ const FILE='11'.repeat(32);
 function memory(){const m=new Map();return {getItem:k=>m.has(k)?m.get(k):null,setItem:(k,v)=>m.set(k,String(v)),removeItem:k=>m.delete(k),dump:()=>m.get(P.storageKey('red'))};}
 function blueMemory(){const m=new Map();return {getItem:k=>m.has(k)?m.get(k):null,setItem:(k,v)=>m.set(k,String(v)),removeItem:k=>m.delete(k)};}
 const hashHarness=h=>H.hash(h);
+const queues=new Map();
+const locks={request(name,fn){const prior=queues.get(name)||Promise.resolve();const next=prior.then(fn,fn);queues.set(name,next.catch(()=>{}));return next;}};
 function doc(over={}){return {revision:'rev-1',sourceHash:'aa'.repeat(32),fileHash:FILE,format:'TXT',name:'notes.txt',segments:[{id:'s0',label:'p',text:'The claim is absolute.'}],...over};}
 function request(d,role,over={}){
   const base=role==='blue'
@@ -23,7 +25,7 @@ function request(d,role,over={}){
 }
 async function hold(storage,over={}){
   const role=over.role||'red',d=over.doc||doc();
-  return P.hold({role,request:over.request||request(d,role,over.requestOver),doc:d,companionInstance:over.instance||INSTANCE,storage,now:over.now||1_700_000_000_000,hashHarness:over.hashHarness||hashHarness});
+  return P.hold({lockProvider:locks,role,request:over.request||request(d,role,over.requestOver),doc:d,companionInstance:over.instance||INSTANCE,storage,now:over.now||1_700_000_000_000,hashHarness:over.hashHarness||hashHarness});
 }
 function job(record,state,extra={}){return {httpStatus:200,body:{id:record.requestId,role:record.role,state,sourceHash:record.sourceHash,revision:record.revision,harnessHash:record.harnessHash,companionInstance:record.companionInstance,requestBytesDigest:record.requestBytesDigest,progress:{completedCalls:0},...extra}};}
 async function sha256Text(text){const buf=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(text));return Buffer.from(buf).toString('hex');}
@@ -100,12 +102,12 @@ test('hold does not overwrite unresolved, failed, or unknown records; discard re
   const storage=memory(),held=await hold(storage);assert.equal(held.ok,true);assert.equal(held.record.postReceipt,'pending');
   const dup=await hold(storage,{requestOver:{requestId:'rev-1:job-2'}});assert.equal(dup.ok,false);assert.equal(dup.blocked,'unresolved');
   assert.equal(P.read('red',storage).record.requestId,held.record.requestId);
-  assert.equal(P.discard('red',{storage}).ok,false);assert.equal(P.read('red',storage).status,'record');
+  assert.equal((await P.discard('red',{storage})).ok,false);assert.equal(P.read('red',storage).status,'record');
   await P.note(held.record,{postReceipt:'unknown'},storage);
   const afterThrow=await hold(storage);assert.equal(afterThrow.blocked,'unknown');
   await P.note(P.read('red',storage).record,{postReceipt:'accepted',disposition:'failed',finishedAt:50},storage);
   const afterFail=await hold(storage);assert.equal(afterFail.blocked,'failed');
-  assert.equal(P.discard('red',{acknowledge:true,storage}).ok,true);
+  assert.equal((await P.discard('red',{acknowledge:true,storage,expectedRequestId:held.record.requestId})).ok,true);
   const next=await hold(storage,{requestOver:{requestId:'rev-1:job-2'}});assert.equal(next.ok,true);assert.equal(next.record.requestId,'rev-1:job-2');
 });
 test('a settled completed record can be replaced; the other role cannot',async()=>{
@@ -113,7 +115,7 @@ test('a settled completed record can be replaced; the other role cannot',async()
   const held=await hold(storage);await P.note(held.record,{postReceipt:'accepted',disposition:'completed',finishedAt:10},storage);
   const next=await hold(storage,{requestOver:{requestId:'rev-1:job-2'}});assert.equal(next.ok,true);
   const red=await hold(storage);assert.equal(red.ok,false);
-  const blue=await P.hold({role:'blue',request:request(doc(),'blue'),doc:doc(),companionInstance:INSTANCE,storage:box,hashHarness,now:10});
+  const blue=await P.hold({lockProvider:locks,role:'blue',request:request(doc(),'blue'),doc:doc(),companionInstance:INSTANCE,storage:box,hashHarness,now:10});
   assert.equal(blue.ok,true);assert.equal(P.read('red',storage).record.role,'red');
 });
 test('secrets, PDF bytes, and BLUE gold or filename are rejected and not stored',async()=>{
@@ -123,9 +125,9 @@ test('secrets, PDF bytes, and BLUE gold or filename are rejected and not stored'
   }
   const box=blueMemory();
   const d=doc();
-  const tainted=await P.hold({role:'blue',request:{...request(d,'blue'),gold:['x'],filename:'red-out.pdf'},doc:d,companionInstance:INSTANCE,storage:box,hashHarness});
+  const tainted=await P.hold({lockProvider:locks,role:'blue',request:{...request(d,'blue'),gold:['x'],filename:'red-out.pdf'},doc:d,companionInstance:INSTANCE,storage:box,hashHarness});
   assert.equal(tainted.ok,false);assert.equal(box.getItem(P.storageKey('blue')),null);
-  const clean=await P.hold({role:'blue',request:request(d,'blue'),doc:d,companionInstance:INSTANCE,storage:box,hashHarness,now:10});
+  const clean=await P.hold({lockProvider:locks,role:'blue',request:request(d,'blue'),doc:d,companionInstance:INSTANCE,storage:box,hashHarness,now:10});
   assert.equal(clean.ok,true);
   const saved=JSON.parse(box.getItem(P.storageKey('blue')));
   assert.equal(saved.request.gold,undefined);assert.equal(saved.request.filename,undefined);assert.equal(saved.request.sourceName,undefined);
@@ -206,10 +208,10 @@ test('concurrent hold keeps one unresolved record and does not let the loser rep
   const slow=async h=>{await gate;return H.hash(h);};
   const first=hold(storage,{hashHarness:slow,requestOver:{requestId:'rev-1:job-a',maxCalls:1}});
   const second=hold(storage,{requestOver:{requestId:'rev-1:job-b',maxCalls:8}});
-  const early=await second;
-  assert.equal(early.ok,false);assert.equal(early.blocked,'unresolved');
   release();
   const winner=await first;
+  const early=await second;
+  assert.equal(early.ok,false);assert.equal(early.blocked,'unresolved');
   assert.equal(winner.ok,true);assert.equal(winner.record.requestId,'rev-1:job-a');
   assert.equal(P.read('red',storage).record.requestId,'rev-1:job-a');
   const again=await hold(storage,{requestOver:{requestId:'rev-1:job-b'}});
@@ -218,15 +220,34 @@ test('concurrent hold keeps one unresolved record and does not let the loser rep
 test('a record planted during hashing is not overwritten',async()=>{
   const storage=memory();
   const hashOnce=async h=>{storage.setItem(P.storageKey('red'),'{');return H.hash(h);};
-  const planted=await P.hold({role:'red',request:request(doc(),'red'),doc:doc(),companionInstance:INSTANCE,storage,hashHarness:hashOnce,now:10});
+  const planted=await P.hold({lockProvider:locks,role:'red',request:request(doc(),'red'),doc:doc(),companionInstance:INSTANCE,storage,hashHarness:hashOnce,now:10});
   assert.equal(planted.ok,false);assert.equal(planted.blocked,'corrupt');assert.equal(storage.dump(),'{');
+});
+
+test('missing locks, hash and storage failures refuse admission',async()=>{
+  const storage=memory(),d=doc();
+  const noLocks=await P.hold({lockProvider:{},role:'red',request:request(d,'red'),doc:d,companionInstance:INSTANCE,storage,hashHarness});
+  assert.equal(noLocks.status,'lock-unavailable');assert.equal(P.read('red',storage).status,'absent');
+  const badHash=await hold(storage,{hashHarness:async()=>{throw Error('hash failed');}});
+  assert.equal(badHash.ok,false);assert.equal(P.read('red',storage).status,'absent');
+  const broken={getItem:()=>null,setItem:()=>{throw Error('quota');}};
+  assert.equal((await hold(broken)).status,'write-failed');
+});
+test('stale note and discard cannot change a newer request; roles are independent',async()=>{
+  const storage=memory(),first=await hold(storage),blue=await hold(storage,{role:'blue'});
+  assert.equal(blue.ok,true);
+  await P.note(first.record,{postReceipt:'accepted',disposition:'completed',finishedAt:1},storage);
+  const second=await hold(storage,{requestOver:{requestId:'rev-1:new'}});assert.equal(second.ok,true);
+  assert.equal((await P.note(first.record,{postReceipt:'unknown'},storage)).ok,false);
+  assert.equal((await P.discard('red',{storage,acknowledge:true,expectedRequestId:first.record.requestId})).status,'stale');
+  assert.equal(P.read('red',storage).record.requestId,'rev-1:new');assert.equal(P.read('blue',storage).record.requestId,blue.record.requestId);
 });
 
 let htmlWrites=0;
 function element(id){
   const e=new EventTarget();
   Object.assign(e,{id,disabled:false,hidden:false,checked:false,value:'',textContent:'',children:[],files:[],className:'',
-    classList:{toggle(){}},replaceChildren(){},append(){},after(){},remove(){},click(){this.dispatchEvent(new Event('click'));},
+    classList:{toggle(){}},replaceChildren(){this.children=[];},append(...nodes){this.children.push(...nodes);},after(){},remove(){},click(){this.dispatchEvent(new Event('click'));},
     getClientRects:()=>[],addEventListener(t,f){EventTarget.prototype.addEventListener.call(this,t,f);}});
   Object.defineProperty(e,'innerHTML',{set(){htmlWrites++;},get(){return e.textContent||'';}});
   return e;
@@ -235,20 +256,20 @@ function vmStorage(){const m=new Map();return {getItem:k=>m.has(k)?m.get(k):null
 async function redPage(storage,hooks,options={}){
   const els=new Map(),get=id=>{if(!els.has(id))els.set(id,element(id));return els.get(id);};
   const document=new EventTarget();
-  Object.assign(document,{querySelector:s=>s.startsWith('#')?get(s.slice(1)):null,querySelectorAll:()=>[],createElement:tag=>element(tag),body:element('body')});
+  Object.assign(document,{querySelector:s=>s.startsWith('#')?(['#red-receipt-check','#red-pending-discard','#red-recovery-details','#red-previous-failure'].includes(s)?els.get(s.slice(1))||null:get(s.slice(1))):null,querySelectorAll:()=>[],createElement:tag=>{const e=element(tag);Object.defineProperty(e,'id',{get(){return this._id;},set(v){this._id=v;els.set(v,this);}});return e;},body:element('body')});
   get('red-level').value='1';get('red-budget').value='8';get('red-empty').textContent='empty';
-  const calls=[];
+  const calls=[],downloads=[];
   const cap={red:true,pdf:false,companionInstance:INSTANCE};
   const bridge={busy(){},state:()=>({status:'paired',connected:true,cap}),capabilities:()=>cap,session:()=>({request:async(p,body)=>{calls.push({path:p,body});return hooks.reply(p,body,calls);}})};
-  const lab={busy(){},allowed:()=>true,ready:Promise.resolve(),bind:async(role,r)=>({...r,harness:H.builtin(role)}),record:async()=>'run-1'};
+  const lab={busy(){},allowed:()=>true,ready:Promise.resolve(),bind:async(role,r)=>({...r,harness:hooks.harness||H.builtin(role)}),record:async()=>'run-1'};
   if(options.shipped){const script=element('pending-job.js');script.src='pending-job.js';script.getAttribute=name=>name==='src'?'pending-job.js':null;document.scripts=[script];}
-  const ctx=vm.createContext({document,crypto:globalThis.crypto,localStorage:storage,FalsifyDocumentRed:Red,FalsifyHarness:H,FalsifyLocalBridge:bridge,FalsifyLab:lab,FalsifyExport:{},TextEncoder,TextDecoder,CustomEvent,Event,URL:{createObjectURL:()=>'blob:1',revokeObjectURL(){}},Blob,File,setTimeout,clearTimeout,confirm:()=>true,addEventListener(){},btoa,atob,Uint8Array,Array,Promise,Error,Map,JSON,Number,String,Object,console});
+  const ctx=vm.createContext({document,crypto:globalThis.crypto,localStorage:storage,navigator:{locks},FalsifyDocumentRed:Red,FalsifyHarness:H,FalsifyLocalBridge:bridge,FalsifyLab:lab,FalsifyExport:{},TextEncoder,TextDecoder,CustomEvent,Event,URL:{createObjectURL(blob){downloads.push(blob);return 'blob:1';},revokeObjectURL(){}},Blob,File,setTimeout,clearTimeout,confirm:()=>true,addEventListener(){},btoa,atob,Uint8Array,Array,Promise,Error,Map,JSON,Number,String,Object,console});
   if(options.helper!==false)vm.runInContext(fs.readFileSync(path.join(dist,'pending-job.js'),'utf8'),ctx,{filename:'pending-job.js'});
   vm.runInContext(fs.readFileSync(path.join(dist,'document-red.js'),'utf8'),ctx,{filename:'document-red.js'});
   const text='The claim is absolute.';
-  return {get,calls,async load(){document.dispatchEvent(new CustomEvent('falsify:document',{detail:{file:{name:'notes.txt',arrayBuffer:async()=>new TextEncoder().encode(text).buffer},result:{text,format:'TXT',segments:[{label:'p',text}]}}}));
-    for(let i=0;i<50&&get('document-red').hidden!==false;i++)await new Promise(r=>setTimeout(r,5));
-    assert.equal(get('document-red').hidden,false);}};
+  return {get,find:id=>els.get(id),calls,downloads,async load(name='notes.txt',content=text){document.dispatchEvent(new CustomEvent('falsify:document',{detail:{file:{name,arrayBuffer:async()=>new TextEncoder().encode(content).buffer},result:{text:content,format:'TXT',segments:[{label:'p',text:content}]}}}));
+    for(let i=0;i<100&&!get('red-document-summary').textContent.startsWith(name+' ·');i++)await new Promise(r=>setTimeout(r,5));
+    assert.match(get('red-document-summary').textContent,new RegExp('^'+name.replace('.', '\\.')+' ·'));}};
 }
 test('RED page writes the pending record before POST and does not POST again after a throw or a reload',async()=>{
   const storage=vmStorage();let failPost=true;
@@ -275,6 +296,39 @@ test('RED page writes the pending record before POST and does not POST again aft
   assert.match(reloaded.get('red-export-status').textContent,/원본 파일/);
 });
 function completedBody(saved){return {id:saved.requestId,role:saved.role,state:'completed',sourceHash:saved.sourceHash,revision:saved.revision,harnessHash:saved.harnessHash,companionInstance:saved.companionInstance,requestBytesDigest:saved.requestBytesDigest,progress:{completedCalls:1},result:saved.role==='blue'?{schema:Blue.VERSION,revision:saved.revision,sourceHash:saved.sourceHash,status:'abstain',findings:[]}:{schema:Red.VERSION,revision:saved.revision,sourceHash:saved.sourceHash,status:'abstain',candidates:[]}};}
+
+test('RED same loaded document explicitly checks lost receipt with GET only',async()=>{
+  const storage=vmStorage();let resolveGet, started=false;
+  const page=await redPage(storage,{reply:async p=>{if(p==='/api/red/jobs')throw Error('lost response');started=true;return new Promise(r=>resolveGet=r);}});
+  await page.load();page.get('red-consent').checked=true;page.get('red-start').click();
+  await until(()=>P.read('red',storage).record?.postReceipt==='unknown'&&page.find('red-receipt-check')&&!page.find('red-receipt-check').hidden,'unknown receipt action');
+  const before=page.calls.length;page.get('red-receipt-check').click();await until(()=>started,'GET started');
+  const saved=P.read('red',storage).record;assert.equal(page.calls.length,before+1);assert.equal(page.calls.at(-1).path,'/api/red/jobs/'+encodeURIComponent(saved.requestId));assert.equal(page.calls.at(-1).body,undefined);
+  resolveGet(completedBody(saved));await until(()=>P.read('red',storage).record?.disposition==='completed','recovered');
+  assert.match(page.get('red-progress').textContent,/복구했습니다/);assert.equal(page.get('red-document-summary').textContent.startsWith('notes.txt'),true);assert.equal(page.calls.length,2);
+});
+test('RED foreign job and a new document during GET never replace the active document or result',async()=>{
+  for(const scenario of ['foreign','new-document','new-result']){
+    const storage=vmStorage();let resolveGet,started=false;
+    const page=await redPage(storage,{reply:async p=>{if(p==='/api/red/jobs')throw Error('lost response');started=true;return new Promise(r=>resolveGet=r);}});
+    await page.load();page.get('red-consent').checked=true;page.get('red-start').click();
+    await until(()=>P.read('red',storage).record?.postReceipt==='unknown'&&page.find('red-receipt-check')&&!page.find('red-receipt-check').hidden,'unknown action');
+    const saved=P.read('red',storage).record;page.get('red-receipt-check').click();await until(()=>started,'GET started');
+    if(scenario==='new-document')await page.load('new.txt','New document text.');
+    if(scenario==='new-result'){
+      page.get('red-response').value=JSON.stringify({schema:Red.VERSION,revision:saved.revision,sourceHash:saved.sourceHash,status:'refusal',candidates:[]});page.get('red-import-response').click();
+      await until(()=>page.get('red-progress').textContent.includes('수동 응답'),'manual result');
+    }
+    const summary=page.get('red-document-summary').textContent, progress=page.get('red-progress').textContent;
+    resolveGet({...completedBody(saved),...(scenario==='foreign'?{id:'foreign-job'}:{})});
+    await new Promise(r=>setTimeout(r,80));
+    assert.equal(page.get('red-document-summary').textContent,summary,scenario);
+    if(scenario!=='foreign')assert.equal(page.get('red-progress').textContent,progress,scenario);
+    else assert.match(page.get('red-progress').textContent,/다릅니다/);
+    assert.equal(P.read('red',storage).record.disposition,'open');assert.equal(page.calls.length,2);assert.equal(page.calls[1].body,undefined);
+  }
+});
+
 test('RED hold failure keeps the visible result and rapid clicks post at most once',async()=>{
   const storage=vmStorage();
   const blocked=await redPage(storage,{reply:async()=>{throw new Error('no post');}});
@@ -318,21 +372,45 @@ test('shipped RED page fails safe without the helper; an unshipped VM may post o
 async function bluePage(storage,hooks){
   const els=new Map(),get=id=>{if(!els.has(id))els.set(id,element(id));return els.get(id);};
   const document=new EventTarget();
-  Object.assign(document,{querySelector:s=>s.startsWith('#')?get(s.slice(1)):null,querySelectorAll:()=>[],createElement:tag=>element(tag),body:element('body')});
+  Object.assign(document,{querySelector:s=>s.startsWith('#')?(s==='#doc-blue-retry-previous'||s==='#doc-blue-recovery-details'?els.get(s.slice(1))||null:get(s.slice(1))):null,querySelectorAll:()=>[],createElement:tag=>{const e=element(tag);Object.defineProperty(e,'id',{get(){return this._id;},set(v){this._id=v;els.set(v,this);}});return e;},body:element('body')});
   get('doc-blue-budget').value='4';
   const calls=[],downloads=[];
   const cap={red:true,blue:true,pdf:false,companionInstance:INSTANCE};
   const net={connected:true};
   const bridge={busy(){},state:()=>({status:net.connected?'paired':'manual',connected:net.connected,cap}),capabilities:()=>cap,session:()=>({request:async(p,body)=>{calls.push({path:p,body});if(p==='/api/capabilities')return hooks.liveCap||cap;return hooks.reply(p,body,calls);}})};
-  const lab={busy(){},allowed:()=>true,ready:Promise.resolve(),bind:async(role,r)=>({...r,harness:H.builtin(role)}),record:async()=>'run-1'};
+  const lab={busy(){},allowed:()=>true,ready:Promise.resolve(),bind:async(role,r)=>({...r,harness:hooks.harness||H.builtin(role)}),record:async()=>'run-1'};
   const importer={extract:async()=>({text:'The claim is absolute.',format:'TXT',warnings:[],segments:[{label:'p',text:'The claim is absolute.'}]})};
-  const ctx=vm.createContext({document,crypto:globalThis.crypto,localStorage:storage,FalsifyDocumentBlue:Blue,FalsifyHarness:H,FalsifyLocalBridge:bridge,FalsifyLab:lab,FalsifyImport:importer,TextEncoder,TextDecoder,CustomEvent,Event,AbortController,URL:{createObjectURL(blob){downloads.push(blob);return 'blob:'+downloads.length;},revokeObjectURL(){}},Blob,File,setTimeout,clearTimeout,confirm:()=>true,Uint8Array,Array,Promise,Error,Map,JSON,Number,String,Object,console});
+  const ctx=vm.createContext({document,crypto:globalThis.crypto,localStorage:storage,navigator:{locks},FalsifyDocumentBlue:Blue,FalsifyHarness:H,FalsifyLocalBridge:bridge,FalsifyLab:lab,FalsifyImport:importer,TextEncoder,TextDecoder,CustomEvent,Event,AbortController,URL:{createObjectURL(blob){downloads.push(blob);return 'blob:'+downloads.length;},revokeObjectURL(){}},Blob,File,setTimeout,clearTimeout,confirm:()=>true,Uint8Array,Array,Promise,Error,Map,JSON,Number,String,Object,console});
   vm.runInContext(fs.readFileSync(path.join(dist,'pending-job.js'),'utf8'),ctx,{filename:'pending-job.js'});
   vm.runInContext(fs.readFileSync(path.join(dist,'document-blue.js'),'utf8'),ctx,{filename:'document-blue.js'});
-  return {get,calls,downloads,disconnect(){net.connected=false;document.dispatchEvent(new CustomEvent('falsify:local-bridge'));},poke(){document.dispatchEvent(new CustomEvent('falsify:local-bridge'));},async load(){get('doc-blue-file').files=[{name:'notes.txt',arrayBuffer:async()=>new TextEncoder().encode('The claim is absolute.').buffer}];get('doc-blue-file').dispatchEvent(new Event('change'));
+  return {get,calls,downloads,handoff(file,sourceRunId=null){return document.dispatchEvent(new CustomEvent('falsify:blue-file',{cancelable:true,detail:{file,sourceRunId}}));},disconnect(){net.connected=false;document.dispatchEvent(new CustomEvent('falsify:local-bridge'));},poke(){document.dispatchEvent(new CustomEvent('falsify:local-bridge'));},async load(){get('doc-blue-file').files=[{name:'notes.txt',arrayBuffer:async()=>new TextEncoder().encode('The claim is absolute.').buffer}];get('doc-blue-file').dispatchEvent(new Event('change'));
     for(let i=0;i<50&&!/추출 완료/.test(get('doc-blue-progress').textContent);i++)await new Promise(r=>setTimeout(r,5));
     assert.match(get('doc-blue-progress').textContent,/추출 완료/);}};
 }
+
+for(const role of ['red','blue'])test(role.toUpperCase()+' failed attempt identity and exports survive one explicit retry with a new harness',async()=>{
+  const storage=vmStorage(), a={...H.builtin(role),name:'Attempt A',version:'A1'}, b={...H.builtin(role),name:'Selected B',version:'B2'};
+  const hooks={harness:a,reply:async(p,body)=>{
+    if(p==='/api/'+role+'/jobs')return {id:body.requestId};
+    const r=P.read(role,storage).record;
+    if(r.request.harness.name==='Attempt A')return {...job(r,'failed',{failure:{schema:'falsify.adapter-failure.v1',code:'timeout',stage:'execute',recovery:'retry'}}).body};
+    return completedBody(r);
+  }};
+  const page=role==='red'?await redPage(storage,hooks):await bluePage(storage,hooks);
+  await page.load();const prefix=role==='red'?'red':'doc-blue';page.get(prefix+'-consent').checked=true;page.get(prefix+'-start').click();
+  await until(()=>P.read(role,storage).record?.disposition==='failed','first failure');
+  await until(()=>page.get(prefix+'-progress').textContent.includes('Attempt A'),'failure identity');
+  const old=P.read(role,storage).record, text=page.get(prefix+'-progress').textContent;
+  assert.ok(text.includes('A1')&&text.includes(old.harnessHash));
+  hooks.harness=b;page.get(prefix+'-start').click();page.get(prefix+'-start').click();
+  await until(()=>P.read(role,storage).record?.disposition==='completed','retry completion');
+  const posts=page.calls.filter(c=>c.path==='/api/'+role+'/jobs');assert.equal(posts.length,2);assert.equal(posts[1].body.harness.name,'Selected B');
+  const details=page.get(role==='red'?'red-previous-failure':'doc-blue-retry-previous');assert.equal(details.hidden,false);
+  details.children[1].click();details.children[2].click();
+  const diagnostic=JSON.parse(await page.downloads.at(-2).text()), original=JSON.parse(await page.downloads.at(-1).text());
+  assert.equal(diagnostic.harnessName,'Attempt A');assert.equal(diagnostic.harnessVersion,'A1');assert.equal(diagnostic.harnessHash,old.harnessHash);assert.equal(original.harness.name,'Attempt A');
+});
+
 const CITE='BLUE 재독 기준 인용이 해당 문단에 없거나 중복됩니다.';
 function storedBlue(storage){return JSON.parse(storage.raw.get(P.storageKey('blue')));}
 function matchedJob(storage,state,extra={}){const record=storedBlue(storage);return {id:record.requestId,role:'blue',state,sourceHash:record.sourceHash,revision:record.revision,harnessHash:record.harnessHash,companionInstance:record.companionInstance,requestBytesDigest:record.requestBytesDigest,progress:{completedCalls:1,requiredCalls:1,phase:'reread'},...extra};}
@@ -340,7 +418,7 @@ function jobPosts(calls){return calls.filter(c=>c.path==='/api/blue/jobs');}
 async function until(fn,label){for(let i=0;i<80&&!fn();i++)await new Promise(r=>setTimeout(r,25));assert.ok(fn(),label);}
 test('optional serverFailure keeps older records and stores only a bounded safe phrase',async()=>{
   const storage=blueMemory();
-  const held=await P.hold({role:'blue',request:request(doc(),'blue'),doc:doc(),companionInstance:INSTANCE,storage,hashHarness,now:10});
+  const held=await P.hold({lockProvider:locks,role:'blue',request:request(doc(),'blue'),doc:doc(),companionInstance:INSTANCE,storage,hashHarness,now:10});
   assert.equal(held.ok,true);assert.equal(Object.hasOwn(held.record,'serverFailure'),false);
   await P.note(held.record,{postReceipt:'accepted',disposition:'failed',finishedAt:10},storage);
   assert.equal(P.read('blue',storage).record.serverFailure,undefined);
@@ -356,7 +434,7 @@ test('optional serverFailure keeps older records and stores only a bounded safe 
   assert.equal(P.read('blue',storage).status,'corrupt');
   assert.equal(P.safeRequest({request:{token:'x'}}),null);
   assert.equal(P.safeFailure(CITE),CITE);
-  const box=blueMemory(),base=await P.hold({role:'blue',request:request(doc(),'blue'),doc:doc(),companionInstance:INSTANCE,storage:box,hashHarness,now:11});
+  const box=blueMemory(),base=await P.hold({lockProvider:locks,role:'blue',request:request(doc(),'blue'),doc:doc(),companionInstance:INSTANCE,storage:box,hashHarness,now:11});
   await P.note(base.record,{postReceipt:'accepted'},box);
   const mismatched=await P.recover({role:'blue',storage:box,companionInstance:INSTANCE,hashHarness,validate:(d,res)=>Blue.validateResponse(d,res),getJob:async()=>job(base.record,'failed',{error:CITE,id:'rev-1:other'})});
   assert.equal(mismatched.status,'request-mismatch');assert.equal(mismatched.error,undefined);assert.equal(JSON.stringify(mismatched).includes(CITE),false);
@@ -385,7 +463,7 @@ test('BLUE page recovers a completed job with GET only and a double-click posts 
   }});
   await again.load();
   again.get('doc-blue-result-summary').textContent='KEEP-RESULT';
-  await P.hold({role:'blue',request:request(doc(),'blue'),doc:doc(),companionInstance:INSTANCE,storage:fresh,hashHarness,now:10});
+  await P.hold({lockProvider:locks,role:'blue',request:request(doc(),'blue'),doc:doc(),companionInstance:INSTANCE,storage:fresh,hashHarness,now:10});
   again.get('doc-blue-consent').checked=true;again.get('doc-blue-start').click();
   await new Promise(r=>setTimeout(r,30));
   assert.equal(posts,0);assert.equal(again.get('doc-blue-result-summary').textContent,'KEEP-RESULT');
@@ -419,6 +497,7 @@ test('BLUE failure stays visible across live poll, reload, and connection and do
   await until(()=>/BLUE 검토 중/.test(page.get('doc-blue-progress').textContent)&&!page.get('doc-blue-progress').textContent.includes(CITE),'running is not a failure');
   await until(()=>page.get('doc-blue-failure').textContent.includes(cite),'failed poll shows the server phrase');
   assert.equal(page.get('doc-blue-progress').textContent.includes(cite),true);
+  assert.equal(page.get('doc-blue-failure').hidden,true,'duplicate failure panel is hidden');
   assert.equal(page.get('doc-blue-progress').textContent.includes('같은 역할의 대기 기록이 남아 있습니다'),false);
   assert.equal(page.get('doc-blue-failure').textContent.includes('같은 역할의 대기 기록이 남아 있습니다'),false);
   assert.equal(htmlWrites,0);assert.equal(jobPosts(page.calls).length,1);
@@ -440,7 +519,7 @@ test('BLUE failure stays visible across live poll, reload, and connection and do
   await new Promise(r=>setTimeout(r,20));
   assert.equal(page.downloads.length,before+2);
   const diagnostic=JSON.parse(await page.downloads[before].text()),exported=JSON.parse(await page.downloads[before+1].text());
-  assert.deepEqual(Object.keys(diagnostic).sort(),['companionInstance','disposition','fileHash','harnessHash','postReceipt','requestBytesDigest','requestFingerprint','requestId','revision','role','schema','serverFailure','sourceHash']);
+  assert.deepEqual(Object.keys(diagnostic).sort(),['adapterFailure','companionInstance','disposition','fileHash','harnessHash','harnessName','harnessVersion','postReceipt','requestBytesDigest','requestFingerprint','requestId','revision','role','schema','serverFailure','sourceHash']);
   assert.equal(diagnostic.serverFailure,cite);assert.equal(JSON.stringify(diagnostic).includes('SHOULD-NOT-APPEAR'),false);assert.equal(JSON.stringify(diagnostic).includes('Bearer'),false);
   assert.deepEqual(exported,JSON.parse(requestSnap));assert.equal(JSON.stringify(exported).includes('"token"'),false);
   let reloadStep='same';
@@ -504,7 +583,31 @@ test('unknown BLUE receipt survives reload and does not show a foreign server ph
   assert.equal(jobPosts(reloaded.calls).length,0);assert.equal(reloaded.get('doc-blue-failure').textContent.includes(CITE),false);
   assert.equal(JSON.stringify(storedBlue(storage).request),snap);
 });
-test('BLUE known HTTP rejection is not an unknown receipt and never reposts',async()=>{
+test('structured failure is bound to the original BLUE attempt, survives reload and explicit double click retries once',async()=>{
+  const storage=vmStorage(),failure={schema:'falsify.adapter-failure.v1',code:'settings_mismatch',stage:'preflight',recovery:'refresh_harness'};
+  const page=await bluePage(storage,{reply:async(p,body)=>p==='/api/blue/jobs'?{id:body.requestId}:matchedJob(storage,'failed',{error:'generic',failure})});
+  await page.load();page.get('doc-blue-consent').checked=true;page.get('doc-blue-start').click();
+  await until(()=>P.read('blue',storage).record?.adapterFailure,'structured failure');
+  const old=storedBlue(storage);assert.deepEqual(old.adapterFailure,failure);assert.match(page.get('doc-blue-progress').textContent,/설정이 저장된 harness와/);
+  const reloaded=await bluePage(storage,{reply:async()=>matchedJob(storage,'failed',{error:'generic',failure})});
+  await until(()=>reloaded.get('doc-blue-progress').textContent.includes('저장된 harness'),'reload');
+  assert.equal(storedBlue(storage).harnessHash,old.harnessHash);
+  page.get('doc-blue-start').click();page.get('doc-blue-start').click();await until(()=>jobPosts(page.calls).length===2,'explicit retry');
+  await new Promise(r=>setTimeout(r,30));assert.equal(jobPosts(page.calls).length,2);assert.notEqual(storedBlue(storage).requestId,old.requestId);
+});
+test('invalid structured failure falls back to the legacy error',async()=>{
+  const storage=vmStorage();const page=await bluePage(storage,{reply:async(p,body)=>p==='/api/blue/jobs'?{id:body.requestId}:matchedJob(storage,'failed',{error:'legacy failure',failure:{schema:'falsify.adapter-failure.v1',code:'forged',stage:'preflight',recovery:'refresh_harness'}})});
+  await page.load();page.get('doc-blue-consent').checked=true;page.get('doc-blue-start').click();await until(()=>P.read('blue',storage).record?.disposition==='failed','failed');
+  assert.equal(storedBlue(storage).adapterFailure,undefined);assert.match(page.get('doc-blue-progress').textContent,/legacy failure/);
+});
+test('RED records structured failure and retries only on a deliberate click',async()=>{
+  const storage=vmStorage(),failure={schema:'falsify.adapter-failure.v1',code:'auth_required',stage:'preflight',recovery:'sign_in'};
+  const page=await redPage(storage,{reply:async(p,body)=>{if(p==='/api/red/jobs')return {id:body.requestId};const r=P.read('red',storage).record;return {id:r.requestId,role:'red',state:'failed',sourceHash:r.sourceHash,revision:r.revision,harnessHash:r.harnessHash,requestBytesDigest:r.requestBytesDigest,companionInstance:r.companionInstance,error:'generic',failure};}});
+  await page.load();page.get('red-consent').checked=true;page.get('red-start').click();await until(()=>P.read('red',storage).record?.adapterFailure,'RED failure');
+  const old=P.read('red',storage).record;assert.deepEqual(old.adapterFailure,failure);assert.match(page.get('red-progress').textContent,/로그인/);
+  page.get('red-start').click();page.get('red-start').click();await until(()=>page.calls.filter(c=>c.path==='/api/red/jobs').length===2,'RED retry');await new Promise(r=>setTimeout(r,30));assert.equal(page.calls.filter(c=>c.path==='/api/red/jobs').length,2);assert.notEqual(P.read('red',storage).record.requestId,old.requestId);
+});
+test('BLUE known HTTP rejection allows one explicit retry',async()=>{
   const storage=vmStorage();
   const page=await bluePage(storage,{reply:async()=>{const e=new Error('이미 실행 중입니다.');e.httpStatus=409;throw e;}});
   await page.load();page.get('doc-blue-consent').checked=true;page.get('doc-blue-start').click();
@@ -513,7 +616,7 @@ test('BLUE known HTTP rejection is not an unknown receipt and never reposts',asy
   assert.match(storedBlue(storage).serverFailure,/HTTP 409/);
   assert.equal(jobPosts(page.calls).length,1);
   page.get('doc-blue-start').click();await new Promise(r=>setTimeout(r,20));
-  assert.equal(jobPosts(page.calls).length,1);
+  assert.equal(jobPosts(page.calls).length,2);
 });
 test('BLUE changed live companion rejects before any POST',async()=>{
   const storage=vmStorage();const page=await bluePage(storage,{liveCap:{companionInstance:OTHER},reply:async()=>{throw new Error('must not post');}});
@@ -534,5 +637,36 @@ test('BLUE lost POST receipt reconciles matching completed job by GET without re
   assert.match(page.get('doc-blue-result-summary').textContent,/abstain/);
   assert.equal(page.get('doc-blue-failure').hidden,true);
 });
+test('RED handoff retires only a finished failure, preserves harness approval and keeps diagnostic export',async()=>{
+  const storage=vmStorage();
+  const page=await bluePage(storage,{reply:async path=>path==='/api/blue/jobs'?{id:storedBlue(storage).requestId}:matchedJob(storage,'failed',{error:'adapter exit'})});
+  await page.load();page.get('doc-blue-consent').checked=true;page.get('blue-harness-consent').checked=true;page.get('doc-blue-start').click();
+  await until(()=>P.read('blue',storage).record?.disposition==='failed','failure before handoff');
+  const old=storedBlue(storage),file=new File(['the new modified paper'],'changed.txt',{type:'text/plain'});
+  assert.equal(page.handoff(file,'red-source-run'),true);
+  await until(()=>page.get('doc-blue-summary').textContent.includes('RED 변경본')&&P.read('blue',storage).status==='absent','new file ready');
+  assert.equal(page.get('blue-harness-consent').checked,true);assert.equal(page.get('doc-blue-consent').checked,false);
+  assert.equal(jobPosts(page.calls).length,1);assert.equal(page.get('doc-blue-handoff-ready').hidden,false);
+  assert.equal(page.get('doc-blue-next').textContent,'이 파일로 BLUE 검토 시작');assert.equal(page.get('doc-blue-previous-failure').hidden,false);
+  page.get('doc-blue-previous-diagnostic').click();page.get('doc-blue-previous-request').click();
+  assert.equal(page.downloads.length,2);assert.equal(JSON.parse(await page.downloads[0].text()).requestId,old.requestId);
+  assert.deepEqual(JSON.parse(await page.downloads[1].text()),old.request);
+  page.get('doc-blue-next').click();assert.equal(page.get('doc-blue-consent').checked,true);
+  await until(()=>jobPosts(page.calls).length===2,'explicit next action starts new review');
+  const body=jobPosts(page.calls)[1].body;assert.notEqual(body.requestId,old.requestId);assert.equal('sourceRunId' in body,false);assert.equal(JSON.stringify(body).includes('red-source-run'),false);
+  page.get('doc-blue-clear').click();assert.equal(page.get('doc-blue-previous-failure').hidden,true);
+  const downloads=page.downloads.length;page.get('doc-blue-previous-request').click();assert.equal(page.downloads.length,downloads);
+});
+
+test('RED handoff keeps an unknown receipt and never silently posts or cancels it',async()=>{
+  const storage=vmStorage();const page=await bluePage(storage,{reply:async()=>{throw Error('lost receipt');}});
+  await page.load();page.get('doc-blue-consent').checked=true;page.get('doc-blue-start').click();
+  await until(()=>P.read('blue',storage).record?.postReceipt==='unknown','unknown receipt');const old=JSON.stringify(storedBlue(storage));
+  page.handoff(new File(['different paper'],'changed.txt',{type:'text/plain'}));
+  await until(()=>page.get('doc-blue-summary').textContent.includes('RED 변경본'),'new input while receipt unknown');
+  assert.equal(JSON.stringify(storedBlue(storage)),old);assert.equal(jobPosts(page.calls).length,1);assert.equal(page.calls.some(c=>c.path.endsWith('/cancel')),false);
+  assert.equal(page.get('doc-blue-next').textContent,'이전 요청 확인');
+});
+
 (async()=>{let passed=0;for(const [name,fn] of tests){try{await fn();passed++;console.log('PASS '+name);}catch(e){console.error('FAIL '+name);console.error(e);process.exitCode=1;}}
   console.log(JSON.stringify({passed,failed:tests.length-passed}));if(passed!==tests.length)process.exit(1);})();

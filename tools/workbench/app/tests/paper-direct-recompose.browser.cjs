@@ -1,0 +1,42 @@
+const {chromium}=require('playwright');
+const fs=require('node:fs/promises'),path=require('node:path'),os=require('node:os'),crypto=require('node:crypto'),assert=require('node:assert/strict');
+const {pathToFileURL}=require('node:url');
+const sha=b=>crypto.createHash('sha256').update(b).digest('hex');
+(async()=>{
+ const root=path.resolve(__dirname,'../..'),out=await fs.mkdtemp(path.join(os.tmpdir(),'falsify-direct-qa-'));
+ const mupdf=await import(pathToFileURL(path.join(root,'app/dist/browser-pdf-vendor/mupdf.js')).href);
+ const pdf=new mupdf.PDFDocument(),font=pdf.addSimpleFont(new mupdf.Font('Times-Roman'));
+ for(const text of ['Original paragraph describes the experiment.','Second page contains the selected word and other text.'])pdf.insertPage(-1,pdf.addPage([0,0,612,792],0,{Font:{F1:font}},`BT /F1 12 Tf 72 700 Td (${text}) Tj ET`));
+ const buf=pdf.saveToBuffer(),source=Buffer.from(buf.asUint8Array());buf.destroy();pdf.destroy();
+ const browser=await chromium.launch({channel:process.platform==='win32'?'msedge':undefined,headless:true});
+ const ctx=await browser.newContext({viewport:{width:1440,height:1000},acceptDownloads:true});const page=await ctx.newPage();const errors=[];
+ page.on('console',m=>{if(m.text().startsWith('QA-WORKER')&&!m.text().endsWith('{}')&&!m.text().endsWith('undefined'))console.log(m.text());});
+ await page.addInitScript(()=>{const Native=window.Worker;window.Worker=class extends Native{constructor(...args){super(...args);console.log('QA-WORKER start '+args[0]);this.addEventListener('message',e=>console.log('QA-WORKER message '+JSON.stringify({type:e.data?.type,error:e.data?.error})));this.addEventListener('error',e=>console.log('QA-WORKER error '+e.message));}postMessage(...args){console.log('QA-WORKER post '+args[0]?.type);return super.postMessage(...args);}};});
+ page.on('pageerror',e=>errors.push(e.message));page.on('requestfailed',r=>errors.push('request '+r.url()+' '+r.failure()?.errorText));
+ await page.route('**/*',async route=>{const u=new URL(route.request().url());if(!['127.0.0.1','localhost'].includes(u.hostname))return route.abort();if(u.pathname.endsWith('/paper-workspace.js'))return route.fulfill({status:200,contentType:'text/javascript',body:await fs.readFile(path.join(root,'app/dist/paper-workspace.js'))});return route.continue();});
+ try{
+  await page.goto(process.env.FALSIFY_UI_TEST_URL||'http://127.0.0.1:18783/');
+  await page.locator('#paper-file').setInputFiles({name:'synthetic.pdf',mimeType:'application/pdf',buffer:source});
+  await page.locator('.paper-paragraph-button').first().waitFor({state:'attached',timeout:90000});
+  const first=page.locator('#paper-before-stage .textLayer span').filter({hasText:'Original paragraph'}).first();await first.click();
+  let editor=page.locator('.paper-page > textarea');await editor.waitFor();assert.equal(await editor.inputValue(),'Original paragraph describes the experiment.');
+  await page.screenshot({path:path.join(out,'paragraph-edit.png'),fullPage:true});
+  await editor.fill('Cancelled text');await editor.press('Escape');assert.equal((await page.evaluate(()=>FalsifyPaperWorkspace.getEditSnapshot())).edits.length,0);await first.click();editor=page.locator('.paper-page > textarea');
+  const replacement='Revised paragraph describes the experiment and provides a substantially longer account of the method and its findings.';await editor.fill(replacement);await page.locator('#paper-page-next').click();
+  await page.waitForFunction(()=>document.querySelector('#paper-page-label').textContent.includes('2 /'),null,{timeout:10000}).catch(async e=>{console.error('nav',await page.locator('#paper-page-label').innerText(),await page.locator('#paper-edit-status').innerText(),await page.locator('#paper-before-status').innerText(),await page.evaluate(()=>FalsifyPaperWorkspace.getEditSnapshot()));throw e;});
+  await page.waitForFunction(()=>document.querySelector('#paper-before-status').textContent.includes('문단을 클릭'),null,{timeout:90000});
+  const second=page.locator('#paper-before-stage .textLayer span').filter({hasText:'Second page contains'}).first();await second.waitFor({state:'visible'});
+  const points=await second.evaluate(span=>{const n=span.firstChild,t=n.textContent,start=t.indexOf('selected');const box=(a,b)=>{const r=document.createRange();r.setStart(n,a);r.setEnd(n,b);const x=r.getBoundingClientRect();return {x:x.left,y:x.top+x.height/2,right:x.right};};return {start:box(start,start+1),end:box(start+7,start+8)};});
+  await page.mouse.move(points.start.x+0.5,points.start.y);await page.mouse.down();await page.mouse.move(points.end.right-0.5,points.end.y,{steps:12});await page.mouse.up();
+  editor=page.locator('.paper-page > textarea');await editor.waitFor();assert.equal(await editor.inputValue(),'selected');
+  await page.screenshot({path:path.join(out,'selection-edit.png'),fullPage:true});await editor.fill('chosen');await editor.press('Tab');
+  const snapshot=await page.evaluate(()=>FalsifyPaperWorkspace.getEditSnapshot());assert.equal(snapshot.edits.length,2);assert.deepEqual(snapshot.edits.map(e=>e.origin),['human','human']);assert.equal(snapshot.edits[1].before,'selected');assert.equal(snapshot.edits[1].after,'chosen');assert.equal(snapshot.edits[1].pageIndex,1);await page.locator('#paper-edits [data-act=edit]').nth(1).click();editor=page.locator('.paper-page > textarea');assert.equal(await editor.inputValue(),'chosen');await editor.fill('cancel this');await editor.press('Escape');assert.equal((await page.evaluate(()=>FalsifyPaperWorkspace.getEditSnapshot())).edits[1].after,'chosen');await page.locator('#paper-undo').click();assert.equal((await page.evaluate(()=>FalsifyPaperWorkspace.getEditSnapshot())).edits.length,1);await page.locator('#paper-redo').click();assert.equal((await page.evaluate(()=>FalsifyPaperWorkspace.getEditSnapshot())).edits.length,2);
+  await page.locator('#paper-recompose').check();await page.locator('#paper-generate').click();await page.waitForFunction(()=>FalsifyPaperWorkspace.getOutput()||/생성하지 못했습니다/.test(document.querySelector('#paper-generate-status').textContent),null,{timeout:110000}).catch(async e=>{console.error('generation waiting:',await page.locator('#paper-generate-status').innerText(), 'disabled:',await page.locator('#paper-generate').isDisabled(),'runtime:',await page.evaluate(()=>typeof globalThis.FalsifyRecompositionPdf?.prepare),'errors:',errors);throw e;});
+  const status=await page.locator('#paper-generate-status').innerText(),output=await page.evaluate(async()=>{const o=FalsifyPaperWorkspace.getOutput();if(!o)return null;return {sha256:o.sha256,bytes:Array.from(new Uint8Array(await o.file.arrayBuffer())),verification:o.verification};});
+  assert.ok(output,'generation failed: '+status);const actual=Buffer.from(output.bytes);assert.equal(sha(actual),output.sha256);
+  const [download]=await Promise.all([page.waitForEvent('download'),page.locator('#paper-current-download').click()]);const downloaded=await fs.readFile(await download.path());assert.deepEqual(downloaded,actual);assert.deepEqual(Buffer.from(await page.evaluate(async()=>Array.from(new Uint8Array(await FalsifyPaperWorkspace.getSource().file.arrayBuffer())))),source);
+  await page.locator('#paper-after-stage canvas').waitFor({state:'visible',timeout:30000});await page.screenshot({path:path.join(out,'generated-preview.png'),fullPage:true});
+  const generated=mupdf.Document.openDocument(actual,'application/pdf'),texts=[];for(let i=0;i<generated.countPages();i++){const p=generated.loadPage(i),t=p.toStructuredText();texts.push(t.asText());t.destroy();p.destroy();}generated.destroy();assert.ok(texts.join('\n').includes('Second page contains the chosen word and other text.'));assert.ok(texts.join('\n').includes('Revised paragraph'));assert.deepEqual(errors,[]);
+  console.log(JSON.stringify({out,sourceHash:sha(source),outputHash:output.sha256,status,edits:snapshot.edits.map(e=>({before:e.before,after:e.after,pageIndex:e.pageIndex,origin:e.origin})),outputPages:texts.length,previewStatus:await page.locator('#paper-after-status').innerText(),errors},null,2));
+ }finally{await ctx.close();await browser.close();}
+})().catch(e=>{console.error(e);process.exitCode=1;});

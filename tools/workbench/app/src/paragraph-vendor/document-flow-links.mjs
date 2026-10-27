@@ -60,9 +60,8 @@ function normalizedSource(chars,band) {
   return {text,indices};
 }
 
-export function deriveNativeLinkMoves(sourceEngine,sourceBands,targetGlyphs,edits,model,expectedPageText) {
-  if(!model||!model.annotations.some(a=>sourceBands.some(b=>b.sourcePageIndex===a.sourcePageIndex)))return [];
-  const ids=sourceBands.map(b=>b.sourcePageIndex),expected=[],mapping=new Map(),sources=new Map();
+function mapSourceGlyphs(sourceEngine,sourceBands,targetGlyphs,edits,expectedPageText) {
+  const expected=[],mapping=new Map(),sources=new Map();
   for(const band of sourceBands){
     const chars=readLinkPageCharacters(sourceEngine,band.sourcePageIndex);sources.set(band.sourcePageIndex,chars);
     const normalized=normalizedSource(chars,band);
@@ -87,11 +86,18 @@ export function deriveNativeLinkMoves(sourceEngine,sourceBands,targetGlyphs,edit
     append(at,normalized.text.length);
   }
   if(expected.length!==targetGlyphs.length||expected.some((u,i)=>u!==targetGlyphs[i].u))fail('document_flow_link_text_mapping_mismatch');
+  return {mapping,sources};
+}
+
+export function deriveNativeLinkMoves(sourceEngine,sourceBands,targetGlyphs,edits,model,expectedPageText,authorizedTargets=new Set()) {
+  if(!model||!model.annotations.some(a=>sourceBands.some(b=>b.sourcePageIndex===a.sourcePageIndex)))return [];
+  const ids=sourceBands.map(b=>b.sourcePageIndex);
+  const {mapping,sources}=mapSourceGlyphs(sourceEngine,sourceBands,targetGlyphs,edits,expectedPageText);
   const moves=[],claimed=new Set();
   for(const descriptor of model.annotations.filter(a=>ids.includes(a.sourcePageIndex))){
     if(descriptor.eligible!==true||descriptor.kind!=='link')fail(descriptor.reason||'document_flow_annotation_unsupported');
     const targets=descriptor.internalDestinationSourcePageIndices||[descriptor.destination?.targetSourcePageIndex].filter(Number.isInteger);
-    if(targets.some(i=>ids.includes(i)))fail('document_flow_link_target_in_changed_body');
+    if(targets.some(i=>ids.includes(i)&&!authorizedTargets.has(i)))fail('document_flow_link_target_in_changed_body');
     const chars=sources.get(descriptor.sourcePageIndex),band=sourceBands.find(b=>b.sourcePageIndex===descriptor.sourcePageIndex);
     const [l,b,r,t]=descriptor.rect,rect={l,b,r,t};
     const owned=chars.filter(c=>c.box&&intersects(c.box,rect));
@@ -120,10 +126,64 @@ export function deriveNativeLinkMoves(sourceEngine,sourceBands,targetGlyphs,edit
   return moves;
 }
 
+// A FitR rectangle is only transportable when its entire area belongs to one
+// source text object and every intersecting glyph has one rigid correspondence.
+// Multi-object and partial-glyph ownership deliberately remain barriers.
+export function deriveNativeFitRMoves(sourceEngine,sourceBands,targetGlyphs,edits,model,expectedPageText) {
+  const ids=new Set(sourceBands.map(b=>b.sourcePageIndex));
+  const destinations=new Map();
+  for(const a of model?.annotations||[])for(const d of a.internalDestinations||[]){
+    if(!ids.has(d.targetSourcePageIndex))continue;
+    const previous=destinations.get(d.id);
+    if(previous&&JSON.stringify(previous)!==JSON.stringify(d))fail('document_flow_destination_alias_mismatch');
+    destinations.set(d.id,d);
+  }
+  if(!destinations.size)return [];
+  const {mapping,sources}=mapSourceGlyphs(sourceEngine,sourceBands,targetGlyphs,edits,expectedPageText);
+  const moves=[];
+  for(const d of destinations.values()){
+    if(d.kind!=='FitR'||!Array.isArray(d.operands)||d.operands.length!==4||!d.operands.every(Number.isFinite))fail('document_flow_destination_unsupported');
+    const [l,b,r,t]=d.operands,rect={l,b,r,t};
+    if(l>=r||b>=t)fail('document_flow_destination_unsupported');
+    const band=sourceBands.find(x=>x.sourcePageIndex===d.targetSourcePageIndex),chars=sources.get(d.targetSourcePageIndex);
+    const owned=chars.filter(c=>c.box&&intersects(c.box,rect));
+    if(!owned.length||owned.some(c=>!bodyGlyph(c,band)||!c.object||c.generated))fail('document_flow_destination_ownership_ambiguous');
+    const object=owned[0].object;
+    if(owned.some(c=>c.object!==object||c.box.l<l-.001||c.box.r>r+.001||c.box.b<b-.001||c.box.t>t+.001))fail('document_flow_destination_ownership_ambiguous');
+    const objectChars=chars.filter(c=>c.box&&c.object===object&&bodyGlyph(c,band));
+    const bounds={l:Math.min(...objectChars.map(c=>c.box.l)),r:Math.max(...objectChars.map(c=>c.box.r)),b:Math.min(...objectChars.map(c=>c.box.b)),t:Math.max(...objectChars.map(c=>c.box.t))};
+    if(l<bounds.l-.001||r>bounds.r+.001||b<bounds.b-.001||t>bounds.t+.001)fail('document_flow_destination_ownership_ambiguous');
+    let dx,dy,outputPageIndex;const targetIndices=new Set();
+    for(const c of owned){
+      const at=mapping.get(`${d.targetSourcePageIndex}:${c.index}`);if(at===undefined)fail('document_flow_destination_edited');
+      const target=targetGlyphs[at];targetIndices.add(at);
+      if(dx===undefined){dx=target.box.l-c.box.l;dy=target.box.b-c.box.b;outputPageIndex=target.outputPageIndex;}
+      if(target.outputPageIndex!==outputPageIndex||!near(target.box.l,c.box.l+dx)||!near(target.box.r,c.box.r+dx)||!near(target.box.b,c.box.b+dy)||!near(target.box.t,c.box.t+dy))fail('document_flow_destination_not_rigid');
+    }
+    const translated={l:l+dx,r:r+dx,b:b+dy,t:t+dy};
+    const outputOwned=targetGlyphs.flatMap((c,i)=>c.outputPageIndex===outputPageIndex&&intersects(c.box,translated)?[i]:[]);
+    if(outputOwned.length!==targetIndices.size||outputOwned.some(i=>!targetIndices.has(i)))fail('document_flow_destination_ownership_ambiguous');
+    moves.push({id:d.id,sourcePageIndex:d.targetSourcePageIndex,outputPageIndex,dx,dy});
+  }
+  return moves;
+}
+
 export function plannedLinkGlyphs(plan) {
   return plan.pages.flatMap((page,outputPageIndex)=>page.lines.flatMap(({index,dy})=>plan.lines[index].items.flatMap(({it})=>it.chars.filter(c=>c.u>32).map(c=>({u:c.u,outputPageIndex,box:{l:c.l,r:c.r,b:c.b+dy,t:c.t+dy}})))));
 }
 
 export function savedLinkGlyphs(engine,outputBands) {
   return outputBands.flatMap(b=>readLinkPageCharacters(engine,b.outputPageIndex).filter(c=>c.u>32&&bodyGlyph(c,b)).map(c=>({...c,outputPageIndex:b.outputPageIndex})));
+}
+
+// A page is eligible only if every reference to it has a corresponding FitR
+// descriptor. Missing or mixed destination forms remain a barrier.
+export function nativeFitRTargetPages(model, pages) {
+  return new Set(pages.filter(page => {
+    const refs=(model?.annotations||[]).filter(a=>(a.internalDestinationSourcePageIndices||[a.destination?.targetSourcePageIndex].filter(Number.isInteger)).includes(page));
+    return refs.length>0 && refs.every(a=>{
+      const ds=(a.internalDestinations||[]).filter(d=>d.targetSourcePageIndex===page);
+      return ds.length>0 && ds.every(d=>d.kind==='FitR' && d.id!==undefined);
+    });
+  }));
 }

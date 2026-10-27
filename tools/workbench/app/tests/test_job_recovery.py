@@ -54,6 +54,20 @@ class RecoveryServer(unittest.TestCase):
         data = json.loads(raw) if res.getheader('Content-Type', '').startswith('application/json') else raw
         return res.status, data
 
+    def test_failed_job_get_returns_fixed_failure(self):
+        import harness_adapter
+        job = {'id': 'failed', 'role': 'blue', 'cancel': threading.Event(),
+               'requestBytesDigest': 'original', 'harnessHash': 'hash'}
+        with patch.object(server, 'run_blue_review', side_effect=harness_adapter.AdapterFailure('process_exit')):
+            self.assertTrue(server.ACTIVE.acquire(blocking=False))
+            server.work(job, {})
+        server.JOBS['failed'] = job
+        status, body = self.call('/api/blue/jobs/failed')
+        self.assertEqual(status, 200)
+        self.assertEqual(body['failure'], harness_adapter.AdapterFailure('process_exit').payload())
+        self.assertEqual(body['requestBytesDigest'], 'original')
+        self.assertEqual(body['harnessHash'], 'hash')
+
     def test_descriptor_hides_the_launcher_id(self):
         first = server.companion_instance_descriptor(SECRET)
         again = server.companion_instance_descriptor(SECRET)

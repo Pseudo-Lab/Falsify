@@ -29,7 +29,10 @@ import cli_backend
 import editor_service
 import paper_analysis_service
 import image_edit_service
+import harness_adapter
 import harness_profile
+import harness_deployment
+import subprocess
 import pairing
 from build_info import WORKBENCH_VERSION
 from experiments.selfplay_codex import discover_codex
@@ -113,6 +116,7 @@ def busy_locked(server):
 CORS_HEADERS = {'authorization', 'content-type'}
 IMAGE_ROUTES = ('/api/paper/images', '/api/paper/images/export')
 PROFILE_ROUTE = '/api/harness/profile/propose'
+DEPLOY_ROUTE = '/api/harness/deploy'
 HOST_LABEL = re.compile(r'[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?')
 
 def parse_web_origin(value):
@@ -135,7 +139,7 @@ def cors_route(method, path):
     Pair register, /api/session and launcher routes stay off this list.
     """
     if method == 'GET': return path in ('/api/capabilities', pairing.STATUS_PATH) or re.fullmatch(r'/api/(red|blue)/jobs/.+', path) is not None
-    if method == 'POST': return path in ['/api/red/jobs', '/api/blue/jobs', '/api/export', '/api/paper/inspect', *IMAGE_ROUTES, PROFILE_ROUTE, pairing.REDEEM_PATH, pairing.REVOKE_PATH] or re.fullmatch(r'/api/(red|blue)/jobs/.+/cancel', path) is not None
+    if method == 'POST': return path in ['/api/red/jobs', '/api/blue/jobs', '/api/export', '/api/paper/inspect', *IMAGE_ROUTES, PROFILE_ROUTE, DEPLOY_ROUTE, pairing.REDEEM_PATH, pairing.REVOKE_PATH] or re.fullmatch(r'/api/(red|blue)/jobs/.+/cancel', path) is not None
     return False
 
 def no_duplicates(items):
@@ -168,7 +172,22 @@ def work(job, data):
     except Exception as error:
         with LOCK:
             job['state'] = 'cancelled' if job['cancel'].is_set() else 'failed'
-            job['error'] = str(error) if isinstance(error, ValueError) else '로컬 실행 오류. CLI 로그인·설치 상태를 확인하세요.'
+            if isinstance(error, harness_adapter.AdapterFailure):
+                failure = error
+            else:
+                # Only exact first-party service labels are recognized; no stderr parsing.
+                message = str(error) if isinstance(error, ValueError) else ''
+                cli_codes = {'subscription_login_required': 'auth_required', 'FileNotFoundError': 'executable_missing',
+                             'timeout': 'timeout', 'output_limit': 'invalid_output',
+                             'response_not_object': 'invalid_output', 'protocol_violation': 'invalid_output'}
+                prefixes = ('CLI 검토 중단: ', 'CLI BLUE 중단: ')
+                cli_code = next((message[len(prefix):] for prefix in prefixes if message.startswith(prefix)), None)
+                failure = harness_adapter.AdapterFailure(cli_codes.get(cli_code, 'unknown')) if cli_code is not None else None
+            if failure:
+                job['failure'] = failure.payload()
+                job['error'] = str(failure)
+            else:
+                job['error'] = str(error) if isinstance(error, ValueError) else '로컬 실행 오류. CLI 로그인·설치 상태를 확인하세요.'
     finally:
         with LOCK: job['finished'] = time.monotonic()
         ACTIVE.release()
@@ -287,7 +306,7 @@ class Handler(BaseHTTPRequestHandler):
                     'model': 'gpt-6.1-sol', 'isolation': 'read-only CLI restrictions; not OS-enforced input-only isolation',
                     'cliSelection': True, 'harnessWrapper': True, 'cliAgents': cli_agents(), 'pdfEditor': pdf_editor,
                     'paperAnalysis': paper_analysis_service.capability(), 'imageEditor': image_edit_service.capability(),
-                    'harnessProfileProposal': harness_profile.capability(),
+                    'harnessProfileProposal': harness_profile.capability(), 'harnessDeployment': True,
                     'workbenchVersion': WORKBENCH_VERSION,
                     'companionInstance': companion_instance_descriptor(self.server.instance_id)}); return
             with LOCK:
@@ -300,7 +319,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.headers.get('Sec-Fetch-Site') == 'cross-site': self.reply(403, {'error': 'cross_site_denied'}); return
         if path == '/': path = '/index.html'
         target = (DIST / path.lstrip('/')).resolve()
-        if not target.is_relative_to(DIST.resolve()) or not target.is_file() or any(part.startswith('.') for part in Path(path).parts) or target.suffix not in ['.html', '.css', '.js', '.mjs', '.bcmap', '.pfb', '.ttf', '.wasm', '.txt']:
+        if not target.is_relative_to(DIST.resolve()) or not target.is_file() or any(part.startswith('.') for part in Path(path).parts) or target.suffix not in ['.html', '.css', '.js', '.mjs', '.json', '.bcmap', '.pfb', '.ttf', '.otf', '.wasm', '.txt']:
             self.reply(404, {'error': 'not_found'}); return
         mime = 'application/javascript' if target.suffix in ['.js', '.mjs'] else mimetypes.guess_type(target)[0] or 'application/octet-stream'
         self.reply(200, target.read_bytes(), mime)
@@ -314,7 +333,7 @@ class Handler(BaseHTTPRequestHandler):
         path = unquote(urlsplit(self.path).path)
         role = 'blue' if path.startswith('/api/blue/jobs') else 'red'
         prefix = '/api/' + role + '/jobs'
-        if path not in ['/api/red/jobs', '/api/blue/jobs', '/api/export', '/api/paper/inspect', *IMAGE_ROUTES, PROFILE_ROUTE] and not (path.startswith(prefix + '/') and path.endswith('/cancel')):
+        if path not in ['/api/red/jobs', '/api/blue/jobs', '/api/export', '/api/paper/inspect', *IMAGE_ROUTES, PROFILE_ROUTE, DEPLOY_ROUTE] and not (path.startswith(prefix + '/') and path.endswith('/cancel')):
             self.reply(404, {'error': 'operation_not_allowed'}); return
         try:
             if self.headers.get('Content-Type') != 'application/json': raise ValueError('application/json 필요')
@@ -358,6 +377,15 @@ class Handler(BaseHTTPRequestHandler):
                 if not admitted: self.reply(409, {'error': 'companion_busy'}); return
                 try: result = (image_edit_service.export_image if export else image_edit_service.list_images)(request)
                 except image_edit_service.ImageEditError as error: self.reply(error.status, error.payload()); return
+                finally: ACTIVE.release()
+                self.reply(200, result); return
+            if path == DEPLOY_ROUTE:
+                with LOCK: admitted = not self.server_closing() and ACTIVE.acquire(blocking=False)
+                if not admitted: self.reply(409, {'error': 'companion_busy'}); return
+                try:
+                    try: result = harness_deployment.deploy(data)
+                    except (ValueError, OSError, subprocess.SubprocessError):
+                        self.reply(400, {'error': 'harness_deployment_failed'}); return
                 finally: ACTIVE.release()
                 self.reply(200, result); return
             if path == PROFILE_ROUTE:

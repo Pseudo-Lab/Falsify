@@ -7,6 +7,7 @@
   function run(operation, request) {
     request = request || {};
     var signal = request.signal, worker, settled = false, id = nextId++;
+    var fontSnapshot = request.fontSnapshot ? structuredClone(request.fontSnapshot) : undefined;
     return new Promise(function(resolve, reject) {
       function finish(error, result) {
         if (settled) return;
@@ -40,7 +41,7 @@
           finish(null, data.result);
         };
         worker.postMessage({id: id, operation: operation, name: file.name || 'document.pdf', bytes: bytes.buffer,
-          edits: request.edits, pageIndex: request.pageIndex, fileHash: request.fileHash || ''}, [bytes.buffer]);
+          edits: request.edits, pageIndex: request.pageIndex, fileHash: request.fileHash || '', fontSnapshot: fontSnapshot}, [bytes.buffer]);
       }).catch(function(error) { finish(error); });
     });
   }

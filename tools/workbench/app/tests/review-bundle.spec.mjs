@@ -124,3 +124,11 @@ test('standalone harness archive validates the content hash and does not carry r
   await assert.rejects(validateArchive(tampered,V),e=>e.code==='hash_mismatch');
   await assert.rejects(buildHarnessArchive({config,hash:'ab'.repeat(32)},V),e=>e.code==='hash_mismatch');
 });
+
+test('visual metadata survives archive validation and forged references fail',async()=>{
+  const {snapshot,blue}=await fiveCase();const v={fileHash:blue.fileHash,sourceHash:blue.sourceHash,page:1,bbox:[0,0,10,10],rotation:0,width:20,height:20,mime:'image/png',sha256:'b'.repeat(64),provenance:'client-declared-pdf-association',artifact:'unavailable'};
+  blue.visualEvidence=[v];blue.response.visualObservations=[{id:'v1',sha256:v.sha256,page:1,bbox:v.bbox,observation:'Synthetic chart',uncertainty:'Unverified'}];
+  const archive=await buildExperimentArchive(snapshot,blue.id,V);const restored=await validateArchive(archive,V);assert.deepEqual(restored.data.ledger.runs.find(r=>r.id===blue.id).visualEvidence,[v]);
+  const forged=structuredClone(archive);forged.data.ledger.runs.find(r=>r.id===blue.id).visualEvidence[0].sha256='c'.repeat(64);await assert.rejects(validateArchive(forged,V));
+  const gold=structuredClone(archive);gold.data.ledger.runs.find(r=>r.id===blue.id).response.gold={secret:true};await assert.rejects(validateArchive(gold,V));
+});

@@ -1,0 +1,32 @@
+name: macOS native compatibility
+on:
+  push:
+    branches: [feature/macos-ci-20261027, feature/macos-support-20261027]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-15, macos-15-intel]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Runner identity
+        run: /bin/bash -c 'uname -a; /bin/bash --version; git rev-parse HEAD'
+      - name: POSIX connection contracts (system Bash)
+        run: /bin/bash scripts/test-posix-connection.sh
+      - name: Isolated macOS handler (system Bash)
+        if: always()
+        run: /bin/bash scripts/test-macos-handler.sh
+      - name: Synthetic PDF, fake CLI and source archive
+        if: always()
+        run: /bin/bash scripts/test-macos-native.sh

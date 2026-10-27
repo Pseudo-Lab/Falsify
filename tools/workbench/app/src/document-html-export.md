@@ -1,0 +1,5 @@
+# Original HTML export contract
+
+RED can download a derived HTML file only for UTF-8 files without a BOM, with each selected change contained in one uniquely bound, plain `p` text node. The original file and its importer text/segments are hash checked again. Entity boundaries are mapped back to the original source; every byte outside the minimal edited spans is preserved. Complex or cross-node paragraphs, ambiguous segments, unsupported entity boundaries, controls and BOM encodings fail closed. Other markup, scripts, images and links are never executed or loaded by the workbench during export. The downloaded HTML remains an HTML document and should be opened only in an appropriate viewer. Normal rendering can reflow text; this is not a pixel-identical or visual-layout certification. SourceBuildVerified remains false.
+
+`node tests/document-html-export.spec.cjs` exercises synthetic RED request, candidate selection and download, source-byte preservation, rendered properties and rejection cases. It does not use a model or a remote paper.

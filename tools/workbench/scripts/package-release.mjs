@@ -28,12 +28,38 @@ export const PARAGRAPH_WASM = Object.freeze([
 export const PARAGRAPH_WASM_SHA256 = '9b14b88937a9b21697565df94e82b28ac645547413606d4994d50d9200529c6e';
 export const PARAGRAPH_JS_SHA256 = '6e6989a9994715951720e05355111aca7eab898e92b519ebea160167875bb3eb';
 export const PARAGRAPH_WASM_BYTES = 7338382;
+export const RECOMPOSITION_WASM = 'app/dist/recomposition-vendor/typst_ts_web_compiler_bg.wasm';
+export const RECOMPOSITION_WASM_SHA256 = '1fc968438a672366dfec39c96c842c26ed29caff4eb1bcaab19a6c60867de5fd';
 
 const forbidden = /(?:^|\/)(?:\.venv|\.local|node_modules|\.pdf-editor\.local\.json|\.runtime[^/]*|output|tmp)(?:\/|$)|^experiments\/|\.(?:pdf|docx|wav|mp3|wasm)$/i;
 const pdfjsWasm = new Set(PDFJS_WASM);
+// Two-sentence synthetic handoff fixture; user papers remain excluded.
+const HANDOFF_FIXTURE = 'app/tests/fixtures/handoff-paper.pdf';
+const HANDOFF_FIXTURE_SHA256 = 'b518af142de7f30099d55a8125f9ae0e742ddefd403919106ed14b237822a275';
 
 export function unexpectedReleasePaths(tracked) {
-  return tracked.filter(p => forbidden.test(p) && !pdfjsWasm.has(p) && p !== MUPDF_WASM && !PARAGRAPH_WASM.includes(p) && p !== 'experiments/selfplay_codex.py');
+  return tracked.filter(p => forbidden.test(p) && !pdfjsWasm.has(p) && p !== MUPDF_WASM && p !== RECOMPOSITION_WASM && p !== HANDOFF_FIXTURE && !PARAGRAPH_WASM.includes(p) && p !== 'experiments/selfplay_codex.py');
+}
+
+export function verifyRecompositionRuntime(rootDir) {
+  const vendor = join(rootDir, 'app/dist/recomposition-vendor');
+  const manifest = readJson(join(vendor, 'manifest.json'));
+  if (manifest.version !== 'falsify.recomposition-runtime.v1' || manifest.compilerModule !== '../recomposition-typst.mjs'
+      || manifest.wasm?.url !== 'typst_ts_web_compiler_bg.wasm' || manifest.wasm.sha256 !== RECOMPOSITION_WASM_SHA256
+      || !Array.isArray(manifest.fonts) || manifest.fonts.length !== 12) throw new Error('Recomposition runtime manifest differs from the pinned compiler and font set.');
+  const names = new Set();
+  for (const asset of [manifest.wasm, ...manifest.fonts]) {
+    if (!/^[A-Za-z0-9_-]+\.(?:wasm|ttf)$/.test(asset.url) || names.has(asset.url)
+        || !/^[a-f0-9]{64}$/.test(asset.sha256)) throw new Error('Invalid recomposition asset.');
+    names.add(asset.url);
+    if (createHash('sha256').update(readFileSync(join(vendor, asset.url))).digest('hex') !== asset.sha256) throw new Error('Recomposition asset digest mismatch: ' + asset.url);
+  }
+  if (!readFileSync(join(vendor, 'LICENSE_TYPST_APACHE'), 'utf8').includes('Apache License')
+      || !readFileSync(join(vendor, 'notoserif-OFL.txt'), 'utf8').includes('SIL OPEN FONT LICENSE')
+      || !readFileSync(join(vendor, 'notosans-OFL.txt'), 'utf8').includes('SIL OPEN FONT LICENSE')
+      || !readFileSync(join(vendor, 'LICENSE_LIBERATION'), 'utf8').includes('LIBERATION FONT SOFTWARE')) throw new Error('Recomposition licenses are missing.');
+  for (const name of ['paper-recompose-runtime.mjs', 'paper-recompose-worker.mjs', 'paper-recompose-worker-core.mjs', 'recomposition-typst.mjs']) readFileSync(join(rootDir, 'app/dist', name));
+  return {compilerVersion: '0.7.0', wasmSha256: RECOMPOSITION_WASM_SHA256, fonts: manifest.fonts.length};
 }
 
 export function verifyParagraphRuntime(rootDir) {
@@ -100,6 +126,8 @@ export function verifyVendoredMupdfWasm(rootDir) {
 export function assertShippableSource(tracked, rootDir) {
   const bad = unexpectedReleasePaths(tracked);
   if (bad.length) throw new Error(`Unexpected private/binary paths in source release: ${bad.join(', ')}`);
+  if (tracked.includes(HANDOFF_FIXTURE) && createHash('sha256').update(readFileSync(join(rootDir, HANDOFF_FIXTURE))).digest('hex') !== HANDOFF_FIXTURE_SHA256) throw new Error('Synthetic handoff fixture digest mismatch.');
+  if (tracked.includes(RECOMPOSITION_WASM)) verifyRecompositionRuntime(rootDir);
   if (PARAGRAPH_WASM.some(p => tracked.includes(p))) {
     if (!PARAGRAPH_WASM.every(p => tracked.includes(p))) throw new Error('Paragraph runtime requires both source and shipped WASM.');
     verifyParagraphRuntime(rootDir);

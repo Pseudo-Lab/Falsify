@@ -17,7 +17,7 @@ var FalsifyPdfEditPipeline = (() => {
   };
   var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
-  // src/pdf-edit-pipeline.mjs
+  // app/src/pdf-edit-pipeline.mjs
   var pdf_edit_pipeline_exports = {};
   __export(pdf_edit_pipeline_exports, {
     PdfEditPipelineError: () => PdfEditPipelineError,
@@ -114,7 +114,8 @@ var FalsifyPdfEditPipeline = (() => {
     if (!tables.length) return prepareOf(paragraphPdf)(request);
     if (!body.length) return prepareOf(selectionPdf)(request);
     const { file: capturedFile, signal, ...rest } = request;
-    const controls = { ...copy(rest), file: capturedFile, signal };
+    const { fontSnapshot, ...metadata } = rest;
+    const controls = { ...copy(metadata), ...fontSnapshot ? { fontSnapshot: structuredClone(fontSnapshot) } : {}, file: capturedFile, signal };
     if (enabled.length > 24 || enabled.some((e) => !e || typeof e.before !== "string" || typeof e.after !== "string")) fail("invalid-edits");
     disjoint(tables, body);
     const envelope = Array.isArray(request.edits) ? null : copy(request.edits);
@@ -126,7 +127,7 @@ var FalsifyPdfEditPipeline = (() => {
     for (const e of tableEdits) if (e.anchor) delete e.anchor.occurrence;
     const tablePages = new Set(tableEdits.map((e) => e.pageIndex));
     for (const e of bodyEdits) if (tablePages.has(e.pageIndex) && validBox(e.anchor?.bbox)) delete e.anchor.occurrence;
-    const scoped = (edits, file, fileHash) => ({ ...controls, file, fileHash, signal, edits: envelope ? { ...copy(envelope), fileHash, edits } : edits });
+    const scoped = (edits, file, fileHash) => ({ ...controls, ...controls.fontSnapshot ? { fontSnapshot: structuredClone(controls.fontSnapshot) } : {}, file, fileHash, signal, edits: envelope ? { ...copy(envelope), fileHash, edits } : edits });
     const stageA = await prepareOf(selectionPdf)(scoped(tableEdits, originalBytes.slice(), original));
     abort(signal);
     const a = await verifyResult(stageA, original, signal), first = descriptor("table-selection", original, a.result, a);

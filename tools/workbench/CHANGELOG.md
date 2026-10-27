@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.2.0-alpha.22
+
+- PDF direct editing, whole-paper recomposition, transparent figure replacement.
+- Explicit failure recovery, stable local harness binding and Confluence attempt records.
+- [Release notes](docs/release-alpha22.md)
+
+## 0.2.0-alpha.18
+
+- RED 선택 후보를 버튼 한 번으로 PDF에 적용하고 바로 다운로드합니다.
+- 알려진 학습용 표시를 편집 전에 제거하고 PDF와 별도 변경 기록을 분리합니다.
+- [변경 내용](docs/release-alpha18.md)
+
+## 0.2.0-alpha.17
+
+- 원문·변경 항목에서 바로 편집하고 키보드로 문단을 선택합니다.
+- 편집창 배치, 문단 준비, 실패 복구와 보조 도구 노출을 정리했습니다.
+- [변경 내용](docs/release-alpha17.md) · [UX 판단 근거](docs/ux-editor-refinement.md)
+
+## 0.2.0-alpha.16
+
+- Add PDF page and region selection for optional visual BLUE input through built-in Codex, with separate observations and bound image references.
+- Compare recorded Harness observations only when file, text, visual input, model, budget, rubric and provenance match. Unknown attempts and costs remain unknown.
+- Add bounded original-format DOCX, HTML and ODT exports; ODT visual rendering remains unverified.
+- Serialize pending admission and updates across tabs with Web Locks; preserve request-bound, GET-only recovery.
+- Fix table painted-bounds warnings and transport source-proven FitR destinations through supported document flow.
+- Clarify Korean guidance and align Confluence, connection and recovery documentation.
+
 ## 0.2.0-alpha.10
 
 - Version the changed role, navigation and Confluence entry assets so browsers load the matching visual workflow implementation after an upgrade. Release packaging rejects stale asset version suffixes.

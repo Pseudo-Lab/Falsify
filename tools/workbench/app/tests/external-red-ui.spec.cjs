@@ -81,8 +81,8 @@ test('panel mounts inside the workspace host or on the ready event',()=>{
   const section=ready.section();
   assert.ok(section);
   assert.equal(section.parentNode?ready.host().children.includes(section):ready.host().children.includes(section),true);
-  assert.match(textOf(section),/검증된 RED 실행이 아닙니다/);
-  assert.match(textOf(section),/모델을 호출하지 않으며/);
+  assert.match(textOf(section),/실행 출처는 외부 응답으로 기록됩니다/);
+  assert.match(textOf(section),/선택한 변경을 가져옵니다/);
   const late=world({host:false});
   assert.equal(late.document.getElementById('external-red'),null);
   const host=late.document.createElement('div');

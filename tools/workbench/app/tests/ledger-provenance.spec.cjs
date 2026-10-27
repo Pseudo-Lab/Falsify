@@ -11,26 +11,27 @@ const sha=async s=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256
 const texts=e=>!e||typeof e!=='object'?[]:[e.textContent,...(e.children||[]).flatMap(texts)].filter(Boolean);
 const shown=e=>texts(e).join('\n');
 // Synthetic DOM for the ledger: elements register by id when assigned; querySelector('#id') resolves or creates.
-function ledger(stored){
+function ledger(stored,scriptUrl){
   const els=new Map(),store=new Map(stored||[]);
   function element(tag){const e=new EventTarget(),classes=new Set();let id='';
     Object.defineProperty(e,'id',{get:()=>id,set:v=>{id=v;els.set(v,e);}});
     Object.assign(e,{tagName:String(tag).toUpperCase(),disabled:false,hidden:false,checked:false,value:'',textContent:'',placeholder:'',children:[],files:[],parent:null,dataset:{},attrs:{},
       classList:{toggle:(c,on)=>{(on??!classes.has(c))?classes.add(c):classes.delete(c);},contains:c=>classes.has(c)},
-      setAttribute(k,v){this.attrs[k]=v;},append(...c){for(const x of c){if(x&&typeof x==='object')x.parent=this;this.children.push(x);}},replaceChildren(...c){this.children=[];this.append(...c);},prepend(...c){this.children.unshift(...c);},after(){},remove(){},reset(){},focus(){},
-      closest(sel){let n=this;while(n){if(n.tagName===sel.toUpperCase())return n;n=n.parent;}return null;}});
-    Object.defineProperty(e,'innerHTML',{set(){}});Object.defineProperty(e,'firstChild',{get(){return this.children[0]??null;}});return e;}
+      setAttribute(k,v){this.attrs[k]=v;},querySelector(s){return s.startsWith('#')?els.get(s.slice(1))||null:null;},style:{},append(...c){for(const x of c){if(x&&typeof x==='object')x.parent=this;this.children.push(x);}},replaceChildren(...c){this.children=[];this.append(...c);},prepend(...c){this.children.unshift(...c);},after(){},remove(){},reset(){},focus(){},
+      closest(sel){let n=this;while(n){if(n.tagName===sel.toUpperCase())return n;n=n.parent;}return this;}});
+    Object.defineProperty(e,'innerHTML',{set(){}});Object.defineProperty(e,'firstChild',{get(){return this.children[0]??null;}});Object.defineProperty(e,'lastChild',{get(){return this.children.at(-1)??null;}});return e;}
   const get=id=>{if(!els.has(id))element('div').id=id;return els.get(id);};
-  const document=new EventTarget();Object.assign(document,{readyState:'complete',createElement:element,querySelector:s=>s.startsWith('#')?get(s.slice(1)):null,querySelectorAll:()=>[],body:element('body')});
-  const ctx=vm.createContext({document,FalsifyReview:require('../dist/review-workbench.js'),FalsifyHarness:H,FalsifyLocalBridge:{capabilities:()=>null,state:()=>({status:'manual',connected:false,cap:null})},FalsifyDocumentRed:R,FalsifyDocumentBlue:require('../dist/document-blue-core.js'),
-    localStorage:{getItem:k=>store.get(k)??null,setItem:(k,v)=>store.set(k,v)},crypto:globalThis.crypto,TextEncoder,CustomEvent,Event,URL,Blob,setTimeout,clearTimeout});
-  vm.runInContext(fs.readFileSync(path.join(dist,'experiment-ledger.js'),'utf8'),ctx,{filename:'experiment-ledger.js'});
+  const document=new EventTarget();Object.assign(document,{readyState:'complete',createElement:element,createTextNode:s=>({textContent:s}),querySelector:s=>s.startsWith('#')?get(s.slice(1)):null,querySelectorAll:()=>[],body:element('body')});
+  if(scriptUrl)document.currentScript={src:scriptUrl};
+  const ctx=vm.createContext({document,FalsifyComparison:require('../dist/harness-comparison.js'),FalsifyReview:require('../dist/review-workbench.js'),FalsifyHarness:H,FalsifyLocalBridge:{busy(){},capabilities:()=>null,state:()=>({status:'manual',connected:false,cap:null})},FalsifyDocumentRed:R,FalsifyDocumentBlue:require('../dist/document-blue-core.js'),
+    localStorage:{getItem:k=>store.get(k)??null,setItem:(k,v)=>store.set(k,v)},crypto:globalThis.crypto,atob,Uint8Array,TextEncoder,CustomEvent,Event,URL,Blob,setTimeout,clearTimeout});
+  vm.runInContext(fs.readFileSync(path.join(dist,'experiment-ledger.js'),'utf8').replace('  function finalState(run,f){','  globalThis.__archiveUrl=ARCHIVE_URL;\n  globalThis.__renderComparison=renderHarnessComparison;\n  function finalState(run,f){'),ctx,{filename:'experiment-ledger.js'});
   const lab=ctx.FalsifyLab,db=()=>JSON.parse(store.get(KEY));
   const rows=()=>get('ledger-table-body').children.map(tr=>tr.children.map(td=>[td.textContent,...td.children.map(s=>s.textContent)].join(' | ')));
   async function restore(data){get('ledger-status').textContent='';const raw=JSON.stringify(data);get('ledger-import').files=[{size:raw.length,text:async()=>raw}];get('ledger-import').dispatchEvent(new Event('change'));await until(()=>get('ledger-status').textContent!=='','import settled');return get('ledger-status').textContent;}
   async function review(id,verdict,score){assert.equal(await lab.review(id),true);get('evaluation-reviewer').value='Synthetic reviewer';get('evaluation-verdict').value=verdict;get('evaluation-score').value=score==null?'':String(score);get('evaluation-note').value='Synthetic test only.';
     get('evaluation-form').dispatchEvent(new Event('submit',{cancelable:true}));assert.match(get('evaluation-status').textContent,/검수 이력을 추가/);}
-  return {get,lab,store,db,rows,restore,review,summary:()=>get('ledger-summary').textContent};
+  return {get,lab,store,db,rows,restore,review,ctx,document,archiveUrl:ctx.__archiveUrl,renderComparison:()=>ctx.__renderComparison(),summary:()=>get('ledger-summary').textContent};
 }
 const segments=[{id:'s0',label:'p1',text:'Study does not show benefit.'},{id:'s1',label:'p2',text:'Only an association was observed.'}];
 const evidence=[{segmentId:'s1',quote:'Only an association was observed.',relation:'Synthetic qualification.'}];
@@ -137,6 +138,60 @@ test('RED page: refusal and live complete keep their own outcome and coverage',a
 test('RED page: a pasted manual response never reads as executed, whatever coverage it claims',async()=>{let p=redPage();await p.load();await p.manual('ok',COMPLETE);
   assert.match(p.progress(),/^1개 후보 · 인용 위치 확인 완료, 과학적 타당성 미검증\. 결과 완료 · 수동 응답이라 실행·검토 범위 미검증\.$/);assert.doesNotMatch(p.progress(),/전체 추출 텍스트 전달 완료|앱 adapter 호출|forged/);
   p=redPage();await p.load();await p.manual('abstain',SCAN_ABSTAIN);assert.equal(p.empty().textContent,'후보 없음 · 모델이 유보했습니다 · 결과 유보 · 수동 응답이라 실행·검토 범위 미검증. 자동 재시도하지 않았습니다.');assert.deepEqual(p.calls,[],'no broker call');});
+
+test('BLUE UI VM source file to visual request, mocked response, record, import and native view',async()=>{
+  const w=ledger();await w.lab.ready;await flush();const {ctx,get}=w;let savedBlob;
+  Object.assign(ctx,{AbortController,File:globalThis.File,URL:{createObjectURL(b){savedBlob=b;return 'blob:fixture';},revokeObjectURL(){}},confirm:()=>true,
+    FalsifyImport:{extract:async()=>({text:'The claim is absolute.',format:'PDF',warnings:[],segments:[{label:'p1',text:'The claim is absolute.'}]})},
+    FalsifyBlueVisual:{previewBluePage:async()=>({canvas:ctx.document.createElement('canvas'),page:1,pages:1,width:10,height:10,wholeFits:true}),renderBlueVisuals:async({file,fileHash,sourceHash,selections})=>{assert.equal(file.name,'fixture.pdf');const raw=Buffer.from('mock pixels');return [{fileHash,sourceHash,page:selections[0].page,bbox:selections[0].bbox,rotation:0,width:20,height:20,mime:'image/png',sha256:await sha('mock pixels'),base64:raw.toString('base64')}];}}});
+  get('doc-blue-budget').value='8';vm.runInContext(fs.readFileSync(path.join(dist,'document-blue.js'),'utf8'),ctx,{filename:'document-blue.js'});
+  get('doc-blue-file').files=[new File(['synthetic pdf'],'fixture.pdf',{type:'application/pdf'})];get('doc-blue-file').dispatchEvent(new Event('change'));await until(()=>get('doc-blue-progress').textContent.includes('추출 완료'),'file extracted');
+  get('blue-visual-select').checked=true;get('blue-visual-select').dispatchEvent(new Event('change'));await until(()=>get('blue-visual-status').textContent.includes('선택됨'),'preview selected');get('blue-visual-consent').checked=true;get('blue-visual-consent').dispatchEvent(new Event('change'));get('doc-blue-request').dispatchEvent(new Event('click'));await until(()=>!!savedBlob,'request downloaded');const q=JSON.parse(await savedBlob.text()),v=q.visualEvidence[0];
+  get('doc-blue-response').value=JSON.stringify({schema:'falsify.document-blue.v1',revision:q.revision,sourceHash:q.sourceHash,status:'ok',findings:[],visualObservations:[{id:'v1',sha256:v.sha256,page:v.page,bbox:v.bbox,observation:'Mock chart observation',uncertainty:'Unverified.'}]});get('doc-blue-apply').dispatchEvent(new Event('click'));await until(()=>get('doc-blue-record-status').textContent.includes('기록됨'),'visual result saved');
+  const backup=w.db(),run=backup.runs[0];assert.equal(run.visualEvidence[0].artifact,'unavailable');const target=ledger();await target.lab.ready;await flush();assert.match(await target.restore(backup),/백업을 병합/);await target.lab.review(run.id);assert.match(shown(target.get('evaluation-output')),/Mock chart observation/);assert.equal(target.db().runs[0].provenance,'imported-unverified');
+});
+
+test('BLUE visual record retains bound metadata without bytes across import and rejects forged references',async()=>{
+  const w=ledger();await w.lab.ready;await flush();const doc=await paper(),B=require('../dist/document-blue-core.js');
+  const q=plain(await w.lab.bind('blue',B.request(doc,8))),bytes=Buffer.from('synthetic image bytes'),hash=await sha('synthetic image bytes');
+  Object.assign(q,{fileHash:doc.fileHash,visualConsent:true,visualEvidence:[{fileHash:doc.fileHash,sourceHash:doc.sourceHash,page:1,bbox:[0,0,10,10],rotation:0,width:20,height:20,mime:'image/png',sha256:hash,base64:bytes.toString('base64')}]});
+  const result={schema:B.VERSION,revision:doc.revision,sourceHash:doc.sourceHash,status:'ok',findings:[],visualObservations:[{id:'v1',sha256:hash,page:1,bbox:[0,0,10,10],observation:'A chart.',uncertainty:'Synthetic.'}],harness:q.harness,harnessHash:await H.hash(q.harness),model:'gpt-6.1-sol'};
+  const id=await w.lab.record('blue',doc,q,result,'local-codex'),backup=w.db(),stored=backup.runs.find(r=>r.id===id);assert.equal(stored.visualEvidence[0].artifact,'unavailable');assert.equal(stored.visualEvidence[0].provenance,'client-declared-pdf-association');assert.ok(!JSON.stringify(stored).includes(q.visualEvidence[0].base64));
+  const t=ledger();await t.lab.ready;await flush();assert.match(await t.restore(backup),/백업을 병합/);assert.equal(t.db().runs[0].provenance,'imported-unverified');await t.lab.review(id);assert.match(shown(t.get('evaluation-output')),/A chart/);
+  const gold=plain(backup);gold.runs[0].response.gold={secret:'red'};const goldTarget=ledger();await goldTarget.lab.ready;await flush();assert.match(await goldTarget.restore(gold),/복원 차단/);
+  const bad=plain(backup);bad.runs[0].visualEvidence[0].sha256='0'.repeat(64);const fresh=ledger();await fresh.lab.ready;await flush();assert.match(await fresh.restore(bad),/복원 차단/);
+  const forged=plain(q);forged.visualEvidence[0].sha256='0'.repeat(64);await assert.rejects(w.lab.record('blue',doc,forged,result,'local-codex'),/해시 불일치/);
+});
+test('comparison UI renders actual ledger records and exclusion reasons in VM',async()=>{const {w,ids}=await populated();w.get('harness-comparison-reference').value=ids.live;w.renderComparison();await flush();assert.match(w.get('harness-comparison-summary').textContent,/누락 시도 수 \/ 비용 미상/);const rows=w.get('harness-comparison-body').children;assert.ok(rows.length>=4);assert.match(shown(rows[0]),/portable 전략 미선언/);assert.match(shown(rows.at(-1)),/출처/);});
+
+test('archive module follows the entry script release version instead of reusing a cached module',async()=>{const w=ledger([], 'https://example.invalid/app/experiment-ledger.js?v=0.2.0-alpha.18');await w.lab.ready;assert.equal(w.archiveUrl,'https://example.invalid/app/review-bundle.mjs?v=0.2.0-alpha.18');const bare=ledger([], 'https://example.invalid/app/experiment-ledger.js');await bare.lab.ready;assert.equal(bare.archiveUrl,'https://example.invalid/app/review-bundle.mjs');});
+
+test('real bind, record, reload, archive and import preserve input identity and exclusions',async()=>{
+  // Synthetic responses only: no broker or model is invoked or claimed as test evidence.
+  const w=ledger();await w.lab.ready;await flush();const B=require('../dist/document-blue-core.js'),C=require('../dist/harness-comparison.js');
+  const config={...H.builtin('blue'),settings:{portableStrategy:{schema:'falsify.portable-strategy.v1',name:'fixture',version:'1',parameters:{}},comparisonRubric:'fixture'}};
+  w.get('harness-editor').value=JSON.stringify(config);w.get('harness-register').dispatchEvent(new Event('click'));await until(()=>w.get('harness-status').textContent.includes('새 버전 등록'),'registered');
+  w.get('blue-harness').value=await H.hash(config);w.get('blue-harness').dispatchEvent(new Event('change'));
+  const doc=await paper();
+  async function save(d,visual,tag,origin='local-codex'){
+    const q=plain(await w.lab.bind('blue',B.request(d,8)));q.requestId=tag;
+    if(visual){const bytes=Buffer.from(visual),hash=await sha(visual);Object.assign(q,{fileHash:d.fileHash,visualConsent:true,visualEvidence:[{fileHash:d.fileHash,sourceHash:d.sourceHash,page:1,bbox:[0,0,10,10],rotation:0,width:20,height:20,mime:'image/png',sha256:hash,base64:bytes.toString('base64')}]});}
+    const response={schema:B.VERSION,revision:d.revision,sourceHash:d.sourceHash,status:'ok',findings:[],harness:q.harness,harnessHash:await H.hash(q.harness),model:'synthetic-model'};
+    if(visual)response.visualObservations=[{id:'v1',sha256:q.visualEvidence[0].sha256,page:1,bbox:[0,0,10,10],observation:'Synthetic observation.',uncertainty:'Synthetic.'}];
+    return w.lab.record('blue',d,q,response,origin);
+  }
+  const ids=await Promise.all([save(doc,null,'text-a'),save(doc,null,'text-b'),save({...doc,fileHash:'a'.repeat(64)},null,'other-file'),save(doc,'image-a','visual-a'),save(doc,'image-a','visual-b'),save(doc,'image-b','visual-changed'),save(doc,null,'manual','manual-unverified')]);
+  const backup=w.db(),by=id=>backup.runs.find(r=>r.id===id),[a,b,file,v,v2,changed,manual]=ids.map(by);
+  assert.equal(a.inputMode,'text');assert.equal(v.inputMode,'visual');assert.ok(!JSON.stringify(v).includes(Buffer.from('image-a').toString('base64')));
+  assert.deepEqual(C.differences(a,b),[]);assert.deepEqual(C.differences(v,v2),[]);
+  for(const x of [file,v,manual])assert.ok(C.differences(a,x).length);assert.ok(C.differences(v,changed).length);
+  const raw=w.store.get(KEY),reload=ledger([[KEY,raw]]);await reload.lab.ready;await flush();assert.equal(reload.store.get(KEY),raw);assert.deepEqual(C.differences(reload.db().runs.find(r=>r.id===ids[0]),reload.db().runs.find(r=>r.id===ids[1])),[]);
+  const legacy=plain(backup);for(const r of legacy.runs)delete r.inputMode;const legacyRaw=JSON.stringify(legacy),old=ledger([[KEY,legacyRaw]]);await old.lab.ready;await flush();assert.equal(old.store.get(KEY),legacyRaw);assert.ok(C.differences(old.db().runs.find(r=>r.id===ids[3]),old.db().runs.find(r=>r.id===ids[4])).length);
+  const codec=await import('../dist/review-bundle.mjs'),V={harness:H,red:R,blue:B,review:require('../dist/review-workbench.js')};const archive=await codec.buildExperimentArchive(backup,ids[3],V),checked=await codec.validateArchive(archive,V);assert.equal(checked.data.ledger.runs[0].inputMode,'visual');
+  const target=ledger();await target.lab.ready;await flush();assert.match(await target.restore(backup),/백업을 병합/);const imported=target.db().runs;assert.ok(imported.every(r=>r.provenance==='imported-unverified'));assert.ok(C.differences(imported.find(r=>r.id===ids[0]),imported.find(r=>r.id===ids[1])).length);
+  for(const mode of ['text','bogus',null]){const bad=plain(backup);bad.runs.find(r=>r.id===ids[3]).inputMode=mode;const fresh=ledger();await fresh.lab.ready;await flush();assert.match(await fresh.restore(bad),/복원 차단/);await assert.rejects(codec.buildExperimentArchive(bad,ids[3],V));}
+  const badText=plain(backup);badText.runs.find(r=>r.id===ids[0]).inputMode='visual';const fresh=ledger();await fresh.lab.ready;await flush();assert.match(await fresh.restore(badText),/복원 차단/);await assert.rejects(codec.buildExperimentArchive(badText,ids[0],V));
+});
 
 (async()=>{let passed=0;for(const [name,fn] of tests){try{await fn();passed++;console.log('PASS '+name);}catch(e){console.error('FAIL '+name+'\n'+(e.stack||e));process.exitCode=1;}}
   console.log(JSON.stringify({passed,total:tests.length}));if(passed!==tests.length)process.exit(1);})();

@@ -190,9 +190,9 @@ test('sources keep secrets out of logs and do not post jobs from the pairing scr
   assert.equal(/sleep=options\.sleep\|\|\(\(\)=>Promise\.resolve\(\)\)/.test(auto),false);
   assert.equal(L.platformKind('MacIntel'),'mac');
   assert.equal(L.platformKind('Linux x86_64'),'linux');
-  assert.equal(L.installCommand('linux'),'./install-connection.sh');
+  assert.equal(L.installCommand('linux'),'python3 -m venv .venv && .venv/bin/python -m pip install -r app/local/requirements.txt && ./install-connection.sh');
   assert.match(L.command(7817,'mac'),/python3 -m venv \.venv/);
-  assert.equal(L.launcher(7816,'linux'),'./open-connection.sh');
+  assert.equal(L.launcher(7816,'linux'),"./open-connection.sh 'falsify://connect?port=7816'");
 });
 
 (async()=>{let passed=0;for(const [name,fn] of tests){try{await fn();passed++;console.log('PASS '+name);}catch(e){console.error('FAIL '+name);console.error(e);process.exitCode=1;}}

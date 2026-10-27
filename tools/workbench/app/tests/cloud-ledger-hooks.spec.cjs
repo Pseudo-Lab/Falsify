@@ -21,7 +21,7 @@ function ledger(stored,opts={}){
   const get=id=>{if(!els.has(id))element('div').id=id;return els.get(id);};
   const document=new EventTarget();Object.assign(document,{readyState:'complete',createElement:element,querySelector:s=>s.startsWith('#')?get(s.slice(1)):null,querySelectorAll:()=>[],body:element('body')});
   for(const type of ['falsify:harness-change','falsify:harness-consent'])document.addEventListener(type,e=>events.push(type+':'+e.detail.role));
-  const ctx=vm.createContext({document,FalsifyReview:require('../dist/review-workbench.js'),FalsifyHarness:opts.harness||H,FalsifyReviewBundle:opts.bundle||ReviewBundle,FalsifyLocalBridge:{capabilities:()=>null,state:()=>({status:'manual',connected:false,cap:null})},FalsifyDocumentRed:R,FalsifyDocumentBlue:require('../dist/document-blue-core.js'),
+  const ctx=vm.createContext({document,FalsifyReview:require('../dist/review-workbench.js'),FalsifyHarness:opts.harness||H,FalsifyReviewBundle:opts.bundle||ReviewBundle,FalsifyLocalBridge:opts.bridge||{capabilities:()=>null,state:()=>({status:'manual',connected:false,cap:null})},FalsifyDocumentRed:R,FalsifyDocumentBlue:require('../dist/document-blue-core.js'),
     localStorage:{getItem:k=>store.get(k)??null,setItem:(k,v)=>{if(opts.failWrite?.()){const e=Error('QuotaExceededError');e.name='QuotaExceededError';throw e;}writes.push(k);store.set(k,v);}},
     fetch(){network.push('fetch');throw Error('network disabled');},WebSocket(){network.push('WebSocket');throw Error('network disabled');},
     crypto:globalThis.crypto,TextEncoder,CustomEvent,Event,URL,Blob,setTimeout,clearTimeout,Date:opts.Date||Date});
@@ -56,7 +56,7 @@ test('previewSharedHarness fills editor and review panel only: no registration, 
   const w=ledger(),pending=w.lab.previewSharedHarness(plain(shared));const hash=await pending;await flush();
   assert.equal(hash,await H.hash(shared));assert.deepEqual(JSON.parse(w.get('harness-editor').value),H.validate(shared),'ready default editor value does not overwrite the shared config');
   const box=w.get('harness-preview');assert.equal(box.hidden,false);assert.equal(box.children[0].textContent,'공유 Harness 검토');assert.match(JSON.stringify(box.children.map(c=>c.children.map(x=>x.textContent))),/미등록/);
-  assert.match(w.get('harness-status').textContent,/등록·선택·실행은 하지 않았습니다/);
+  assert.match(w.get('harness-status').textContent,/사용을 누르기 전에는 등록하거나 선택하지 않습니다/);
   assert.deepEqual(w.writes,[]);assert.equal(w.store.get(KEY),undefined);const snap=await w.lab.cloudSnapshot();assert.ok(!snap.harnesses.some(h=>h.hash===hash));
   assert.deepEqual(w.get('blue-harness').children.map(o=>o.value),[await H.hash(H.builtin('blue'))],'selection menu lists registered versions only');assert.ok(!w.events.some(e=>e.startsWith('falsify:harness-change')));
   assert.equal(await w.lab.previewSharedHarness(plain(shared),hash),hash,'matching expected hash accepted');});
@@ -65,6 +65,29 @@ test('previewSharedHarness rejects invalid configs and mismatched hashes without
   const w=ledger();await w.lab.ready;const before=w.get('harness-editor').value;
   await assert.rejects(w.lab.previewSharedHarness({...shared,role:'gold'}));assert.equal(w.get('harness-preview').hidden,true);assert.equal(w.get('harness-editor').value,before);assert.ok(w.get('harness-status').classList.contains('error'));
   await assert.rejects(w.lab.previewSharedHarness(plain(shared),'0'.repeat(64)),/내용 해시/);assert.equal(w.get('harness-editor').value,before);assert.deepEqual(w.writes,[]);});
+
+test('explicit shared Use registers and selects the role without executing it',async()=>{
+  const w=ledger(),hash=await H.hash(shared),archive=await ReviewBundle.buildHarnessArchive({config:shared,hash},{harness:H});
+  await w.lab.openArchive(archive);assert.equal((await w.lab.cloudSnapshot()).harnesses.length,2);
+  w.get('blue-harness-consent').checked=true;
+  const use=w.get('harness-preview').children.find(e=>e.tagName==='BUTTON'&&e.className==='button primary');assert.ok(use);
+  use.dispatchEvent(new Event('click'));await flush(40);
+  assert.equal(w.get('blue-harness').value,hash);assert.equal(w.get('blue-harness-consent').checked,false);
+  const db=await w.lab.cloudSnapshot();assert.ok(db.harnesses.some(h=>h.hash===hash));assert.equal(db.runs.length,0);assert.deepEqual(w.network,[]);
+});
+
+test('v035 shared Use binds the local prepared profile and retains the remote profile unchanged',async()=>{
+  const remote={...shared,id:'shinick-blue-evidence-external-v035',version:'0.3.5'},hash=await H.hash(remote);
+  const local={...remote,adapter:{...remote.adapter,executable:'C:\\SyntheticLocal\\python.exe'}};
+  const calls=[],bridge={capabilities:()=>({harnessDeployment:true}),state:()=>({connected:true}),session:()=>({request:async(path,body)=>{calls.push({path,body});return {schema:'falsify.harness-deployment.v1',profile:local,sourceDigest:'b'.repeat(64)};}})};
+  const w=ledger(undefined,{bridge});await w.lab.openArchive(await ReviewBundle.buildHarnessArchive({config:remote,hash},{harness:H}));
+  const use=w.get('harness-preview').children.find(e=>e.tagName==='BUTTON'&&e.className==='button primary');use.dispatchEvent(new Event('click'));await flush(40);
+  assert.equal(calls.length,1);assert.equal(calls[0].path,'/api/harness/deploy');
+  assert.deepEqual(plain(calls[0].body),{schema:'falsify.harness-deployment-request.v1',family:'evidence-blue-v035'});
+  const chosen=await H.hash(local);assert.equal(w.get('blue-harness').value,chosen);assert.notEqual(chosen,hash);
+  assert.equal(JSON.parse(w.get('harness-editor').value).adapter.executable,remote.adapter.executable);
+  assert.equal((await w.lab.cloudSnapshot()).runs.length,0);assert.deepEqual(w.network,[]);
+});
 
 async function reviewBlue(w,withRed=true){
   const redDoc=await paper(),blueSegments=[{...segments[0],text:candidate.after},segments[1]],blueDoc={...redDoc,revision:'synthetic-blue',fileHash:'a'.repeat(64),sourceHash:await sha(blueSegments.map(s=>s.text).join('\n\n')),segments:blueSegments};
@@ -219,7 +242,7 @@ test('tamper, conflicting parent and harness preview do not write or register',a
   const box=ledger();await box.lab.ready;const stored=box.store.get(KEY),menu=box.get('blue-harness').value;
   const loaded=await box.lab.openArchive(harnessArchive);assert.equal(loaded.kind,'harness');assert.equal(loaded.hash,hash);
   assert.equal(box.store.get(KEY),stored);assert.equal(box.get('blue-harness').value,menu);assert.equal(box.get('blue-harness-consent').checked,false);
-  assert.equal(JSON.parse(box.get('harness-editor').value).id,'archive-blue');assert.match(box.get('harness-status').textContent,/등록·선택·실행은 하지 않았습니다/);assert.equal(box.network.length,0);
+  assert.equal(JSON.parse(box.get('harness-editor').value).id,'archive-blue');assert.match(box.get('harness-status').textContent,/사용을 누르기 전에는 등록하거나 선택하지 않습니다/);assert.equal(box.network.length,0);
   const rootRun=archive.data.ledger.runs.find(r=>r.id===rootId);
   const conflicted=plain(rootRun);conflicted.response=plain(conflicted.response);conflicted.response.candidates[0].rationale='Local rationale stays local.';
   const rootOnly={schema:KEY,harnesses:archive.data.ledger.harnesses.filter(h=>h.hash===rootRun.harnessHash),runs:[conflicted],reviews:[]};
@@ -361,7 +384,7 @@ test('harness preview expires and restores the previous draft without touching a
   assert.equal((await fresh.lab.openArchive(harnessArchive)).hash,hash);
   fresh.document.visibilityState='hidden';
   fresh.document.dispatchEvent(new Event('visibilitychange'));
-  assert.equal(fresh.get('harness-editor').value,draft);
+  assert.equal(JSON.parse(fresh.get('harness-editor').value).id,'archive-blue','tab switching retains the transient preview until its TTL or an explicit close');
   assert.equal(fresh.writes.length,0);assert.equal(fresh.store.get(KEY),undefined);
   fresh.get('harness-editor').value=draft;
   assert.equal((await fresh.lab.openArchive(harnessArchive)).hash,hash);

@@ -37,14 +37,14 @@ async function initialize() {
     throw Object.assign(new Error('Paragraph runtime digest mismatch'), {code: 'runtime-hash-mismatch'});
   }
   const {default: createModule} = await import(/* @vite-ignore */ asset('editcore.js').href);
-  const engineFactory = async bytes => {
+  const engineFactory = async (bytes, fontSnapshot = null) => {
     const M = await createModule({wasmBinary: wasm, print() {}, printErr() {}});
     const cfg = M._malloc(48);
     M.HEAPU8.fill(0, cfg, cfg + 48);
     M.HEAPU32[cfg >> 2] = 2;
     M._FPDF_InitLibraryWithConfig(cfg);
     M._free(cfg);
-    const engine = new PdfEngine(M);
+    const engine = new PdfEngine(M, fontSnapshot);
     try { if (bytes) engine.open(new Uint8Array(bytes)); }
     catch (error) { engine.close(); throw error; }
     return engine;

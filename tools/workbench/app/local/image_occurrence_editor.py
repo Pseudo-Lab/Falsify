@@ -6,13 +6,7 @@ Public API (contract: falsify coordination image-occurrence-contract, v1):
   replace_occurrence(source, occurrence_id, replacement_png) -> (output_pdf_bytes, report)
 Failures raise ValueError(fixed_code); a missing dependency raises ValueError('dependency-unavailable').
 
-What is editable: a page-level or simple Form-nested `/Name Do` that paints an opaque raster Image XObject on an unrotated, uncropped page with
-an axis-aligned positive-scale CTM, no clip that cuts the image, no transparency (ExtGState alpha/soft mask/blend, image
-SMask/Mask/ImageMask), no later-painted content intersecting its box, inside a page whose image paints line up one-to-one
-with MuPDF's paint log. The same xref may be painted elsewhere (twice on a page, on other pages, via inherited shared
-Resources or repeated Forms): only the selected operator invocation is changed. Form ancestry is limited to three levels,
-with rectangular containing BBoxes, no transparency group/masks and a positive axis-aligned final CTM. Inline, clipped,
-transparent, rotated or overlapped images remain non-editable; nothing is guessed.
+What is editable: a page-level or simple Form-nested `/Name Do` raster Image XObject on an unrotated, uncropped page with a nonsingular affine CTM and existing clipping. Operator-local surgery preserves clipping and subsequent paints. Graphics-state transparency, image stencils, explicit masks, soft masks with matte, optional content and tagged structures remain unsupported. RGB PNG retains a compatible original soft mask; RGBA PNG supplies its own alpha in place of the original mask. Other occurrences of shared resources remain unchanged.
 
 Occurrence id = sha256(source sha256, page index, painting operator path). The path is (content stream index, operator
 index) for the page-level Do, extended by (form object, operator index) for nested paints, so two paints of one xref at
@@ -26,8 +20,8 @@ original Forms/images and all other painting uses remain untouched. The
 output is accepted only after re-reading it: same page count/boxes/rotation, identical text words on every page,
 identical decoded content streams except the selected chain's renamed operands (including per-invocation Form checks),
 identical occurrence list except the selected size,
-pixel-identical renders of every other page and of the target page outside the image box (+2 px antialias bleed), and a
-visible change inside it. This is an engine render self-check (MuPDF), not an independent fidelity proof.
+pixel-identical renders of every other page and the target page outside the image box (+2 px antialias bleed),
+except for a bounded RGBA rounding difference proved against an opaque-alpha control, and a visible change inside it. This is an engine render self-check (MuPDF), not an independent fidelity proof.
 
 Bounds: source <= 25 MiB and <= 64 pages, content streams decoded by a bounded Flate inflater (other filters -> page
 'scan-limit'), operator/form-depth budgets, PNG <= 4 MiB / <= 4M pixels / each side <= 8192 validated from the IHDR and
@@ -103,7 +97,7 @@ def _mul(m, n):
     return (a * A + b * C, a * B + b * D, c * A + d * C, c * B + d * D, e * A + f * C + E, e * B + f * D + F)
 
 
-def _axis(m): return abs(m[1]) <= 1e-9 and abs(m[2]) <= 1e-9
+def _axis(m): return abs(m[1]) <= max(abs(m[0]), abs(m[3]), 1.0) * 1e-6 and abs(m[2]) <= max(abs(m[0]), abs(m[3]), 1.0) * 1e-6
 
 
 def _rect_through(m, x0, y0, x1, y1):
@@ -220,7 +214,12 @@ def _image_opaque_issue(pk, image):
     # structure-tree associations. A normal visible render cannot prove these.
     if any(key in image for key in ('/OC', '/StructParent', '/StructParents')):
         return 'form-image'
-    if image.get('/ImageMask') is True or image.get('/SMask') is not None or image.get('/Mask') is not None:
+    if image.get('/ImageMask') is True or image.get('/Mask') is not None:
+        return 'transparency'
+    mask = image.get('/SMask')
+    if mask is not None and (not isinstance(mask, pk.Stream) or '/Matte' in mask
+            or mask.get('/Subtype') != pk.Name('/Image') or mask.get('/ColorSpace') != pk.Name('/DeviceGray')
+            or mask.get('/SMask') is not None or mask.get('/Mask') is not None):
         return 'transparency'
     smid = image.get('/SMaskInData')
     if smid is not None and int(smid) != 0: return 'transparency'
@@ -380,15 +379,16 @@ class _Scanner:
         reason = self.page_reason or reason
         if reason is None and state.get('structure_unsupported'):
             reason = 'form-image'
-        if reason is None and not (_axis(ctm) and ctm[0] > 0 and ctm[3] > 0 and bbox[2] - bbox[0] > TOL
-                and bbox[3] - bbox[1] > TOL and width > 0 and height > 0):
+        # Surgery changes only a Do resource; the original CTM and clip remain in the stream.
+        # A complex clip uses the image AABB as a conservative render-check region.
+        if reason is None and not (abs(ctm[0] * ctm[3] - ctm[1] * ctm[2]) > 1e-9
+                and bbox[2] - bbox[0] > TOL and bbox[3] - bbox[1] > TOL and width > 0 and height > 0):
             reason = 'unsupported-transform'
-        if reason is None and (state['clip'] == 'complex' or (state['clip'] is not None
-                and not _contains(state['clip'], bbox)) or not _contains(self.mediabox, bbox)):
-            reason = 'clipped-image'
         if reason is None and state['trans']: reason = 'transparency'
         self.events.append({'kind': kind, 'path': path, 'name': name, 'xref': xref, 'width': width, 'height': height,
-            'pdfBox': bbox, 'reason': reason, 'surgery': surgery})
+            'pdfBox': bbox, 'visibleBox': _intersect(_intersect(bbox, self.mediabox), state['clip'])
+                if state['clip'] not in (None, 'complex') else _intersect(bbox, self.mediabox),
+            'reason': reason, 'surgery': surgery})
 
 
 def _page_geometry(pk, page):
@@ -450,7 +450,7 @@ def _open_mu(mu, data):
 
 
 def _align(mu_page, page_events, mediabox):
-    """Line page image paints up with MuPDF's ordered paint log and apply the overlap rule. Mutates reasons."""
+    """Line page image paints up with MuPDF's ordered paint log. Mutates reasons."""
     try:
         log = mu_page.get_bboxlog()
     except Exception:
@@ -465,11 +465,7 @@ def _align(mu_page, page_events, mediabox):
         x0, y0, x1, y1 = _top_left(mediabox, e['pdfBox'])
         if max(abs(x0 - rect[0]), abs(y0 - rect[1]), abs(x1 - rect[2]), abs(y1 - rect[3])) > 0.5:
             e['reason'] = 'scan-limit'; continue
-        for kind, r in log[li + 1:]:
-            if kind == 'ignore-text': continue
-            ix0, iy0, ix1, iy1 = max(x0, r[0]), max(y0, r[1]), min(x1, r[2]), min(y1, r[3])
-            if ix1 - ix0 > TOL and iy1 - iy0 > TOL:
-                e['reason'] = 'overlapping-content'; break
+
 
 
 def _scan(pk, mu, source):
@@ -612,10 +608,8 @@ def _decode_png(Image, data, size):
             if img.size != size or img.mode not in ('RGB', 'RGBA') or getattr(img, 'is_animated', False):
                 raise ValueError('replacement-invalid')
             img.load()
-            if img.mode == 'RGBA':
-                if img.getchannel('A').getextrema() != (255, 255): raise ValueError('transparency')
-                img = img.convert('RGB')
-            return img.tobytes()
+            alpha = img.getchannel('A').tobytes() if img.mode == 'RGBA' else None
+            return img.convert('RGB').tobytes(), alpha
     except ValueError:
         raise
     except Exception:
@@ -686,6 +680,7 @@ def _rewrite(pk, source, target, rgb, size):
             datas = [_stream_bytes(pk, s) for s in streams]
         except _PageStop as exc:
             raise ValueError(exc.reason) from None
+        rgb, alpha = rgb
         image = pdf.make_stream(zlib.compress(rgb, 9))
         image.Type, image.Subtype = pk.Name('/XObject'), pk.Name('/Image')
         image.Width, image.Height = size
@@ -700,6 +695,14 @@ def _rewrite(pk, source, target, rgb, size):
             if not isinstance(original, pk.Stream): raise ValueError('malformed-pdf')
             if level + 1 == len(steps):
                 if original.get('/Subtype') != pk.Name.Image: raise ValueError('malformed-pdf')
+                if alpha is None:
+                    if original.get('/SMask') is not None: image.SMask = original.SMask
+                else:
+                    mask = pdf.make_stream(zlib.compress(alpha, 9))
+                    mask.Type, mask.Subtype = pk.Name('/XObject'), pk.Name('/Image')
+                    mask.Width, mask.Height = size
+                    mask.ColorSpace, mask.BitsPerComponent, mask.Filter = pk.Name('/DeviceGray'), 8, pk.Name('/FlateDecode')
+                    image.SMask = mask
                 replacement = image
             else:
                 if original.get('/Subtype') != pk.Name.Form: raise ValueError('malformed-pdf')
@@ -809,7 +812,7 @@ def _position(path):
     return [None if isinstance(p, list) else p for p in path]
 
 
-def _verify(pk, mu, Image, ImageChops, source, output, scan, target, expected_streams, size):
+def _verify(pk, mu, Image, ImageChops, source, output, scan, target, expected_streams, size, control=None):
     if len(output) > LIMITS['maxOutputBytes']: raise ValueError('output-too-large')
     fail = ValueError('check-failed')
     pno = target['pageIndex']
@@ -824,7 +827,23 @@ def _verify(pk, mu, Image, ImageChops, source, output, scan, target, expected_st
     if len(a_streams) != len(b_streams): raise fail
     for i, (a, b) in enumerate(zip(a_streams, b_streams)):
         if b is None or b != (expected_streams['pageStreams'] if i == pno else a): raise fail
+    # The opaque-alpha control uses the same replacement and selected Do chain. Its streams
+    # must independently satisfy the same exact-operator proof before it can explain rounding.
+    if control is not None:
+        if len(control[0]) > LIMITS['maxOutputBytes'] or control[1] != expected_streams: raise fail
+        control_pdf = _open_pike(pk, control[0])
+        source_pdf = _open_pike(pk, source)
+        try:
+            cp, sp = _page_streams(pk, control_pdf), _page_streams(pk, source_pdf)
+            if len(cp) != len(sp) or any(x != (control[1]['pageStreams'] if i == pno else sp[i])
+                    for i, x in enumerate(cp)): raise fail
+            forms = _form_streams(pk, source_pdf)
+            forms.update({(pno,) + path: data for path, data in control[1]['formStreams'].items()})
+            if _form_streams(pk, control_pdf) != forms: raise fail
+        finally:
+            control_pdf.close(); source_pdf.close()
     a, b = _open_mu(mu, source), _open_mu(mu, output)
+    c = _open_mu(mu, control[0]) if control is not None else None
     try:
         if a.page_count != b.page_count: raise fail
         for i in range(a.page_count):
@@ -843,18 +862,34 @@ def _verify(pk, mu, Image, ImageChops, source, output, scan, target, expected_st
             ia = Image.frombytes('RGB', (ra.width, ra.height), ra.samples)
             ib = Image.frombytes('RGB', (rb.width, rb.height), rb.samples)
             diff = ImageChops.difference(ia, ib)
-            x0, y0, x1, y1 = target['bbox']
+            x0, y0, x1, y1 = _top_left(tuple(pa.mediabox), target['visibleBox'])
             roi = (max(0, math.floor(x0 * zoom) - BLEED_PX), max(0, math.floor(y0 * zoom) - BLEED_PX),
                 min(ra.width, math.ceil(x1 * zoom) + BLEED_PX), min(ra.height, math.ceil(y1 * zoom) + BLEED_PX))
             changed = diff.getbbox()
             if changed is None: raise ValueError('no-op')
-            if not _contains(roi, changed): raise fail
+            if not _contains(roi, changed):
+                if c is None or c.page_count != a.page_count: raise fail
+                pc = c[i]
+                if (tuple(pc.mediabox), tuple(pc.cropbox), pc.rotation) != (tuple(pa.mediabox), tuple(pa.cropbox), pa.rotation) \
+                        or pc.get_text('words', sort=False) != pa.get_text('words', sort=False): raise fail
+                rc = pc.get_pixmap(matrix=m, alpha=False, colorspace=mu.csRGB)
+                if (rc.width, rc.height) != (ra.width, ra.height): raise fail
+                ic = Image.frombytes('RGB', (rc.width, rc.height), rc.samples)
+                source_control = ImageChops.difference(ia, ic)
+                output_control = ImageChops.difference(ib, ic)
+                source_control.paste((0, 0, 0), roi)
+                output_control.paste((0, 0, 0), roi)
+                # Only renderer-path rounding proven by this control is allowed: <=2 per
+                # channel versus source, and exact equality to output outside the ROI.
+                if max(channel.getextrema()[1] for channel in source_control.split()) > 2 \
+                        or output_control.getbbox() is not None: raise fail
             r, g, bl = diff.crop(roi).split()
             peak = ImageChops.lighter(ImageChops.lighter(r, g), bl)
             if sum(peak.point(lambda v: 255 if v > VISIBLE_DELTA else 0).histogram()[255:]) < MIN_VISIBLE_PIXELS:
                 raise ValueError('no-op')
     finally:
         a.close(); b.close()
+        if c is not None: c.close()
     _, after, complete, _ = _scan(pk, mu, output)
     before = scan['occurrences']
     if len(after) != len(before) or complete != scan['complete']: raise fail
@@ -878,8 +913,11 @@ def replace_occurrence(source, occurrence_id, replacement_png):
     if target['reason'] is not None: raise ValueError(target['reason'])
     rgb = _decode_png(Image, bytes(replacement_png), size)
     output, expected = _rewrite(pk, source, target, rgb, size)
+    control = None
+    if rgb[1] is not None:
+        control = _rewrite(pk, source, target, (rgb[0], bytes([255]) * (size[0] * size[1])), size)
     _verify(pk, mu, Image, ImageChops, source, output, {'occurrences': occurrences, 'complete': complete}, target,
-        expected, size)
+        expected, size, control)
     out_sha = _sha(output)
     return output, {'schema': REPORT_SCHEMA, 'sourceSha256': sha, 'occurrenceId': occurrence_id, 'outputSha256': out_sha,
         'pageIndex': target['pageIndex'], 'bbox': list(target['bbox']), 'changedOccurrences': 1, 'check': 'passed',

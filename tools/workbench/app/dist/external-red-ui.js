@@ -32,8 +32,8 @@
     section.id='external-red';
     section.setAttribute('aria-label','외부 모델 응답 가져오기');
     section.append(el(doc,'h2',null,'외부 모델 응답 가져오기'));
-    section.append(el(doc,'p','muted','이 가져오기는 검증된 RED 실행이 아닙니다. Falsify가 모델을 호출하지 않으며, 응답을 자동으로 적용하지 않습니다. 프롬프트를 외부 모델에 직접 붙여넣고, 여기서 위치를 확인한 뒤 고른 변경만 편집 목록에 올립니다.'));
-    const modelLabel=el(doc,'label',null,'모델 이름 (선택, 검증되지 않은 표시)');
+    section.append(el(doc,'p','muted','프롬프트를 사용하는 AI에 전달하고 응답을 붙여넣으세요. 위치를 확인한 뒤 선택한 변경을 가져옵니다. 실행 출처는 외부 응답으로 기록됩니다.'));
+    const modelLabel=el(doc,'label',null,'사용한 모델 이름 (선택)');
     const modelInput=el(doc,'input');
     modelInput.id='external-red-model';
     modelInput.type='text';
