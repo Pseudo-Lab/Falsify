@@ -1203,6 +1203,29 @@ test('recomposition discards late revision and preserves last real output after 
   v.get('paper-generate').click();await until(()=>release,'pending');v.get('paper-undo').click();release();await settle();assert.equal(v.ws.getOutput().file,old.file);assert.notEqual(v.ws.getEditSnapshot().revision,old.revision);assert.equal(v.get('paper-current-download').disabled,false);
 });
 
+test('default local generation forwards original and fonts without whole-paper fallback',async()=>{
+  const original=pdfFile(pdfBytes('MARKER-A')), bytes=pdfBytes('MARKER-GEN'), requests=[];let whole=0,fail=false;
+  const fonts={revision:0,list:()=>[],resolve:async()=>({revision:0,digest:'source-fonts',fonts:[]})};
+  const v=mount({fonts,paragraphPdf:paragraphMock('Original paragraph.',{prepare:async req=>{requests.push(req);if(fail)throw new Error('local failure');return {file:pdfFile(bytes),sha256:sha(bytes),verification:{status:'applied',pageCount:{source:2,output:2}}};}}),recompositionPdf:{prepare:async()=>{whole++;throw new Error('unexpected whole-paper generation');}}});
+  assert.equal(v.get('paper-recompose').checked,false);v.file(original);await until(()=>/문단을 클릭/.test(v.get('paper-before-status').textContent),'local source');
+  clickParagraph(v);v.get('paper-inline-after').value='Edited paragraph.';v.get('paper-inline-apply').click();v.get('paper-generate').click();
+  await until(()=>v.ws.getOutput()&&!v.get('paper-generate').disabled,'local output');
+  assert.equal(requests[0].file,original);assert.equal(requests[0].fontSnapshot.digest,'source-fonts');assert.equal(whole,0);
+  assert.match(v.get('paper-output-notes').textContent,/원본에서 선택 구간 편집 · 원본 2쪽 → 출력 2쪽/);
+  const previous=v.ws.getOutput().file;fail=true;v.get('paper-generate').click();await until(()=>/생성하지 못했습니다/.test(v.get('paper-generate-status').textContent),'local failure');
+  assert.equal(whole,0);assert.equal(v.ws.getOutput().file,previous);
+});
+
+test('whole-paper choice reports its mode and only trustworthy page count metadata',async()=>{
+  const bytes=pdfBytes('MARKER-GEN');let count=2;
+  const v=mount({paragraphPdf:paragraphMock('Original paragraph.'),recompositionPdf:{prepare:async req=>({file:pdfFile(bytes),sha256:sha(bytes),revision:req.revision,verification:{pageCount:{source:count,output:3}}})}});
+  v.get('paper-recompose').checked=true;v.file(pdfFile(pdfBytes('MARKER-A')));await until(()=>/문단을 클릭/.test(v.get('paper-before-status').textContent),'source');
+  clickParagraph(v);v.get('paper-inline-after').value='Edited paragraph.';v.get('paper-inline-apply').click();v.get('paper-generate').click();await until(()=>v.ws.getOutput()&&!v.get('paper-generate').disabled,'whole output');
+  assert.match(v.get('paper-output-notes').textContent,/전체 논문 새로 배치 · 원본 2쪽 → 출력 3쪽/);
+  count=99;v.get('paper-generate').click();await until(()=>!v.get('paper-generate').disabled,'whole output again');assert.doesNotMatch(v.get('paper-output-notes').textContent,/원본 99쪽/);
+  assert.match(HTML,/<details class="red-help"><summary>고급 생성 옵션<\/summary><label class="paper-recompose-option"><input type="checkbox" id="paper-recompose"> 전체 논문 새로 배치/);
+});
+
 (async()=>{let passed=0;for(const [name,fn] of tests){try{await fn();passed++;console.log('PASS '+name);}catch(e){console.error('FAIL '+name+'\n'+(e.stack||e));process.exitCode=1;}}
   console.log(JSON.stringify({file:'paper-workspace.spec.cjs',passed,failed:tests.length-passed,total:tests.length}));})();
 

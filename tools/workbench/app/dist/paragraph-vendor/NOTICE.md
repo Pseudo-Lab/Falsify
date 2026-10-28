@@ -46,3 +46,6 @@ document-flow-links.mjs and document-flow-underlines.mjs. It reuses the same
 hash-pinned native runtime; the optional raw annotation adapter is Workbench
 source in app/src/document-flow-annotations.mjs using the existing MuPDF vendor.
 See build-source/DOCUMENT_FLOW.md and overlay.json for exact source scope.
+
+Local editor change after the pinned overlay: patches/local-deletion-alignment.patch
+records the deletion alignment and source-line glyph reuse changes against the repository source paths.

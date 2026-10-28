@@ -1,5 +1,7 @@
 # Paper layout and automatic repair
 
+This describes the optional whole-paper layout mode. Ordinary PDF edits use the source-preserving paragraph engine. A verified single-source-line deletion can keep the original font codes, object and suffix positions; the original line break in the quoted input is not treated as a new replacement. Whole-paper layout is selected explicitly under advanced generation options.
+
 The web entry enables measured layout for PDF recomposition. The lower-level runtime accepts the optional `layoutMode: 'measured-continuous'`; omitted mode retains ordered bands for existing callers. A document without measured two-column body text uses the existing single-column path.
 
 The compositor derives paragraph sizes and column evidence from the source. Headings, body text, captions and title-page notes retain their size contexts. Source line-wrap hyphens can be omitted when the same joined word occurs unbroken elsewhere in the original and the compound spelling is not corroborated. Addresses, ambiguous short prefixes, unsupported geometry, edited words and literal user After stay outside that projection. `verification.sourceNormalization` records source ranges separately from the experiment's edits.

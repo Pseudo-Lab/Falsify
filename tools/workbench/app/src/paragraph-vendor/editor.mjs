@@ -13,6 +13,7 @@ import {
   LineRetentionError,
   canCommitLineLocal,
   commitRetainingLines,
+  commitSourceLineDeletion,
   commitGeometricPrefix,
   removeGeometricFirstLine,
   pageObjectList,
@@ -63,6 +64,19 @@ const EDIT_KEYS = new Set(["id", "pageIndex", "before", "after"]);
 const REQUEST_KEYS = new Set(["sourceBytes", "edits", "reflow"]);
 
 export const normalizeText = (s) => s.replace(/\s+/g, " ");
+
+// Before is matched in normalized space. For a literal deletion contained
+// within one input line, use that same space for token alignment, so an
+// unchanged input newline does not become a spurious replacement. The source
+// whitespace itself is retained; requested line-break edits use the old path.
+function deletionAlignmentAfter(before, after) {
+  let prefix = 0, suffix = 0;
+  while (prefix < after.length && before[prefix] === after[prefix]) prefix++;
+  while (suffix < after.length - prefix && before[before.length - 1 - suffix] === after[after.length - 1 - suffix]) suffix++;
+  const removed = before.slice(prefix, before.length - suffix);
+  return before.length > after.length && prefix + suffix === after.length && !/[\r\n]/.test(removed)
+    ? normalizeText(after) : after;
+}
 
 // Validates shape and budgets only; page ranges need the opened document.
 export function validateRequest(request, limits = LIMITS) {
@@ -268,7 +282,7 @@ export function planPageEdits(paras, edits) {
     const noop = normalizeText(e.after) === needle;
     const discontiguous = source.some((v, k) => k > 0 && v > source[k - 1] + 2);
     const geometricShortening = !noop && discontiguous ? planGeometricShortening(matchedChars, map, hit, needle, e.after) : null;
-    const change = noop ? null : geometricShortening || planInlineChange(paras, matchedChars, map, hits[0], needle, e.after);
+    const change = noop ? null : geometricShortening || planInlineChange(paras, matchedChars, map, hits[0], needle, deletionAlignmentAfter(e.before, e.after));
     if (change?.failure) {
       failures.push({ id: e.id, pageIndex: e.pageIndex, code: change.failure });
       continue;
@@ -522,7 +536,7 @@ export async function editPdf(request, options = {}) {
             if (plan.plans.filter((p) => p.touched.includes(pi) && !p.noop).length !== 1) throw new LineRetentionError("geometric_prefix_shared");
             committed = await commitGeometricPrefix(engine, para, del, inserts);
             if (!committed) throw new LineRetentionError("geometric_prefix_unsupported");
-          } else committed = commitRetainingLines(engine, para, runs, linePlan);
+          } else committed = await commitSourceLineDeletion(engine, para, runs) || commitRetainingLines(engine, para, runs, linePlan);
           // Any plain re-layout lost the source lines, including one that
           // changed the line count: commitLineLocal itself declines an edit
           // that leaves its source line or does not fit it.

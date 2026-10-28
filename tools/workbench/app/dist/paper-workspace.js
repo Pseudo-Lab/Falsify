@@ -621,7 +621,11 @@
       ui.team.disabled=blocked;
       ui.blue.disabled=blocked;
       ui.hash.textContent=output&&!output.blocked?'SHA-256 '+output.sha256:'';
-      if(ui.outputNotes)ui.outputNotes.textContent=output&&!output.blocked?diagnosticText(output.warnings,output.verification):'';
+      if(ui.outputNotes){
+        const v=output?.verification, final=Array.isArray(v?.stages)?v.stages.at(-1)?.verification:v, counts=final?.pageCount;
+        const countText=Number.isSafeInteger(counts?.source)&&counts.source===pages&&Number.isSafeInteger(counts.output)&&counts.output>0?' · 원본 '+counts.source+'쪽 → 출력 '+counts.output+'쪽':'';
+        ui.outputNotes.textContent=output&&!output.blocked?('생성 방식: '+(output.recomposition?'전체 논문 새로 배치':'원본에서 선택 구간 편집')+countText+' '+diagnosticText(output.warnings,output.verification)).trim():'';
+      }
       ui.afterLabel.textContent=!output?'아직 생성본이 없습니다':stale()?'마지막 생성본 · 현재 편집과 다름':'현재 생성본';
       syncNav();
     }

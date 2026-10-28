@@ -47,10 +47,10 @@
   "sourceBuildVerified": false,
   "trust": "locally-supplied-hash-verified-artifacts",
   "editorModuleSha256": {
-    "editor.mjs": "188593711f015c606c21e49c06803fd469436387bae4c0eac8eeb03dbd5f9426",
+    "editor.mjs": "9bfcec6b9d7a1cef93bef2ba1e5452e222cf54fd6ae3ca1c3de0df56276c7ecb",
     "quality.mjs": "395f55600c880999398b05971c1d09cda96a924d243b8a5f7fb472e0867ff309",
     "pagination.mjs": "e66e6b630c426f9d80da87781590e59ed7b67ffdaeee7aa49bd139e7507438cb",
-    "inline-preservation.mjs": "2ef15bddd2384148bef208319656fdd468434d3853c0d32428d61bef635e9fbb",
+    "inline-preservation.mjs": "84b98551dad10752016319ee0e14e953b1723cd6142079d9ed3dc0b593149de7",
     "continuation-template.mjs": "94bfc49200818466e9ec99560d00a7e2dcf72a8003fa10d485852bbace124336",
     "document-flow.mjs": "2834b616e41159765bb3054e56a0b1c601eb888b635c6b0d332165133638539d",
     "document-flow-band.mjs": "1b44eb4198fe99a60c83b742ecf6911b153bfd082e4e92a69f798828d4689a3f",

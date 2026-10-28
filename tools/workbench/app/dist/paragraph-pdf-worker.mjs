@@ -6236,6 +6236,83 @@ async function sourceLineCodes(engine, x, y) {
   }
   return matches.length === 1 ? matches[0] : null;
 }
+async function commitSourceLineDeletion(engine, para, runs) {
+  const lines = para.lines || [], old = para.runs.map((r) => r.text).join(""), next = runs.map((r) => r.text).join("");
+  let a = 0, b = 0;
+  while (a < next.length && old[a] === next[a]) a++;
+  while (b < next.length - a && old[old.length - 1 - b] === next[next.length - 1 - b]) b++;
+  if (next.length >= old.length || a + b !== next.length) return null;
+  const end = old.length - b, k = lines.findIndex((l, i) => a >= l.off && end <= (lines[i + 1]?.off ?? old.length));
+  if (k < 0 || /[\r\n]/.test(old.slice(a, end))) return null;
+  const start = lines[k].off, limit = lines[k + 1]?.off ?? old.length, source2 = old.slice(start, limit).replace(/\s+$/, "");
+  if (end > start + source2.length || !source2.length) return null;
+  const M = engine.M;
+  const api = ["_FPDFText_LoadPage", "_FPDFText_CountChars", "_FPDFText_GetUnicode", "_FPDFText_GetTextObject", "_FPDFText_GetCharOrigin", "_FPDFText_ClosePage", "_FPDFText_SetCharcodes", "_FPDFText_SetPositions", "_FPDFPageObj_GetMatrix"];
+  if (!api.every((n) => typeof M?.[n] === "function")) return null;
+  const handles = new Set((engine.paragraphObjects(para.id) || []).map((h) => h >>> 0)), buf = M._malloc(64);
+  const read = () => {
+    const tp = M._FPDFText_LoadPage(engine.page), glyph = [];
+    if (!tp) return null;
+    try {
+      for (let i = 0; i < M._FPDFText_CountChars(tp); i++) {
+        const h = M._FPDFText_GetTextObject(tp, i) >>> 0;
+        if (!handles.has(h) || !M._FPDFText_GetCharOrigin(tp, i, buf, buf + 8)) continue;
+        const y = M.HEAPF64[buf + 8 >> 3];
+        if (Math.abs(y - lines[k].y) <= 0.5) glyph.push({ h, u: M._FPDFText_GetUnicode(tp, i), x: M.HEAPF64[buf >> 3], y });
+      }
+      return glyph;
+    } finally {
+      M._FPDFText_ClosePage(tp);
+    }
+  };
+  try {
+    const glyph = read();
+    if (!glyph) return null;
+    if (glyph.length !== source2.length || glyph.some((g, i) => g.h !== glyph[0]?.h || g.u !== source2.charCodeAt(i))) return null;
+    const h = glyph[0].h, check = M._FPDFText_LoadPage(engine.page);
+    if (!check) return null;
+    let otherLine = false;
+    try {
+      for (let i = 0; i < M._FPDFText_CountChars(check); i++) {
+        if (M._FPDFText_GetTextObject(check, i) >>> 0 !== h) continue;
+        if (!M._FPDFText_GetCharOrigin(check, i, buf, buf + 8) || Math.abs(M.HEAPF64[buf + 8 >> 3] - lines[k].y) > 0.5) {
+          otherLine = true;
+          break;
+        }
+      }
+    } finally {
+      M._FPDFText_ClosePage(check);
+    }
+    if (otherLine || !M._FPDFPageObj_GetMatrix(h, buf)) return null;
+    const [scale, skew1, skew2, vertical, x, y] = [0, 1, 2, 3, 4, 5].map((i) => M.HEAPF32[(buf >> 2) + i]);
+    if (!(scale > 0 && vertical > 0) || Math.abs(skew1) > 1e-4 || Math.abs(skew2) > 1e-4) return null;
+    const codes = await sourceLineCodes(engine, x, y);
+    if (!codes || codes.length !== glyph.length) return null;
+    const left = a - start, right = end - start, kept = glyph.map((_, i) => i).filter((i) => i < left || i >= right);
+    if (!kept.length || left === 0 || right >= glyph.length) return null;
+    const shift = glyph[right].x - glyph[left].x, cp = M._malloc(kept.length * 4), pp = M._malloc((kept.length - 1) * 4);
+    try {
+      kept.forEach((j, i) => {
+        M.HEAPU32[(cp >> 2) + i] = codes[j];
+        if (i) M.HEAPF32[(pp >> 2) + i - 1] = (glyph[j].x - glyph[0].x - (j >= right ? shift : 0)) / scale;
+      });
+      if (!M._FPDFText_SetCharcodes(h, cp, kept.length) || !M._FPDFText_SetPositions(h, pp, kept.length - 1)) throw new LineRetentionError("source_deletion_write_failed");
+    } finally {
+      M._free(cp);
+      M._free(pp);
+    }
+    engine._pageDirty = true;
+    engine._spliceOk = false;
+    const after = read();
+    if (!after || after.length !== kept.length || after.some((g, i) => {
+      const j = kept[i], expected = glyph[j].x - (j >= right ? shift : 0);
+      return g.h !== h || g.u !== glyph[j].u || Math.abs(g.y - glyph[j].y) > 0.02 || Math.abs(g.x - expected) > 0.02;
+    })) throw new LineRetentionError("source_deletion_proof_failed");
+    return { upd: { id: para.id, surgical: true, lines }, lines: { status: "source_line_deletion", line: k } };
+  } finally {
+    M._free(buf);
+  }
+}
 async function commitGeometricPrefix(engine, para, del, inserts) {
   const M = engine.M, lines = para.lines || [];
   const api = ["_FPDFText_LoadPage", "_FPDFText_CountChars", "_FPDFText_GetUnicode", "_FPDFText_GetTextObject", "_FPDFText_GetCharOrigin", "_FPDFText_GetCharBox", "_FPDFText_ClosePage", "_FPDFText_SetCharcodes", "_FPDFText_SetPositions", "_FPDFPageObj_GetMatrix"];
@@ -7206,6 +7283,13 @@ var ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 var EDIT_KEYS = /* @__PURE__ */ new Set(["id", "pageIndex", "before", "after"]);
 var REQUEST_KEYS = /* @__PURE__ */ new Set(["sourceBytes", "edits", "reflow"]);
 var normalizeText = (s) => s.replace(/\s+/g, " ");
+function deletionAlignmentAfter(before, after) {
+  let prefix = 0, suffix = 0;
+  while (prefix < after.length && before[prefix] === after[prefix]) prefix++;
+  while (suffix < after.length - prefix && before[before.length - 1 - suffix] === after[after.length - 1 - suffix]) suffix++;
+  const removed = before.slice(prefix, before.length - suffix);
+  return before.length > after.length && prefix + suffix === after.length && !/[\r\n]/.test(removed) ? normalizeText(after) : after;
+}
 function validateRequest(request, limits = LIMITS) {
   const bad = (msg, details) => {
     throw new EditError("INVALID_REQUEST", msg, details);
@@ -7387,7 +7471,7 @@ function planPageEdits(paras, edits) {
     const noop = normalizeText(e.after) === needle;
     const discontiguous = source2.some((v, k) => k > 0 && v > source2[k - 1] + 2);
     const geometricShortening = !noop && discontiguous ? planGeometricShortening(matchedChars, map, hit, needle, e.after) : null;
-    const change = noop ? null : geometricShortening || planInlineChange(paras, matchedChars, map, hits[0], needle, e.after);
+    const change = noop ? null : geometricShortening || planInlineChange(paras, matchedChars, map, hits[0], needle, deletionAlignmentAfter(e.before, e.after));
     if (change?.failure) {
       failures.push({ id: e.id, pageIndex: e.pageIndex, code: change.failure });
       continue;
@@ -7587,7 +7671,7 @@ async function editPdf(request, options = {}) {
             if (plan.plans.filter((p) => p.touched.includes(pi) && !p.noop).length !== 1) throw new LineRetentionError("geometric_prefix_shared");
             committed = await commitGeometricPrefix(engine, para, del, inserts);
             if (!committed) throw new LineRetentionError("geometric_prefix_unsupported");
-          } else committed = commitRetainingLines(engine, para, runs, linePlan);
+          } else committed = await commitSourceLineDeletion(engine, para, runs) || commitRetainingLines(engine, para, runs, linePlan);
           const lost = committed.lines?.status === "reflowed";
           if (lost && linePlan?.breaks && objectsBefore !== null && !localStable) lineLocal = { status: "declined", reason: "page_model_unstable" };
           if (pre && lost) {
