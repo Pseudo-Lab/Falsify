@@ -851,6 +851,26 @@ function buildPaperFlow(document, { drawings = document?.drawings || [], links }
       repeats.get(key).add(b.source.pageIndex);
     }
   }
+  const decoratedFooter = /* @__PURE__ */ new Set();
+  for (const page of document.pages) {
+    const pi = page.sourcePageIndex;
+    const candidates = textBlocks.filter((b) => b.source?.pageIndex === pi && boxOK2(b.source.bbox) && b.source.bbox[1] >= page.height * 0.94 && textKey(b) && repeats.get(textKey(b))?.size >= 3);
+    for (const band of drawings.filter((d) => d.pageIndex === pi && d.operation === "fill" && boxOK2(d.bbox) && d.bbox[1] >= page.height * 0.94 && d.bbox[2] - d.bbox[0] >= page.width * 0.8 && d.bbox[3] - d.bbox[1] <= page.height * 0.035)) {
+      const members = candidates.filter((b) => overlap(b.source.bbox, band.bbox));
+      if (new Set(members.map(textKey)).size < 2) continue;
+      if (document.assets.some((a) => a.source?.pageIndex === pi && boxOK2(a.source.bbox) && overlap(a.source.bbox, band.bbox))) continue;
+      if (drawings.some((d) => d !== band && d.pageIndex === pi && boxOK2(d.bbox) && overlap(d.bbox, band.bbox))) continue;
+      const matchingPages = document.pages.filter((p) => {
+        if (p.width !== page.width || p.height !== page.height || !members.every((b) => textBlocks.filter((other) => other.source?.pageIndex === p.sourcePageIndex && textKey(other) === textKey(b) && sameNumbers(other.source.bbox, b.source.bbox, 2)).length === 1)) return false;
+        const decorations = drawings.filter((d) => d.pageIndex === p.sourcePageIndex && d.operation === "fill" && sameNumbers(d.bbox, band.bbox, 2));
+        if (decorations.length !== 1) return false;
+        const decoration = decorations[0];
+        return !document.assets.some((a) => a.source?.pageIndex === p.sourcePageIndex && boxOK2(a.source.bbox) && overlap(a.source.bbox, decoration.bbox)) && !drawings.some((d) => d !== decoration && d.pageIndex === p.sourcePageIndex && boxOK2(d.bbox) && overlap(d.bbox, decoration.bbox));
+      });
+      const bodyPages = matchingPages.filter((p) => textBlocks.some((b) => b.source?.pageIndex === p.sourcePageIndex && boxOK2(b.source.bbox) && b.source.bbox[1] >= p.height * 0.12 && b.source.bbox[3] <= p.height * 0.88 && (b.text || "").trim().length >= 100));
+      if (matchingPages.length >= 3 && bodyPages.length >= 2) for (const b of members) decoratedFooter.add(b.id);
+    }
+  }
   for (const page of document.pages) {
     const pi = page.sourcePageIndex;
     const blocks = flowBlocks.map((b, index) => ({ b, index, box: b.source?.bbox, pos: b.source?.readerPosition })).filter((x) => x.b.source?.pageIndex === pi);
@@ -1010,6 +1030,7 @@ function buildPaperFlow(document, { drawings = document?.drawings || [], links }
       if (b.kind === "figure" || b.kind === "table") kind = "asset";
       else if (b.kind === "caption" || /^\s*(?:extended\s+data\s+)?(?:fig(?:ure)?\.?|table)\s*\d+[\w.:-]*/i.test(b.text || "")) kind = "caption";
       else if (b.kind === "header" || b.kind === "footer") kind = b.kind;
+      else if (decoratedFooter.has(b.id)) kind = "footer";
       else if (inferredEdge(x)) {
         if (box5[1] < page.height * 0.12) kind = "header";
         else if (box5[3] > page.height * 0.88) kind = "footer";
