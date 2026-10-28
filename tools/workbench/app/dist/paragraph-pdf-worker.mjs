@@ -174,10 +174,10 @@ var init_shadingsurgery = __esm({
         subsetFont: false
       };
       const end = u8.length;
-      const match = (at, text) => {
-        if (at + text.length > end) return false;
-        for (let j = 1; j < text.length; j++) {
-          if (u8[at + j] !== text.charCodeAt(j)) return false;
+      const match = (at, text2) => {
+        if (at + text2.length > end) return false;
+        for (let j = 1; j < text2.length; j++) {
+          if (u8[at + j] !== text2.charCodeAt(j)) return false;
         }
         return true;
       };
@@ -193,8 +193,8 @@ var init_shadingsurgery = __esm({
           continue;
         }
         if (c !== 47) continue;
-        for (const [key2, text] of PROBE_NEEDLES) {
-          if (!out[key2] && match(i, text)) out[key2] = true;
+        for (const [key3, text2] of PROBE_NEEDLES) {
+          if (!out[key3] && match(i, text2)) out[key3] = true;
         }
         if (!out.contentsArray && match(i, "/Contents")) {
           if (u8[skipWs(i + 9)] === 91) out.contentsArray = true;
@@ -251,12 +251,12 @@ var init_shadingsurgery = __esm({
         const end = src.indexOf("endobj", start);
         return end < 0 ? null : { start, end, body: src.slice(start, end) };
       };
-      const dictRef = (body, key2) => {
-        const m = body.match(new RegExp("/" + key2 + "\\s+(\\d+)\\s+\\d+\\s+R"));
+      const dictRef = (body, key3) => {
+        const m = body.match(new RegExp("/" + key3 + "\\s+(\\d+)\\s+\\d+\\s+R"));
         return m ? parseInt(m[1], 10) : -1;
       };
       let rootNum = -1;
-      let size = -1;
+      let size2 = -1;
       for (let tAt = src.length; rootNum < 0; ) {
         tAt = src.lastIndexOf("trailer", tAt - 1);
         if (tAt < 0) break;
@@ -264,12 +264,12 @@ var init_shadingsurgery = __esm({
         if (rootNum < 0) rootNum = dictRef(trailer, "Root");
       }
       for (const m of src.matchAll(/\/Size\s+(\d+)/g))
-        size = Math.max(size, parseInt(m[1], 10));
+        size2 = Math.max(size2, parseInt(m[1], 10));
       if (rootNum < 0) {
         const m = src.match(/\/Root\s+(\d+)\s+\d+\s+R/);
         if (m) rootNum = parseInt(m[1], 10);
       }
-      if (rootNum < 0 || size < 0) return null;
+      if (rootNum < 0 || size2 < 0) return null;
       let pageList = null;
       const pageNum = (pageIndex) => {
         if (!pageList) {
@@ -295,7 +295,7 @@ var init_shadingsurgery = __esm({
         }
         return pageIndex < pageList.length ? pageList[pageIndex] : -1;
       };
-      return { objBody, dictRef, rootNum, size, pageNum };
+      return { objBody, dictRef, rootNum, size: size2, pageNum };
     };
     streamData = async (bytes2, src, obj) => {
       const si = src.indexOf("stream", obj.start);
@@ -321,8 +321,8 @@ var init_shadingsurgery = __esm({
         return /\/Filter/.test(obj.body) ? null : latin(raw);
       }
       try {
-        const stream = new Blob([raw]).stream().pipeThrough(new DecompressionStream("deflate"));
-        const buf = new Uint8Array(await new Response(stream).arrayBuffer());
+        const stream2 = new Blob([raw]).stream().pipeThrough(new DecompressionStream("deflate"));
+        const buf = new Uint8Array(await new Response(stream2).arrayBuffer());
         return latin(buf);
       } catch {
         return null;
@@ -504,10 +504,10 @@ function activeSpacing(txt, at) {
   return Math.abs(tc) > 1e-6 || Math.abs(tw) > 1e-6;
 }
 function buildTJ(op, wide) {
-  const { after, pos, adv, size } = op;
+  const { after, pos, adv, size: size2 } = op;
   if (!after?.length || pos?.length !== after.length || adv?.length !== after.length)
     return null;
-  if (!(size > 0)) return null;
+  if (!(size2 > 0)) return null;
   if (wide == null) wide = after.some((c) => c > 255);
   if (!wide && after.some((c) => c > 255)) return null;
   const hex3 = (c) => (wide ? c.toString(16).padStart(4, "0") : c.toString(16).padStart(2, "0")).toUpperCase();
@@ -516,7 +516,7 @@ function buildTJ(op, wide) {
   let pen = pos[0];
   for (let i = 0; i < after.length; i++) {
     if (i > 0) {
-      const kern = (pen - pos[i]) * 1e3 / size;
+      const kern = (pen - pos[i]) * 1e3 / size2;
       if (Math.abs(kern) > 1e-4) {
         if (run) {
           out += `<${run}>`;
@@ -531,8 +531,8 @@ function buildTJ(op, wide) {
   if (run) out += `<${run}>`;
   return out + "] TJ";
 }
-function inlineDict(body, key2) {
-  const m = body.match(new RegExp(`/${key2}\\s*<<`));
+function inlineDict(body, key3) {
+  const m = body.match(new RegExp(`/${key3}\\s*<<`));
   if (!m) return null;
   let i = m.index + m[0].length, depth = 1;
   for (let k = i; k < body.length - 1; k++) {
@@ -715,19 +715,19 @@ function fmt(v) {
   return s === "-0" ? "0" : s;
 }
 function locate(txt, want, tm) {
-  const hits = [];
+  const hits2 = [];
   for (const op of showOperators(txt)) {
     const s = scanShowOperand(txt, op.at, op.len);
     if (!s || s.codes.length !== want.length) continue;
     if (!s.codes.every((c, i) => c === want[i])) continue;
-    hits.push({ op, scan: s, tm: tmBefore(txt, op.at) });
+    hits2.push({ op, scan: s, tm: tmBefore(txt, op.at) });
   }
-  if (!hits.length) return null;
-  if (hits.length === 1) return hits[0];
-  const near4 = hits.filter(
+  if (!hits2.length) return null;
+  if (hits2.length === 1) return hits2[0];
+  const near5 = hits2.filter(
     (h) => h.tm && tm && Math.abs(h.tm[4] - tm[4]) < 0.01 && Math.abs(h.tm[5] - tm[5]) < 0.01
   );
-  return near4.length === 1 ? near4[0] : null;
+  return near5.length === 1 ? near5[0] : null;
 }
 async function findHolderStream(bytes2, src, pdf, pageRec, codes) {
   const resNum = pdf.dictRef(pageRec.body, "Resources");
@@ -742,8 +742,8 @@ async function findHolderStream(bytes2, src, pdf, pageRec, codes) {
     if (!rec || !/\/Subtype\s*\/Form/.test(rec.body)) continue;
     const data = await streamData(bytes2, src, { num, ...rec });
     if (!data) continue;
-    const text = typeof data === "string" ? data : latin(data);
-    if (!locate(text, codes, null)) continue;
+    const text2 = typeof data === "string" ? data : latin(data);
+    if (!locate(text2, codes, null)) continue;
     const refs = [...src.matchAll(new RegExp(`\\b${num}\\s+0\\s+R\\b`, "g"))].length;
     let pagesUsing = 0;
     if (resNum >= 0) {
@@ -760,7 +760,7 @@ async function findHolderStream(bytes2, src, pdf, pageRec, codes) {
     return {
       num,
       rec,
-      text,
+      text: text2,
       name: m[1],
       xoNum,
       xoBody,
@@ -908,8 +908,8 @@ async function applyPlan(originalBytes, pageIndex, plan) {
       if (!m) return null;
       const e = Number(m[5]) + (op.dx || 0);
       const f = Number(m[6]) + (op.dy || 0);
-      const text = `${m[1]} ${m[2]} ${m[3]} ${m[4]} ${fmt(e)} ${fmt(f)} Tm`;
-      edits.push({ at: m.index, len: m[0].length, text });
+      const text2 = `${m[1]} ${m[2]} ${m[3]} ${m[4]} ${fmt(e)} ${fmt(f)} Tm`;
+      edits.push({ at: m.index, len: m[0].length, text: text2 });
       continue;
     }
     for (const idx of op.drop) {
@@ -974,7 +974,7 @@ function xrefStyle(src) {
   const at = +m[1];
   return /^\s*xref/.test(src.slice(at, at + 8)) ? "classic" : "stream";
 }
-function rewriteStream(originalBytes, src, pdf, num, rec, text, cow, moreObjs) {
+function rewriteStream(originalBytes, src, pdf, num, rec, text2, cow, moreObjs) {
   let targetNum = num;
   const extra = [];
   let nextFree = Math.max(pdf.size, num + 1);
@@ -1008,7 +1008,7 @@ function rewriteStream(originalBytes, src, pdf, num, rec, text, cow, moreObjs) {
     extra.push({ num: cow.pageNum, body: pageBody.trim() });
   }
   for (const e of moreObjs || []) extra.push(e);
-  const out = bin(text);
+  const out = bin(text2);
   const dict = rec.body.slice(0, rec.body.indexOf("stream"));
   let nd = dict.replace(/\/Filter\s*\/\w+/g, "").replace(/\/Filter\s*\[[^\]]*\]/g, "").replace(/\/DecodeParms\s*<<[^>]*>>/g, "").replace(/\/Length\s+\d+(\s+\d+\s+R)?/g, "");
   nd = nd.replace(/>>\s*$/, "").replace(/^\s*<</, "");
@@ -1056,10 +1056,10 @@ endobj
         `${n} 1
 ` + String(offsets.get(n)).padStart(10, "0") + " 00000 n \n"
       );
-    const size = Math.max(pdf.size, Math.max(...nums) + 1);
+    const size2 = Math.max(pdf.size, Math.max(...nums) + 1);
     push(
       `trailer
-<< /Size ${size} /Root ${pdf.rootNum} 0 R /Prev ${prev} >>
+<< /Size ${size2} /Root ${pdf.rootNum} 0 R /Prev ${prev} >>
 `
     );
     push(`startxref
@@ -1071,7 +1071,7 @@ ${xrefAt}
     const xrefAt = base + bytes2.length;
     offsets.set(xrefNum, xrefAt);
     const nums = [...offsets.keys()].sort((x, y) => x - y);
-    const size = Math.max(pdf.size, Math.max(...nums) + 1);
+    const size2 = Math.max(pdf.size, Math.max(...nums) + 1);
     let index = "";
     const rows = [];
     for (const n of nums) {
@@ -1089,7 +1089,7 @@ ${xrefAt}
     }
     push(
       `${xrefNum} 0 obj
-<< /Type /XRef /Size ${size} /Index [ ${index}] /W [1 4 2] /Root ${pdf.rootNum} 0 R /Prev ${prev} /Length ${rows.length} >>
+<< /Type /XRef /Size ${size2} /Index [ ${index}] /W [1 4 2] /Root ${pdf.rootNum} 0 R /Prev ${prev} /Length ${rows.length} >>
 stream
 `
     );
@@ -1140,8 +1140,8 @@ var init_streamsplice = __esm({
 });
 
 // src/paragraph-vendor/continuation-template.mjs
-function classifyEdgeText(text) {
-  const t = String(text).trim();
+function classifyEdgeText(text2) {
+  const t = String(text2).trim();
   if (/^\d+$/.test(t)) return "page_number";
   if (t && (NUMBER_LIKE.test(t) || LABELLED_NUMBER.test(t))) return "number_unsupported";
   return "running";
@@ -1157,8 +1157,8 @@ function resolvePageFraction(items) {
   const baseline = (i) => i.chars?.[0]?.oy;
   if (![a, b, d].every((i) => Number.isFinite(baseline(i))) || Math.abs(baseline(a) - baseline(b)) > 0.5 || Math.abs(baseline(a) - baseline(d)) > 0.5) return null;
   if (!(a.bounds.r <= d.bounds.l + 0.5 && d.bounds.r <= b.bounds.l + 0.5)) return null;
-  const size = a.bounds.t - a.bounds.b;
-  if (!(size > 0) || d.bounds.l - a.bounds.r > size || b.bounds.l - d.bounds.r > size || +a.text > +b.text || +a.text < 1) return null;
+  const size2 = a.bounds.t - a.bounds.b;
+  if (!(size2 > 0) || d.bounds.l - a.bounds.r > size2 || b.bounds.l - d.bounds.r > size2 || +a.text > +b.text || +a.text < 1) return null;
   const fixedNumbers = /* @__PURE__ */ new Set([b]);
   const row = items.filter((i) => Math.abs(baseline(i) - baseline(a)) <= 0.5).sort((a2, b2) => a2.bounds.l - b2.bounds.l);
   for (let k = 2; k < row.length; k++) {
@@ -1171,8 +1171,8 @@ function continuationNumberText(source2, ordinal) {
   if (!/^\d+$/.test(t) || !Number.isInteger(ordinal) || ordinal < 1) return null;
   return t + "." + ordinal;
 }
-function suffixedText(text, ordinal) {
-  const m = /^(\s*)(\d+)(\s*)$/.exec(text);
+function suffixedText(text2, ordinal) {
+  const m = /^(\s*)(\d+)(\s*)$/.exec(text2);
   const n = m && continuationNumberText(m[2], ordinal);
   return n ? m[1] + n + m[3] : null;
 }
@@ -1304,10 +1304,10 @@ function toTextSpace(m, x, y) {
   if (Math.abs(det) < 1e-9) return null;
   return { x: (d * (x - e) - c * (y - f)) / det, y: (-b * (x - e) + a * (y - f)) / det };
 }
-function glyphAvailable(M, font, size, u) {
-  const w = readFloat(M, "_FPDFFont_GetGlyphWidth", font, u, size);
+function glyphAvailable(M, font, size2, u) {
+  const w = readFloat(M, "_FPDFFont_GetGlyphWidth", font, u, size2);
   if (!(w > 0)) return false;
-  const path = M._FPDFFont_GetGlyphPath(font, u, size);
+  const path = M._FPDFFont_GetGlyphPath(font, u, size2);
   return !!path && M._FPDFGlyphPath_CountGlyphSegments(path) > 0;
 }
 function snapshotPageEdges(engine, floor, bodyTop, exclude = null, selection = null) {
@@ -1348,17 +1348,17 @@ function snapshotPageEdges(engine, floor, bodyTop, exclude = null, selection = n
       if (clip && M._FPDFClipPath_CountPaths(clip) > 0) return fail6("continuation_edge_clip_unsupported", at);
     }
     const cs = chars.get(e.h) || [];
-    const text = textOf(cs);
-    if (!text.trim()) {
+    const text2 = textOf(cs);
+    if (!text2.trim()) {
       skipped++;
       continue;
     }
-    const role = selection ? "running" : classifyEdgeText(text);
+    const role = selection ? "running" : classifyEdgeText(text2);
     if (role === "number_unsupported") return fail6("continuation_page_number_unsupported", at);
     const font = M._FPDFTextObj_GetFont(e.h);
-    const size = readFloat(M, "_FPDFTextObj_GetFontSize", e.h);
+    const size2 = readFloat(M, "_FPDFTextObj_GetFontSize", e.h);
     const matrix = readMatrix(M, e.h);
-    if (!font || !(size > 0) || !matrix) return fail6("continuation_edge_text_layout_unsupported", at);
+    if (!font || !(size2 > 0) || !matrix) return fail6("continuation_edge_text_layout_unsupported", at);
     if (cs.some((c) => c.ox === null || c.l === null)) return fail6("continuation_edge_text_layout_unsupported", at);
     const ts = cs.map((c) => toTextSpace(matrix, c.ox, c.oy));
     if (ts.some((p) => !p || Math.abs(p.y - ts[0].y) > 0.01)) return fail6("continuation_edge_text_layout_unsupported", at);
@@ -1369,7 +1369,7 @@ function snapshotPageEdges(engine, floor, bodyTop, exclude = null, selection = n
     }
     if (role === "page_number") {
       for (let k = 1; k < cs.length; k++) {
-        const w = readFloat(M, "_FPDFFont_GetGlyphWidth", font, cs[k - 1].u, size);
+        const w = readFloat(M, "_FPDFFont_GetGlyphWidth", font, cs[k - 1].u, size2);
         if (w === null || Math.abs(ts[k].x - ts[k - 1].x - w) > POS_TOL) return fail6("continuation_page_number_spacing_unsupported", at);
       }
     }
@@ -1377,12 +1377,12 @@ function snapshotPageEdges(engine, floor, bodyTop, exclude = null, selection = n
       index: e.index,
       role,
       band: e.band,
-      text,
+      text: text2,
       bounds: e.bounds,
       chars: cs.map(({ u, ox, oy, l, b, r, t, ll, lr }) => ({ u, ox, oy, l, b, r, t, ll, lr })),
       style: {
         font: fontInfo(M, font),
-        size,
+        size: size2,
         matrix,
         fill,
         stroke,
@@ -1425,9 +1425,9 @@ function verifyTextObject(engine, page, item, handle, dy = 0) {
   const M = engine.M;
   const chars = charsByObject(M, page).get(handle >>> 0) || [];
   if (textOf(chars) !== item.text || chars.length !== item.chars.length) return false;
-  for (let i = 0; i < chars.length; i++) for (const key2 of ["ox", "oy", "l", "b", "r", "t"]) {
-    const delta = ["oy", "b", "t"].includes(key2) ? dy : 0;
-    if (!near(chars[i][key2], item.chars[i][key2] + delta, POS_TOL)) return false;
+  for (let i = 0; i < chars.length; i++) for (const key3 of ["ox", "oy", "l", "b", "r", "t"]) {
+    const delta = ["oy", "b", "t"].includes(key3) ? dy : 0;
+    if (!near(chars[i][key3], item.chars[i][key3] + delta, POS_TOL)) return false;
   }
   const matrix = readMatrix(M, handle), expected = [...item.style.matrix];
   expected[5] += dy;
@@ -1444,11 +1444,11 @@ function expectedPageEdges(snapshot, ordinal) {
       items.push({ ...base, text: it.text, bounds: it.bounds, anchor: null, chars: it.chars, prefixChars: null, suffix: null });
       continue;
     }
-    const text = suffixedText(it.text, ordinal);
-    if (text === null) return { ok: false, code: "continuation_page_number_unsupported", items: [] };
+    const text2 = suffixedText(it.text, ordinal);
+    if (text2 === null) return { ok: false, code: "continuation_page_number_unsupported", items: [] };
     const lead = /^\s*/.exec(it.text)[0].length;
     const digits = it.text.trim().length;
-    items.push({ ...base, text, bounds: null, anchor: it.anchor, chars: null, prefixChars: it.chars.slice(lead, lead + digits), suffix: "." + ordinal });
+    items.push({ ...base, text: text2, bounds: null, anchor: it.anchor, chars: null, prefixChars: it.chars.slice(lead, lead + digits), suffix: "." + ordinal });
   }
   return { ok: true, code: null, items };
 }
@@ -1467,12 +1467,12 @@ function preflightPageEdges(engine, snapshot, count) {
   }
   return { ok: true, code: null, items: [] };
 }
-function setText(M, obj, text) {
-  if (!text) return false;
-  const p = M._malloc((text.length + 1) * 2);
+function setText(M, obj, text2) {
+  if (!text2) return false;
+  const p = M._malloc((text2.length + 1) * 2);
   try {
-    for (let i = 0; i < text.length; i++) M.HEAPU16[(p >> 1) + i] = text.charCodeAt(i);
-    M.HEAPU16[(p >> 1) + text.length] = 0;
+    for (let i = 0; i < text2.length; i++) M.HEAPU16[(p >> 1) + i] = text2.charCodeAt(i);
+    M.HEAPU16[(p >> 1) + text2.length] = 0;
     return !!M._FPDFText_SetText(obj, p);
   } finally {
     M._free(p);
@@ -1551,7 +1551,7 @@ function verifyPageEdges(engine, newPage, snapshot, ordinal, applied) {
     items.push({ index: e.index, role: e.role, text: e.text, bounds });
     if (e.role !== "page_number") {
       for (const [i, c] of cs.entries()) {
-        for (const key2 of ["ox", "oy", "l", "b", "r", "t"]) if (!near(c[key2], e.chars[i][key2], POS_TOL)) return bad(e.index, "geometry");
+        for (const key3 of ["ox", "oy", "l", "b", "r", "t"]) if (!near(c[key3], e.chars[i][key3], POS_TOL)) return bad(e.index, "geometry");
       }
       continue;
     }
@@ -1560,8 +1560,8 @@ function verifyPageEdges(engine, newPage, snapshot, ordinal, applied) {
     const dx = cs[lead].ox - e.prefixChars[0].ox;
     for (let i = 0; i < digits; i++) {
       const c = cs[lead + i], s = e.prefixChars[i];
-      for (const key2 of ["ox", "l", "r"]) if (!near(c[key2], s[key2] + dx, POS_TOL)) return bad(e.index, "digits");
-      for (const key2 of ["oy", "b", "t"]) if (!near(c[key2], s[key2], POS_TOL)) return bad(e.index, "digits");
+      for (const key3 of ["ox", "l", "r"]) if (!near(c[key3], s[key3] + dx, POS_TOL)) return bad(e.index, "digits");
+      for (const key3 of ["oy", "b", "t"]) if (!near(c[key3], s[key3], POS_TOL)) return bad(e.index, "digits");
     }
     for (let i = lead + digits; i < lead + digits + e.suffix.length; i++) {
       const c = cs[i];
@@ -1584,347 +1584,6 @@ var init_continuation_template = __esm({
     LABELLED_NUMBER = /^(page|pg\.?|p\.)\s*\d+/i;
     textOf = (chars) => chars.map((c) => String.fromCodePoint(c.u)).join("");
     near = (a, b, tol) => a !== null && b !== null && Math.abs(a - b) <= tol;
-  }
-});
-
-// src/paragraph-vendor/pagination.mjs
-function groupLines(items) {
-  const seeds = items.filter((it) => it.top - it.bottom > EPS).sort((a, b) => b.top - a.top || a.order - b.order);
-  const lines = [];
-  for (const it of seeds) {
-    const cy = (it.top + it.bottom) / 2;
-    const l = lines[lines.length - 1];
-    const lc = l ? (l.top + l.bottom) / 2 : 0;
-    if (l && (cy <= l.top + EPS && cy >= l.bottom - EPS || lc <= it.top + EPS && lc >= it.bottom - EPS)) {
-      l.items.push(it);
-      l.top = Math.max(l.top, it.top);
-      l.bottom = Math.min(l.bottom, it.bottom);
-    } else {
-      lines.push({ top: it.top, bottom: it.bottom, items: [it] });
-    }
-  }
-  return { lines, loose: items.filter((it) => !(it.top - it.bottom > EPS)) };
-}
-function planFlow(lines, { bodyTop, floor, maxNewPages }) {
-  if (!(bodyTop > floor)) return { ok: false, code: "pagination_body_band_invalid" };
-  for (let i = 1; i < lines.length; i++) {
-    const a = lines[i - 1], b = lines[i];
-    if (!((b.top + b.bottom) / 2 < (a.top + a.bottom) / 2 && b.top <= a.top + EPS)) return { ok: false, code: "pagination_flow_not_monotonic", line: i };
-  }
-  const pages = [{ offset: 0, lines: [] }];
-  for (let i = 0; i < lines.length; i++) {
-    const l = lines[i];
-    const page = pages[pages.length - 1];
-    if (l.bottom + page.offset >= floor - EPS) {
-      page.lines.push(i);
-      continue;
-    }
-    const offset = bodyTop - l.top;
-    if (l.bottom + offset < floor - EPS) return { ok: false, code: "pagination_line_exceeds_body", line: i };
-    if (pages.length - 1 >= maxNewPages) return { ok: false, code: "pagination_budget_exceeded", maxNewPages };
-    pages.push({ offset, lines: [i] });
-  }
-  return { ok: true, pages };
-}
-function listObjects(M, page) {
-  const n = M._FPDFPage_CountObjects(page);
-  const out = [];
-  for (let i = 0; i < n; i++) out.push(M._FPDFPage_GetObject(page, i) >>> 0);
-  return out;
-}
-function readBox(M, page, fn) {
-  const p = M._malloc(16);
-  try {
-    if (!M[fn](page, p, p + 4, p + 8, p + 12)) return null;
-    return [0, 1, 2, 3].map((k) => M.HEAPF32[(p >> 2) + k]);
-  } finally {
-    M._free(p);
-  }
-}
-function unsupportedPage(engine) {
-  const M = engine.M;
-  if (engine._t3seg && Object.keys(engine._t3seg).length) return "pagination_unsupported_type3_segments";
-  if (typeof M._FPDFPage_GetRotation === "function" && M._FPDFPage_GetRotation(engine.page) !== 0) return "pagination_unsupported_rotated_page";
-  const t = engine.pageT || [1, 0, 0, 1, 0, 0];
-  if ([1, 0, 0, 1, 0, 0].some((v, i) => Math.abs(t[i] - v) > 1e-4)) return "pagination_unsupported_cropped_or_offset_page";
-  const media = typeof M._FPDFPage_GetMediaBox === "function" ? readBox(M, engine.page, "_FPDFPage_GetMediaBox") : null;
-  if (media && (Math.abs(media[0]) > 1e-3 || Math.abs(media[1]) > 1e-3)) return "pagination_unsupported_cropped_or_offset_page";
-  const crop = typeof M._FPDFPage_GetCropBox === "function" ? readBox(M, engine.page, "_FPDFPage_GetCropBox") : null;
-  if (crop && media && crop.some((v, i) => Math.abs(v - media[i]) > 1e-3)) return "pagination_unsupported_cropped_or_offset_page";
-  return null;
-}
-function buildFlowPlan(engine, ctx, grown, { floor, maxNewPages }) {
-  const M = engine.M;
-  const err = (code, extra = {}) => ({ ok: false, code, ...extra });
-  const bad = unsupportedPage(engine);
-  if (bad) return err(bad);
-  const grownIds = new Set(grown.map((g) => g.id));
-  const flowTop = Math.max(...grown.map((g) => g.box.top));
-  const anchor = grown.find((g) => g.box.top === flowTop).box;
-  const objects = listObjects(M, engine.page);
-  const indexOf = new Map(objects.map((h, i) => [h, i]));
-  const bounds = (h) => {
-    const b = engine.objectBounds(h);
-    return b ? { top: b.y + b.h, bottom: b.y, x: b.x, w: b.w } : null;
-  };
-  const owner = /* @__PURE__ */ new Map();
-  const current = /* @__PURE__ */ new Map();
-  for (const q of ctx.paras) {
-    const hs = (engine.paragraphObjects(q.id) || []).map((h) => h >>> 0);
-    current.set(q.id, hs);
-    for (const h of hs) {
-      if (owner.has(h) && owner.get(h) !== q.id) return err("pagination_unsupported_shared_objects");
-      owner.set(h, q.id);
-    }
-  }
-  const flow = [];
-  for (const q of ctx.paras) {
-    if (!q.box) continue;
-    const cy = q.box.top - q.box.h / 2;
-    const below = q.box.top <= flowTop + 0.5;
-    if (q.role !== "body") {
-      if (cy > floor + EPS && cy < flowTop && below) return err("pagination_unsupported_edge_paragraph_in_flow");
-      continue;
-    }
-    if (!below) continue;
-    if (!sameColumn(q.box, anchor)) return err("pagination_unsupported_multi_column_flow");
-    if (!q.editable || q.sharesObjects) return err("pagination_unsupported_shared_objects");
-    if (!q.topLevel && !grownIds.has(q.id)) return err("pagination_unsupported_non_top_level_text");
-    flow.push(q);
-  }
-  flow.sort((a, b) => b.box.top - a.box.top || a.box.x - b.box.x);
-  const shiftOf = (q) => {
-    let s = 0;
-    for (const g of grown) {
-      if (g.id === q.id || q.box.top > bottomOf(g.box) + 0.5 || !sameColumn(q.box, g.box)) continue;
-      s += g.delta;
-    }
-    return s;
-  };
-  const lines = [];
-  const untouchedLines = [];
-  for (const q of flow) {
-    const shift = shiftOf(q);
-    const items = [];
-    for (const h of current.get(q.id)) {
-      if (!indexOf.has(h)) return err("pagination_unsupported_non_top_level_text");
-      const b = bounds(h);
-      if (!b) return err("pagination_unsupported_non_top_level_text");
-      items.push({ h, order: indexOf.get(h), ...b });
-    }
-    const { lines: ls, loose } = groupLines(items);
-    if (!ls.length && loose.length) ls.push({ top: Math.max(...loose.map((i) => i.top)), bottom: Math.min(...loose.map((i) => i.bottom)), items: [] });
-    for (const it of loose) {
-      const l = ls.find((x) => it.bottom <= x.top + 0.5 && it.bottom >= x.bottom - 0.5) || ls[ls.length - 1];
-      l.items.push(it);
-    }
-    for (const l of ls) {
-      const line = { para: q.id, shift, top: l.top, bottom: l.bottom, items: l.items };
-      lines.push(line);
-      if (!grownIds.has(q.id) && shift >= 0) untouchedLines.push(line);
-    }
-  }
-  let orphans = 0;
-  for (const h of objects) {
-    if (owner.has(h)) continue;
-    const b = bounds(h);
-    if (!b) return err("pagination_unsupported_foreign_object_in_flow");
-    const cy = (b.top + b.bottom) / 2;
-    if (cy < floor - EPS || cy > flowTop + 0.5) continue;
-    if (b.x + b.w < anchor.x - 0.5 || b.x > anchor.x + anchor.w + 0.5) {
-      return err("pagination_unsupported_multi_column_flow");
-    }
-    if (M._FPDFPageObj_GetType(h) !== OBJ_TEXT2) {
-      const hits = M._FPDFPageObj_GetType(h) === 2 && b.top - b.bottom <= EPS && b.w > EPS ? lines.filter((line) => {
-        const size = ctx.paras.find((q) => q.id === line.para)?.size || 0;
-        const text = line.items.filter((it) => {
-          const cx = it.x + it.w / 2;
-          return cx >= b.x - 3 && cx <= b.x + b.w + 3 && it.bottom - b.top >= -1 && it.bottom - b.top <= 0.4 * size;
-        });
-        const single = text.some((it) => Math.abs(it.x - b.x) <= 1 && Math.abs(it.x + it.w - b.x - b.w) <= 1);
-        return size > 0 && b.w <= 2 * size && text.length && (single || Math.abs(Math.min(...text.map((it) => it.x)) - b.x) <= 3 && Math.abs(Math.max(...text.map((it) => it.x + it.w)) - b.x - b.w) <= 3);
-      }) : [];
-      if (hits.length !== 1) return err("pagination_unsupported_foreign_object_in_flow");
-      hits[0].items.push({ h, order: indexOf.get(h), ...b });
-      continue;
-    }
-    const l = untouchedLines.find((x) => cy <= x.top + 0.5 && cy >= x.bottom - 0.5);
-    if (l) {
-      l.items.push({ h, order: indexOf.get(h), ...b });
-      continue;
-    }
-    if (b.top - b.bottom <= EPS && b.w <= EPS) {
-      orphans++;
-      continue;
-    }
-    return err("pagination_unsupported_foreign_object_in_flow");
-  }
-  let bodyTop = -Infinity;
-  for (const q of ctx.paras) {
-    if (q.role !== "body") continue;
-    for (const h of current.get(q.id)) {
-      const b = indexOf.has(h) ? bounds(h) : null;
-      if (b && b.top - b.bottom > EPS) bodyTop = Math.max(bodyTop, b.top);
-    }
-  }
-  const virtual = lines.map((l) => ({ top: l.top - l.shift, bottom: l.bottom - l.shift }));
-  const split = planFlow(virtual, { bodyTop, floor, maxNewPages });
-  if (!split.ok) return err(split.code, { line: split.line, maxNewPages: split.maxNewPages });
-  return { ok: true, lines, pages: split.pages, bodyTop, flowTop: Math.min(flowTop, bodyTop), floor, orphans, objects };
-}
-function evictPagesAfter(engine, pageIndex) {
-  const M = engine.M;
-  const cache = engine._pageCache;
-  if (!cache) return;
-  for (const [k, h] of [...cache.entries()]) {
-    if (k <= pageIndex || !h || h === engine.page) continue;
-    M._ec_history_drop_page?.(engine.session, h);
-    M._FPDF_ClosePage(h);
-    cache.delete(k);
-  }
-}
-function applyFlowPlan(engine, pageIndex, plan, edges = null) {
-  const M = engine.M;
-  if (engine.pageIndex !== pageIndex) throw new Error("page_not_current");
-  for (const [p, page] of plan.pages.entries()) {
-    for (const i of page.lines) {
-      const l = plan.lines[i];
-      const dy = -l.shift + (p ? page.offset : 0);
-      if (Math.abs(dy) < 1e-6) continue;
-      for (const it of l.items) engine.translateObject(it.h, 0, dy);
-    }
-  }
-  engine._pageDirty = true;
-  if (!engine.generateContent()) throw new Error("source_generate_failed");
-  const added = plan.pages.length - 1;
-  const lineCounts = [];
-  if (added > 0) {
-    if (edges) {
-      const fresh = snapshotPageEdges(engine, plan.floor, plan.bodyTop);
-      if (!fresh.ok) throw coded(fresh.code);
-      const key2 = (s) => JSON.stringify(s.items.map((i) => [i.role, i.text, i.chars.map((c) => [c.u, c.ox.toFixed(2), c.oy.toFixed(2)])]));
-      if (key2(fresh) !== key2(edges)) throw coded("continuation_edge_snapshot_drift");
-      const pre = preflightPageEdges(engine, fresh, added);
-      if (!pre.ok) throw coded(pre.code);
-      edges = fresh;
-    }
-    evictPagesAfter(engine, pageIndex);
-    const W = engine.pageWidth, H = engine.pageHeight;
-    const before = M._FPDFPage_CountObjects(engine.page);
-    let movedTotal = 0;
-    let copiedEdges = 0;
-    for (let p = 1; p <= added; p++) {
-      const np = M._FPDFPage_New(engine.doc, pageIndex + p, W, H);
-      if (!np) throw new Error("page_new_failed");
-      try {
-        const now = new Map(listObjects(M, engine.page).map((h, i) => [h, i]));
-        const handles = plan.pages[p].lines.flatMap((i) => plan.lines[i].items.map((it) => it.h));
-        if (handles.some((h) => !now.has(h))) throw new Error("object_not_on_source_page");
-        handles.sort((a, b) => now.get(a) - now.get(b));
-        const bodyIndex = edges ? Math.min(...handles.map((h) => edges.order.get(h) ?? Infinity)) : Infinity;
-        const applied = edges ? applyPageEdges(engine, np, edges, p, bodyIndex) : { ok: true, items: [], bodyAt: 0 };
-        if (!applied.ok) throw coded(applied.code);
-        if (applied.items.length && !M._FPDFPage_GenerateContent(np)) throw new Error("continuation_generate_failed");
-        let at = applied.bodyAt;
-        for (const h of handles) {
-          if (!M._FPDFPage_RemoveObject(engine.page, h)) throw new Error("remove_failed");
-          if (!M._FPDFPage_InsertObjectAtIndex(np, h, at++)) throw new Error("insert_failed");
-        }
-        if (M._FPDFPage_CountObjects(np) !== handles.length + applied.items.length) throw new Error("insert_count_mismatch");
-        if (edges) {
-          const proof = verifyPageEdges(engine, np, edges, p, applied);
-          if (!proof.ok) throw coded(proof.code);
-        }
-        if (!M._FPDFPage_GenerateContent(np)) throw new Error("continuation_generate_failed");
-        movedTotal += handles.length;
-        copiedEdges += applied.items.length;
-        lineCounts.push(plan.pages[p].lines.length);
-      } finally {
-        M._FPDF_ClosePage(np);
-      }
-    }
-    if (M._FPDFPage_CountObjects(engine.page) !== before - movedTotal) throw new Error("source_count_mismatch");
-    engine._pageDirty = true;
-    if (!engine.generateContent()) throw new Error("source_generate_failed");
-    M._ec_history_drop_page?.(engine.session, engine.page);
-    engine._pageStale = true;
-    engine.buildModel();
-    engine.pageCount = M._FPDF_GetPageCount(engine.doc);
-    return { added, lineCounts, keptLines: plan.pages[0].lines.length, copiedEdges };
-  }
-  return { added, lineCounts, keptLines: plan.pages[0].lines.length, copiedEdges: 0 };
-}
-function paginateOverflow(engine, ctx, grown, { floor, maxNewPages }) {
-  const warnings = [];
-  const repairs = [];
-  const reject = (code, extra = {}) => {
-    warnings.push({ code, severity: "error", ...extra });
-    repairs.push({ kind: "pagination", action: "rejected", reason: code });
-    return { ok: false, warnings, repairs, added: 0 };
-  };
-  const plan = buildFlowPlan(engine, ctx, grown, { floor, maxNewPages });
-  if (!plan.ok) return reject(plan.code, plan.maxNewPages !== void 0 ? { maxNewPages: plan.maxNewPages } : {});
-  let edges = null;
-  if (plan.pages.length > 1) {
-    const flow = new Set(plan.lines.flatMap((l) => l.items.map((it) => it.h)));
-    edges = snapshotPageEdges(engine, plan.floor, plan.bodyTop, flow);
-    if (!edges.ok) return reject(edges.code);
-    const pre = preflightPageEdges(engine, edges, plan.pages.length - 1);
-    if (!pre.ok) return reject(pre.code);
-  }
-  let r;
-  try {
-    r = applyFlowPlan(engine, ctx.pageIndex, plan, edges);
-  } catch (e) {
-    warnings.push(e?.code ? { code: e.code, severity: "error" } : { code: "pagination_apply_failed", severity: "error", reason: String(e?.message || e).slice(0, 80) });
-    repairs.push({ kind: "pagination", action: "failed" });
-    return { ok: false, warnings, repairs, added: 0 };
-  }
-  if (edges?.fixedGraphics) warnings.push({ code: "continuation_fixed_edge_graphics_not_repeated", severity: "warning", count: edges.fixedGraphics, policy: "source-graphics-preserved-text-only-continuation" });
-  if (plan.orphans) warnings.push({ code: "pagination_empty_objects_kept", severity: "info", count: plan.orphans });
-  repairs.push({ kind: "pagination", action: r.added ? "continued" : "shifted", added: r.added, keptLines: r.keptLines, lineCounts: r.lineCounts, copiedEdges: r.copiedEdges, floor: +plan.floor.toFixed(2), bodyTop: +plan.bodyTop.toFixed(2) });
-  const continuationStyle = r.added ? { version: CONTINUATION_STYLE.version, policy: CONTINUATION_STYLE.policy, applied: true } : void 0;
-  return { ok: true, warnings, repairs, added: r.added, lineCounts: r.lineCounts, keptLines: r.keptLines, bodyTop: plan.bodyTop, flowTop: plan.flowTop, floor: plan.floor, continuationStyle };
-}
-var OBJ_TEXT2, EPS, PAGINATION_LIMITS, PAGINATION_CAPABILITY, bottomOf, hOverlap, sameColumn, coded;
-var init_pagination = __esm({
-  "src/paragraph-vendor/pagination.mjs"() {
-    init_continuation_template();
-    OBJ_TEXT2 = 1;
-    EPS = 0.01;
-    PAGINATION_LIMITS = Object.freeze({ defaultMaxNewPages: 8, maxNewPages: 32 });
-    PAGINATION_CAPABILITY = Object.freeze({
-      supported: true,
-      scope: "single-column top-level body text flow below the edited paragraph on unrotated, uncropped pages",
-      continuationPages: "same size as the source page, inserted directly after it; moved body lines plus source-style copies of the source page's header/footer text; a standalone Arabic page number becomes source number plus decimal suffix (10.1, 10.2); no synthesized label",
-      fixedEdgeGraphics: "graphics wholly within the physical edge band stay on the original page and are omitted on text-only continuations, with an explicit warning; body-intersecting graphics still refuse",
-      sourcePageNumbers: "unchanged; existing page-number objects stay on their source page",
-      continuationStyle: Object.freeze({ version: CONTINUATION_STYLE.version, policy: CONTINUATION_STYLE.policy }),
-      downstreamPages: "never modified; only their output index shifts, see report.pagination.sourcePageMap",
-      maxNewPagesDefault: PAGINATION_LIMITS.defaultMaxNewPages,
-      maxNewPagesLimit: PAGINATION_LIMITS.maxNewPages,
-      unsupported: Object.freeze([
-        "multi_column_flow",
-        "foreign_object_in_flow",
-        "edge_paragraph_in_flow",
-        "rotated_page",
-        "cropped_or_offset_page",
-        "type3_segments",
-        "non_top_level_text",
-        "shared_objects",
-        "edge_graphics",
-        "edge_clip",
-        "edge_text_layout",
-        "edge_style",
-        "ambiguous_page_number",
-        "page_number_spacing",
-        "page_number_glyph_missing"
-      ])
-    });
-    bottomOf = (b) => b.top - b.h;
-    hOverlap = (a, b) => Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x);
-    sameColumn = (a, b) => hOverlap(a, b) >= 0.35 * Math.min(a.w, b.w);
-    coded = (code) => Object.assign(new Error(code), { code });
   }
 });
 
@@ -1979,23 +1638,23 @@ function readLinkPageCharacters(engine, pageIndex) {
 }
 function normalizedSource(chars, band) {
   const selected = chars.filter((c) => c.u <= 32 || bodyGlyph(c, band));
-  let text = "", indices = [];
+  let text2 = "", indices = [];
   for (const c of selected) {
     const ch = String.fromCharCode(c.u);
     if (/\s/.test(ch)) {
-      if (!text || text.endsWith(" ")) continue;
-      text += " ";
+      if (!text2 || text2.endsWith(" ")) continue;
+      text2 += " ";
       indices.push(null);
     } else {
-      text += ch;
+      text2 += ch;
       indices.push(c.u > 32 ? c.index : null);
     }
   }
-  if (text.endsWith(" ")) {
-    text = text.slice(0, -1);
+  if (text2.endsWith(" ")) {
+    text2 = text2.slice(0, -1);
     indices.pop();
   }
-  return { text, indices };
+  return { text: text2, indices };
 }
 function mapSourceGlyphs(sourceEngine, sourceBands, targetGlyphs, edits, expectedPageText2) {
   const expected = [], mapping2 = /* @__PURE__ */ new Map(), sources = /* @__PURE__ */ new Map();
@@ -2046,10 +1705,10 @@ function deriveNativeLinkMoves(sourceEngine, sourceBands, targetGlyphs, edits, m
     let dx, dy, outputPageIndex;
     const linkedTargets = /* @__PURE__ */ new Set();
     for (const c of body) {
-      const key2 = `${descriptor.sourcePageIndex}:${c.index}`;
-      if (claimed.has(key2)) fail("document_flow_link_overlapping_ownership");
-      claimed.add(key2);
-      const at = mapping2.get(key2);
+      const key3 = `${descriptor.sourcePageIndex}:${c.index}`;
+      if (claimed.has(key3)) fail("document_flow_link_overlapping_ownership");
+      claimed.add(key3);
+      const at = mapping2.get(key3);
       if (at === void 0) fail("document_flow_link_edited_label");
       linkedTargets.add(at);
       const target = targetGlyphs[at];
@@ -2195,32 +1854,32 @@ function sourceUnderline(engine, h, pageIndex, annotationModel) {
   if (!owned.length) fail2("document_flow_underline_ownership_ambiguous");
   engine.loadPage(pageIndex);
   const M = engine.M, tp = M._FPDFText_LoadPage(engine.page), matrix = M._malloc(24);
-  let size = 0;
+  let size2 = 0;
   try {
     for (const c of owned) {
       if (!M._FPDFText_GetMatrix(tp, c.index, matrix)) fail2("document_flow_underline_style_unsupported");
       const [a, b, cx, d] = Array.from(M.HEAPF32.slice(matrix >> 2, (matrix >> 2) + 4));
-      size = Math.max(size, M._FPDFText_GetFontSize(tp, c.index) * Math.max(Math.hypot(a, b), Math.hypot(cx, d)));
+      size2 = Math.max(size2, M._FPDFText_GetFontSize(tp, c.index) * Math.max(Math.hypot(a, b), Math.hypot(cx, d)));
     }
   } finally {
     M._free(matrix);
     M._FPDFText_ClosePage(tp);
   }
-  if (!(size > 0) || right - left > 2 * size + 0.02) fail2("document_flow_underline_too_long");
-  const objects = list(M, engine.page), order = objects.indexOf(h >>> 0), text = M._FPDFText_LoadPage(engine.page);
+  if (!(size2 > 0) || right - left > 2 * size2 + 0.02) fail2("document_flow_underline_too_long");
+  const objects = list(M, engine.page), order = objects.indexOf(h >>> 0), text2 = M._FPDFText_LoadPage(engine.page);
   let owners;
   try {
-    owners = owned.map((c) => objects.indexOf(M._FPDFText_GetTextObject(text, c.index) >>> 0));
+    owners = owned.map((c) => objects.indexOf(M._FPDFText_GetTextObject(text2, c.index) >>> 0));
   } finally {
-    M._FPDFText_ClosePage(text);
+    M._FPDFText_ClosePage(text2);
   }
   if (owners.some((i) => i < 0) || !(order < Math.min(...owners) || order > Math.max(...owners))) fail2("document_flow_underline_paint_order_unsupported");
   return { ...path, sourcePageIndex: pageIndex, annotationIndex: link.annotationIndex, ownerRect: [...link.rect], paint: order < Math.min(...owners) ? "before" : "after" };
 }
 function underlineEqual(actual, source2, dx = 0, dy = 0) {
   if (!near3(actual.bounds.x, source2.bounds.x + dx) || !near3(actual.bounds.y, source2.bounds.y + dy) || !near3(actual.bounds.w, source2.bounds.w) || !near3(actual.bounds.h, source2.bounds.h)) return false;
-  for (const key2 of ["fillMode", "stroke", "cap", "join"]) if (actual[key2] !== source2[key2]) return false;
-  for (const key2 of ["fill", "strokeColor"]) if (JSON.stringify(actual[key2]) !== JSON.stringify(source2[key2])) return false;
+  for (const key3 of ["fillMode", "stroke", "cap", "join"]) if (actual[key3] !== source2[key3]) return false;
+  for (const key3 of ["fill", "strokeColor"]) if (JSON.stringify(actual[key3]) !== JSON.stringify(source2[key3])) return false;
   if (!near3(actual.width, source2.width) || actual.segments.length !== source2.segments.length) return false;
   for (let i = 0; i < actual.segments.length; i++) {
     const a = actual.segments[i], s = source2.segments[i];
@@ -2312,11 +1971,11 @@ var init_document_flow_underlines = __esm({
 function checkDocumentFlowPageBudget(e) {
   const M = e.M;
   if (M._FPDFPage_CountObjects(e.page) > 5e3) fail3("document_flow_object_budget_exceeded");
-  const text = M._FPDFText_LoadPage(e.page);
+  const text2 = M._FPDFText_LoadPage(e.page);
   try {
-    if (!text || M._FPDFText_CountChars(text) > 1e5) fail3("document_flow_character_budget_exceeded");
+    if (!text2 || M._FPDFText_CountChars(text2) > 1e5) fail3("document_flow_character_budget_exceeded");
   } finally {
-    if (text) M._FPDFText_ClosePage(text);
+    if (text2) M._FPDFText_ClosePage(text2);
   }
 }
 function deriveDocumentFlowBand(engine, sourcePageIndex, captureLayout, annotationModel = null) {
@@ -2370,6 +2029,8 @@ var init_document_flow_band = __esm({
 var quality_exports = {};
 __export(quality_exports, {
   capturePageLayout: () => capturePageLayout,
+  cascadeBarrier: () => cascadeBarrier,
+  cascadeShifts: () => cascadeShifts,
   countGlyphLines: () => countGlyphLines,
   edgeGlyphs: () => edgeGlyphs,
   expectedPageText: () => expectedPageText,
@@ -2378,6 +2039,7 @@ __export(quality_exports, {
   matchesGeneratedWhitespace: () => matchesGeneratedWhitespace,
   matchesStationaryReorderedGlyphs: () => matchesStationaryReorderedGlyphs,
   normalizePageMap: () => normalizePageMap,
+  readGlyphs: () => readGlyphs,
   repairPageLayout: () => repairPageLayout,
   restoreSourceOrder: () => restoreSourceOrder,
   validContinuationStyle: () => validContinuationStyle
@@ -2385,7 +2047,7 @@ __export(quality_exports, {
 function ensurePage(engine, pageIndex) {
   if (!engine.page || engine.pageIndex !== pageIndex) engine.loadPage(pageIndex);
 }
-function listObjects2(engine) {
+function listObjects(engine) {
   const M = engine.M;
   const n = M._FPDFPage_CountObjects(engine.page);
   const out = [];
@@ -2405,33 +2067,33 @@ function unionBounds(engine, handles) {
   if (!(x1 > x0)) return null;
   return { x: x0, top: y1, w: x1 - x0, h: y1 - y0 };
 }
-function hOverlap2(a, b) {
+function hOverlap(a, b) {
   return Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x);
 }
 function classify(p, pageH, edgeBottomY) {
   if (!p.box) return "unknown";
-  const text = normStr(paraText(p));
-  const short = text.length <= 60 && text.split(" ").length <= 12 && (p.lines?.length || 1) <= 2;
-  const inTop = bottomOf2(p.box) >= edgeBottomY + pageH * (1 - EDGE_BAND);
+  const text2 = normStr(paraText(p));
+  const short = text2.length <= 60 && text2.split(" ").length <= 12 && (p.lines?.length || 1) <= 2;
+  const inTop = bottomOf(p.box) >= edgeBottomY + pageH * (1 - EDGE_BAND);
   const inBottom = p.box.top <= edgeBottomY + pageH * EDGE_BAND;
   if (!short || !(inTop || inBottom)) return "body";
-  if (/^[\s\-–—|/.()]*(\d+|[ivxlcdm]+)([\s\-–—|/.()]*(\d+|of))*[\s\-–—|/.()]*$/i.test(text)) return "page_number";
+  if (/^[\s\-–—|/.()]*(\d+|[ivxlcdm]+)([\s\-–—|/.()]*(\d+|of))*[\s\-–—|/.()]*$/i.test(text2)) return "page_number";
   return inTop ? "header_uncertain" : "footer_uncertain";
 }
 function capturePageLayout(engine, pageIndex, paragraphs) {
   ensurePage(engine, pageIndex);
   const pageW = engine.pageWidth, pageH = engine.pageHeight;
-  const objects = listObjects2(engine);
+  const objects = listObjects(engine);
   const M = engine.M;
   const types = objects.map((h) => M._FPDFPageObj_GetType(h));
   const indexOf = new Map(objects.map((h, i) => [h, i]));
   const boxes = (paragraphs || []).filter((p) => p.box).map((p) => p.box);
-  const edgeBottomY = boxes.length ? Math.min(0, ...boxes.map(bottomOf2)) : 0;
+  const edgeBottomY = boxes.length ? Math.min(0, ...boxes.map(bottomOf)) : 0;
   const paras = (paragraphs || []).map((p) => {
     const handles = (engine.paragraphObjects(p.id) || []).map((h) => h >>> 0);
     const slots = handles.map((h) => indexOf.get(h)).filter((i) => i !== void 0).sort((a, b) => a - b);
     const baselines = (p.lines || []).map((l) => l.y).filter(Number.isFinite);
-    const size = median((p.runs || []).map((r) => r.size).filter((s) => s > 0));
+    const size2 = median((p.runs || []).map((r) => r.size).filter((s) => s > 0));
     return {
       id: p.id,
       role: classify(p, pageH, edgeBottomY),
@@ -2439,7 +2101,7 @@ function capturePageLayout(engine, pageIndex, paragraphs) {
       sharesObjects: !!p.sharesObjects,
       box: p.box ? { ...p.box } : null,
       baselines,
-      size,
+      size: size2,
       handles,
       slots,
       topLevel: slots.length === handles.length
@@ -2448,7 +2110,7 @@ function capturePageLayout(engine, pageIndex, paragraphs) {
   const numbers2 = paras.filter((q) => q.role === "page_number" && q.box?.top <= edgeBottomY + pageH * EDGE_BAND);
   for (const q of paras) {
     if (q.role !== "body" || !q.box || q.baselines.length !== 1 || q.box.top > edgeBottomY + pageH * EDGE_BAND) continue;
-    if (numbers2.some((n) => n.id !== q.id && n.baselines.some((y) => Math.abs(y - q.baselines[0]) <= 0.5) && hOverlap2(n.box, q.box) <= 0)) q.role = "footer_uncertain";
+    if (numbers2.some((n) => n.id !== q.id && n.baselines.some((y) => Math.abs(y - q.baselines[0]) <= 0.5) && hOverlap(n.box, q.box) <= 0)) q.role = "footer_uncertain";
   }
   return { pageIndex, pageW, pageH, objects, types, paras };
 }
@@ -2456,7 +2118,7 @@ function columnOf(ctx, box) {
   let right = box.x + box.w;
   for (const q of ctx.paras) {
     if (q.role !== "body" || !q.box) continue;
-    if (hOverlap2(q.box, box) < 0.35 * Math.min(box.w, q.box.w)) continue;
+    if (hOverlap(q.box, box) < 0.35 * Math.min(box.w, q.box.w)) continue;
     right = Math.max(right, q.box.x + q.box.w);
   }
   return { left: box.x, right };
@@ -2474,7 +2136,7 @@ function lastBaseline(engine, handles) {
   try {
     let y = Infinity;
     for (const h of handles) {
-      if (M._FPDFPageObj_GetType(h) !== OBJ_TEXT3 || !M._FPDFPageObj_GetMatrix(h, p)) return null;
+      if (M._FPDFPageObj_GetType(h) !== OBJ_TEXT2 || !M._FPDFPageObj_GetMatrix(h, p)) return null;
       const [a, b, c, d, e, f] = [0, 1, 2, 3, 4, 5].map((k) => M.HEAPF32[(p >> 2) + k]);
       if (Math.abs(b) > 1e-4 || Math.abs(c) > 1e-4 || !(a > 0) || !(d > 0)) return null;
       y = Math.min(y, typeof engine.toModel === "function" ? engine.toModel(e, f).y : f);
@@ -2493,43 +2155,43 @@ function inferPitch(ctx, t, info) {
     if (m2 > 0 && gaps.every((g) => Math.abs(g - m2) <= 0.05 * m2)) return { pitch: m2, from: "source_lines" };
     return null;
   }
-  const col2 = ctx.paras.filter((q) => q.role === "body" && q.box && q.baselines.length && hOverlap2(q.box, t.sourceBox) >= 0.35 * Math.min(q.box.w, t.sourceBox.w)).flatMap((q) => q.baselines).sort((a, b) => b - a);
-  const size = info?.size || 0;
-  const near4 = [];
+  const col2 = ctx.paras.filter((q) => q.role === "body" && q.box && q.baselines.length && hOverlap(q.box, t.sourceBox) >= 0.35 * Math.min(q.box.w, t.sourceBox.w)).flatMap((q) => q.baselines).sort((a, b) => b - a);
+  const size2 = info?.size || 0;
+  const near5 = [];
   for (let i = 1; i < col2.length; i++) {
     const g = col2[i - 1] - col2[i];
-    if (g > 0.5 && (!size || g < 2.6 * size)) near4.push(g);
+    if (g > 0.5 && (!size2 || g < 2.6 * size2)) near5.push(g);
   }
-  if (near4.length < 2) return null;
-  const m = median(near4);
-  const agree = near4.filter((g) => Math.abs(g - m) <= 0.05 * m).length;
-  return agree >= Math.max(2, 0.6 * near4.length) ? { pitch: m, from: "neighbour_lines" } : null;
+  if (near5.length < 2) return null;
+  const m = median(near5);
+  const agree = near5.filter((g) => Math.abs(g - m) <= 0.05 * m).length;
+  return agree >= Math.max(2, 0.6 * near5.length) ? { pitch: m, from: "neighbour_lines" } : null;
 }
 function restorePitch(engine, id, rz, pitch) {
-  const lines = (rz.lines || []).map((l) => l.y);
-  if (lines.length < 2) return { ok: true, dyLast: 0, moved: 0 };
-  const cur = median(lines.slice(1).map((y, i) => lines[i] - y));
+  const lines2 = (rz.lines || []).map((l) => l.y);
+  if (lines2.length < 2) return { ok: true, dyLast: 0, moved: 0 };
+  const cur = median(lines2.slice(1).map((y, i) => lines2[i] - y));
   if (Math.abs(cur - pitch) <= 0.25) return { ok: true, dyLast: 0, moved: 0 };
   const handles = (engine.paragraphObjects(id) || []).map((h) => h >>> 0);
-  const groups = lines.map(() => []);
+  const groups = lines2.map(() => []);
   for (const h of handles) {
     const b = engine.objectBounds(h);
     if (!b) return { ok: false, reason: "object_without_bounds" };
-    const hits = lines.map((y, k) => y >= b.y - 0.5 && y <= b.y + b.h + 0.5 ? k : -1).filter((k) => k >= 0);
-    if (hits.length !== 1) return { ok: false, reason: "object_line_ambiguous" };
-    groups[hits[0]].push(h);
+    const hits2 = lines2.map((y, k) => y >= b.y - 0.5 && y <= b.y + b.h + 0.5 ? k : -1).filter((k) => k >= 0);
+    if (hits2.length !== 1) return { ok: false, reason: "object_line_ambiguous" };
+    groups[hits2[0]].push(h);
   }
   let moved = 0;
-  for (let k = 1; k < lines.length; k++) {
-    const dy = lines[0] - k * pitch - lines[k];
+  for (let k = 1; k < lines2.length; k++) {
+    const dy = lines2[0] - k * pitch - lines2[k];
     if (Math.abs(dy) < 0.01) continue;
     for (const h of groups[k]) {
       engine.translateObject(h, 0, dy);
       moved++;
     }
   }
-  const last = lines.length - 1;
-  return { ok: true, dyLast: lines[0] - last * pitch - lines[last], moved };
+  const last = lines2.length - 1;
+  return { ok: true, dyLast: lines2[0] - last * pitch - lines2[last], moved };
 }
 function repairPageLayout(engine, pageIndex, context2, touched, options = {}) {
   const repairs = [];
@@ -2562,7 +2224,7 @@ function repairPageLayout(engine, pageIndex, context2, touched, options = {}) {
       rec.action = "kept_surgical";
       const src = (t.sourceLines || []).map((l) => l?.y).filter(Number.isFinite);
       const base = src.length ? lastBaseline(engine, handles) : null;
-      const delta2 = base !== null ? Math.min(...src) - base : bottomOf2(t.sourceBox) - bottomOf2(cur);
+      const delta2 = base !== null ? Math.min(...src) - base : bottomOf(t.sourceBox) - bottomOf(cur);
       if (delta2 > 0.5) {
         rec.grown = { by: +delta2.toFixed(2), from: base !== null ? "baselines" : "bounds" };
         grown.push({ id: t.id, box: t.sourceBox, delta: delta2 });
@@ -2594,7 +2256,7 @@ function repairPageLayout(engine, pageIndex, context2, touched, options = {}) {
     }
     rec.width = +width.toFixed(2);
     rec.lines = rz.lines?.length || 0;
-    let bottom = bottomOf2(rz.box);
+    let bottom = bottomOf(rz.box);
     const pitch = inferPitch(context2, t, info);
     if (pitch && rec.lines > 1) {
       const r = restorePitch(engine, t.id, rz, pitch.pitch);
@@ -2608,7 +2270,7 @@ function repairPageLayout(engine, pageIndex, context2, touched, options = {}) {
     } else if (rec.lines > 1) {
       warnings.push({ code: "line_pitch_unknown", id: t.id, severity: "warning" });
     }
-    const delta = bottomOf2(t.sourceBox) - bottom;
+    const delta = bottomOf(t.sourceBox) - bottom;
     if (delta > 0.5) grown.push({ id: t.id, box: t.sourceBox, delta });
   }
   const paginate = typeof options.paginate === "function" ? options.paginate : null;
@@ -2619,7 +2281,7 @@ function repairPageLayout(engine, pageIndex, context2, touched, options = {}) {
   repairs.push(...p?.repairs ?? []);
   warnings.push(...p?.warnings ?? []);
   if (!p?.ok) return { repairs, warnings, pagination: null };
-  const pagination = { added: p.added, lineCounts: p.lineCounts, keptLines: p.keptLines, bodyTop: p.bodyTop, ...p.flowTop !== void 0 ? { flowTop: p.flowTop } : {}, floor: p.floor };
+  const pagination = { added: p.added, lineCounts: p.lineCounts, keptLines: p.keptLines, bodyTop: p.bodyTop, ...p.flowTop !== void 0 ? { flowTop: p.flowTop } : {}, floor: p.floor, ...p.flowColumn ? { flowColumn: p.flowColumn } : {} };
   if (p.continuationStyle !== void 0) {
     if (!validContinuationStyle(p.continuationStyle)) {
       warnings.push({ code: "continuation_style_invalid", pageIndex, severity: "error" });
@@ -2629,26 +2291,59 @@ function repairPageLayout(engine, pageIndex, context2, touched, options = {}) {
   }
   return { repairs, warnings, pagination };
 }
+function cascadeShifts(ctx, grown) {
+  const growth = new Map(grown.map((g) => [g.id, g.delta]));
+  const ordered = ctx.paras.filter((q) => q.box && q.role === "body").sort((a, b) => b.box.top - a.box.top || a.box.x - b.box.x);
+  const shifts = /* @__PURE__ */ new Map();
+  for (let i = 0; i < ordered.length; i++) {
+    const q = ordered[i];
+    let shift = 0;
+    for (const prev of ordered.slice(0, i)) {
+      if (hOverlap(prev.box, q.box) < 0.35 * Math.min(prev.box.w, q.box.w)) continue;
+      if (q.box.top > bottomOf(prev.box) + 0.5) continue;
+      const gap = Math.max(0, bottomOf(prev.box) - q.box.top);
+      shift = Math.max(shift, (shifts.get(prev.id) || 0) + (growth.get(prev.id) || 0) - gap);
+    }
+    if (shift > 0.01) shifts.set(q.id, shift);
+  }
+  return shifts;
+}
+function cascadeBarrier(engine, ctx, grown, shifts) {
+  const bodyHandles = new Set(ctx.paras.filter((q) => q.role === "body").flatMap((q) => (engine.paragraphObjects(q.id) || []).map((h) => h >>> 0)));
+  const fixed = listObjects(engine).filter((h) => !bodyHandles.has(h)).map((h) => engine.objectBounds(h));
+  if (fixed.some((b) => !b)) return grown[0]?.id ?? "unknown";
+  const intersects2 = (a, b) => Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x) > 0.01 && Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y) > 0.01;
+  for (const q of ctx.paras) {
+    if (!q.box || q.role !== "body") continue;
+    const shift = shifts.get(q.id) || 0;
+    const delta = grown.find((g) => g.id === q.id)?.delta || 0;
+    if (!(shift > 0 || delta > 0)) continue;
+    const sweep = { x: q.box.x, y: bottomOf(q.box) - shift - delta, w: q.box.w, h: q.box.h + shift + delta };
+    const original = { x: q.box.x, y: bottomOf(q.box) - TOL, w: q.box.w, h: q.box.h + 2 * TOL };
+    const area = (a, b) => Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x)) * Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y));
+    if (fixed.some((b) => intersects2(sweep, b) && area(sweep, b) > area(original, b) + 0.01)) return q.id;
+  }
+  return null;
+}
 function cascade(engine, ctx, grown, touchedIds, repairs, warnings, allowOverflow = false) {
   const edgeTops = ctx.paras.filter((q) => q.box && q.role !== "body" && q.box.top < ctx.pageH / 2).map((q) => q.box.top);
-  const bodyBottoms = ctx.paras.filter((q) => q.box && q.role === "body").map((q) => bottomOf2(q.box));
-  const pageBottom = Math.min(...ctx.paras.filter((q) => q.box).map((q) => bottomOf2(q.box)));
+  const bodyBottoms = ctx.paras.filter((q) => q.box && q.role === "body").map((q) => bottomOf(q.box));
+  const pageBottom = Math.min(...ctx.paras.filter((q) => q.box).map((q) => bottomOf(q.box)));
   const floor = edgeTops.length ? Math.max(Math.max(...edgeTops) + 2, Math.min(pageBottom + EDGE_BAND * ctx.pageH, ...bodyBottoms)) : Math.min(...bodyBottoms, Infinity);
-  const plan = /* @__PURE__ */ new Map();
-  for (const g of grown) {
-    for (const q of ctx.paras) {
-      if (!q.box || q.id === g.id || q.role !== "body" || !q.editable) continue;
-      if (q.box.top > bottomOf2(g.box) + 0.5) continue;
-      if (hOverlap2(q.box, g.box) < 0.35 * Math.min(g.box.w, q.box.w)) continue;
-      plan.set(q.id, (plan.get(q.id) || 0) + g.delta);
+  const plan = cascadeShifts(ctx, grown);
+  for (const [id] of plan) {
+    const q = ctx.paras.find((p) => p.id === id);
+    if (!q.editable || q.sharesObjects) {
+      warnings.push({ code: "pagination_unsupported_shared_objects", id, severity: "error" });
+      return null;
     }
   }
   const violations = [];
   for (const [id, dy] of plan) {
     const q = ctx.paras.find((p) => p.id === id);
-    if (bottomOf2(q.box) - dy < floor - 0.01) violations.push(id);
+    if (bottomOf(q.box) - dy < floor - 0.01) violations.push(id);
   }
-  for (const g of grown) if (bottomOf2(g.box) - g.delta < floor - 0.01) violations.push(g.id);
+  for (const g of grown) if (bottomOf(g.box) - g.delta - (plan.get(g.id) || 0) < floor - 0.01) violations.push(g.id);
   if (violations.length) {
     if (allowOverflow) {
       warnings.push({ code: "pagination_required", severity: "info", paragraphs: violations, floor: +floor.toFixed(2) });
@@ -2657,6 +2352,12 @@ function cascade(engine, ctx, grown, touchedIds, repairs, warnings, allowOverflo
     }
     warnings.push({ code: "pagination_unsupported", severity: "error", paragraphs: violations, floor: +floor.toFixed(2) });
     repairs.push({ kind: "cascade", action: "skipped_no_room", moved: 0 });
+    return null;
+  }
+  const barrier = cascadeBarrier(engine, ctx, grown, plan);
+  if (barrier !== null) {
+    warnings.push({ code: "pagination_unsupported_foreign_object_in_flow", id: barrier, severity: "error" });
+    repairs.push({ kind: "cascade", action: "rejected_foreign_object", moved: 0 });
     return null;
   }
   let moved = 0;
@@ -2673,7 +2374,7 @@ function cascade(engine, ctx, grown, touchedIds, repairs, warnings, allowOverflo
 }
 function restoreSourceOrder(engine, ctx, repairs, warnings) {
   const M = engine.M;
-  const current = listObjects2(engine);
+  const current = listObjects(engine);
   const present = new Set(current);
   const ownerOfSource = /* @__PURE__ */ new Map();
   for (const q of ctx.paras) for (const h of q.handles) ownerOfSource.set(h, q.id);
@@ -2752,7 +2453,7 @@ function restoreSourceOrder(engine, ctx, repairs, warnings) {
     moves++;
   }
   if (moves) engine._pageDirty = true;
-  const after = listObjects2(engine);
+  const after = listObjects(engine);
   const nonText = (list3) => list3.filter((h) => !claimedText(M, h));
   const stackKept = nonText(after).join(",") === typesBefore.join(",");
   const exact = after.length === desired.length && after.every((h, i) => h === desired[i]);
@@ -2778,7 +2479,7 @@ function restoreSourceOrder(engine, ctx, repairs, warnings) {
   });
 }
 function claimedText(M, h) {
-  return M._FPDFPageObj_GetType(h) === OBJ_TEXT3;
+  return M._FPDFPageObj_GetType(h) === OBJ_TEXT2;
 }
 function readStyle(M, tp, i, buf) {
   const n = M._FPDFText_GetFontInfo(tp, i, buf, 128, buf + 128);
@@ -2808,12 +2509,12 @@ function readGlyphs(engine, pageIndex) {
   const styled = STYLE_FNS.every((f) => typeof M[f] === "function") && typeof M.UTF8ToString === "function";
   const b = M._malloc(32);
   const sb = styled ? M._malloc(256) : 0;
-  let text = "";
+  let text2 = "";
   const glyphs = [];
   const chars = [];
   for (let i = 0; i < n; i++) {
     const u = M._FPDFText_GetUnicode(tp, i);
-    text += String.fromCharCode(u);
+    text2 += String.fromCharCode(u);
     if (u <= 32 || !M._FPDFText_GetCharBox(tp, i, b, b + 8, b + 16, b + 24)) {
       chars.push({ u, cy: null, generated: typeof M._FPDFText_IsGenerated === "function" && M._FPDFText_IsGenerated(tp, i) === 1 });
       continue;
@@ -2821,12 +2522,12 @@ function readGlyphs(engine, pageIndex) {
     const l = M.HEAPF64[b >> 3], r = M.HEAPF64[b + 8 >> 3];
     const bo = M.HEAPF64[b + 16 >> 3], t = M.HEAPF64[b + 24 >> 3];
     glyphs.push(styled ? { u, l, r, b: bo, t, i, ...readStyle(M, tp, i, sb) } : { u, l, r, b: bo, t, i });
-    chars.push({ u, cy: (bo + t) / 2 });
+    chars.push({ u, cy: (bo + t) / 2, cx: (l + r) / 2 });
   }
   M._free(b);
   if (sb) M._free(sb);
   if (tp) M._FPDFText_ClosePage(tp);
-  return { text, glyphs, chars, styled, W: M._FPDF_GetPageWidthF(engine.page), H: M._FPDF_GetPageHeightF(engine.page) };
+  return { text: text2, glyphs, chars, styled, W: M._FPDF_GetPageWidthF(engine.page), H: M._FPDF_GetPageHeightF(engine.page) };
 }
 function offPage(g) {
   return g.glyphs.filter((c) => c.r > g.W + 0.5 || c.l < -0.5 || c.b < -0.5 || c.t > g.H + 0.5).length;
@@ -2840,8 +2541,8 @@ function overlaps(g, adjacentKerning = false) {
     const seen = /* @__PURE__ */ new Set();
     for (let x = Math.floor(c.l / cell); x <= Math.floor(c.r / cell); x++) {
       for (let y = Math.floor(c.b / cell); y <= Math.floor(c.t / cell); y++) {
-        const key2 = x + ":" + y;
-        for (const j of grid.get(key2) || []) {
+        const key3 = x + ":" + y;
+        for (const j of grid.get(key3) || []) {
           if (seen.has(j)) continue;
           seen.add(j);
           const d = g.glyphs[j];
@@ -2852,8 +2553,8 @@ function overlaps(g, adjacentKerning = false) {
           const other = Math.max(0.01, (d.r - d.l) * (d.t - d.b));
           if (iw * ih > 0.3 * Math.min(area, other)) count++;
         }
-        if (!grid.has(key2)) grid.set(key2, []);
-        grid.get(key2).push(i);
+        if (!grid.has(key3)) grid.set(key3, []);
+        grid.get(key3).push(i);
       }
     }
   });
@@ -2877,10 +2578,10 @@ function bodyBoxes(engine, pageIndex, g) {
   if (typeof engine.buildModel !== "function" || !uprightPage(engine) || !g.glyphs.length) return null;
   const paras = engine.buildModel();
   const boxes = paras.filter((p) => p.box).map((p) => p.box);
-  const edgeBottomY = boxes.length ? Math.min(0, ...boxes.map(bottomOf2)) : 0;
+  const edgeBottomY = boxes.length ? Math.min(0, ...boxes.map(bottomOf)) : 0;
   const lo = Math.min(...g.glyphs.map((c) => c.b)) + EDGE_BAND * g.H;
   const hi = Math.max(...g.glyphs.map((c) => c.t)) - EDGE_BAND * g.H;
-  return paras.filter((p) => p.box && classify(p, engine.pageHeight, edgeBottomY) === "body" && p.box.top > lo && bottomOf2(p.box) < hi).map((p) => p.box);
+  return paras.filter((p) => p.box && classify(p, engine.pageHeight, edgeBottomY) === "body" && p.box.top > lo && bottomOf(p.box) < hi).map((p) => p.box);
 }
 function edgeBodySplit(src, out, i, oi, s, o, es, eo) {
   const sb = bodyBoxes(src, i, s), ob = bodyBoxes(out, oi, o);
@@ -2934,8 +2635,8 @@ function expectedPageText(sourceText, pageEdits, options = {}) {
   for (const e of pageEdits) {
     const needle = normStr(e.before);
     const candidates = /* @__PURE__ */ new Map();
-    for (const [text, map] of [[matchText, matchMap], [logicalText, logicalMap]]) {
-      for (let k = needle ? text.indexOf(needle) : -1; k >= 0; k = text.indexOf(needle, k + 1)) {
+    for (const [text2, map] of [[matchText, matchMap], [logicalText, logicalMap]]) {
+      for (let k = needle ? text2.indexOf(needle) : -1; k >= 0; k = text2.indexOf(needle, k + 1)) {
         const a = map[k], b = map[k + needle.length - 1] + 1;
         candidates.set(a + ":" + b, { a, b, after: normStr(e.after), id: e.id });
       }
@@ -3158,11 +2859,11 @@ function inspectDocumentGroups(src, out, map, groups, byPage, failures, warnings
       continue;
     }
     const keys = ["bodyTop", "flowTop", "floor", "x0", "x1"];
-    const near4 = (a, b) => Number.isFinite(a) && Math.abs(a - b) <= 1e-4;
+    const near5 = (a, b) => Number.isFinite(a) && Math.abs(a - b) <= 1e-4;
     const expectedX0 = Math.min(...derived.map((b) => b.x0)), expectedX1 = Math.max(...derived.map((b) => b.x1));
-    if (ss.some((b, k) => keys.some((key2) => !near4(b[key2], derived[k][key2]))) || oo.some((b, k) => {
+    if (ss.some((b, k) => keys.some((key3) => !near5(b[key3], derived[k][key3]))) || oo.some((b, k) => {
       const destination = derived[Math.min(k, derived.length - 1)];
-      return ["bodyTop", "flowTop", "floor"].some((key2) => !near4(b[key2], destination[key2])) || !near4(b.x0, expectedX0) || !near4(b.x1, expectedX1);
+      return ["bodyTop", "flowTop", "floor"].some((key3) => !near5(b[key3], destination[key3])) || !near5(b.x0, expectedX0) || !near5(b.x1, expectedX1);
     })) {
       bad();
       continue;
@@ -3291,6 +2992,7 @@ function normalizePageMap(map, sourcePageCount) {
     if (cont.length && !(Number.isFinite(m.bodyTop) && Number.isFinite(m.floor) && m.bodyTop > m.floor)) return null;
     if (m.flowTop !== void 0 && !(cont.length && Number.isFinite(m.flowTop) && m.flowTop > m.floor && m.flowTop <= m.bodyTop + 2)) return null;
     if (cont.length && !(Array.isArray(m.lineCounts) && m.lineCounts.length === cont.length)) return null;
+    if (m.flowColumn !== void 0 && !(cont.length && Number.isFinite(m.flowColumn?.x0) && Number.isFinite(m.flowColumn?.x1) && m.flowColumn.x1 > m.flowColumn.x0)) return null;
     if (m.continuationStyle !== void 0 && !(cont.length && validContinuationStyle(m.continuationStyle))) return null;
     out.push({ ...m, continuationPageIndices: [...cont] });
   }
@@ -3395,20 +3097,20 @@ function checkContinuationEdges(s, es, g, edge, ordinal, pageIndex, outputPageIn
 }
 function glyphLines(glyphs) {
   const sorted = [...glyphs].sort((a, b) => b.t - a.t);
-  const lines = [];
+  const lines2 = [];
   let top = 0, bottom = 0;
   for (const c of sorted) {
     const cy = (c.b + c.t) / 2;
-    if (lines.length && cy <= top && cy >= bottom) {
+    if (lines2.length && cy <= top && cy >= bottom) {
       bottom = Math.min(bottom, c.b);
-      lines[lines.length - 1].push(c);
+      lines2[lines2.length - 1].push(c);
       continue;
     }
-    lines.push([c]);
+    lines2.push([c]);
     top = c.t;
     bottom = c.b;
   }
-  return lines;
+  return lines2;
 }
 function countGlyphLines(glyphs) {
   return glyphLines(glyphs).length;
@@ -3438,20 +3140,43 @@ function matchesGeneratedWhitespace(expected, chars) {
   }
   if (tokens2[0]?.ch === " ") tokens2.shift();
   if (tokens2[tokens2.length - 1]?.ch === " ") tokens2.pop();
-  const text = normStr(expected);
+  const text2 = normStr(expected);
   let at = 0;
   for (const token of tokens2) {
-    if (token.ch === text[at]) at++;
+    if (token.ch === text2[at]) at++;
     else if (!(token.ch === " " && token.optional)) return false;
   }
-  return at === text.length;
+  return at === text2.length;
 }
 function inspectContinued(s, o, out, m, pageEdits, row, failures, warnings, includeText) {
   const i = row.pageIndex;
   const { floor, bodyTop } = m;
   const lo = floor - 0.5, hi = bodyTop + 0.5;
   const flowHi = m.flowTop === void 0 ? hi : Math.min(hi, m.flowTop + 0.5);
-  const exp = expectedPageText(bandText(s, lo, flowHi), pageEdits);
+  const column = m.flowColumn;
+  const inColumn = (c) => !column || (c.cx ?? (c.l + c.r) / 2) >= column.x0 - 0.5 && (c.cx ?? (c.l + c.r) / 2) <= column.x1 + 0.5;
+  const selected = (g, top) => {
+    if (!column) return g.chars.filter((c) => c.cy === null || c.cy >= lo && c.cy <= top);
+    const visible = (c) => c.cy !== null && c.cy >= lo && c.cy <= top && inColumn(c);
+    return g.chars.filter((c, k, cs) => {
+      if (c.cy !== null) return visible(c);
+      let a = k - 1, b = k + 1;
+      while (a >= 0 && cs[a].cy === null) a--;
+      while (b < cs.length && cs[b].cy === null) b++;
+      return a >= 0 && b < cs.length && visible(cs[a]) && visible(cs[b]);
+    });
+  };
+  const flowText = (g, top) => selected(g, top).map((c) => String.fromCharCode(c.u)).join("");
+  const exp = expectedPageText(flowText(s, flowHi), pageEdits);
+  if (column) {
+    const fixed = (g) => g.glyphs.filter((c) => {
+      const cy = (c.b + c.t) / 2;
+      return cy >= lo && cy <= hi && !inColumn(c);
+    });
+    const a = fixed(s), b = fixed(o);
+    row.fixed_column_stable = sameGlyphs(a, b) && sameStyles(a, b);
+    if (!row.fixed_column_stable) failures.push({ code: "fixed_other_column_changed", pageIndex: i });
+  }
   if (flowHi < hi) {
     const fixed = (g) => g.glyphs.filter((c) => c.b + (c.t - c.b) / 2 > flowHi && c.b + (c.t - c.b) / 2 <= hi);
     const a = fixed(s), b = fixed(o);
@@ -3459,7 +3184,7 @@ function inspectContinued(s, o, out, m, pageEdits, row, failures, warnings, incl
     if (!row.fixed_body_stable) failures.push({ code: "fixed_body_above_flow_changed", pageIndex: i });
   }
   const conts = m.continuationPageIndices.map((k) => readGlyphs(out, k));
-  const parts = [normStr(bandText(o, lo, flowHi)), ...conts.map((g) => normStr(bandText(g, lo, hi)))];
+  const parts = [normStr(flowText(o, flowHi)), ...conts.map((g) => normStr(flowText(g, hi)))];
   const joined = joinFlowParts(parts, exp.ok ? exp.text : "");
   const got = joined.text;
   row.body_band = { floor: +floor.toFixed(2), bodyTop: +bodyTop.toFixed(2) };
@@ -3468,10 +3193,9 @@ function inspectContinued(s, o, out, m, pageEdits, row, failures, warnings, incl
     failures.push({ code: "expected_text_uncomputable", pageIndex: i, id: exp.id, reason: exp.reason });
   } else {
     row.text_equal = exp.text === got;
-    const sourceWords = new Set([...bandText(s, lo, flowHi).matchAll(/([\p{L}]+)\u0002\s*([\p{L}]+)/gu)].map((m2) => m2[1] + m2[2]));
+    const sourceWords = new Set([...flowText(s, flowHi).matchAll(/([\p{L}]+)\u0002\s*([\p{L}]+)/gu)].map((m2) => m2[1] + m2[2]));
     const expectedTypography = exp.text.replace(/([\p{L}]+)\u0002\s*([\p{L}]+)/gu, (raw, left, right) => sourceWords.has(left + right) ? left + right : raw);
     if (!row.text_equal) {
-      const selected = (g, top) => g.chars.filter((c) => c.cy === null || c.cy >= lo && c.cy <= top);
       const actual = [selected(o, flowHi), ...conts.map((g) => selected(g, hi))].flatMap((part, k) => k ? [{ u: 32, generated: true }, ...part] : part);
       const raw = actual.map((c) => String.fromCharCode(c.u)).join("");
       const drop = /* @__PURE__ */ new Set();
@@ -3497,6 +3221,7 @@ function inspectContinued(s, o, out, m, pageEdits, row, failures, warnings, incl
   const se = extents(s);
   row.continuation = conts.map((g, k) => {
     const bodyGlyphs = inBand(g, lo, hi);
+    if (column && bodyGlyphs.some((c2) => !inColumn(c2))) failures.push({ code: "continuation_text_outside_flow_column", pageIndex: i, outputPageIndex: m.continuationPageIndices[k] });
     const edge = outsideBand(g, lo, hi);
     const c = {
       outputPageIndex: m.continuationPageIndices[k],
@@ -3529,7 +3254,7 @@ function inspectContinued(s, o, out, m, pageEdits, row, failures, warnings, incl
   const oe = extents(o);
   if (se && oe && (oe.right > se.right + TOL || oe.left < se.left - TOL)) failures.push({ code: "text_outside_source_columns", pageIndex: i });
 }
-var TOL, EDGE_BAND, OBJ_TEXT3, normStr, paraText, bottomOf2, median, STYLE_FNS, sameStyles, inBoxes, sameGlyphs, digest, textOf2, samePlace;
+var TOL, EDGE_BAND, OBJ_TEXT2, normStr, paraText, bottomOf, median, STYLE_FNS, sameStyles, inBoxes, sameGlyphs, digest, textOf2, samePlace;
 var init_quality = __esm({
   "src/paragraph-vendor/quality.mjs"() {
     init_paragraph_pdf_crypto();
@@ -3539,10 +3264,10 @@ var init_quality = __esm({
     init_document_flow_underlines();
     TOL = 1;
     EDGE_BAND = 0.1;
-    OBJ_TEXT3 = 1;
+    OBJ_TEXT2 = 1;
     normStr = (s) => String(s).replace(/\s+/g, " ").trim();
     paraText = (p) => (p.runs || []).map((r) => r.text || "").join("");
-    bottomOf2 = (b) => b.top - b.h;
+    bottomOf = (b) => b.top - b.h;
     median = (xs) => {
       const s = [...xs].sort((a, b) => a - b);
       return s.length ? s[Math.floor(s.length / 2)] : 0;
@@ -3551,19 +3276,363 @@ var init_quality = __esm({
     sameStyles = (a, b) => a.length === b.length && a.every((c, k) => sameStyle(c.style ?? null, b[k].style ?? null));
     inBoxes = (c, boxes) => {
       const x = (c.l + c.r) / 2, y = (c.b + c.t) / 2;
-      return boxes.some((b) => x >= b.x - 0.5 && x <= b.x + b.w + 0.5 && y >= bottomOf2(b) - 0.5 && y <= b.top + 0.5);
+      return boxes.some((b) => x >= b.x - 0.5 && x <= b.x + b.w + 0.5 && y >= bottomOf(b) - 0.5 && y <= b.top + 0.5);
     };
     sameGlyphs = (a, b) => a.length === b.length && a.every((c, k) => {
       const d = b[k];
       return c.u === d.u && Math.abs(c.l - d.l) <= 0.5 && Math.abs(c.b - d.b) <= 0.5;
     });
-    digest = (text, includeText) => ({
-      sha256: createHash("sha256").update(text, "utf8").digest("hex"),
-      chars: text.length,
-      ...includeText ? { text } : {}
+    digest = (text2, includeText) => ({
+      sha256: createHash("sha256").update(text2, "utf8").digest("hex"),
+      chars: text2.length,
+      ...includeText ? { text: text2 } : {}
     });
     textOf2 = (cs) => String.fromCharCode(...cs.map((c) => c.u));
     samePlace = (c, d) => c.u === d.u && Math.abs(c.l - d.l) <= 0.5 && Math.abs(c.r - d.r) <= 0.5 && Math.abs(c.b - d.b) <= 0.5 && Math.abs(c.t - d.t) <= 0.5;
+  }
+});
+
+// src/paragraph-vendor/pagination.mjs
+function groupLines(items) {
+  const seeds = items.filter((it) => it.top - it.bottom > EPS).sort((a, b) => b.top - a.top || a.order - b.order);
+  const lines2 = [];
+  for (const it of seeds) {
+    const cy = (it.top + it.bottom) / 2;
+    const l = lines2[lines2.length - 1];
+    const lc = l ? (l.top + l.bottom) / 2 : 0;
+    if (l && (cy <= l.top + EPS && cy >= l.bottom - EPS || lc <= it.top + EPS && lc >= it.bottom - EPS)) {
+      l.items.push(it);
+      l.top = Math.max(l.top, it.top);
+      l.bottom = Math.min(l.bottom, it.bottom);
+    } else {
+      lines2.push({ top: it.top, bottom: it.bottom, items: [it] });
+    }
+  }
+  return { lines: lines2, loose: items.filter((it) => !(it.top - it.bottom > EPS)) };
+}
+function planFlow(lines2, { bodyTop, floor, maxNewPages }) {
+  if (!(bodyTop > floor)) return { ok: false, code: "pagination_body_band_invalid" };
+  for (let i = 1; i < lines2.length; i++) {
+    const a = lines2[i - 1], b = lines2[i];
+    if (!((b.top + b.bottom) / 2 < (a.top + a.bottom) / 2 && b.top <= a.top + EPS)) return { ok: false, code: "pagination_flow_not_monotonic", line: i };
+  }
+  const pages = [{ offset: 0, lines: [] }];
+  for (let i = 0; i < lines2.length; i++) {
+    const l = lines2[i];
+    const page = pages[pages.length - 1];
+    if (l.bottom + page.offset >= floor - EPS) {
+      page.lines.push(i);
+      continue;
+    }
+    const offset = bodyTop - l.top;
+    if (l.bottom + offset < floor - EPS) return { ok: false, code: "pagination_line_exceeds_body", line: i };
+    if (pages.length - 1 >= maxNewPages) return { ok: false, code: "pagination_budget_exceeded", maxNewPages };
+    pages.push({ offset, lines: [i] });
+  }
+  return { ok: true, pages };
+}
+function listObjects2(M, page) {
+  const n = M._FPDFPage_CountObjects(page);
+  const out = [];
+  for (let i = 0; i < n; i++) out.push(M._FPDFPage_GetObject(page, i) >>> 0);
+  return out;
+}
+function readBox(M, page, fn) {
+  const p = M._malloc(16);
+  try {
+    if (!M[fn](page, p, p + 4, p + 8, p + 12)) return null;
+    return [0, 1, 2, 3].map((k) => M.HEAPF32[(p >> 2) + k]);
+  } finally {
+    M._free(p);
+  }
+}
+function unsupportedPage(engine) {
+  const M = engine.M;
+  if (engine._t3seg && Object.keys(engine._t3seg).length) return "pagination_unsupported_type3_segments";
+  if (typeof M._FPDFPage_GetRotation === "function" && M._FPDFPage_GetRotation(engine.page) !== 0) return "pagination_unsupported_rotated_page";
+  const t = engine.pageT || [1, 0, 0, 1, 0, 0];
+  if ([1, 0, 0, 1, 0, 0].some((v, i) => Math.abs(t[i] - v) > 1e-4)) return "pagination_unsupported_cropped_or_offset_page";
+  const media = typeof M._FPDFPage_GetMediaBox === "function" ? readBox(M, engine.page, "_FPDFPage_GetMediaBox") : null;
+  if (media && (Math.abs(media[0]) > 1e-3 || Math.abs(media[1]) > 1e-3)) return "pagination_unsupported_cropped_or_offset_page";
+  const crop = typeof M._FPDFPage_GetCropBox === "function" ? readBox(M, engine.page, "_FPDFPage_GetCropBox") : null;
+  if (crop && media && crop.some((v, i) => Math.abs(v - media[i]) > 1e-3)) return "pagination_unsupported_cropped_or_offset_page";
+  return null;
+}
+function buildFlowPlan(engine, ctx, grown, { floor, maxNewPages }) {
+  const M = engine.M;
+  const err = (code, extra = {}) => ({ ok: false, code, ...extra });
+  const bad = unsupportedPage(engine);
+  if (bad) return err(bad);
+  const grownIds = new Set(grown.map((g) => g.id));
+  const flowTop = Math.max(...grown.map((g) => g.box.top));
+  const anchor = grown.find((g) => g.box.top === flowTop).box;
+  if (grown.some((g) => !sameColumn(g.box, anchor))) return err("pagination_unsupported_multi_column_flow");
+  const objects = listObjects2(M, engine.page);
+  const indexOf = new Map(objects.map((h, i) => [h, i]));
+  const bounds = (h) => {
+    const b = engine.objectBounds(h);
+    return b ? { top: b.y + b.h, bottom: b.y, x: b.x, w: b.w } : null;
+  };
+  const owner = /* @__PURE__ */ new Map();
+  const current = /* @__PURE__ */ new Map();
+  for (const q of ctx.paras) {
+    const hs = (engine.paragraphObjects(q.id) || []).map((h) => h >>> 0);
+    current.set(q.id, hs);
+    for (const h of hs) {
+      if (owner.has(h) && owner.get(h) !== q.id) return err("pagination_unsupported_shared_objects");
+      owner.set(h, q.id);
+    }
+  }
+  const flow = [];
+  for (const q of ctx.paras) {
+    if (!q.box) continue;
+    const cy = q.box.top - q.box.h / 2;
+    const below = q.box.top <= flowTop + 0.5;
+    if (hOverlap2(q.box, anchor) <= EPS) continue;
+    if (q.role !== "body") {
+      if (cy > floor + EPS && cy < flowTop && below) return err("pagination_unsupported_edge_paragraph_in_flow");
+      continue;
+    }
+    if (!below) continue;
+    if (!sameColumn(q.box, anchor)) return err("pagination_unsupported_multi_column_flow");
+    if (!q.editable || q.sharesObjects) return err("pagination_unsupported_shared_objects");
+    if (!q.topLevel && !grownIds.has(q.id)) return err("pagination_unsupported_non_top_level_text");
+    flow.push(q);
+  }
+  flow.sort((a, b) => b.box.top - a.box.top || a.box.x - b.box.x);
+  const shifts = cascadeShifts(ctx, grown);
+  const shiftOf = (q) => shifts.get(q.id) || 0;
+  const lines2 = [];
+  const untouchedLines = [];
+  for (const q of flow) {
+    const shift = shiftOf(q);
+    const items = [];
+    for (const h of current.get(q.id)) {
+      if (!indexOf.has(h)) return err("pagination_unsupported_non_top_level_text");
+      const b = bounds(h);
+      if (!b) return err("pagination_unsupported_non_top_level_text");
+      items.push({ h, order: indexOf.get(h), ...b });
+    }
+    const { lines: ls, loose } = groupLines(items);
+    if (!ls.length && loose.length) ls.push({ top: Math.max(...loose.map((i) => i.top)), bottom: Math.min(...loose.map((i) => i.bottom)), items: [] });
+    for (const it of loose) {
+      const l = ls.find((x) => it.bottom <= x.top + 0.5 && it.bottom >= x.bottom - 0.5) || ls[ls.length - 1];
+      l.items.push(it);
+    }
+    for (const l of ls) {
+      const line = { para: q.id, shift, top: l.top, bottom: l.bottom, items: l.items };
+      lines2.push(line);
+      if (!grownIds.has(q.id) && shift >= 0) untouchedLines.push(line);
+    }
+  }
+  const flowColumn = { x0: Math.min(...flow.map((q) => q.box.x)), x1: Math.max(...flow.map((q) => q.box.x + q.box.w)) };
+  let orphans = 0;
+  for (const h of objects) {
+    if (owner.has(h)) continue;
+    const b = bounds(h);
+    if (!b) return err("pagination_unsupported_foreign_object_in_flow");
+    const cy = (b.top + b.bottom) / 2;
+    if (b.top < floor - EPS || b.bottom > flowTop + 0.5) continue;
+    if (b.x + b.w < flowColumn.x0 - 0.5 || b.x > flowColumn.x1 + 0.5) {
+      continue;
+    }
+    if (M._FPDFPageObj_GetType(h) !== OBJ_TEXT3) {
+      const hits2 = M._FPDFPageObj_GetType(h) === 2 && b.top - b.bottom <= EPS && b.w > EPS ? lines2.filter((line) => {
+        const size2 = ctx.paras.find((q) => q.id === line.para)?.size || 0;
+        const text2 = line.items.filter((it) => {
+          const cx = it.x + it.w / 2;
+          return cx >= b.x - 3 && cx <= b.x + b.w + 3 && it.bottom - b.top >= -1 && it.bottom - b.top <= 0.4 * size2;
+        });
+        const single = text2.some((it) => Math.abs(it.x - b.x) <= 1 && Math.abs(it.x + it.w - b.x - b.w) <= 1);
+        return size2 > 0 && b.w <= 2 * size2 && text2.length && (single || Math.abs(Math.min(...text2.map((it) => it.x)) - b.x) <= 3 && Math.abs(Math.max(...text2.map((it) => it.x + it.w)) - b.x - b.w) <= 3);
+      }) : [];
+      if (hits2.length !== 1) return err("pagination_unsupported_foreign_object_in_flow");
+      hits2[0].items.push({ h, order: indexOf.get(h), ...b });
+      continue;
+    }
+    const l = untouchedLines.find((x) => cy <= x.top + 0.5 && cy >= x.bottom - 0.5);
+    if (l) {
+      l.items.push({ h, order: indexOf.get(h), ...b });
+      continue;
+    }
+    if (b.top - b.bottom <= EPS && b.w <= EPS) {
+      orphans++;
+      continue;
+    }
+    return err("pagination_unsupported_foreign_object_in_flow");
+  }
+  let bodyTop = -Infinity;
+  for (const q of ctx.paras) {
+    if (q.role !== "body") continue;
+    for (const h of current.get(q.id)) {
+      const b = indexOf.has(h) ? bounds(h) : null;
+      if (b && b.top - b.bottom > EPS) bodyTop = Math.max(bodyTop, b.top);
+    }
+  }
+  const hasFixedColumn = objects.some((h) => {
+    const b = bounds(h);
+    if (!b) return false;
+    const cy = (b.top + b.bottom) / 2;
+    return cy >= floor - EPS && cy <= bodyTop + EPS && (b.x + b.w < flowColumn.x0 - 0.5 || b.x > flowColumn.x1 + 0.5);
+  });
+  const virtual = lines2.map((l) => ({ top: l.top - l.shift, bottom: l.bottom - l.shift }));
+  const split = planFlow(virtual, { bodyTop, floor, maxNewPages });
+  if (!split.ok) return err(split.code, { line: split.line, maxNewPages: split.maxNewPages });
+  return { ok: true, lines: lines2, pages: split.pages, bodyTop, flowTop: Math.min(flowTop, bodyTop), ...hasFixedColumn ? { flowColumn } : {}, floor, orphans, objects };
+}
+function evictPagesAfter(engine, pageIndex) {
+  const M = engine.M;
+  const cache = engine._pageCache;
+  if (!cache) return;
+  for (const [k, h] of [...cache.entries()]) {
+    if (k <= pageIndex || !h || h === engine.page) continue;
+    M._ec_history_drop_page?.(engine.session, h);
+    M._FPDF_ClosePage(h);
+    cache.delete(k);
+  }
+}
+function applyFlowPlan(engine, pageIndex, plan, edges = null) {
+  const M = engine.M;
+  if (engine.pageIndex !== pageIndex) throw new Error("page_not_current");
+  for (const [p, page] of plan.pages.entries()) {
+    for (const i of page.lines) {
+      const l = plan.lines[i];
+      const dy = -l.shift + (p ? page.offset : 0);
+      if (Math.abs(dy) < 1e-6) continue;
+      for (const it of l.items) engine.translateObject(it.h, 0, dy);
+    }
+  }
+  engine._pageDirty = true;
+  if (!engine.generateContent()) throw new Error("source_generate_failed");
+  const added = plan.pages.length - 1;
+  const lineCounts = [];
+  if (added > 0) {
+    if (edges) {
+      const fresh = snapshotPageEdges(engine, plan.floor, plan.bodyTop);
+      if (!fresh.ok) throw coded(fresh.code);
+      const key3 = (s) => JSON.stringify(s.items.map((i) => [i.role, i.text, i.chars.map((c) => [c.u, c.ox.toFixed(2), c.oy.toFixed(2)])]));
+      if (key3(fresh) !== key3(edges)) throw coded("continuation_edge_snapshot_drift");
+      const pre = preflightPageEdges(engine, fresh, added);
+      if (!pre.ok) throw coded(pre.code);
+      edges = fresh;
+    }
+    evictPagesAfter(engine, pageIndex);
+    const W = engine.pageWidth, H = engine.pageHeight;
+    const before = M._FPDFPage_CountObjects(engine.page);
+    let movedTotal = 0;
+    let copiedEdges = 0;
+    for (let p = 1; p <= added; p++) {
+      const np = M._FPDFPage_New(engine.doc, pageIndex + p, W, H);
+      if (!np) throw new Error("page_new_failed");
+      try {
+        const now = new Map(listObjects2(M, engine.page).map((h, i) => [h, i]));
+        const handles = plan.pages[p].lines.flatMap((i) => plan.lines[i].items.map((it) => it.h));
+        if (handles.some((h) => !now.has(h))) throw new Error("object_not_on_source_page");
+        handles.sort((a, b) => now.get(a) - now.get(b));
+        const bodyIndex = edges ? Math.min(...handles.map((h) => edges.order.get(h) ?? Infinity)) : Infinity;
+        const applied = edges ? applyPageEdges(engine, np, edges, p, bodyIndex) : { ok: true, items: [], bodyAt: 0 };
+        if (!applied.ok) throw coded(applied.code);
+        if (applied.items.length && !M._FPDFPage_GenerateContent(np)) throw new Error("continuation_generate_failed");
+        let at = applied.bodyAt;
+        for (const h of handles) {
+          if (!M._FPDFPage_RemoveObject(engine.page, h)) throw new Error("remove_failed");
+          if (!M._FPDFPage_InsertObjectAtIndex(np, h, at++)) throw new Error("insert_failed");
+        }
+        if (M._FPDFPage_CountObjects(np) !== handles.length + applied.items.length) throw new Error("insert_count_mismatch");
+        if (edges) {
+          const proof = verifyPageEdges(engine, np, edges, p, applied);
+          if (!proof.ok) throw coded(proof.code);
+        }
+        if (!M._FPDFPage_GenerateContent(np)) throw new Error("continuation_generate_failed");
+        movedTotal += handles.length;
+        copiedEdges += applied.items.length;
+        lineCounts.push(plan.pages[p].lines.length);
+      } finally {
+        M._FPDF_ClosePage(np);
+      }
+    }
+    if (M._FPDFPage_CountObjects(engine.page) !== before - movedTotal) throw new Error("source_count_mismatch");
+    engine._pageDirty = true;
+    if (!engine.generateContent()) throw new Error("source_generate_failed");
+    M._ec_history_drop_page?.(engine.session, engine.page);
+    engine._pageStale = true;
+    engine.buildModel();
+    engine.pageCount = M._FPDF_GetPageCount(engine.doc);
+    return { added, lineCounts, keptLines: plan.pages[0].lines.length, copiedEdges };
+  }
+  return { added, lineCounts, keptLines: plan.pages[0].lines.length, copiedEdges: 0 };
+}
+function paginateOverflow(engine, ctx, grown, { floor, maxNewPages }) {
+  const warnings = [];
+  const repairs = [];
+  const reject = (code, extra = {}) => {
+    warnings.push({ code, severity: "error", ...extra });
+    repairs.push({ kind: "pagination", action: "rejected", reason: code });
+    return { ok: false, warnings, repairs, added: 0 };
+  };
+  const plan = buildFlowPlan(engine, ctx, grown, { floor, maxNewPages });
+  if (!plan.ok) return reject(plan.code, plan.maxNewPages !== void 0 ? { maxNewPages: plan.maxNewPages } : {});
+  let edges = null;
+  if (plan.pages.length > 1) {
+    const flow = new Set(plan.lines.flatMap((l) => l.items.map((it) => it.h)));
+    edges = snapshotPageEdges(engine, plan.floor, plan.bodyTop, flow);
+    if (!edges.ok) return reject(edges.code);
+    const pre = preflightPageEdges(engine, edges, plan.pages.length - 1);
+    if (!pre.ok) return reject(pre.code);
+  }
+  let r;
+  try {
+    r = applyFlowPlan(engine, ctx.pageIndex, plan, edges);
+  } catch (e) {
+    warnings.push(e?.code ? { code: e.code, severity: "error" } : { code: "pagination_apply_failed", severity: "error", reason: String(e?.message || e).slice(0, 80) });
+    repairs.push({ kind: "pagination", action: "failed" });
+    return { ok: false, warnings, repairs, added: 0 };
+  }
+  if (edges?.fixedGraphics) warnings.push({ code: "continuation_fixed_edge_graphics_not_repeated", severity: "warning", count: edges.fixedGraphics, policy: "source-graphics-preserved-text-only-continuation" });
+  if (plan.orphans) warnings.push({ code: "pagination_empty_objects_kept", severity: "info", count: plan.orphans });
+  repairs.push({ kind: "pagination", action: r.added ? "continued" : "shifted", added: r.added, keptLines: r.keptLines, lineCounts: r.lineCounts, copiedEdges: r.copiedEdges, floor: +plan.floor.toFixed(2), bodyTop: +plan.bodyTop.toFixed(2) });
+  const continuationStyle = r.added ? { version: CONTINUATION_STYLE.version, policy: CONTINUATION_STYLE.policy, applied: true } : void 0;
+  return { ok: true, warnings, repairs, added: r.added, lineCounts: r.lineCounts, keptLines: r.keptLines, bodyTop: plan.bodyTop, flowTop: plan.flowTop, flowColumn: plan.flowColumn, floor: plan.floor, continuationStyle };
+}
+var OBJ_TEXT3, EPS, PAGINATION_LIMITS, PAGINATION_CAPABILITY, hOverlap2, sameColumn, coded;
+var init_pagination = __esm({
+  "src/paragraph-vendor/pagination.mjs"() {
+    init_quality();
+    init_continuation_template();
+    OBJ_TEXT3 = 1;
+    EPS = 0.01;
+    PAGINATION_LIMITS = Object.freeze({ defaultMaxNewPages: 8, maxNewPages: 32 });
+    PAGINATION_CAPABILITY = Object.freeze({
+      supported: true,
+      scope: "single-column top-level body text flow below the edited paragraph on unrotated, uncropped pages",
+      continuationPages: "same size as the source page, inserted directly after it; moved body lines plus source-style copies of the source page's header/footer text; a standalone Arabic page number becomes source number plus decimal suffix (10.1, 10.2); no synthesized label",
+      fixedEdgeGraphics: "graphics wholly within the physical edge band stay on the original page and are omitted on text-only continuations, with an explicit warning; body-intersecting graphics still refuse",
+      sourcePageNumbers: "unchanged; existing page-number objects stay on their source page",
+      continuationStyle: Object.freeze({ version: CONTINUATION_STYLE.version, policy: CONTINUATION_STYLE.policy }),
+      downstreamPages: "never modified; only their output index shifts, see report.pagination.sourcePageMap",
+      maxNewPagesDefault: PAGINATION_LIMITS.defaultMaxNewPages,
+      maxNewPagesLimit: PAGINATION_LIMITS.maxNewPages,
+      unsupported: Object.freeze([
+        "multi_column_flow",
+        "foreign_object_in_flow",
+        "edge_paragraph_in_flow",
+        "rotated_page",
+        "cropped_or_offset_page",
+        "type3_segments",
+        "non_top_level_text",
+        "shared_objects",
+        "edge_graphics",
+        "edge_clip",
+        "edge_text_layout",
+        "edge_style",
+        "ambiguous_page_number",
+        "page_number_spacing",
+        "page_number_glyph_missing"
+      ])
+    });
+    hOverlap2 = (a, b) => Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x);
+    sameColumn = (a, b) => hOverlap2(a, b) >= 0.35 * Math.min(a.w, b.w);
+    coded = (code) => Object.assign(new Error(code), { code });
   }
 });
 
@@ -3634,7 +3703,7 @@ function applyType3LeftoverSurgery(savedBytes, jobs) {
     const tjs = job.seg.tjs || [];
     const anchors = job.anchors || {};
     const usedTj = /* @__PURE__ */ new Set();
-    const lines = [];
+    const lines2 = [];
     const injectedTjs = [];
     for (const o of leftovers) {
       let name = anchors[o.font] ?? null;
@@ -3690,11 +3759,11 @@ function applyType3LeftoverSurgery(savedBytes, jobs) {
         size: o.size,
         codes: shownCodes
       });
-      lines.push(ops);
+      lines2.push(ops);
     }
-    if (!lines.length) continue;
+    if (!lines2.length) continue;
     const prefix = "ET Q\n".repeat(leftovers.length);
-    const body = prefix + lines.join("\n") + "\n";
+    const body = prefix + lines2.join("\n") + "\n";
     const pgNum = sp.pageNum(job.pageIndex);
     if (pgNum < 0) continue;
     const spg = sp.objBody(pgNum);
@@ -3715,7 +3784,7 @@ ${body}endstream`
       `/Contents [ ${refList} ${snum} 0 R ]`
     );
     const usedNames = new Set(
-      (lines.join(" ").match(/\/([A-Za-z0-9_.#-]+)\s+[\d.]+\s+Tf/g) ?? []).map(
+      (lines2.join(" ").match(/\/([A-Za-z0-9_.#-]+)\s+[\d.]+\s+Tf/g) ?? []).map(
         (s) => s.match(/\/([A-Za-z0-9_.#-]+)/)[1]
       )
     );
@@ -3760,7 +3829,7 @@ function mergeFonts(body, usedNames, fontNums) {
   else newRes = resDict.replace(/^<</, `<< /Font << ${entries2} >> `);
   return body.replace(resDict, newRes);
 }
-function appendRevision(src, rootNum, size, pageRewrites, newObjs) {
+function appendRevision(src, rootNum, size2, pageRewrites, newObjs) {
   let out = src;
   if (!out.endsWith("\n")) out += "\n";
   const offsets = /* @__PURE__ */ new Map();
@@ -3790,7 +3859,7 @@ endobj
   const prevNum = parseInt(src.slice(prevAt + 9).trim(), 10);
   const infoM = src.slice(src.lastIndexOf("trailer")).match(/\/Info\s+(\d+)\s+\d+\s+R/);
   out += `trailer
-<< /Size ${size} /Root ${rootNum} 0 R` + (infoM ? ` /Info ${infoM[1]} 0 R` : "") + (Number.isFinite(prevNum) ? ` /Prev ${prevNum}` : "") + ` >>
+<< /Size ${size2} /Root ${rootNum} 0 R` + (infoM ? ` /Info ${infoM[1]} 0 R` : "") + (Number.isFinite(prevNum) ? ` /Prev ${prevNum}` : "") + ` >>
 startxref
 ${xrefAt}
 %%EOF
@@ -3805,8 +3874,8 @@ init_shadingsurgery();
 
 // src/paragraph-vendor/utils/freetext-script.ts
 var WINANSI_SAFE = /^[ - -ÿ€‚ƒ„…†‡ˆ‰Š‹ŒŽ‘’“”•–—˜™š›œžŸ\r\n\t]*$/;
-function needsFontEmbedding(text) {
-  return !WINANSI_SAFE.test(text ?? "");
+function needsFontEmbedding(text2) {
+  return !WINANSI_SAFE.test(text2 ?? "");
 }
 
 // src/paragraph-vendor/engine/core.js
@@ -3821,11 +3890,11 @@ function sfntCovers(bytes2, cps) {
     per = /* @__PURE__ */ new Map();
     sfntCoverMemo.set(bytes2, per);
   }
-  const key2 = cps.length ? cps.join(",") : "";
-  const hit = per.get(key2);
+  const key3 = cps.length ? cps.join(",") : "";
+  const hit = per.get(key3);
   if (hit !== void 0) return hit;
   const computed = sfntCoversUncached(bytes2, cps);
-  if (per.size < 512) per.set(key2, computed);
+  if (per.size < 512) per.set(key3, computed);
   return computed;
 }
 function sfntCoversUncached(bytes2, cps) {
@@ -4127,7 +4196,7 @@ var PdfEngine = class _PdfEngine {
   _makeProvider() {
     const M = this.M;
     const norm = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, "").replace(/(psmt|mt|ps)$/, "");
-    const normLookup = (fam, styleKey, want) => {
+    const normLookup = (fam, styleKey2, want) => {
       const target = norm(fam);
       if (!target) return null;
       let anyStyle = null;
@@ -4138,7 +4207,7 @@ var PdfEngine = class _PdfEngine {
         if (norm(kf) !== target) continue;
         if (want.length && !sfntCovers(b, want)) continue;
         const ks = bar < 0 ? "" : k.slice(bar + 1);
-        if (ks === styleKey) return b;
+        if (ks === styleKey2) return b;
         if (!anyStyle) anyStyle = b;
       }
       return anyStyle;
@@ -4150,15 +4219,15 @@ var PdfEngine = class _PdfEngine {
         const want = [];
         for (let i = 0; i < n; i++) want.push(M.HEAPU32[(cps >> 2) + i]);
         if (this.fontSnapshot) {
-          const key2 = (s) => {
+          const key3 = (s) => {
             let name = String(s || "").replace(/^[A-Z]{6}\+/, "");
             name = name.replace(/^(TimesNewRomanPS|Arial)-(BoldItalic|BoldOblique|Bold|Italic|Oblique)MT$/i, (_, family, variant) => `${/^arial$/i.test(family) ? "Arial" : "TimesNewRoman"}-${variant}`);
             name = name.replace(/[-,](?:bolditalic|boldoblique|bold|italic|oblique|regular|roman)$/i, "").toLowerCase().replace(/[\s_-]+/g, "");
             return { timesnewromanpsmt: "timesnewroman", arialmt: "arial" }[name] || name;
           };
-          const target = key2(fam);
+          const target = key3(fam);
           const faces = this.fontSnapshot.fonts;
-          const matches = (f) => target && (key2(f.family) === target || key2(f.postscriptName) === target);
+          const matches = (f) => target && (key3(f.family) === target || key3(f.postscriptName) === target);
           const rank = (f) => (f.italic === !!italic ? 0 : 2e3) + Math.abs(f.weight - (bold ? 700 : 400));
           const covering = (f) => f.bytes.length && (!want.length || sfntCovers(f.bytes, want));
           const same = faces.filter(matches).sort((a, b) => rank(a) - rank(b));
@@ -4188,8 +4257,8 @@ var PdfEngine = class _PdfEngine {
           M.HEAPU32[outSize >> 2] = face.bytes.length;
           return 1;
         }
-        const styleKey = (bold ? 1 : 0) + "" + (italic ? 1 : 0);
-        const sk = "|" + styleKey;
+        const styleKey2 = (bold ? 1 : 0) + "" + (italic ? 1 : 0);
+        const sk = "|" + styleKey2;
         const names = [fam, ...scriptFallbackFamilies(want)];
         let bytes2 = null;
         for (const nm of names) {
@@ -4202,7 +4271,7 @@ var PdfEngine = class _PdfEngine {
           }
           if (bytes2) break;
         }
-        if (!bytes2) bytes2 = normLookup(fam, styleKey, want);
+        if (!bytes2) bytes2 = normLookup(fam, styleKey2, want);
         if (!bytes2 && want.some((cp) => needsFontEmbedding(String.fromCodePoint(cp)))) {
           for (const b of _PdfEngine.fallbackFonts.values()) {
             if (b && b.length && sfntCovers(b, want)) {
@@ -4329,8 +4398,8 @@ var PdfEngine = class _PdfEngine {
     }
     if (!edits.length) return bytes2;
     const out = new Uint8Array(bytes2);
-    for (const [at, text] of edits) {
-      for (let i = 0; i < text.length; i++) out[at + i] = text.charCodeAt(i);
+    for (const [at, text2] of edits) {
+      for (let i = 0; i < text2.length; i++) out[at + i] = text2.charCodeAt(i);
     }
     return out;
   }
@@ -4458,9 +4527,9 @@ var PdfEngine = class _PdfEngine {
     this.page = handle;
     while (cache.size > PAGE_CACHE_MAX) {
       let victim = null;
-      for (const key2 of cache.keys()) {
-        if (key2 === index || this.pinnedPages?.has(key2)) continue;
-        victim = key2;
+      for (const key3 of cache.keys()) {
+        if (key3 === index || this.pinnedPages?.has(key3)) continue;
+        victim = key3;
         break;
       }
       if (victim === null) break;
@@ -4825,15 +4894,15 @@ var PdfEngine = class _PdfEngine {
       runIndex,
       sp
     );
-    const size = M.HEAPU32[sp >> 2];
+    const size2 = M.HEAPU32[sp >> 2];
     M._free(sp);
-    if (!ptr || !size) return null;
-    if (size === 1) {
+    if (!ptr || !size2) return null;
+    if (size2 === 1) {
       const flag = M.HEAPU8[ptr];
       M._ec_string_free(ptr);
       return flag === 221 ? "dishonest" : null;
     }
-    const bytes2 = M.HEAPU8.slice(ptr, ptr + size);
+    const bytes2 = M.HEAPU8.slice(ptr, ptr + size2);
     M._ec_string_free(ptr);
     return bytes2;
   }
@@ -5225,8 +5294,8 @@ var PdfEngine = class _PdfEngine {
       walk(M._FPDF_StructTree_GetChildAtIndex(tree, i));
     M._FPDF_StructTree_Close(tree);
     const out = /* @__PURE__ */ new Map();
-    const key2 = M._malloc(8);
-    M.stringToUTF8("MCID", key2, 8);
+    const key3 = M._malloc(8);
+    M.stringToUTF8("MCID", key3, 8);
     const val = M._malloc(4);
     for (let i = 0; i < this.objectCount(); i++) {
       const o = this.objectAt(i);
@@ -5247,30 +5316,30 @@ var PdfEngine = class _PdfEngine {
         M._free(nb);
         M._free(need);
         if (name !== "P" && name !== "Figure") continue;
-        if (!M._FPDFPageObjMark_GetParamIntValue(mk, key2, val)) continue;
+        if (!M._FPDFPageObjMark_GetParamIntValue(mk, key3, val)) continue;
         const mcid = M.HEAP32[val >> 2];
         if (mcid >= 0 && !registered.has(mcid))
           out.set(mcid, { mcid, type: name });
       }
     }
-    M._free(key2);
+    M._free(key3);
     M._free(val);
     return [...out.values()].sort((a, b) => a.mcid - b.mcid);
   }
   objectMcid(handle) {
     const M = this.M;
-    const key2 = M._malloc(8);
-    M.stringToUTF8("MCID", key2, 8);
+    const key3 = M._malloc(8);
+    M.stringToUTF8("MCID", key3, 8);
     const val = M._malloc(4);
     let mcid = -1;
     const nm = M._FPDFPageObj_CountMarks(handle);
     for (let k = 0; k < nm && mcid < 0; k++) {
       const mk = M._FPDFPageObj_GetMark(handle, k);
-      if (mk && M._FPDFPageObjMark_GetParamIntValue(mk, key2, val)) {
+      if (mk && M._FPDFPageObjMark_GetParamIntValue(mk, key3, val)) {
         mcid = M.HEAP32[val >> 2];
       }
     }
-    M._free(key2);
+    M._free(key3);
     M._free(val);
     return mcid;
   }
@@ -5287,16 +5356,16 @@ var PdfEngine = class _PdfEngine {
     const mk = M._FPDFPageObj_AddMark(handle, nbuf);
     let ok = false;
     if (mk) {
-      const key2 = M._malloc(8);
-      M.stringToUTF8("MCID", key2, 8);
+      const key3 = M._malloc(8);
+      M.stringToUTF8("MCID", key3, 8);
       ok = !!M._FPDFPageObjMark_SetIntParam(
         this.doc,
         handle,
         mk,
-        key2,
+        key3,
         maxM + 1
       );
-      M._free(key2);
+      M._free(key3);
     }
     M._free(nbuf);
     return ok;
@@ -5659,10 +5728,10 @@ var PdfEngine = class _PdfEngine {
     const hasT3 = this._t3seg && Object.keys(this._t3seg).length > 0;
     const incremental = !this._encrypted && (opts && opts.incremental || hasT3);
     const outPtr = M._ec_save_document(this.doc, incremental ? 1 : 2, sizePtr);
-    const size = M.HEAPU32[sizePtr >> 2];
+    const size2 = M.HEAPU32[sizePtr >> 2];
     M._free(sizePtr);
-    if (!outPtr || !size) return null;
-    let bytes2 = M.HEAPU8.slice(outPtr, outPtr + size);
+    if (!outPtr || !size2) return null;
+    let bytes2 = M.HEAPU8.slice(outPtr, outPtr + size2);
     M._ec_string_free(outPtr);
     if (hasT3 && this._t3state) {
       try {
@@ -5817,12 +5886,12 @@ var fail4 = (code) => {
 };
 var list2 = (M, p) => Array.from({ length: M._FPDFPage_CountObjects(p) }, (_, i) => M._FPDFPage_GetObject(p, i) >>> 0);
 var median2 = (xs) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)] || 14;
-function planDocumentLines(lines, bands, maxNewPages = 32) {
-  if (!lines.length || !bands.length) fail4("document_flow_empty");
+function planDocumentLines(lines2, bands, maxNewPages = 32) {
+  if (!lines2.length || !bands.length) fail4("document_flow_empty");
   const pages = bands.map((b) => ({ ...b, lines: [] }));
   let at = 0, previous = null;
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
+  for (let i = 0; i < lines2.length; i++) {
+    const line = lines2[i];
     let p = pages[at];
     let top = previous ? previous.top - line.gap : p.bodyTop;
     if (top - (line.top - line.bottom) < p.floor - 0.01) {
@@ -5866,7 +5935,7 @@ function readPart(e, pageIndex, band, origin) {
   return { pageIndex, handle: e.page, handles, paths, items: snap.items, lines: grouped.lines.map((l) => ({ ...l, origin, part: pageIndex })), band };
 }
 async function compactDocumentFlow(engineFactory, sourceBytes, intermediatePdf, edits, preliminaryMap, maxNewPages = 32, policy = "strict", annotationAdapter = null) {
-  const starts = preliminaryMap.filter((m) => m.continuationPageIndices.length && m.sourcePageIndex < preliminaryMap.length - 1);
+  const starts = preliminaryMap.filter((m) => !m.flowColumn && m.continuationPageIndices.length && m.sourcePageIndex < preliminaryMap.length - 1);
   if (!starts.length) return { pdf: intermediatePdf, sourcePageMap: preliminaryMap, flowGroups: [], addedPages: preliminaryMap.reduce((n, m) => n + m.continuationPageIndices.length, 0) };
   if (preliminaryMap.length > 64) fail4("document_flow_page_budget_exceeded");
   if (annotationAdapter && !["inspect", "transport", "validate"].every((k) => typeof annotationAdapter[k] === "function")) fail4("document_flow_annotation_adapter_invalid");
@@ -5879,8 +5948,8 @@ async function compactDocumentFlow(engineFactory, sourceBytes, intermediatePdf, 
   try {
     let plans = [];
     for (let start = 0; start < preliminaryMap.length; start++) {
-      if (!preliminaryMap[start].continuationPageIndices.length || start === preliminaryMap.length - 1) continue;
-      const bands = [], parts = [], lines = [];
+      if (preliminaryMap[start].flowColumn || !preliminaryMap[start].continuationPageIndices.length || start === preliminaryMap.length - 1) continue;
+      const bands = [], parts = [], lines2 = [];
       let end = start, planned;
       try {
         for (; end < preliminaryMap.length; end++) {
@@ -5902,15 +5971,15 @@ async function compactDocumentFlow(engineFactory, sourceBytes, intermediatePdf, 
             held.add(part.handle);
             const pitches = part.lines.slice(1).map((l, i) => part.lines[i].top - l.top).filter((x) => x > 0 && x < 30);
             const pitch = median2(pitches);
-            for (let j = 0; j < part.lines.length; j++) lines.push({ ...part.lines[j], gap: j ? part.lines[j - 1].top - part.lines[j].top : pitch });
-            if (lines.length > 1e4) fail4("document_flow_line_budget_exceeded");
+            for (let j = 0; j < part.lines.length; j++) lines2.push({ ...part.lines[j], gap: j ? part.lines[j - 1].top - part.lines[j].top : pitch });
+            if (lines2.length > 1e4) fail4("document_flow_line_budget_exceeded");
           }
-          planned = planDocumentLines(lines, bands, maxNewPages);
+          planned = planDocumentLines(lines2, bands, maxNewPages);
           if (end > start && planned.length === bands.length) break;
         }
         end = Math.min(end, preliminaryMap.length - 1);
         for (const part of parts) if (!part.items.length) fail4("document_flow_empty_body_unsupported");
-        const plan = { start, end, bands, parts, lines, pages: planned };
+        const plan = { start, end, bands, parts, lines: lines2, pages: planned };
         const authorized = nativeFitRTargetPages(annotationModel, bands.map((b) => b.sourcePageIndex));
         plan.destinationMoves = deriveNativeFitRMoves(src, bands, plannedLinkGlyphs(plan), edits, annotationModel, expectedPageText);
         plan.linkMoves = deriveNativeLinkMoves(src, bands, plannedLinkGlyphs(plan), edits, annotationModel, expectedPageText, authorized);
@@ -6033,7 +6102,7 @@ async function compactDocumentFlow(engineFactory, sourceBytes, intermediatePdf, 
       map[s].outputPageIndex = out;
       map[s].continuationPageIndices = Array.from({ length: n }, (_, k) => out + k + 1);
       if (p) {
-        for (const key2 of ["lineCounts", "keptLines", "bodyTop", "flowTop", "floor", "continuationStyle"]) delete map[s][key2];
+        for (const key3 of ["lineCounts", "keptLines", "bodyTop", "flowTop", "floor", "flowColumn", "continuationStyle"]) delete map[s][key3];
         if (n) Object.assign(map[s], { bodyTop: p.bands.at(-1).bodyTop, flowTop: p.bands.at(-1).bodyTop, floor: p.bands.at(-1).floor, lineCounts: p.pages.slice(p.bands.length).map((q) => q.lines.length), continuationStyle: { version: 1, policy: "source-number-suffix", applied: true } });
       }
       out += 1 + n;
@@ -6079,6 +6148,252 @@ async function compactDocumentFlow(engineFactory, sourceBytes, intermediatePdf, 
   }
 }
 
+// src/paragraph-column-isolation.mjs
+function isolateColumns(engine, paragraphs, edits, plan) {
+  const M = engine.M;
+  const api = ["_FPDFText_LoadPage", "_FPDFText_CountChars", "_FPDFText_GetUnicode", "_FPDFText_GetTextObject", "_FPDFText_ClosePage", "_FPDFPage_RemoveObject", "_FPDFPage_InsertObjectAtIndex", "_FPDFPageObj_GetType"];
+  if (plan.failures.length || api.some((k) => typeof M?.[k] !== "function") || ["objectCount", "objectAt", "objectBounds", "paragraphObjects"].some((k) => typeof engine[k] !== "function")) return null;
+  const tp = M._FPDFText_LoadPage(engine.page);
+  if (!tp) return null;
+  let chars = [];
+  try {
+    for (let i = 0, n = M._FPDFText_CountChars(tp); i < n; i++) chars.push({ ch: String.fromCodePoint(M._FPDFText_GetUnicode(tp, i) || 0), h: M._FPDFText_GetTextObject(tp, i) >>> 0 });
+  } finally {
+    M._FPDFText_ClosePage(tp);
+  }
+  let norm = "", map = [];
+  for (let i = 0; i < chars.length; i++) {
+    let j = i;
+    if (/\s/.test(chars[i].ch)) while (j + 1 < chars.length && /\s/.test(chars[j + 1].ch)) j++;
+    norm += /\s/.test(chars[i].ch) ? " " : chars[i].ch;
+    for (let k = 0; k < (/\s/.test(chars[i].ch) ? 1 : chars[i].ch.length); k++) map.push([i, j]);
+    i = j;
+  }
+  const selected = /* @__PURE__ */ new Set();
+  for (const edit of edits) {
+    const needle = edit.before.replace(/\s+/g, " "), at = norm.indexOf(needle);
+    if (!needle || at < 0 || norm.indexOf(needle, at + 1) >= 0) {
+      return null;
+    }
+    for (const c of chars.slice(map[at][0], map[at + needle.length - 1][1] + 1)) if (!/\s/.test(c.ch)) {
+      if (!c.h) return null;
+      selected.add(c.h);
+    }
+  }
+  const candidates = new Set(plan.plans.flatMap((p) => p.touched));
+  const foreign = /* @__PURE__ */ new Set();
+  let side = null, gap = null, gapRight = null;
+  for (const pi of candidates) {
+    const objects = engine.paragraphObjects(paragraphs[pi].id).map((h) => ({ h: h >>> 0, b: engine.objectBounds(h) }));
+    if (objects.some((o) => !o.b || !Number.isFinite(o.b.x) || !Number.isFinite(o.b.w))) return null;
+    const sorted = objects.slice().sort((a, b) => a.b.x - b.b.x);
+    let right = -Infinity, gaps = [];
+    for (const o of sorted) {
+      if (o.b.x - right >= 10) gaps.push([right, o.b.x]);
+      right = Math.max(right, o.b.x + o.b.w);
+    }
+    if (!gaps.length) continue;
+    for (const [a, b] of gaps) {
+      if (!Number.isFinite(a)) continue;
+      const chosen = objects.filter((o) => selected.has(o.h));
+      if (!chosen.length) continue;
+      const left = chosen.every((o) => o.b.x + o.b.w <= a + 0.01), rightSide = chosen.every((o) => o.b.x >= b - 0.01);
+      if (!left && !rightSide) return null;
+      const s = left ? "left" : "right";
+      if (side && (side !== s || Math.abs(gap - a) > 10)) return null;
+      side = s;
+      gap = a;
+      gapRight = b;
+      for (const o of objects) if (left ? o.b.x >= b - 0.01 : o.b.x + o.b.w <= a + 0.01) foreign.add(o.h);
+      break;
+    }
+  }
+  if (foreign.size) for (let i = 0; i < engine.objectCount(); i++) {
+    const o = engine.objectAt(i);
+    if (M._FPDFPageObj_GetType(o.handle) !== 1) continue;
+    const b = engine.objectBounds(o.handle);
+    if (b && (side === "right" ? b.x + b.w <= gap + 0.01 : b.x >= gapRight - 0.01)) foreign.add(o.handle >>> 0);
+  }
+  if (!foreign.size) return null;
+  for (const h of selected) {
+    const b = engine.objectBounds(h);
+    if (!b || (side === "left" ? b.x + b.w > gap + 0.01 : b.x < gapRight - 0.01)) return null;
+  }
+  const slots = [];
+  for (let i = 0; i < engine.objectCount(); i++) {
+    const o = engine.objectAt(i);
+    if (o && foreign.has(o.handle >>> 0)) slots.push({ h: o.handle >>> 0, i });
+  }
+  if (slots.length !== foreign.size) return null;
+  let detached = [];
+  const restore = () => {
+    let failed = false;
+    const pending = [];
+    for (const item of detached) {
+      if (!M._FPDFPage_InsertObjectAtIndex(engine.page, item.h, item.i - pending.length)) {
+        failed = true;
+        pending.push(item);
+      }
+    }
+    detached = pending;
+    if (failed) throw new Error("column_isolation_restore_failed");
+  };
+  restore.disposeDetached = () => {
+    if (!detached.length) return;
+    for (const item of detached) M._FPDFPageObj_Destroy(item.h);
+    detached = [];
+  };
+  try {
+    for (const item of slots) {
+      if (!M._FPDFPage_RemoveObject(engine.page, item.h)) throw new Error("column_isolation_remove_failed");
+      detached.push(item);
+    }
+  } catch (e) {
+    try {
+      restore();
+    } catch (restoreError) {
+      restore.disposeDetached();
+      throw restoreError;
+    }
+    throw e;
+  }
+  return restore;
+}
+
+// src/paragraph-inline-markers.mjs
+init_quality();
+var text = (gs) => gs.map((g) => String.fromCodePoint(g.u)).join("");
+var key = (gs) => text(gs).normalize("NFKC").replace(/\s/gu, "").toLowerCase();
+var originY = (g) => g.origin?.[1];
+var size = (g) => g.style.size * Math.hypot(g.style.mat?.[2] ?? 0, g.style.mat?.[3] ?? 1);
+var styleKey = (g) => JSON.stringify(g.style);
+var near4 = (a, b, t = 0.15) => Number.isFinite(a) && Number.isFinite(b) && Math.abs(a - b) <= t;
+function lines(glyphs) {
+  const out = [];
+  for (const g of glyphs.filter((g2) => g2.obj && g2.style && Number.isFinite(originY(g2))).sort((a, b) => originY(b) - originY(a) || a.l - b.l)) {
+    let line = out.find((l) => near4(l.y, originY(g), 0.5) && near4(l.size, size(g), 0.2));
+    if (!line) out.push(line = { y: originY(g), size: size(g), glyphs: [] });
+    line.glyphs.push(g);
+  }
+  for (const line of out) line.glyphs.sort((a, b) => a.l - b.l);
+  return out;
+}
+function clusters(glyphs) {
+  const groups = [];
+  for (const line of lines(glyphs)) {
+    let current = [];
+    for (const g of line.glyphs) {
+      const prev = current.at(-1);
+      if (prev && g.l - prev.r > Math.max(2, size(g) * 0.6)) {
+        groups.push(current);
+        current = [];
+      }
+      current.push(g);
+    }
+    if (current.length) groups.push(current);
+  }
+  return groups;
+}
+function stream(page, bodySize, column) {
+  const chars = [];
+  for (const line of lines(page.glyphs).filter((l) => near4(l.size, bodySize, 0.2))) {
+    for (const g of line.glyphs.filter((g2) => g2.l < page.W / 2 === column)) {
+      for (const c of key([g])) chars.push({ c, g });
+    }
+  }
+  return chars;
+}
+function hits(chars, needle) {
+  const hay = chars.map((x) => x.c).join(""), found = [];
+  for (let i = hay.indexOf(needle); i >= 0; i = hay.indexOf(needle, i + 1)) found.push(chars[i + needle.length - 1].g);
+  return found;
+}
+function planInlineMarkers(source2, output, pageIndex = 0) {
+  const warnings = [], repairs = [], sl = lines(source2.glyphs);
+  const sourceClusters = clusters(source2.glyphs), outputClusters = clusters(output.glyphs);
+  for (const marker of sourceClusters) {
+    if (!marker.length || marker.length > 12) continue;
+    const m = marker[0], left = marker[0].l;
+    const candidates = [];
+    for (const line2 of sl) {
+      if (line2.size < size(m) * 1.2 || line2.size > size(m) * 3 || line2.y >= originY(m) || originY(m) - line2.y > line2.size * 0.8) continue;
+      const preceding = line2.glyphs.filter((g) => g.r <= left + 1 && left - g.r <= line2.size * 1.3);
+      if (!preceding.length) continue;
+      const parent2 = preceding.at(-1), gap = left - parent2.r;
+      if (gap < -1 || gap > line2.size * 1.3) continue;
+      const column2 = parent2.l < source2.W / 2, chars2 = stream(source2, line2.size, column2);
+      const end = chars2.findLastIndex((c) => c.g === parent2);
+      if (end < 0) continue;
+      const anchor2 = chars2.slice(Math.max(0, end - 39), end + 1).map((c) => c.c).join("");
+      if (anchor2.length < 12) continue;
+      candidates.push({ line: line2, parent: parent2, anchor: anchor2, column: column2, chars: chars2 });
+    }
+    if (candidates.length !== 1) continue;
+    const { line, parent, anchor, column, chars } = candidates[0];
+    const sourceHits = hits(chars, anchor), targetHits = hits(stream(output, line.size, column), anchor);
+    const same = (gs) => text(gs) === text(marker) && gs.length === marker.length && gs.every((g, i) => styleKey(g) === styleKey(marker[i]));
+    const sourceMarkers = sourceClusters.filter(same), targetMarkers = outputClusters.filter(same);
+    if (sourceHits.length !== 1 || sourceHits[0] !== parent || targetHits.length !== 1 || sourceMarkers.length !== 1 || targetMarkers.length !== 1) {
+      warnings.push({ pageIndex, code: "inline_marker_ambiguous", sourceIndex: m.i, text: text(marker) });
+      continue;
+    }
+    const target = targetHits[0], outMarker = targetMarkers[0], selected = new Set(outMarker);
+    const handles = [...new Set(outMarker.map((g) => g.obj))];
+    if (handles.some((h) => output.glyphs.some((g) => g.obj === h && !selected.has(g)))) {
+      warnings.push({ pageIndex, code: "inline_marker_object_ambiguous", sourceIndex: m.i, text: text(marker) });
+      continue;
+    }
+    const dx = target.r + (left - parent.r) - outMarker[0].l;
+    const dy = originY(target) + (originY(m) - line.y) - originY(outMarker[0]);
+    if (Math.hypot(dx, dy) >= 1) for (const object of handles) repairs.push({ pageIndex, sourceIndex: m.i, object, dx, dy });
+  }
+  return { repairs, warnings };
+}
+async function repairInlineMarkers({ engineFactory, sourceBytes, outputBytes, pageIndices, sourcePageMap }) {
+  let src, out;
+  const repairs = [], warnings = [];
+  try {
+    src = await engineFactory(sourceBytes);
+    out = await engineFactory(outputBytes);
+    for (const pageIndex of pageIndices) {
+      const mapping2 = sourcePageMap?.find((m) => m.sourcePageIndex === pageIndex);
+      if (sourcePageMap && (!mapping2 || mapping2.continuationPageIndices?.length)) {
+        warnings.push({ pageIndex, code: "inline_marker_continuation_unverified" });
+        continue;
+      }
+      const outputPageIndex = mapping2?.outputPageIndex ?? pageIndex;
+      const s = readGlyphs(src, pageIndex), o = readGlyphs(out, outputPageIndex);
+      if (!s.styled || !o.styled) {
+        warnings.push({ pageIndex, code: "inline_marker_style_unavailable" });
+        continue;
+      }
+      const plan = planInlineMarkers(s, o, pageIndex);
+      warnings.push(...plan.warnings);
+      const seen = /* @__PURE__ */ new Set(), counts = /* @__PURE__ */ new Map();
+      for (const move of plan.repairs) counts.set(move.object, (counts.get(move.object) || 0) + 1);
+      const conflicts = new Set(plan.repairs.filter((move) => counts.get(move.object) !== 1).map((move) => move.sourceIndex));
+      for (const sourceIndex of conflicts) warnings.push({ pageIndex, code: "inline_marker_object_ambiguous", sourceIndex });
+      for (const move of plan.repairs) {
+        if (conflicts.has(move.sourceIndex)) continue;
+        seen.add(move.object);
+        out.M._FPDFPageObj_Transform(move.object, 1, 0, 0, 1, move.dx, move.dy);
+        repairs.push({ pageIndex, sourceIndex: move.sourceIndex, dx: move.dx, dy: move.dy });
+      }
+      if (seen.size) {
+        if (!out.M._FPDFPage_GenerateContent(out.page)) throw new Error("inline_marker_generate_failed");
+        if (out.M._FPDFPage_GetAnnotCount?.(out.page) > 0) warnings.push({ pageIndex, code: "inline_marker_annotations_unverified" });
+      }
+    }
+    return { pdf: repairs.length ? new Uint8Array(out.save()) : new Uint8Array(outputBytes), repairs, warnings };
+  } finally {
+    try {
+      src?.close();
+    } finally {
+      out?.close();
+    }
+  }
+}
+
 // src/paragraph-vendor/inline-preservation.mjs
 init_shadingsurgery();
 var WS = /^\s+$/;
@@ -6103,11 +6418,11 @@ function planInlineChange(paras, chars, map, hit, needle, after) {
   while (s < bt.length - p && s < at.length - p && same(bt[bt.length - 1 - s], at[at.length - 1 - s])) s++;
   const D = bt.slice(p, bt.length - s);
   const X = at.slice(p, at.length - s);
-  const text = X.join("");
+  const text2 = X.join("");
   const del = D.flatMap(rawOf).filter((c) => c.pi >= 0);
-  if (!text) return { del, inserts: [] };
+  if (!text2) return { del, inserts: [] };
   const style = (c) => runStyleKey(paras[c.pi].runs[c.ri]);
-  const place = (c, text2, after2 = false) => ({ pi: c.pi, ri: c.ri, o: c.o + (after2 ? 1 : 0), text: text2 });
+  const place = (c, text3, after2 = false) => ({ pi: c.pi, ri: c.ri, o: c.o + (after2 ? 1 : 0), text: text3 });
   const words = del.filter((c) => !isWs(c));
   if (words.length) {
     const styles = new Set(words.map(style));
@@ -6115,9 +6430,9 @@ function planInlineChange(paras, chars, map, hit, needle, after) {
     if (paraSet.size > 1) {
       const lastPi = Math.max(...paraSet);
       const anchor = del.find((c) => c.pi === lastPi);
-      return { del, inserts: [place(anchor, text)], warning: styles.size > 1 ? "style_inherited_across_paragraphs" : void 0 };
+      return { del, inserts: [place(anchor, text2)], warning: styles.size > 1 ? "style_inherited_across_paragraphs" : void 0 };
     }
-    if (styles.size === 1) return { del, inserts: [place(words[0], text)] };
+    if (styles.size === 1) return { del, inserts: [place(words[0], text2)] };
     if (D.length !== X.length) return { failure: "AMBIGUOUS_STYLE" };
     const sourceStyles = /* @__PURE__ */ new Map();
     for (const b of bt) {
@@ -6153,11 +6468,11 @@ function planInlineChange(paras, chars, map, hit, needle, after) {
   const rightWord = right.find((c) => c.pi >= 0 && !isWs(c));
   const lk = leftWord && style(leftWord), rk = rightWord && style(rightWord);
   if (lk && rk && lk !== rk) return { failure: "AMBIGUOUS_STYLE" };
-  const viaLeft = left.length && left.at(-1).pi >= 0 ? place(left.at(-1), text, true) : null;
-  const viaRight = right.length && right[0].pi >= 0 ? place(right[0], text) : null;
+  const viaLeft = left.length && left.at(-1).pi >= 0 ? place(left.at(-1), text2, true) : null;
+  const viaRight = right.length && right[0].pi >= 0 ? place(right[0], text2) : null;
   const want = lk || rk;
   if (!want) {
-    if (del.length && new Set(del.map(style)).size === 1) return { del, inserts: [place(del[0], text)] };
+    if (del.length && new Set(del.map(style)).size === 1) return { del, inserts: [place(del[0], text2)] };
     return { failure: "AMBIGUOUS_STYLE" };
   }
   const ins = [rk ? viaRight : null, lk ? viaLeft : null, viaRight, viaLeft].find((c) => c && style(c) === want);
@@ -6194,11 +6509,11 @@ async function sourceLineCodes(engine, x, y) {
     if (!rec) return null;
     const raw = await streamData(bytes2, src, { num: id, ...rec });
     if (raw == null) return null;
-    const text = typeof raw === "string" ? raw : latin(raw);
+    const text2 = typeof raw === "string" ? raw : latin(raw);
     const re = new RegExp(`(${num})\\s+(${num})\\s+(${num})\\s+(${num})\\s+(${num})\\s+(${num})\\s+Tm\\b`, "g");
-    for (const m of text.matchAll(re)) {
+    for (const m of text2.matchAll(re)) {
       if (Math.abs(+m[5] - x) > 0.02 || Math.abs(+m[6] - y) > 0.02) continue;
-      const tail = text.slice(m.index + m[0].length);
+      const tail = text2.slice(m.index + m[0].length);
       const show = tail.match(/^\s*(\[(?:[^\[\]]|\\.)*\]\s*TJ|\((?:[^()\\]|\\.)*\)\s*Tj)/);
       if (!show) continue;
       const op = show[1], codes = [];
@@ -6236,14 +6551,14 @@ async function sourceLineCodes(engine, x, y) {
   return matches.length === 1 ? matches[0] : null;
 }
 async function commitSourceLineDeletion(engine, para, runs) {
-  const lines = para.lines || [], old = para.runs.map((r) => r.text).join(""), next = runs.map((r) => r.text).join("");
+  const lines2 = para.lines || [], old = para.runs.map((r) => r.text).join(""), next = runs.map((r) => r.text).join("");
   let a = 0, b = 0;
   while (a < next.length && old[a] === next[a]) a++;
   while (b < next.length - a && old[old.length - 1 - b] === next[next.length - 1 - b]) b++;
   if (next.length >= old.length || a + b !== next.length) return null;
-  const end = old.length - b, k = lines.findIndex((l, i) => a >= l.off && end <= (lines[i + 1]?.off ?? old.length));
+  const end = old.length - b, k = lines2.findIndex((l, i) => a >= l.off && end <= (lines2[i + 1]?.off ?? old.length));
   if (k < 0 || /[\r\n]/.test(old.slice(a, end))) return null;
-  const start = lines[k].off, limit = lines[k + 1]?.off ?? old.length, source2 = old.slice(start, limit).replace(/\s+$/, "");
+  const start = lines2[k].off, limit = lines2[k + 1]?.off ?? old.length, source2 = old.slice(start, limit).replace(/\s+$/, "");
   if (end > start + source2.length || !source2.length) return null;
   const M = engine.M;
   const api = ["_FPDFText_LoadPage", "_FPDFText_CountChars", "_FPDFText_GetUnicode", "_FPDFText_GetTextObject", "_FPDFText_GetCharOrigin", "_FPDFText_ClosePage", "_FPDFText_SetCharcodes", "_FPDFText_SetPositions", "_FPDFPageObj_GetMatrix"];
@@ -6257,7 +6572,7 @@ async function commitSourceLineDeletion(engine, para, runs) {
         const h = M._FPDFText_GetTextObject(tp, i) >>> 0;
         if (!handles.has(h) || !M._FPDFText_GetCharOrigin(tp, i, buf, buf + 8)) continue;
         const y = M.HEAPF64[buf + 8 >> 3];
-        if (Math.abs(y - lines[k].y) <= 0.5) glyph.push({ h, u: M._FPDFText_GetUnicode(tp, i), x: M.HEAPF64[buf >> 3], y });
+        if (Math.abs(y - lines2[k].y) <= 0.5) glyph.push({ h, u: M._FPDFText_GetUnicode(tp, i), x: M.HEAPF64[buf >> 3], y });
       }
       return glyph;
     } finally {
@@ -6274,7 +6589,7 @@ async function commitSourceLineDeletion(engine, para, runs) {
     try {
       for (let i = 0; i < M._FPDFText_CountChars(check); i++) {
         if (M._FPDFText_GetTextObject(check, i) >>> 0 !== h) continue;
-        if (!M._FPDFText_GetCharOrigin(check, i, buf, buf + 8) || Math.abs(M.HEAPF64[buf + 8 >> 3] - lines[k].y) > 0.5) {
+        if (!M._FPDFText_GetCharOrigin(check, i, buf, buf + 8) || Math.abs(M.HEAPF64[buf + 8 >> 3] - lines2[k].y) > 0.5) {
           otherLine = true;
           break;
         }
@@ -6307,16 +6622,16 @@ async function commitSourceLineDeletion(engine, para, runs) {
       const j = kept[i], expected = glyph[j].x - (j >= right ? shift : 0);
       return g.h !== h || g.u !== glyph[j].u || Math.abs(g.y - glyph[j].y) > 0.02 || Math.abs(g.x - expected) > 0.02;
     })) throw new LineRetentionError("source_deletion_proof_failed");
-    return { upd: { id: para.id, surgical: true, lines }, lines: { status: "source_line_deletion", line: k } };
+    return { upd: { id: para.id, surgical: true, lines: lines2 }, lines: { status: "source_line_deletion", line: k } };
   } finally {
     M._free(buf);
   }
 }
 async function commitGeometricPrefix(engine, para, del, inserts) {
-  const M = engine.M, lines = para.lines || [];
+  const M = engine.M, lines2 = para.lines || [];
   const api = ["_FPDFText_LoadPage", "_FPDFText_CountChars", "_FPDFText_GetUnicode", "_FPDFText_GetTextObject", "_FPDFText_GetCharOrigin", "_FPDFText_GetCharBox", "_FPDFText_ClosePage", "_FPDFText_SetCharcodes", "_FPDFText_SetPositions", "_FPDFPageObj_GetMatrix"];
-  if (!lines.length || inserts.length !== 1 || !api.every((k) => typeof M?.[k] === "function")) return null;
-  const flat = para.runs.map((r) => r.text).join(""), start = lines.at(-1).off, offsets = [];
+  if (!lines2.length || inserts.length !== 1 || !api.every((k) => typeof M?.[k] === "function")) return null;
+  const flat = para.runs.map((r) => r.text).join(""), start = lines2.at(-1).off, offsets = [];
   let offset = 0;
   para.runs.forEach((r, ri) => {
     for (let o = 0; o < r.text.length; o++, offset++) if (del.has(ri + ":" + o)) offsets.push(offset);
@@ -6332,7 +6647,7 @@ async function commitGeometricPrefix(engine, para, del, inserts) {
         const h = M._FPDFText_GetTextObject(tp, i) >>> 0;
         if (!handles.has(h) || !M._FPDFText_GetCharOrigin(tp, i, buf, buf + 8)) continue;
         const y = M.HEAPF64[buf + 8 >> 3];
-        if (Math.abs(y - lines.at(-1).y) <= 0.5) {
+        if (Math.abs(y - lines2.at(-1).y) <= 0.5) {
           const x = M.HEAPF64[buf >> 3];
           if (!M._FPDFText_GetCharBox(tp, i, buf + 16, buf + 24, buf + 32, buf + 40)) throw new LineRetentionError("glyph_box_unavailable");
           rows.push({ h, u: M._FPDFText_GetUnicode(tp, i), x, y, box: [0, 1, 2, 3].map((k) => M.HEAPF64[(buf + 16 >> 3) + k]) });
@@ -6352,12 +6667,12 @@ async function commitGeometricPrefix(engine, para, del, inserts) {
     if (!(a > 0 && d > 0) || Math.abs(b) > 1e-4 || Math.abs(c) > 1e-4) return null;
     const codes = await sourceLineCodes(engine, x, y);
     if (!codes || codes.length < line.length || codes.length > line.length + 1 || ins.text !== ".") return null;
-    const text = line.slice(0, keep) + ins.text, tp = M._malloc(text.length * 4), pp = M._malloc(keep * 4);
+    const text2 = line.slice(0, keep) + ins.text, tp = M._malloc(text2.length * 4), pp = M._malloc(keep * 4);
     try {
       for (let i = 0; i < keep; i++) M.HEAPU32[(tp >> 2) + i] = codes[i];
       M.HEAPU32[(tp >> 2) + keep] = 46;
       for (let i = 1; i <= keep; i++) M.HEAPF32[(pp >> 2) + i - 1] = (before[i].x - before[0].x) / a;
-      if (!M._FPDFText_SetCharcodes(h, tp, text.length) || !M._FPDFText_SetPositions(h, pp, keep)) throw new LineRetentionError("geometric_prefix_write_failed");
+      if (!M._FPDFText_SetCharcodes(h, tp, text2.length) || !M._FPDFText_SetPositions(h, pp, keep)) throw new LineRetentionError("geometric_prefix_write_failed");
     } finally {
       M._free(tp);
       M._free(pp);
@@ -6365,16 +6680,16 @@ async function commitGeometricPrefix(engine, para, del, inserts) {
     engine._pageDirty = true;
     engine._spliceOk = false;
     const after = read();
-    if (after.length !== text.length || after.some((g, i) => g.h !== h || g.u !== text.charCodeAt(i) || Math.abs(g.x - before[i].x) > 0.02 || Math.abs(g.y - before[i].y) > 0.02 || i < keep && g.box.some((v, k) => Math.abs(v - before[i].box[k]) > 0.02))) throw new LineRetentionError("geometric_prefix_proof_failed");
-    return { upd: { id: para.id, surgical: true, lines }, lines: { status: "geometric_prefix", keptGlyphs: keep } };
+    if (after.length !== text2.length || after.some((g, i) => g.h !== h || g.u !== text2.charCodeAt(i) || Math.abs(g.x - before[i].x) > 0.02 || Math.abs(g.y - before[i].y) > 0.02 || i < keep && g.box.some((v, k) => Math.abs(v - before[i].box[k]) > 0.02))) throw new LineRetentionError("geometric_prefix_proof_failed");
+    return { upd: { id: para.id, surgical: true, lines: lines2 }, lines: { status: "geometric_prefix", keptGlyphs: keep } };
   } finally {
     M._free(buf);
   }
 }
 function removeGeometricFirstLine(engine, para, del, inserts) {
-  const M = engine.M, lines = para.lines || [];
-  if (inserts.length || lines.length < 2 || typeof M?._FPDFPage_RemoveObject !== "function" || typeof M._FPDFPageObj_Destroy !== "function" || typeof engine.retainDetachedObject !== "function") return false;
-  const flat = para.runs.map((r) => r.text).join(""), end = lines[1].off, line = flat.slice(0, end), visible = line.replace(/\s+$/, "");
+  const M = engine.M, lines2 = para.lines || [];
+  if (inserts.length || lines2.length < 2 || typeof M?._FPDFPage_RemoveObject !== "function" || typeof M._FPDFPageObj_Destroy !== "function" || typeof engine.retainDetachedObject !== "function") return false;
+  const flat = para.runs.map((r) => r.text).join(""), end = lines2[1].off, line = flat.slice(0, end), visible = line.replace(/\s+$/, "");
   if (!visible || !/^\s*$/.test(line.slice(visible.length))) return false;
   const offsets = [];
   let n = 0;
@@ -6392,7 +6707,7 @@ function removeGeometricFirstLine(engine, para, del, inserts) {
       const h2 = M._FPDFText_GetTextObject(tp, i) >>> 0;
       if (!handles.has(h2) || !M._FPDFText_GetCharOrigin(tp, i, buf, buf + 8)) continue;
       const y = M.HEAPF64[buf + 8 >> 3];
-      if (Math.abs(y - lines[0].y) <= 0.5) rows.push({ h: h2, u: M._FPDFText_GetUnicode(tp, i) });
+      if (Math.abs(y - lines2[0].y) <= 0.5) rows.push({ h: h2, u: M._FPDFText_GetUnicode(tp, i) });
       else other.push(h2);
     }
   } finally {
@@ -6410,15 +6725,15 @@ function removeGeometricFirstLine(engine, para, del, inserts) {
   return true;
 }
 function sourceLinePlan(para, del, inserts) {
-  const lines = para.lines || [];
-  if (!lines.length || lines.some((l) => !Number.isFinite(l?.y) || !Number.isFinite(l?.x) || !Number.isInteger(l?.off))) return null;
+  const lines2 = para.lines || [];
+  if (!lines2.length || lines2.some((l) => !Number.isFinite(l?.y) || !Number.isFinite(l?.x) || !Number.isInteger(l?.off))) return null;
   const runStart = [];
   const flat = [];
   para.runs.forEach((r, ri) => {
     runStart.push(flat.length);
     for (let o = 0; o < r.text.length; o++) flat.push({ ri, o, ch: r.text[o] });
   });
-  const starts = lines.map((l) => l.off);
+  const starts = lines2.map((l) => l.off);
   for (let k = 1; k < starts.length; k++) if (!(starts[k] > starts[k - 1]) || starts[k] > flat.length) return { reason: "line_offsets_invalid" };
   const lineOf = (f) => {
     let k = 0;
@@ -6434,8 +6749,8 @@ function sourceLinePlan(para, del, inserts) {
     breaks.add(c.ri + ":" + c.o);
   }
   const edited = /* @__PURE__ */ new Set();
-  for (const key2 of del) {
-    const [ri, o] = key2.split(":").map(Number);
+  for (const key3 of del) {
+    const [ri, o] = key3.split(":").map(Number);
     edited.add(lineOf(runStart[ri] + o));
   }
   for (const ins of inserts) {
@@ -6450,14 +6765,14 @@ var TEXT_FNS = ["_FPDFPage_CountObjects", "_FPDFPage_GetObject", "_FPDFText_Load
 function canRetainLines(engine) {
   return ENGINE_FNS.every((f) => typeof engine?.[f] === "function") && TEXT_FNS.every((f) => typeof engine?.M?.[f] === "function");
 }
-function lineGlyphs(engine, handles, lines) {
+function lineGlyphs(engine, handles, lines2) {
   const M = engine.M;
   const own = new Set(handles.map((h) => h >>> 0));
   const tp = M._FPDFText_LoadPage(engine.page);
   const n = tp ? M._FPDFText_CountChars(tp) : 0;
   const buf = M._malloc(192);
   const matrix = typeof M._FPDFText_GetMatrix === "function";
-  const out = lines.map(() => []);
+  const out = lines2.map(() => []);
   for (let i = 0; i < n; i++) {
     const u = M._FPDFText_GetUnicode(tp, i);
     const h = M._FPDFText_GetTextObject(tp, i) >>> 0;
@@ -6466,18 +6781,18 @@ function lineGlyphs(engine, handles, lines) {
     const x = M.HEAPF64[buf >> 3], y = M.HEAPF64[buf + 8 >> 3];
     const len = M._FPDFText_GetFontInfo(tp, i, buf + 16, 128, buf + 144);
     const font = len > 0 && len <= 128 ? M.UTF8ToString(buf + 16, 128) : null;
-    const size = M._FPDFText_GetFontSize(tp, i);
+    const size2 = M._FPDFText_GetFontSize(tp, i);
     let aspect = null;
     if (matrix && M._FPDFText_GetMatrix(tp, i, buf + 160)) {
       const [a, b, c, d] = [0, 1, 2, 3].map((j) => M.HEAPF32[(buf + 160 >> 2) + j]);
       if (a > 0 && d > 0 && Math.abs(b) <= ASPECT_TOL * d && Math.abs(c) <= ASPECT_TOL * d) aspect = a / d;
     }
     let k = -1, best = Infinity;
-    lines.forEach((l, j) => {
+    lines2.forEach((l, j) => {
       const d = Math.abs(l.y - y);
       if (d < best) [k, best] = [j, d];
     });
-    if (k >= 0 && best <= Math.max(0.5, 0.3 * size)) out[k].push({ u, x, y, font, size, aspect, h });
+    if (k >= 0 && best <= Math.max(0.5, 0.3 * size2)) out[k].push({ u, x, y, font, size: size2, aspect, h });
   }
   M._free(buf);
   if (tp) M._FPDFText_ClosePage(tp);
@@ -6489,9 +6804,9 @@ function alignLines(engine, id, committed, source2, edited) {
   for (const h of (engine.paragraphObjects(id) || []).map((x) => x >>> 0)) {
     const b = engine.objectBounds(h);
     if (!b) return false;
-    const hits = committed.map((l, k) => l.y >= b.y - 0.5 && l.y <= b.y + b.h + 0.5 ? k : -1).filter((k) => k >= 0);
-    if (hits.length !== 1) return false;
-    groups[hits[0]].push(h);
+    const hits2 = committed.map((l, k) => l.y >= b.y - 0.5 && l.y <= b.y + b.h + 0.5 ? k : -1).filter((k) => k >= 0);
+    if (hits2.length !== 1) return false;
+    groups[hits2[0]].push(h);
   }
   committed.forEach((l, k) => {
     const dx = edited.has(k) ? 0 : source2[k].x - l.x;
@@ -6603,15 +6918,15 @@ var squash = (s) => s.replace(/\s+/g, " ").trim();
 var baseStyle = (r) => runStyleKey({ ...r, hScale: 1 });
 var paraKey = (p) => (p.box ? [p.box.x, p.box.top, p.box.w, p.box.h].map((v) => Math.round(v * 100)).join(",") : "-") + "|" + textOf3(p);
 function editedLineSpan(para, del, inserts) {
-  const lines = para.lines || [];
-  if (!lines.length || lines.some((l) => !Number.isFinite(l?.y) || !Number.isFinite(l?.x) || !Number.isFinite(l?.w) || !Number.isInteger(l?.off))) return null;
+  const lines2 = para.lines || [];
+  if (!lines2.length || lines2.some((l) => !Number.isFinite(l?.y) || !Number.isFinite(l?.x) || !Number.isFinite(l?.w) || !Number.isInteger(l?.off))) return null;
   const runStart = [];
   let n = 0;
   for (const r of para.runs) {
     runStart.push(n);
     n += r.text.length;
   }
-  const starts = lines.map((l) => l.off);
+  const starts = lines2.map((l) => l.off);
   if (starts[0] !== 0) return { reason: "line_offsets_invalid" };
   for (let k2 = 1; k2 < starts.length; k2++) if (!(starts[k2] > starts[k2 - 1]) || starts[k2] > n) return { reason: "line_offsets_invalid" };
   const lineOf = (f) => {
@@ -6619,8 +6934,8 @@ function editedLineSpan(para, del, inserts) {
     while (k2 + 1 < starts.length && starts[k2 + 1] <= f) k2++;
     return k2;
   };
-  const delAt = [...del].map((key2) => {
-    const [ri, o] = key2.split(":").map(Number);
+  const delAt = [...del].map((key3) => {
+    const [ri, o] = key3.split(":").map(Number);
     return runStart[ri] + o;
   });
   const insAt = inserts.map((ins) => runStart[ins.ri] + ins.o);
@@ -6789,7 +7104,7 @@ function commitLineLocal(engine, paras, pi, del, inserts, changed = /* @__PURE__
   if (!upd) return restore("edited_line_wraps");
   const w0 = upd.lines[0].w;
   const spaces = (newLine.match(/ /g) || []).length;
-  const size = Math.max(...runs.map((r) => r.size || 0)) || 10;
+  const size2 = Math.max(...runs.map((r) => r.size || 0)) || 10;
   let ws = 0;
   let justified = false;
   if (justify && spaces) {
@@ -6807,7 +7122,7 @@ function commitLineLocal(engine, paras, pi, del, inserts, changed = /* @__PURE__
     for (let j = 0; j + 1 < newLine.length; j++) {
       if (newLine[j] !== " ") continue;
       const gap = cx[j + 1] - cx[j];
-      if (!(gap >= LOCAL_JUSTIFY.min * size && gap <= LOCAL_JUSTIFY.max * size)) return restore(gap <= LOCAL_JUSTIFY.min * size ? "edited_line_too_wide" : "justification_out_of_range");
+      if (!(gap >= LOCAL_JUSTIFY.min * size2 && gap <= LOCAL_JUSTIFY.max * size2)) return restore(gap <= LOCAL_JUSTIFY.min * size2 ? "edited_line_too_wide" : "justification_out_of_range");
     }
     justified = true;
   } else if (w0 > target + WIDTH_TOL) {
@@ -6875,8 +7190,8 @@ function sliceRuns(runs, from) {
     const a = Math.max(0, from - n);
     n += r.text.length;
     if (a >= r.text.length) continue;
-    const text = r.text.slice(a);
-    if (text) out.push({ ...r, text });
+    const text2 = r.text.slice(a);
+    if (text2) out.push({ ...r, text: text2 });
   }
   return out;
 }
@@ -6904,7 +7219,7 @@ function collectGlyphs(engine, handles) {
     const x = M.HEAPF64[buf >> 3], y = M.HEAPF64[buf + 8 >> 3];
     const len = M._FPDFText_GetFontInfo(tp, i, buf + 16, 128, buf + 144);
     const font = len > 0 && len <= 128 ? M.UTF8ToString(buf + 16, 128) : null;
-    const size = M._FPDFText_GetFontSize(tp, i);
+    const size2 = M._FPDFText_GetFontSize(tp, i);
     let aspect = null;
     let vd = null;
     if (matrix && M._FPDFText_GetMatrix(tp, i, buf + 160)) {
@@ -6912,7 +7227,7 @@ function collectGlyphs(engine, handles) {
       vd = d;
       if (a > 0 && d > 0 && Math.abs(b) <= ASPECT_TOL * d && Math.abs(c) <= ASPECT_TOL * d) aspect = a / d;
     }
-    out.push({ u, x, y, font, size, aspect, vd, h });
+    out.push({ u, x, y, font, size: size2, aspect, vd, h });
   }
   M._free(buf);
   if (tp) M._FPDFText_ClosePage(tp);
@@ -6956,9 +7271,9 @@ function commitPrefixSuffix(engine, paras, pi, del, inserts, runs, changed = /* 
   for (const h of handles) {
     const on = linesOf.get(h);
     if (on) {
-      const lines = [...on];
-      const inPrefix = lines.some((j) => j < k);
-      const inSuffix = lines.some((j) => j >= k);
+      const lines2 = [...on];
+      const inPrefix = lines2.some((j) => j < k);
+      const inSuffix = lines2.some((j) => j >= k);
       if (inPrefix && inSuffix) return { reason: "prefix_objects_span_suffix" };
       if (on.size !== 1 || M._FPDFPageObj_GetType(h) !== OBJ_TEXT4) return { reason: inPrefix ? "prefix_objects_unresolved" : "suffix_objects_unresolved" };
       (inPrefix ? prefix : suffix).push(h);
@@ -7191,15 +7506,15 @@ function rebindRuns(edited, original, restored) {
   original.forEach((r, i) => {
     for (let k = 0; k < r.text.length; k++) from.push(i);
   });
-  const hits = /* @__PURE__ */ new Map();
+  const hits2 = /* @__PURE__ */ new Map();
   from.forEach((ri, off) => {
-    const set = hits.get(ri) ?? /* @__PURE__ */ new Set();
+    const set = hits2.get(ri) ?? /* @__PURE__ */ new Set();
     set.add(at[off]);
-    hits.set(ri, set);
+    hits2.set(ri, set);
   });
   const out = [];
   for (const r of edited) {
-    const targets = [...hits.get(r.sourceIndex) ?? []];
+    const targets = [...hits2.get(r.sourceIndex) ?? []];
     if (targets.length !== 1) return null;
     out.push({ ...r, sourceIndex: targets[0] });
   }
@@ -7336,12 +7651,12 @@ function pageIndexMap(paras) {
   paras.forEach((p, pi) => {
     if (pi > 0) chars.push({ ch: "\n", pi: -1 });
     let offset = 0;
-    const text = p.runs.map((r) => r.text).join("");
+    const text2 = p.runs.map((r) => r.text).join("");
     const starts = new Set((p.lines || []).map((l) => l.off));
     p.runs.forEach((r, ri) => {
       for (let o = 0; o < r.text.length; o++) {
         const at = offset + o;
-        const lineEndHyphen = text[at] === "" && /\p{L}/u.test(text[at - 1] || "") && /\s/.test(text[at + 1] || "") && /\p{L}/u.test(text[at + 2] || "") && starts.has(at + 2);
+        const lineEndHyphen = text2[at] === "" && /\p{L}/u.test(text2[at - 1] || "") && /\s/.test(text2[at + 1] || "") && /\p{L}/u.test(text2[at + 2] || "") && starts.has(at + 2);
         chars.push({ ch: r.text[o], pi, ri, o, lineEndHyphen });
       }
       offset += r.text.length;
@@ -7377,24 +7692,24 @@ function normalizeChars(chars, logical = false) {
   return { norm, map };
 }
 function findAll(norm, needle) {
-  const hits = [];
-  for (let k = norm.indexOf(needle); k >= 0; k = norm.indexOf(needle, k + 1)) hits.push(k);
-  return hits;
+  const hits2 = [];
+  for (let k = norm.indexOf(needle); k >= 0; k = norm.indexOf(needle, k + 1)) hits2.push(k);
+  return hits2;
 }
 function geometricVariants(paras, chars) {
   const byPara = paras.map((_, pi) => chars.flatMap((c, i) => c.pi === pi ? [{ ...c, source: i }] : []));
   const variants = [];
   for (let i = 0; i < paras.length; i++) {
-    const a = paras[i], lines = a.lines || [], box = a.box;
-    if (!box || lines.length < 2 || !byPara[i].length) continue;
-    const steps = lines.slice(1).map((l, k) => lines[k].y - l.y);
+    const a = paras[i], lines2 = a.lines || [], box = a.box;
+    if (!box || lines2.length < 2 || !byPara[i].length) continue;
+    const steps = lines2.slice(1).map((l, k) => lines2[k].y - l.y);
     const step = steps[0];
     if (!(step > 0) || steps.some((d) => Math.abs(d - step) > 0.5)) continue;
     for (let j = 0; j < paras.length; j++) {
       if (i === j) continue;
       const b = paras[j], first = b.lines?.[0], bb = b.box;
       if (!bb || !first || !byPara[j].length || ![box.x, box.w, bb.x, bb.w, first.y].every(Number.isFinite)) continue;
-      if (Math.abs(box.x - bb.x) > 1 || Math.abs(box.w - bb.w) > Math.max(2, box.w * 0.03) || Math.abs(lines.at(-1).y - first.y - step) > 0.5) continue;
+      if (Math.abs(box.x - bb.x) > 1 || Math.abs(box.w - bb.w) > Math.max(2, box.w * 0.03) || Math.abs(lines2.at(-1).y - first.y - step) > 0.5) continue;
       const competitors = paras.filter((p, k) => k !== i && k !== j && p.box && p.lines?.some((l) => Math.abs(l.y - first.y) <= 0.5) && Math.abs(p.box.x - box.x) <= 1 && p.box.w >= box.w * 0.5);
       if (competitors.length) continue;
       const joined = [...byPara[i], { ch: "\n", pi: -1, source: null }, ...byPara[j]];
@@ -7442,8 +7757,8 @@ function planPageEdits(paras, edits) {
       for (const hit2 of findAll(variant.norm, needle)) {
         const a2 = variant.map[hit2][0], b2 = variant.map[hit2 + needle.length - 1][1];
         const source3 = variant.chars.slice(a2, b2 + 1).filter((c) => c.source != null && c.pi >= 0).map((c) => c.source);
-        const key2 = source3.join(":");
-        if (!candidates.has(key2)) candidates.set(key2, { ...variant, hit: hit2, a: a2, b: b2, source: source3 });
+        const key3 = source3.join(":");
+        if (!candidates.has(key3)) candidates.set(key3, { ...variant, hit: hit2, a: a2, b: b2, source: source3 });
       }
     }
     if (candidates.size !== 1) {
@@ -7451,7 +7766,7 @@ function planPageEdits(paras, edits) {
       continue;
     }
     const { map, hit, a, b, source: source2, chars: matchedChars } = candidates.values().next().value;
-    const hits = [hit];
+    const hits2 = [hit];
     const sourceSet = new Set(source2);
     const overlap = spans.find((s) => s.source.some((i) => sourceSet.has(i)));
     if (overlap) {
@@ -7470,7 +7785,7 @@ function planPageEdits(paras, edits) {
     const noop = normalizeText(e.after) === needle;
     const discontiguous = source2.some((v, k) => k > 0 && v > source2[k - 1] + 2);
     const geometricShortening = !noop && discontiguous ? planGeometricShortening(matchedChars, map, hit, needle, e.after) : null;
-    const change = noop ? null : geometricShortening || planInlineChange(paras, matchedChars, map, hits[0], needle, deletionAlignmentAfter(e.before, e.after));
+    const change = noop ? null : geometricShortening || planInlineChange(paras, matchedChars, map, hits2[0], needle, deletionAlignmentAfter(e.before, e.after));
     if (change?.failure) {
       failures.push({ id: e.id, pageIndex: e.pageIndex, code: change.failure });
       continue;
@@ -7589,6 +7904,7 @@ async function editPdf(request, options = {}) {
   };
   const logCapture = captureConsole(!!options.includeEngineLog);
   let engine;
+  let restoreColumns = null;
   let pdf;
   let sourcePageCount = 0;
   const continued = /* @__PURE__ */ new Map();
@@ -7610,10 +7926,17 @@ async function editPdf(request, options = {}) {
     for (const [pageIndex, pageEdits] of groupByPage(edits)) {
       engine.loadPage(pageIndex);
       engine.normalizeFontsForEdit();
-      const paras = engine.buildModel();
-      const plan = planPageEdits(paras, pageEdits);
+      let paras = engine.buildModel();
+      let plan = planPageEdits(paras, pageEdits);
+      restoreColumns = isolateColumns(engine, paras, pageEdits, plan);
+      if (restoreColumns) {
+        paras = engine.buildModel();
+        plan = planPageEdits(paras, pageEdits);
+      }
       failures.push(...plan.failures);
-      pagePlans.push({ pageIndex, paras, plan, key: snapshotKey(paras), regenHostile: engine.pageRegenHostile() });
+      pagePlans.push({ pageIndex, pageEdits, isolated: !!restoreColumns, paras, plan, key: snapshotKey(paras), regenHostile: engine.pageRegenHostile() });
+      restoreColumns?.();
+      restoreColumns = null;
     }
     if (failures.length) {
       for (const f of failures) Object.assign(editReport.get(f.id), { status: "rejected", code: f.code, hits: f.hits });
@@ -7623,7 +7946,7 @@ async function editPdf(request, options = {}) {
       throw fail6("MATCH_FAILED", `${failures.length} edit(s) could not be matched exactly once or planned`, { failures });
     }
     let mutated = false;
-    for (const { pageIndex, plan, key: key2, regenHostile } of pagePlans) {
+    for (const { pageIndex, pageEdits, isolated, plan, key: key3, regenHostile } of pagePlans) {
       const pageReport = { pageIndex, paragraphs: [], regenHostile };
       report.pages.push(pageReport);
       if (regenHostile) report.warnings.push({ pageIndex, code: "PAGE_REGEN_HOSTILE" });
@@ -7638,10 +7961,15 @@ async function editPdf(request, options = {}) {
       if (plan.perPara.size === 0) continue;
       const at = pageIndex + added;
       engine.loadPage(at);
+      if (isolated) {
+        const initial = engine.buildModel();
+        restoreColumns = isolateColumns(engine, initial, pageEdits, planPageEdits(initial, pageEdits));
+        if (!restoreColumns) throw fail6("STATE_DRIFT", "Column isolation could not be repeated", { pageIndex });
+      }
       const objectsBefore = canCommitLineLocal(engine) ? pageObjectList(engine).join(",") : null;
       const paras = engine.buildModel();
       const localStable = objectsBefore !== null && pageObjectList(engine).join(",") === objectsBefore;
-      if (snapshotKey(paras) !== key2) throw fail6("STATE_DRIFT", "Page model changed between planning and commit", { pageIndex });
+      if (snapshotKey(paras) !== key3) throw fail6("STATE_DRIFT", "Page model changed between planning and commit", { pageIndex });
       const context2 = quality.capturePageLayout(engine, at, paras);
       const touched = [];
       const mutations = [...plan.perPara.entries()].sort((x, y) => x[0] - y[0]);
@@ -7712,7 +8040,11 @@ async function editPdf(request, options = {}) {
       if (reflow) {
         let r;
         let paginated = null;
-        const repairOptions = pg.allow ? { paginate: (eng, ctx, grown, info) => paginated = paginateOverflow(eng, ctx, grown, { ...info, maxNewPages: pg.max - added }) } : {};
+        const repairOptions = pg.allow ? { paginate: (eng, ctx, grown, info) => {
+          restoreColumns?.();
+          restoreColumns = null;
+          return paginated = paginateOverflow(eng, ctx, grown, { ...info, maxNewPages: pg.max - added });
+        } } : {};
         try {
           r = quality.repairPageLayout(engine, at, context2, touched, repairOptions);
         } catch (err) {
@@ -7727,9 +8059,15 @@ async function editPdf(request, options = {}) {
             throw fail6("PAGINATION_LIMIT", `Edit on page ${pageIndex} needs more than the ${pg.max} allowed new page(s)`, { pageIndex, maxNewPages: pg.max });
           }
           const unsupported = errors.some((w) => /unsupported/.test(String(w.code)));
-          throw fail6(unsupported ? "LAYOUT_UNSUPPORTED" : "REPAIR_FAILED", `Layout repair reported ${errors.length} error(s) on page ${pageIndex}`, {
+          const codes = errors.map((w) => w.code);
+          const reasons = [];
+          if (codes.includes("pagination_unsupported_edge_paragraph_in_flow")) reasons.push("\uD398\uC774\uC9C0 \uACBD\uACC4\uC758 \uBB38\uB2E8\uC744 \uC774\uC5B4 \uBC30\uCE58\uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4");
+          if (codes.includes("pagination_unsupported_multi_column_flow")) reasons.push("\uC5EC\uB7EC \uB2E8\uC73C\uB85C \uB41C \uBCF8\uBB38\uC744 \uC774\uC5B4 \uBC30\uCE58\uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4");
+          if (codes.some((code) => !["pagination_unsupported_edge_paragraph_in_flow", "pagination_unsupported_multi_column_flow"].includes(code))) reasons.push("\uD604\uC7AC \uB808\uC774\uC544\uC6C3\uC744 \uC548\uC804\uD558\uAC8C \uBCF5\uAD6C\uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4");
+          throw fail6(unsupported ? "LAYOUT_UNSUPPORTED" : "REPAIR_FAILED", `PDF ${pageIndex + 1}\uCABD: ${reasons.join("; ")}. \uD574\uB2F9 \uCABD\uC758 \uD3B8\uC9D1 \uB0B4\uC6A9\uC774\uB098 \uBC30\uCE58\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694.`, {
             pageIndex,
-            codes: errors.map((w) => w.code)
+            codes,
+            count: errors.length
           });
         }
         if (r?.pagination?.added > 0) {
@@ -7739,6 +8077,8 @@ async function editPdf(request, options = {}) {
         }
       }
       for (const p of plan.plans) if (!p.noop) editReport.get(p.edit.id).status = "applied";
+      restoreColumns?.();
+      restoreColumns = null;
     }
     if (mutated) {
       pdf = engine.save();
@@ -7749,7 +8089,15 @@ async function editPdf(request, options = {}) {
     }
   } finally {
     try {
-      engine?.close();
+      try {
+        restoreColumns?.();
+      } finally {
+        try {
+          restoreColumns?.disposeDetached?.();
+        } finally {
+          engine?.close();
+        }
+      }
     } catch {
     }
     report.engineLog = logCapture.restore();
@@ -7759,7 +8107,7 @@ async function editPdf(request, options = {}) {
     const c = continued.get(s);
     const n = c?.added ?? 0;
     const entry = { sourcePageIndex: s, outputPageIndex: out, continuationPageIndices: Array.from({ length: n }, (_, k) => out + 1 + k) };
-    if (c) Object.assign(entry, { lineCounts: [...c.lineCounts], keptLines: c.keptLines, bodyTop: c.bodyTop, ...c.flowTop !== void 0 ? { flowTop: c.flowTop } : {}, floor: c.floor });
+    if (c) Object.assign(entry, { lineCounts: [...c.lineCounts], keptLines: c.keptLines, bodyTop: c.bodyTop, ...c.flowTop !== void 0 ? { flowTop: c.flowTop } : {}, ...c.flowColumn ? { flowColumn: { ...c.flowColumn } } : {}, floor: c.floor });
     if (c?.continuationStyle) entry.continuationStyle = { version: c.continuationStyle.version, policy: c.continuationStyle.policy, applied: c.continuationStyle.applied === true };
     sourcePageMap.push(entry);
     out += 1 + n;
@@ -7790,6 +8138,16 @@ async function editPdf(request, options = {}) {
     documentFlow: documentFlowEnabled,
     documentFlowPolicy: options.documentFlow === "compatible-groups" ? "compatible-groups" : documentFlowEnabled ? "strict" : "disabled"
   };
+  const markerResult = await repairInlineMarkers({
+    engineFactory,
+    sourceBytes,
+    outputBytes: pdf,
+    pageIndices: [...new Set(edits.map((e) => e.pageIndex))],
+    sourcePageMap
+  });
+  pdf = markerResult.pdf;
+  report.inlineMarkerRepairs = markerResult.repairs;
+  report.warnings.push(...markerResult.warnings);
   const qaCapture = captureConsole(!!options.includeEngineLog);
   let check;
   try {
@@ -7861,7 +8219,7 @@ var frozen = (value) => {
 };
 var numbers = (a, b) => a.length === b.length && a.every((v, i) => Math.abs(v - b[i]) <= 1e-3);
 var contains = (a, b) => a[0] - 1e-3 <= b[0] && a[1] - 1e-3 <= b[1] && a[2] + 1e-3 >= b[2] && a[3] + 1e-3 >= b[3];
-var key = (p, i) => p + ":" + i;
+var key2 = (p, i) => p + ":" + i;
 var identity = (o) => o.isIndirect() ? "r" + o.asIndirect() : "d" + o.pointer;
 function bytes(value, limit) {
   if (!(value instanceof Uint8Array) || value.length < 5 || value.length > limit) fail5("annotation-byte-limit");
@@ -8230,10 +8588,10 @@ function mapping(model, map, count) {
 }
 function movementPlan(model, records, map, count, moves, reflowed, destinationMoves = []) {
   if (!Array.isArray(moves) || moves.length > ANNOTATION_LIMITS.annotations || !Array.isArray(reflowed) || reflowed.some((p) => !Number.isInteger(p) || p < 0 || p >= model.pageCount) || new Set(reflowed).size !== reflowed.length) fail5("annotation-move-invalid");
-  const group = new Set(reflowed), byKey = new Map(records.map((r) => [key(r.sourcePageIndex, r.annotationIndex), r])), planned = /* @__PURE__ */ new Map();
+  const group = new Set(reflowed), byKey = new Map(records.map((r) => [key2(r.sourcePageIndex, r.annotationIndex), r])), planned = /* @__PURE__ */ new Map();
   for (const move of moves) {
     if (!move || Object.keys(move).sort().join(",") !== "annotationIndex,dx,dy,outputPageIndex,sourcePageIndex" || !Number.isInteger(move.sourcePageIndex) || !Number.isInteger(move.annotationIndex) || !Number.isInteger(move.outputPageIndex) || move.outputPageIndex < 0 || move.outputPageIndex >= count || ![move.dx, move.dy].every((n) => typeof n === "number" && Number.isFinite(n) && Math.abs(n) <= 1e5)) fail5("annotation-move-invalid");
-    const id = key(move.sourcePageIndex, move.annotationIndex), record = byKey.get(id);
+    const id = key2(move.sourcePageIndex, move.annotationIndex), record = byKey.get(id);
     if (!record || planned.has(id) || !record.descriptor.eligible || !group.has(move.sourcePageIndex)) fail5("annotation-move-invalid");
     planned.set(id, move);
   }
@@ -8264,11 +8622,11 @@ function movementPlan(model, records, map, count, moves, reflowed, destinationMo
   }
   const expected = Array.from({ length: count }, () => []);
   for (const record of records) {
-    const id = key(record.sourcePageIndex, record.annotationIndex), move = planned.get(id), origin = map.get(record.sourcePageIndex);
+    const id = key2(record.sourcePageIndex, record.annotationIndex), move = planned.get(id), origin = map.get(record.sourcePageIndex);
     if (!move || move.outputPageIndex === origin) expected[origin].push({ record, move });
   }
   for (const move of moves) {
-    const record = byKey.get(key(move.sourcePageIndex, move.annotationIndex));
+    const record = byKey.get(key2(move.sourcePageIndex, move.annotationIndex));
     if (move.outputPageIndex !== map.get(move.sourcePageIndex)) expected[move.outputPageIndex].push({ record, move });
   }
   return { expected, planned, destinationPlan };
@@ -8357,11 +8715,11 @@ async function transport(request = {}) {
   try {
     const noMoves = movementPlan(request.model, ctx.state.records, ctx.map, ctx.pages.length, [], request.reflowedSourcePages || [], request.destinationMoves || []);
     const actual = await verifyDocument(ctx, noMoves.expected), located = /* @__PURE__ */ new Map();
-    for (const record of ctx.state.records) located.set(key(record.sourcePageIndex, record.annotationIndex), actual.byPage[ctx.map.get(record.sourcePageIndex)][record.annotationIndex].object);
+    for (const record of ctx.state.records) located.set(key2(record.sourcePageIndex, record.annotationIndex), actual.byPage[ctx.map.get(record.sourcePageIndex)][record.annotationIndex].object);
     const reader = destinationReader(ctx.c, ctx.refs, nameDestinations(ctx.c)), changed = /* @__PURE__ */ new Set();
     for (const record of ctx.state.records) {
       if (!record.destinationFingerprints) continue;
-      const resolved = reader(located.get(key(record.sourcePageIndex, record.annotationIndex)));
+      const resolved = reader(located.get(key2(record.sourcePageIndex, record.annotationIndex)));
       for (let i = 0; i < resolved.destinations.length; i++) {
         const d = resolved.destinations[i], change = ctx.plan.destinationPlan.get(d.id);
         if (!change || changed.has(d.id)) continue;
@@ -8374,7 +8732,7 @@ async function transport(request = {}) {
     if (changed.size !== ctx.plan.destinationPlan.size) fail5("annotation-destination-move-invalid");
     const touched = /* @__PURE__ */ new Set();
     for (const move of request.moves || []) {
-      const object = located.get(key(move.sourcePageIndex, move.annotationIndex)), record = ctx.state.records.find((r) => r.sourcePageIndex === move.sourcePageIndex && r.annotationIndex === move.annotationIndex), d = record.descriptor;
+      const object = located.get(key2(move.sourcePageIndex, move.annotationIndex)), record = ctx.state.records.find((r) => r.sourcePageIndex === move.sourcePageIndex && r.annotationIndex === move.annotationIndex), d = record.descriptor;
       const rect = d.rect.map((v, k) => v + (k % 2 ? move.dy : move.dx));
       if (!contains(geometry(ctx.c, ctx.pages[move.outputPageIndex]), rect)) fail5("annotation-output-geometry-mismatch");
       object.put("Rect", rect);
@@ -8385,7 +8743,7 @@ async function transport(request = {}) {
     }
     for (const p of touched) {
       const array = ctx.c.keep(ctx.c.doc.newArray());
-      for (const { record } of ctx.plan.expected[p]) array.push(located.get(key(record.sourcePageIndex, record.annotationIndex)));
+      for (const { record } of ctx.plan.expected[p]) array.push(located.get(key2(record.sourcePageIndex, record.annotationIndex)));
       ctx.pages[p].put("Annots", array);
     }
     await verifyDocument(ctx, ctx.plan.expected, true);
@@ -8459,16 +8817,16 @@ function parseFont(bytes2) {
     const p = n + 6 + i * 12, platform = u16(p), encoding = u16(p + 2), language = u16(p + 4), id = u16(p + 6), length = u16(p + 8), start = strings + u16(p + 10);
     if (start > end || length > end - start) bad();
     if (![1, 2, 6, 16, 17].includes(id)) continue;
-    let text;
+    let text2;
     if (platform === 0 || platform === 3) {
       if (length % 2) bad();
-      text = "";
-      for (let j = 0; j < length; j += 2) text += String.fromCharCode(u16(start + j));
-    } else if (platform === 1 && encoding === 0) text = String.fromCharCode(...bytes2.subarray(start, start + length));
+      text2 = "";
+      for (let j = 0; j < length; j += 2) text2 += String.fromCharCode(u16(start + j));
+    } else if (platform === 1 && encoding === 0) text2 = String.fromCharCode(...bytes2.subarray(start, start + length));
     else continue;
-    text = text.replace(/\0/g, "").trim();
+    text2 = text2.replace(/\0/g, "").trim();
     const score = (platform === 3 ? 4 : platform === 0 ? 3 : 1) + (language === 1033 ? 2 : 0);
-    if (text && (!values.has(id) || values.get(id).score < score)) values.set(id, { text, score });
+    if (text2 && (!values.has(id) || values.get(id).score < score)) values.set(id, { text: text2, score });
   }
   const get = (id) => values.get(id)?.text;
   const family = get(16) || get(1), postscriptName = get(6);
@@ -8612,16 +8970,16 @@ function reconcileSourceWrap(paragraphs, before) {
   let raw = "", markers = /* @__PURE__ */ new Map();
   paragraphs.forEach((p, pi) => {
     if (pi) raw += "\n";
-    const base = raw.length, text = p.runs.map((r) => r.text).join("");
+    const base = raw.length, text2 = p.runs.map((r) => r.text).join("");
     const starts = new Set((p.lines || []).map((l) => l.off));
-    for (let i = 0; i < text.length; i++) {
-      if (text.slice(i, i + 2) === "\uFFFC\xAD" && starts.has(i + 2) && /\p{L}/u.test(text[i - 1] || "") && /\p{L}/u.test(text[i + 2] || "")) markers.set(base + i, "pair");
-      if (text[i] === "" && /\p{L}/u.test(text[i - 1] || "") && /\s/.test(text[i + 1] || "") && /\p{L}/u.test(text[i + 2] || "") && starts.has(i + 2)) markers.set(base + i, "control");
+    for (let i = 0; i < text2.length; i++) {
+      if (text2.slice(i, i + 2) === "\uFFFC\xAD" && starts.has(i + 2) && /\p{L}/u.test(text2[i - 1] || "") && /\p{L}/u.test(text2[i + 2] || "")) markers.set(base + i, "pair");
+      if (text2[i] === "" && /\p{L}/u.test(text2[i - 1] || "") && /\s/.test(text2[i + 1] || "") && /\p{L}/u.test(text2[i + 2] || "") && starts.has(i + 2)) markers.set(base + i, "control");
     }
-    raw += text;
+    raw += text2;
   });
   if (![...markers.values()].includes("pair")) return null;
-  const needle = before.replace(/\s+/g, " "), hits = /* @__PURE__ */ new Map();
+  const needle = before.replace(/\s+/g, " "), hits2 = /* @__PURE__ */ new Map();
   for (const pairMode of ["raw", "visible", "logical"]) for (const controlMode of ["visible", "logical"]) {
     const chars = [];
     for (let i = 0; i < raw.length; i++) {
@@ -8652,20 +9010,20 @@ function reconcileSourceWrap(paragraphs, before) {
     for (let at = norm.indexOf(needle); at >= 0; at = norm.indexOf(needle, at + 1)) {
       const a = map[at][0], b = map[at + needle.length - 1][1];
       const hasPair = [...markers].some(([offset, kind]) => kind === "pair" && offset >= a && offset + 1 <= b);
-      const key2 = `${a}:${b}`;
-      const prior = hits.get(key2);
-      hits.set(key2, { a, b, reconciled: prior?.reconciled || pairMode !== "raw" && hasPair });
+      const key3 = `${a}:${b}`;
+      const prior = hits2.get(key3);
+      hits2.set(key3, { a, b, reconciled: prior?.reconciled || pairMode !== "raw" && hasPair });
     }
   }
-  if (![...hits.values()].some((h) => h.reconciled)) return null;
-  if (hits.size !== 1) return { ambiguous: true, hits: hits.size };
+  if (![...hits2.values()].some((h) => h.reconciled)) return null;
+  if (hits2.size !== 1) return { ambiguous: true, hits: hits2.size };
   const offsets = [...markers.keys()];
   for (let i = 0; i < offsets.length; i++) for (let j = i + 1; j < offsets.length; j++) {
     if (markers.get(offsets[i]) !== "pair" && markers.get(offsets[j]) !== "pair") continue;
     const between = raw.slice(offsets[i] + 2, offsets[j]).replace(/\ufffc\u00ad/g, "").replace(/\u0002\s/g, "").replace(/\s+/g, " ");
     if (between.length <= needle.length) return { unsupported: true };
   }
-  const hit = hits.values().next().value;
+  const hit = hits2.values().next().value;
   return { before: raw.slice(hit.a, hit.b + 1) };
 }
 async function reconcileEdits(bytes2, edits, engineFactory, signal) {

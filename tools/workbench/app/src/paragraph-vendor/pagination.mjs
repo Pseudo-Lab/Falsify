@@ -22,6 +22,7 @@
 // Original edge objects and page numbers are never moved or changed; no
 // label is synthesized (see docs/PAGINATION.md for the page map contract).
 
+import { cascadeShifts } from "./quality.mjs";
 import { CONTINUATION_STYLE, applyPageEdges, preflightPageEdges, snapshotPageEdges, verifyPageEdges } from "./continuation-template.mjs";
 
 const OBJ_TEXT = 1;
@@ -150,6 +151,7 @@ export function buildFlowPlan(engine, ctx, grown, { floor, maxNewPages }) {
   const grownIds = new Set(grown.map((g) => g.id));
   const flowTop = Math.max(...grown.map((g) => g.box.top));
   const anchor = grown.find((g) => g.box.top === flowTop).box;
+  if (grown.some((g) => !sameColumn(g.box, anchor))) return err("pagination_unsupported_multi_column_flow");
   const objects = listObjects(M, engine.page);
   const indexOf = new Map(objects.map((h, i) => [h, i]));
   const bounds = (h) => {
@@ -173,6 +175,7 @@ export function buildFlowPlan(engine, ctx, grown, { floor, maxNewPages }) {
     if (!q.box) continue;
     const cy = q.box.top - q.box.h / 2;
     const below = q.box.top <= flowTop + 0.5;
+    if (hOverlap(q.box, anchor) <= EPS) continue;
     if (q.role !== "body") {
       if (cy > floor + EPS && cy < flowTop && below) return err("pagination_unsupported_edge_paragraph_in_flow");
       continue;
@@ -185,15 +188,8 @@ export function buildFlowPlan(engine, ctx, grown, { floor, maxNewPages }) {
   }
   flow.sort((a, b) => b.box.top - a.box.top || a.box.x - b.box.x);
 
-  // In-page shift: the growth of every grown paragraph above (as cascade).
-  const shiftOf = (q) => {
-    let s = 0;
-    for (const g of grown) {
-      if (g.id === q.id || q.box.top > bottomOf(g.box) + 0.5 || !sameColumn(q.box, g.box)) continue;
-      s += g.delta;
-    }
-    return s;
-  };
+  const shifts = cascadeShifts(ctx, grown);
+  const shiftOf = (q) => shifts.get(q.id) || 0;
 
   const lines = [];
   const untouchedLines = [];
@@ -219,6 +215,8 @@ export function buildFlowPlan(engine, ctx, grown, { floor, maxNewPages }) {
     }
   }
 
+  const flowColumn = { x0: Math.min(...flow.map((q) => q.box.x)), x1: Math.max(...flow.map((q) => q.box.x + q.box.w)) };
+
   // Objects inside the flow band that no paragraph owns: soft hyphens and
   // empty spacing objects ride with the untouched line they sit on; any
   // other object there makes the flow ambiguous.
@@ -228,9 +226,9 @@ export function buildFlowPlan(engine, ctx, grown, { floor, maxNewPages }) {
     const b = bounds(h);
     if (!b) return err("pagination_unsupported_foreign_object_in_flow");
     const cy = (b.top + b.bottom) / 2;
-    if (cy < floor - EPS || cy > flowTop + 0.5) continue;
-    if (b.x + b.w < anchor.x - 0.5 || b.x > anchor.x + anchor.w + 0.5) {
-      return err("pagination_unsupported_multi_column_flow");
+    if (b.top < floor - EPS || b.bottom > flowTop + 0.5) continue;
+    if (b.x + b.w < flowColumn.x0 - 0.5 || b.x > flowColumn.x1 + 0.5) {
+      continue;
     }
     if (M._FPDFPageObj_GetType(h) !== OBJ_TEXT) {
       // A short zero-height link underline is an inline decoration, not a
@@ -270,13 +268,23 @@ export function buildFlowPlan(engine, ctx, grown, { floor, maxNewPages }) {
       if (b && b.top - b.bottom > EPS) bodyTop = Math.max(bodyTop, b.top);
     }
   }
+  // A column bound is needed only when body-band content remains beside the
+  // selected flow. Ordinary one-column continuations must remain eligible for
+  // whole-page compaction, even though their flow has measurable x bounds.
+  const hasFixedColumn = objects.some((h) => {
+    const b = bounds(h);
+    if (!b) return false;
+    const cy = (b.top + b.bottom) / 2;
+    return cy >= floor - EPS && cy <= bodyTop + EPS &&
+      (b.x + b.w < flowColumn.x0 - 0.5 || b.x > flowColumn.x1 + 0.5);
+  });
   const virtual = lines.map((l) => ({ top: l.top - l.shift, bottom: l.bottom - l.shift }));
   const split = planFlow(virtual, { bodyTop, floor, maxNewPages });
   if (!split.ok) return err(split.code, { line: split.line, maxNewPages: split.maxNewPages });
   // Paragraph boxes use font metrics; bodyTop is measured glyph ink. The
   // report's flow band must not begin above the measured body band merely
   // because an ascender metric extends farther than its actual glyphs.
-  return { ok: true, lines, pages: split.pages, bodyTop, flowTop: Math.min(flowTop, bodyTop), floor, orphans, objects };
+  return { ok: true, lines, pages: split.pages, bodyTop, flowTop: Math.min(flowTop, bodyTop), ...(hasFixedColumn ? { flowColumn } : {}), floor, orphans, objects };
 }
 
 const coded = (code) => Object.assign(new Error(code), { code });
@@ -416,5 +424,5 @@ export function paginateOverflow(engine, ctx, grown, { floor, maxNewPages }) {
   if (plan.orphans) warnings.push({ code: "pagination_empty_objects_kept", severity: "info", count: plan.orphans });
   repairs.push({ kind: "pagination", action: r.added ? "continued" : "shifted", added: r.added, keptLines: r.keptLines, lineCounts: r.lineCounts, copiedEdges: r.copiedEdges, floor: +plan.floor.toFixed(2), bodyTop: +plan.bodyTop.toFixed(2) });
   const continuationStyle = r.added ? { version: CONTINUATION_STYLE.version, policy: CONTINUATION_STYLE.policy, applied: true } : undefined;
-  return { ok: true, warnings, repairs, added: r.added, lineCounts: r.lineCounts, keptLines: r.keptLines, bodyTop: plan.bodyTop, flowTop: plan.flowTop, floor: plan.floor, continuationStyle };
+  return { ok: true, warnings, repairs, added: r.added, lineCounts: r.lineCounts, keptLines: r.keptLines, bodyTop: plan.bodyTop, flowTop: plan.flowTop, flowColumn: plan.flowColumn, floor: plan.floor, continuationStyle };
 }

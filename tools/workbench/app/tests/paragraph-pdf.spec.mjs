@@ -138,7 +138,19 @@ test('real PDFium paragraph inspect and reflow retain full After and following c
     const resultInspect=await inspectPage({file:saved,pageIndex:out.pageMap[0].outputPageIndex});
     const following=resultInspect.paragraphs.find(p=>p.text.includes('Following paragraph'));
     const originalFollowing=inspected.paragraphs.find(p=>p.text.includes('Following paragraph'));
-    assert.ok(following && following.bbox[1]>originalFollowing.bbox[1], 'following paragraph moves down after expansion');
+    const bottom=(data,needle)=>{const d=mupdf.Document.openDocument(data,'application/pdf'),p=d.loadPage(0);try{return p.search(needle).flat(2);}finally{p.destroy();d.destroy();}};
+    const found=bottom(saved,'Following paragraph remains readable.');
+    assert.ok(found.length>0,'following paragraph remains independently locatable');
+    const afterQuads=bottom(saved,after), sourceFollowing=bottom(bytes,'Following paragraph remains readable.');
+    assert.ok(afterQuads.length>0,'complete After has independent glyph quads');
+    const ys=xs=>xs.filter((_,i)=>i%2===1);
+    assert.ok(Math.min(...ys(found))>=Math.min(...ys(sourceFollowing))-.5,'following content does not move upward into the expansion');
+    // MuPDF search quads include the font's ascent/descent box; these boxes
+    // overlap even on normally spaced source lines. Compare successive line
+    // tops against the source font size rather than treating that box as ink.
+    const tops=quads=>Array.from({length:quads.length/8},(_,i)=>Math.min(quads[i*8+1],quads[i*8+3]));
+    assert.ok(Math.min(...tops(found))-Math.max(...tops(afterQuads))>=target.size-1,'following paragraph has a full line of clearance after the expanded text');
+    assert.ok(following && originalFollowing,'both source and output retain the following paragraph');
     // Compare image object stream and rendered image region independently.
     const render = data => { const doc=mupdf.Document.openDocument(data,'application/pdf');const p=doc.loadPage(0); const pix=p.toPixmap([1,0,0,1,0,0],mupdf.ColorSpace.DeviceRGB,false); const pixels=Uint8Array.from(pix.getPixels());const stride=pix.getStride();const sample=[];for(let y=322;y<342;y++)sample.push(...pixels.slice(y*stride+450*3,y*stride+470*3));pix.destroy();p.destroy();doc.destroy();return sample; };
     assert.deepEqual(render(saved),render(bytes),'unrelated image pixels remain unchanged');

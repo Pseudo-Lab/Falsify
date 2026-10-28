@@ -9,6 +9,8 @@ import { createHash } from "node:crypto";
 import { loadRuntime } from "./runtime.mjs";
 import { PAGINATION_CAPABILITY, PAGINATION_LIMITS, paginateOverflow } from "./pagination.mjs";
 import { compactDocumentFlow } from "./document-flow.mjs";
+import { isolateColumns } from "../paragraph-column-isolation.mjs";
+import { repairInlineMarkers } from "../paragraph-inline-markers.mjs";
 import {
   LineRetentionError,
   canCommitLineLocal,
@@ -441,6 +443,7 @@ export async function editPdf(request, options = {}) {
 
   const logCapture = captureConsole(!!options.includeEngineLog);
   let engine;
+  let restoreColumns = null;
   let pdf;
   let sourcePageCount = 0;
   const continued = new Map();
@@ -464,10 +467,13 @@ export async function editPdf(request, options = {}) {
     for (const [pageIndex, pageEdits] of groupByPage(edits)) {
       engine.loadPage(pageIndex);
       engine.normalizeFontsForEdit();
-      const paras = engine.buildModel();
-      const plan = planPageEdits(paras, pageEdits);
+      let paras = engine.buildModel();
+      let plan = planPageEdits(paras, pageEdits);
+      restoreColumns = isolateColumns(engine, paras, pageEdits, plan);
+      if (restoreColumns) { paras = engine.buildModel(); plan = planPageEdits(paras, pageEdits); }
       failures.push(...plan.failures);
-      pagePlans.push({ pageIndex, paras, plan, key: snapshotKey(paras), regenHostile: engine.pageRegenHostile() });
+      pagePlans.push({ pageIndex, pageEdits, isolated: !!restoreColumns, paras, plan, key: snapshotKey(paras), regenHostile: engine.pageRegenHostile() });
+      restoreColumns?.(); restoreColumns = null;
     }
     if (failures.length) {
       for (const f of failures) Object.assign(editReport.get(f.id), { status: "rejected", code: f.code, hits: f.hits });
@@ -482,7 +488,7 @@ export async function editPdf(request, options = {}) {
     // a page shift every later page by `added`, so the engine addresses
     // source page p at p + added (pagination evicts stale cache entries).
     let mutated = false;
-    for (const { pageIndex, plan, key, regenHostile } of pagePlans) {
+    for (const { pageIndex, pageEdits, isolated, plan, key, regenHostile } of pagePlans) {
       const pageReport = { pageIndex, paragraphs: [], regenHostile };
       report.pages.push(pageReport);
       if (regenHostile) report.warnings.push({ pageIndex, code: "PAGE_REGEN_HOSTILE" });
@@ -497,6 +503,11 @@ export async function editPdf(request, options = {}) {
       if (plan.perPara.size === 0) continue;
       const at = pageIndex + added;
       engine.loadPage(at);
+      if (isolated) {
+        const initial = engine.buildModel();
+        restoreColumns = isolateColumns(engine, initial, pageEdits, planPageEdits(initial, pageEdits));
+        if (!restoreColumns) throw fail("STATE_DRIFT", "Column isolation could not be repeated", { pageIndex });
+      }
       // A line-local commit undoes steps by object handle, so it needs a page
       // whose model build keeps every page object: a build that re-creates
       // objects (seen for text objects with word spacing) would point those
@@ -589,7 +600,7 @@ export async function editPdf(request, options = {}) {
         // page map even when the quality module does not forward it.
         let paginated = null;
         const repairOptions = pg.allow
-          ? { paginate: (eng, ctx, grown, info) => (paginated = paginateOverflow(eng, ctx, grown, { ...info, maxNewPages: pg.max - added })) }
+          ? { paginate: (eng, ctx, grown, info) => { restoreColumns?.(); restoreColumns = null; return (paginated = paginateOverflow(eng, ctx, grown, { ...info, maxNewPages: pg.max - added })); } }
           : {};
         try {
           r = quality.repairPageLayout(engine, at, context, touched, repairOptions);
@@ -606,9 +617,15 @@ export async function editPdf(request, options = {}) {
             throw fail("PAGINATION_LIMIT", `Edit on page ${pageIndex} needs more than the ${pg.max} allowed new page(s)`, { pageIndex, maxNewPages: pg.max });
           }
           const unsupported = errors.some((w) => /unsupported/.test(String(w.code)));
-          throw fail(unsupported ? "LAYOUT_UNSUPPORTED" : "REPAIR_FAILED", `Layout repair reported ${errors.length} error(s) on page ${pageIndex}`, {
+          const codes = errors.map((w) => w.code);
+          const reasons = [];
+          if (codes.includes("pagination_unsupported_edge_paragraph_in_flow")) reasons.push("페이지 경계의 문단을 이어 배치할 수 없습니다");
+          if (codes.includes("pagination_unsupported_multi_column_flow")) reasons.push("여러 단으로 된 본문을 이어 배치할 수 없습니다");
+          if (codes.some((code) => !["pagination_unsupported_edge_paragraph_in_flow", "pagination_unsupported_multi_column_flow"].includes(code))) reasons.push("현재 레이아웃을 안전하게 복구할 수 없습니다");
+          throw fail(unsupported ? "LAYOUT_UNSUPPORTED" : "REPAIR_FAILED", `PDF ${pageIndex + 1}쪽: ${reasons.join("; ")}. 해당 쪽의 편집 내용이나 배치를 확인해 주세요.`, {
             pageIndex,
-            codes: errors.map((w) => w.code),
+            codes,
+            count: errors.length,
           });
         }
         if (r?.pagination?.added > 0) {
@@ -618,6 +635,7 @@ export async function editPdf(request, options = {}) {
         }
       }
       for (const p of plan.plans) if (!p.noop) editReport.get(p.edit.id).status = "applied";
+      restoreColumns?.(); restoreColumns = null;
     }
 
     if (mutated) {
@@ -630,7 +648,9 @@ export async function editPdf(request, options = {}) {
     }
   } finally {
     try {
-      engine?.close();
+      try { restoreColumns?.(); } finally {
+        try { restoreColumns?.disposeDetached?.(); } finally { engine?.close(); }
+      }
     } catch {}
     report.engineLog = logCapture.restore();
   }
@@ -642,7 +662,7 @@ export async function editPdf(request, options = {}) {
     const c = continued.get(s);
     const n = c?.added ?? 0;
     const entry = { sourcePageIndex: s, outputPageIndex: out, continuationPageIndices: Array.from({ length: n }, (_, k) => out + 1 + k) };
-    if (c) Object.assign(entry, { lineCounts: [...c.lineCounts], keptLines: c.keptLines, bodyTop: c.bodyTop, ...(c.flowTop !== undefined ? { flowTop: c.flowTop } : {}), floor: c.floor });
+    if (c) Object.assign(entry, { lineCounts: [...c.lineCounts], keptLines: c.keptLines, bodyTop: c.bodyTop, ...(c.flowTop !== undefined ? { flowTop: c.flowTop } : {}), ...(c.flowColumn ? { flowColumn: { ...c.flowColumn } } : {}), floor: c.floor });
     if (c?.continuationStyle) entry.continuationStyle = { version: c.continuationStyle.version, policy: c.continuationStyle.policy, applied: c.continuationStyle.applied === true };
     sourcePageMap.push(entry);
     out += 1 + n;
@@ -672,7 +692,15 @@ export async function editPdf(request, options = {}) {
     documentFlowPolicy: options.documentFlow === 'compatible-groups' ? 'compatible-groups' : documentFlowEnabled ? 'strict' : 'disabled',
   };
 
-  // Same-engine self-check on a freshly reopened copy.
+  // Reflowed body text and separately stored raised references must move
+  // together. Match the unchanged parent context before translating markers.
+  const markerResult = await repairInlineMarkers({engineFactory, sourceBytes, outputBytes: pdf,
+    pageIndices: [...new Set(edits.map(e => e.pageIndex))], sourcePageMap});
+  pdf = markerResult.pdf;
+  report.inlineMarkerRepairs = markerResult.repairs;
+  report.warnings.push(...markerResult.warnings);
+
+  // Same-engine self-check on the final bytes, including marker repairs.
   const qaCapture = captureConsole(!!options.includeEngineLog);
   let check;
   try {

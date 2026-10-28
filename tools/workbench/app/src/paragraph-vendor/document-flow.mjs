@@ -63,7 +63,7 @@ function readPart(e, pageIndex, band, origin) {
 }
 
 export async function compactDocumentFlow(engineFactory, sourceBytes, intermediatePdf, edits, preliminaryMap, maxNewPages=32, policy='strict', annotationAdapter=null) {
-  const starts=preliminaryMap.filter(m=>m.continuationPageIndices.length&&m.sourcePageIndex<preliminaryMap.length-1);
+  const starts=preliminaryMap.filter(m=>!m.flowColumn&&m.continuationPageIndices.length&&m.sourcePageIndex<preliminaryMap.length-1);
   if(!starts.length)return {pdf:intermediatePdf,sourcePageMap:preliminaryMap,flowGroups:[],addedPages:preliminaryMap.reduce((n,m)=>n+m.continuationPageIndices.length,0)};
   if(preliminaryMap.length>64)fail('document_flow_page_budget_exceeded');
   if(annotationAdapter&&!['inspect','transport','validate'].every(k=>typeof annotationAdapter[k]==='function'))fail('document_flow_annotation_adapter_invalid');
@@ -77,7 +77,7 @@ export async function compactDocumentFlow(engineFactory, sourceBytes, intermedia
   try {
     let plans=[];
     for(let start=0;start<preliminaryMap.length;start++){
-      if(!preliminaryMap[start].continuationPageIndices.length||start===preliminaryMap.length-1)continue;
+      if(preliminaryMap[start].flowColumn||!preliminaryMap[start].continuationPageIndices.length||start===preliminaryMap.length-1)continue;
       const bands=[],parts=[],lines=[];let end=start,planned;
       try {
       for(;end<preliminaryMap.length;end++){
@@ -206,7 +206,7 @@ export async function compactDocumentFlow(engineFactory, sourceBytes, intermedia
       const p=plans.find(p=>s>=p.start&&s<=p.end);
       const n=p?(s===p.end?Math.max(0,p.pages.length-p.bands.length):0):map[s].continuationPageIndices.length;
       map[s].outputPageIndex=out;map[s].continuationPageIndices=Array.from({length:n},(_,k)=>out+k+1);
-      if(p){for(const key of ['lineCounts','keptLines','bodyTop','flowTop','floor','continuationStyle'])delete map[s][key];
+      if(p){for(const key of ['lineCounts','keptLines','bodyTop','flowTop','floor','flowColumn','continuationStyle'])delete map[s][key];
         if(n)Object.assign(map[s],{bodyTop:p.bands.at(-1).bodyTop,flowTop:p.bands.at(-1).bodyTop,floor:p.bands.at(-1).floor,lineCounts:p.pages.slice(p.bands.length).map(q=>q.lines.length),continuationStyle:{version:1,policy:'source-number-suffix',applied:true}});
       }
       out+=1+n;
