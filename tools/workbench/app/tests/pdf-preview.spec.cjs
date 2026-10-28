@@ -168,14 +168,16 @@ test('markup: canvas-only preview with labelled controls; no iframe/object/embed
 // RED wiring: the real document-red.js with a mocked bridge, the real preview bundle and the mocked PDF.js.
 const SEG0='The trial shows a modest benefit in adults.',SEG1='Effects were observed only in the treated cohort.',BEFORE1='only in the treated cohort';
 const SRC=Buffer.from('%PDF-1.7 synthetic source'),OUT=pdfBytes('synthetic preserved output');
-function red({cap={red:true,blue:true,pdf:true},format='PDF',pdf={}}={}){
+function red({cap={red:true,blue:true,pdf:true},format='PDF',pdf={},multi=false,connected=true}={}){
   const w=dom(),{lib,log}=pdfjs(pdf),downloads=[],calls=[],handoffs=[];let reply=async()=>({file:OUT.toString('base64'),sourceFileHash:sha(SRC),outputFileHash:sha(OUT),verification:{mode:'pdf-original-font-single-line',pages:3}});
+  const query=w.document.querySelector;w.document.querySelector=s=>s==='#red-types'&&!multi?null:query(s);
+  if(multi){const types=w.get('red-types');types.selected=['contradiction'];types.querySelectorAll=()=>types.selected.map(value=>({value}));}
   w.get('red-level').value='1';w.get('red-budget').value='4';w.get('document-red').hidden=true;
   const URLmock={createObjectURL:b=>{downloads.push(b);return 'blob:'+downloads.length;},revokeObjectURL(){}};
   const pctx=vm.createContext({URL,TextDecoder,Uint8Array,Promise,Error,Math,Number,Array,Object,String});vm.runInContext(BUNDLE,pctx);
   const FalsifyPreview={createPreview:()=>pctx.FalsifyPreview.createPreview({document:w.document,importPdf:async()=>lib,subtle:globalThis.crypto.subtle,urls:URLmock,timers:globalThis,ratio:()=>1})};
   const lab={busy(){},allowed:()=>true,ready:Promise.resolve(),bind:(_,r)=>r,record:async()=>nodeCrypto.randomUUID()};
-  const bridge={busy(){},state:()=>({status:'paired',connected:true,cap}),capabilities:()=>cap,session:()=>({request:async(p,body)=>{calls.push({path:p,body});return reply(p,body);}})};
+  const bridge={busy(){},state:()=>({status:connected?'paired':'disconnected',connected,cap}),capabilities:()=>cap,session:()=>({request:async(p,body)=>{calls.push({path:p,body});return reply(p,body);}})};
   const textFile=async()=>({bytes:new Uint8Array(Buffer.from('plain output')),verification:null});
   const ctx=vm.createContext({document:w.document,crypto:globalThis.crypto,FalsifyDocumentRed:C,FalsifyHarness:require('../dist/harness-core.js'),FalsifyLocalBridge:bridge,FalsifyLab:lab,FalsifyExport:{textFile},FalsifyPreview,TextEncoder,TextDecoder,CustomEvent,Event,URL:URLmock,Blob,File,setTimeout,clearTimeout,confirm:()=>true,addEventListener(){},btoa,atob,Uint8Array,Array,Promise,Error,Map,JSON,Number,String,Object});
   vm.runInContext(RED,ctx,{filename:'document-red.js'});w.document.addEventListener('falsify:blue-file',e=>handoffs.push(e.detail));
@@ -193,6 +195,8 @@ function red({cap={red:true,blue:true,pdf:true},format='PDF',pdf={}}={}){
     handoff(){const ev=new Event('click');Object.defineProperty(ev,'target',{value:{closest:s=>s==='#red-handoff'?{}:null}});w.document.dispatchEvent(ev);}};
   return r;}
 
+test('RED: disconnected guidance points to external import',()=>{const r=red({connected:false});assert.match(r.get('red-connection').textContent,/외부 RED 응답을 가져오거나/);assert.doesNotMatch(r.get('red-connection').textContent,/만 가능합니다/);});
+
 test('RED: a verified PDF export previews the very File that was downloaded and is handed to BLUE; no automatic BLUE',async()=>{
   const r=red();await r.ready();await r.export();await until(()=>r.canvas().length===1,'preview drawn');
   assert.equal(r.get('red-preview').hidden,false);assert.equal(r.handoffs.length,0,'preview never starts BLUE');assert.equal(r.calls.filter(c=>c.path!=='/api/export').length,0,'no extra broker call');
@@ -203,12 +207,30 @@ test('RED: a verified PDF export previews the very File that was downloaded and 
 
 test('RED: candidate/After changes, source reset, settings and harness changes clear the preview and drop late renders',async()=>{
   const steps=[['After edit',r=>r.edit('in every cohort, including the untreated one')],['candidate unchecked',r=>{const b=r.created.find(e=>e.type==='checkbox');b.checked=false;b.dispatchEvent(new Event('change'));}],
-    ['source reset',r=>r.fire('falsify:document-clear')],['harness change',r=>r.fire('falsify:harness-change',{role:'red'})],['level change',r=>{r.get('red-level').value='2';r.get('red-level').dispatchEvent(new Event('change'));}]];
+    ['source reset',r=>r.fire('falsify:document-clear')],['harness change',r=>r.fire('falsify:harness-change',{role:'red'})]];
   for(const [label,step] of steps){const r=red({pdf:{manual:true}});await r.ready();await r.export();await until(()=>r.log.renders.length===1,label+': rendering');
     step(r);await settle();assert.equal(r.get('red-preview').hidden,true,label);assert.equal(r.log.renders[0].r.cancelled,true,label+': render cancelled');
     r.log.renders[0].r.finish();await settle();assert.equal(r.canvas().length,0,label+': no stale paint');assert.equal(r.pstatus(),'',label);assert.equal(r.get('red-preview-download').disabled,true,label);}
   const r=red({pdf:{hold:true}});await r.ready();await r.export();await until(()=>r.log.tasks.length===1,'loading');r.edit('changed while loading');await settle();
   assert.equal(r.log.tasks[0].destroyed,true,'pending PDF.js document destroyed');});
+
+test('RED: legacy level change preserves edited response and preview while updating the next request',async()=>{
+  const r=red({pdf:{manual:true}});await r.ready();r.edit('edited After');await r.export();await until(()=>r.log.renders.length===1,'rendering');
+  r.get('red-level').value='2';r.get('red-level').dispatchEvent(new Event('change'));await settle();
+  assert.equal(r.get('red-preview').hidden,false);assert.equal(r.log.renders[0].r.cancelled,false);
+  assert.equal(r.created.find(e=>e.id==='red-after-0').value,'edited After');assert.match(r.get('red-progress').textContent,/현재 후보는 유지/);
+  r.log.renders[0].r.finish();await until(()=>r.canvas().length===1,'retained preview');
+  r.get('red-request').click();await until(()=>r.downloads.length===2,'next request');
+  const request=JSON.parse(await r.downloads.at(-1).text());assert.equal(request.level,2);
+});
+
+test('RED: multiple attack types apply to the next request without clearing the preview',async()=>{
+  const r=red({multi:true});await r.ready();r.edit('retained edit');await r.export();await until(()=>r.canvas().length===1,'preview');
+  const types=r.get('red-types');types.selected=['contradiction','unsupported-inference'];types.dispatchEvent(new Event('change'));
+  assert.equal(r.get('red-preview').hidden,false);assert.equal(r.created.find(e=>e.id==='red-after-0').value,'retained edit');
+  r.get('red-request').click();await until(()=>r.downloads.length===2,'next request');const q=JSON.parse(await r.downloads.at(-1).text());
+  assert.deepEqual(q.attackTypes,['contradiction','unsupported-inference']);
+});
 
 test('RED: a new export clears the old preview first; a failed export leaves none behind',async()=>{
   const r=red();await r.ready();await r.export();await until(()=>r.canvas().length===1,'first preview');

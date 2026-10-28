@@ -9,7 +9,7 @@ export const LEDGER_CHAR_LIMIT=4500000;
 export const LIMITS=Object.freeze({harnesses:100,runs:100,reviews:1000,title:500,runId:160,segments:10000,source:1000000,verification:20000,paperEdits:200,paperReviews:100,editText:8000});
 
 const HEX=/^[a-f0-9]{64}$/;
-const RUN_KEYS=['id','createdAt','role','revision','fileHash','sourceHash','segments','harness','harnessHash','maxCalls','level','model','provenance','response','sourceName','format','finalState','sourceRunId','snapshotOf','requestId','visualEvidence','inputMode'];
+const RUN_KEYS=['id','createdAt','role','revision','fileHash','sourceHash','segments','harness','harnessHash','maxCalls','level','attackTypes','model','provenance','response','sourceName','format','finalState','sourceRunId','snapshotOf','requestId','visualEvidence','inputMode'];
 const PATCH_KEYS=['id','segmentId','label','before','after','offset','edited'];
 const MESSAGES={
   malformed:'Archive shape is not falsify.confluence-archive.v1.',
@@ -79,13 +79,13 @@ async function checkRun(r,harnesses,prior,V){
   const doc={revision:r.revision,sourceHash:r.sourceHash,segments:r.segments};
   if('inputMode' in r&&(!['text','visual'].includes(r.inputMode)||(r.inputMode==='visual')!==('visualEvidence' in r)))fail('malformed','Input mode and visual evidence do not match.');
   if('visualEvidence' in r)checkVisualRefs(r.visualEvidence,r);
-  try{if(r.role==='blue')V.blue.validateResponse(doc,r.response,'visualEvidence' in r?{visualEvidence:r.visualEvidence}:undefined);else{if(![1,2,3].includes(r.level))fail('malformed','RED level is malformed.');V.red.validateResponse(doc,r.response);}}catch(e){if(e instanceof ReviewBundleError)throw e;fail('malformed','Stored model response failed validation.');}
+  try{if(r.role==='blue')V.blue.validateResponse(doc,r.response,'visualEvidence' in r?{visualEvidence:r.visualEvidence}:undefined);else{if(r.level!==undefined&&![1,2,3].includes(r.level))fail('malformed','RED level is malformed.');if(r.attackTypes!==undefined){V.red.types(r.attackTypes);if(r.level!==undefined&&(r.attackTypes.length!==1||r.attackTypes[0]!==V.red.types(r.level)[0]))fail('malformed','RED level and attack types disagree.');}else if(r.level===undefined)fail('malformed','RED attack types are missing.');const candidates=V.red.validateResponse(doc,r.response);if(r.attackTypes&&candidates.some(c=>c.attackTypes.some(t=>!r.attackTypes.includes(t))))fail('malformed','Candidate attack types were not selected.');}}catch(e){if(e instanceof ReviewBundleError)throw e;fail('malformed','Stored model response failed validation.');}
   if('finalState' in r&&(r.role!=='red'||stable(finalState(r,r.finalState,V.red))!==stable(r.finalState)))fail('conflict','RED final state does not match the stored response.');
   return copy(r);
 }
 // An imported-unverified snapshot may cite a root that keeps another provenance. Parent identity still has to match, and a non-imported snapshot may not.
 function checkLinks(r,all){
-  if('snapshotOf' in r){const root=typeof r.snapshotOf==='string'&&all.find(x=>x.id===r.snapshotOf);if(r.role!=='red'||!r.finalState||!root||root.id===r.id||'snapshotOf' in root||root.role!=='red'||root.sourceHash!==r.sourceHash||root.fileHash!==r.fileHash||root.model!==r.model||(root.provenance!==r.provenance&&r.provenance!=='imported-unverified')||root.revision!==r.revision||root.harnessHash!==r.harnessHash||'requestId' in root&&root.requestId!==r.requestId||root.level!==r.level||root.maxCalls!==r.maxCalls||stable(root.response)!==stable(r.response))fail('missing_ref','Snapshot parent is missing or does not match the stored response.');}
+  if('snapshotOf' in r){const root=typeof r.snapshotOf==='string'&&all.find(x=>x.id===r.snapshotOf);if(r.role!=='red'||!r.finalState||!root||root.id===r.id||'snapshotOf' in root||root.role!=='red'||root.sourceHash!==r.sourceHash||root.fileHash!==r.fileHash||root.model!==r.model||(root.provenance!==r.provenance&&r.provenance!=='imported-unverified')||root.revision!==r.revision||root.harnessHash!==r.harnessHash||'requestId' in root&&root.requestId!==r.requestId||root.level!==r.level||JSON.stringify(root.attackTypes?.slice().sort()??null)!==JSON.stringify(r.attackTypes?.slice().sort()??null)||root.maxCalls!==r.maxCalls||stable(root.response)!==stable(r.response))fail('missing_ref','Snapshot parent is missing or does not match the stored response.');}
   if('sourceRunId' in r){const red=typeof r.sourceRunId==='string'&&all.find(x=>x.id===r.sourceRunId);if(r.role!=='blue'||red?.role!=='red'||red.finalState?.outputFileHash!==r.fileHash)fail('missing_ref','BLUE source RED run is missing or its output hash differs.');}
 }
 const REVIEW_KEYS=['id','runId','createdAt','reviewer','caseLabel','verdict','score','note','comparison','findingAssessments','reviewContext'];
@@ -386,11 +386,26 @@ export async function buildAttemptArchive(record,validators){
   const title=assertTitle(`${attempt.role.toUpperCase()} 시도 · ${attempt.harnessName||'이름 미상'} · ${attempt.status} · ${attempt.id}`);
   return boundedJSON({schema:ARCHIVE_SCHEMA,kind:'attempt',id,title,data:attempt});
 }
+// External responses have no implied model invocation or harness. The source text,
+// raw batches and optional human reviews remain part of a single selected case.
+async function externalCase(value){
+  if(!exact(value,['record','reviews'])||!plain(value.record)||!Array.isArray(value.reviews)||value.reviews.length>100)fail('malformed');
+  const r=value.record,s=r.snapshot;
+  if(Object.keys(r).some(k=>!['id','createdAt','provenance','fileHash','sourceHash','revision','sourceName','segments','snapshot','outputFileHash'].includes(k))||typeof r.id!=='string'||!r.id||r.id.length>160||r.provenance!=='external-ai-import'||(r.outputFileHash!==undefined&&(!HEX.test(r.outputFileHash)||r.snapshot?.role!=='red'))||!HEX.test(r.fileHash)||!HEX.test(r.sourceHash)||typeof r.revision!=='string'||!r.revision||!Number.isFinite(Date.parse(r.createdAt))||!Array.isArray(r.segments)||!r.segments.length||r.segments.length>LIMITS.segments||r.segments.some(x=>!plain(x)||typeof x.id!=='string'||!x.id||typeof x.text!=='string')||new Set(r.segments.map(x=>x.id)).size!==r.segments.length||JSON.stringify(r).includes('%PDF-'))fail('malformed','External record is malformed.');
+  const source=r.segments.map(x=>x.text).join('\n\n');if(source.length>LIMITS.source||await sha256(source)!==r.sourceHash)fail('hash_mismatch');
+  if(!plain(s)||s.schema!=='falsify.external-proposals.v1'||s.fileHash!==r.fileHash||!['red','blue'].includes(s.role)||!Array.isArray(s.items)||!Array.isArray(s.batches)||s.items.length>1000||s.batches.length>100)fail('malformed');
+  const batches=new Map();for(const b of s.batches){if(!plain(b)||b.schema!=='falsify.external-batch.v1'||b.fileHash!==r.fileHash||b.role!==s.role||typeof b.id!=='string'||!b.id||batches.has(b.id)||typeof b.raw!=='string'||!Array.isArray(b.items))fail('malformed');batches.set(b.id,b);}
+  const ids=new Set(),selected=[];for(const item of s.items){if(!plain(item)||typeof item.id!=='string'||!item.id||ids.has(item.id)||!Array.isArray(item.sourceRefs)||typeof item.enabled!=='boolean')fail('malformed');ids.add(item.id);for(const ref of item.sourceRefs){const b=ref&&batches.get(ref.batchId);if(!b||!b.items.some(x=>x&&x.id===ref.itemId))fail('missing_ref');}if(item.anchor){const part=r.segments.find(x=>x.id===item.segmentId),a=item.anchor;if(!part||!Number.isInteger(a.start)||!Number.isInteger(a.end)||a.start<0||a.end<=a.start||part.text.slice(a.start,a.end)!==(item.before||item.quote))fail('conflict','External anchor differs from source.');}if(s.role==='red'&&item.enabled){if(item.kind!=='change'||item.matchStatus!=='matched'||!item.anchor||typeof item.after!=='string'||item.after===item.before)fail('conflict');for(const other of selected)if(item.segmentId===other.segmentId&&item.anchor.start<other.anchor.end&&other.anchor.start<item.anchor.end)fail('conflict');selected.push(item);}}
+  const reviewIds=new Set();for(const review of value.reviews){if(!exact(review,['id','createdAt','reviewer','note'])||typeof review.id!=='string'||!review.id||review.id.length>160||reviewIds.has(review.id)||typeof review.reviewer!=='string'||!review.reviewer.trim()||review.reviewer.length>120||typeof review.note!=='string'||!review.note.trim()||review.note.length>3000||!Number.isFinite(Date.parse(review.createdAt)))fail('malformed');reviewIds.add(review.id);}
+  return copy(value);
+}
+export async function buildExternalResponseArchive(record,reviews=[]){const data=await externalCase({record:copy(record),reviews:copy(reviews)});return boundedJSON({schema:ARCHIVE_SCHEMA,kind:'external-response',id:data.record.id,title:assertTitle('외부 '+data.record.snapshot.role.toUpperCase()+' 응답 · '+(data.record.sourceName||data.record.id)),data});}
 export async function validateArchive(archive,validators){
   const value=copy(archive);
   boundedJSON(value);
   if(!exact(value,['schema','kind','id','title','data'])||value.schema!==ARCHIVE_SCHEMA)fail('malformed');
   assertTitle(value.title);
+  if(value.kind==='external-response'){const data=await externalCase(value.data);if(value.id!==data.record.id)fail('conflict');return {schema:ARCHIVE_SCHEMA,kind:value.kind,id:value.id,title:value.title,data};}
   if(value.kind==='attempt'){
     const attempt=attemptOf(value.data,validators);
     if(value.id!==attempt.role+':'+attempt.id)fail('conflict','Attempt archive identity differs.');

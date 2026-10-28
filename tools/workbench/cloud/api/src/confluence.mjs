@@ -599,7 +599,7 @@ async function normalizeArchive(archive) {
     if (error instanceof GatewayError) throw error;
     fail(422, 'invalid_archive');
   }
-  if (!normalized || normalized.schema !== 'falsify.confluence-archive.v1' || !['experiment', 'harness', 'paper-edit', 'attempt'].includes(normalized.kind)) fail(422, 'invalid_archive');
+  if (!normalized || normalized.schema !== 'falsify.confluence-archive.v1' || !['experiment', 'harness', 'paper-edit', 'attempt', 'external-response'].includes(normalized.kind)) fail(422, 'invalid_archive');
   if (typeof normalized.id !== 'string' || !normalized.id || normalized.id.length > 200 || /[\u0000-\u001f]/.test(normalized.id)) fail(422, 'invalid_archive');
   if (typeof normalized.title !== 'string' || !normalized.title.trim() || normalized.title.length > 500 || /[\u0000-\u001f\u007f]/.test(normalized.title)) fail(422, 'invalid_archive');
   if (!normalized.data || typeof normalized.data !== 'object' || Array.isArray(normalized.data)) fail(422, 'invalid_archive');

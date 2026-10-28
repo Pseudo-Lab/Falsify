@@ -24,7 +24,9 @@
     }
     return 'visual:'+JSON.stringify(refs.sort());
   }
+  const typesIdentity=r=>JSON.stringify(r.attackTypes?.slice().sort()??null);
   function differences(a,b){const out=[];for(const [name,x,y] of [['입력 텍스트 해시',a.sourceHash,b.sourceHash],['입력 파일 해시',a.fileHash,b.fileHash],['역할',a.role,b.role],['출처',a.provenance,b.provenance],['예산',a.maxCalls,b.maxCalls],['RED 난이도',a.level??null,b.level??null]])if((name!=='RED 난이도'&&(x==null||y==null))||x!==y)out.push(name);
+    if(typesIdentity(a)!==typesIdentity(b))out.push('RED 공격 유형');
     if(!hex(a.sourceHash)||!hex(b.sourceHash))out.push('입력 텍스트 해시 미상');
     if(!hex(a.fileHash)||!hex(b.fileHash))out.push('입력 파일 해시 미상');
     if(a.provenance!=='local-codex'||b.provenance!=='local-codex')out.push('출처 미검증');
@@ -37,7 +39,7 @@
     const groups=new Map();for(const row of rows.filter(x=>x.comparable)){let g=groups.get(row.strategy);if(!g){g={strategy:row.strategy,runs:[],unreviewed:0,uncertain:0};groups.set(row.strategy,g);}g.runs.push(row.run);if(row.review==='unreviewed')g.unreviewed++;if(row.review==='uncertain')g.uncertain++;}
     return {rows,groups:[...groups.values()],observed:rows.filter(x=>x.comparable).length,excluded:rows.filter(x=>!x.comparable).length,unreviewed:rows.filter(x=>x.comparable&&x.review==='unreviewed').length,uncertain:rows.filter(x=>x.comparable&&x.review==='uncertain').length,missingAttempts:null,cost:null};}
   function observedAttempts(attempts,reference){
-    const matching=attempts.filter(a=>a.role===reference.role&&a.sourceHash===reference.sourceHash&&a.fileHash===reference.fileHash&&a.budget===reference.maxCalls&&(a.level??null)===(reference.level??null)&&knownModel(a.model)&&knownModel(reference.model)&&a.model===reference.model);
+    const matching=attempts.filter(a=>a.role===reference.role&&a.sourceHash===reference.sourceHash&&a.fileHash===reference.fileHash&&a.budget===reference.maxCalls&&(a.level??null)===(reference.level??null)&&typesIdentity(a)===typesIdentity(reference)&&knownModel(a.model)&&knownModel(reference.model)&&a.model===reference.model);
     const groups=new Map();for(const a of matching){let g=groups.get(a.harnessHash);if(!g){g={harnessHash:a.harnessHash,name:a.harnessName,version:a.harnessVersion,effort:a.effort,counts:{completed:0,failed:0,cancelled:0,unknown:0},observedMs:0,calls:0,callsUnknown:0};groups.set(a.harnessHash,g);}g.counts[a.status]++;g.observedMs+=a.durationMs;if(a.calls===null)g.callsUnknown++;else g.calls+=a.calls;}
     return {groups:[...groups.values()],matched:matching.length,unmatched:attempts.length-matching.length};
   }

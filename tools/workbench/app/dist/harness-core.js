@@ -139,8 +139,8 @@
   // Groups never mix executed, manual and imported records, so each denominator counts one kind. Means use attested executions only.
   function summarize(runs,reviews){
     const groups=new Map();
-    for(const r of runs){const o=origin(r.provenance),a=attestation(r),key=[r.role,o,a,r.harnessHash,r.model,r.sourceHash,r.level||'-',r.maxCalls].join('|');
-      if(!groups.has(key))groups.set(key,{role:r.role,origin:o,attestation:a,harness:r.harness,hash:r.harnessHash,model:r.model,sourceHash:r.sourceHash,level:r.level,maxCalls:r.maxCalls,runs:0,reviewed:0,scores:[],uncertain:0,manual:0,statuses:{ok:0,abstain:0,refusal:0,unknown:0},incomplete:0,calls:0,callsUnknown:0});
+    for(const r of runs){const o=origin(r.provenance),a=attestation(r),key=[r.role,o,a,r.harnessHash,r.model,r.sourceHash,r.level||'-',JSON.stringify(r.attackTypes?.slice().sort()??null),r.maxCalls].join('|');
+      if(!groups.has(key))groups.set(key,{role:r.role,origin:o,attestation:a,harness:r.harness,hash:r.harnessHash,model:r.model,sourceHash:r.sourceHash,level:r.level,attackTypes:r.attackTypes?.slice(),maxCalls:r.maxCalls,runs:0,reviewed:0,scores:[],uncertain:0,manual:0,statuses:{ok:0,abstain:0,refusal:0,unknown:0},incomplete:0,calls:0,callsUnknown:0});
       const g=groups.get(key),x=outcome(r.role,r.response,r.provenance);g.runs++;if(r.provenance!=='local-codex')g.manual++;g.statuses[x.status]++;if(x.complete===false)g.incomplete++;if(x.calls!==null)g.calls+=x.calls;else if(o==='executed')g.callsUnknown++;
       const latest=reviews.filter(v=>v.runId===r.id).at(-1);if(latest){g.reviewed++;if(latest.verdict==='uncertain')g.uncertain++;if(latest.score!==null&&latest.verdict!=='uncertain')g.scores.push(latest.score);}
     }

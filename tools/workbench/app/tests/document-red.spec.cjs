@@ -11,8 +11,8 @@ test('fabricated quote denied',()=>assert.throws(()=>C.validateResponse(doc,resp
 test('fabricated location denied',()=>assert.throws(()=>C.validateResponse(doc,response([{...candidate,segmentId:'missing'}]))));
 test('duplicate ids denied',()=>assert.throws(()=>C.validateResponse(doc,response([candidate,candidate]))));
 test('ambiguous target denied',()=>assert.throws(()=>C.validateResponse({...doc,segments:[{id:'s0',label:'p1',text:doc.segments[0].text+' '+candidate.before}]},response([candidate]))));
-test('number changes denied',()=>assert.throws(()=>C.validateAfter('N=12','N=13')));
-test('citation changes denied',()=>assert.throws(()=>C.validateAfter('No [1]','Yes [2]')));
+test('number changes allowed',()=>assert.equal(C.validateAfter('N=12','N=13'),'N=13'));
+test('citation changes and deletions allowed',()=>{assert.equal(C.validateAfter('No [1]','Yes [2]'),'Yes [2]');assert.equal(C.validateAfter('text',''),'');});
 test('unchanged candidate denied',()=>assert.throws(()=>C.validateAfter('same','same')));
 test('refusal cannot contain candidates',()=>assert.throws(()=>C.validateResponse(doc,{...response([candidate]),status:'refusal'})));
 test('empty abstain is legitimate',()=>assert.deepEqual(C.validateResponse(doc,{...response([]),status:'abstain'}),[]));
@@ -23,3 +23,5 @@ test('Korean explanations are the default; exact paper text is not translated',(
 test('English explanations can be selected explicitly',()=>{assert.equal(C.request(doc,2,8,'en').explanationLanguage,'en');assert.match(C.request(doc,2,8,'en').instructions,/in English/);assert.throws(()=>C.request(doc,2,8,'unknown'));});
 
 console.log(JSON.stringify({passed:checks}));
+
+test('mixed attack types and optional uncertainty',()=>{const c={...candidate,attackTypes:['contradiction','unsupported-inference'],after:'',uncertainty:undefined};delete c.level;assert.deepEqual(C.validateResponse(doc,response([c]))[0].attackTypes,c.attackTypes);assert.deepEqual(C.request(doc,c.attackTypes,8).attackTypes,c.attackTypes);});

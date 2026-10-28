@@ -2,6 +2,8 @@
 
 Browser-local RED and BLUE scientific-document experiments, independent human review, and versioned user-defined harnesses. RED and BLUE may be used independently.
 
+Falsify orchestrator planning reference: [External AI RED BLUE North Star](docs/NORTH_STAR_EXTERNAL_AI.md). It records the confirmed workflow and implementation plan for that coordinator; it is not required reading or a shared instruction for other agents. Implementation status is tracked separately.
+
 This repository contains only the application code. Private project notes, research papers, answer keys, meeting recordings and execution records are not included. The original private research repository remains private.
 
 The hosted frontend is static. Files are parsed in your browser; original local drafts and saved runs stay local until you explicitly publish a selected case to Confluence. Confluence is the only remote archive, and publication means sharing with the Falsify team. Fetched records open temporarily in native review, without automatic persistent browser copies; publish new review notes explicitly before closing or reloading. A thin OAuth/API relay stores no experiment database or files. Historical private records are not automatically published. Explicit execution sends the supplied paper text through your own local CLI or selected trusted harness to its model provider. GitHub is not an execution backend or shared experiment database.

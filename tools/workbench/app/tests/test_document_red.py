@@ -75,6 +75,39 @@ class RedTests(unittest.TestCase):
             def infer(self,*_):self.__class__.calls+=1;return {'status':'error','error_code':'synthetic_error'}
         with self.assertRaises(ValueError):run_review(request(),lambda _:None,threading.Event(),Error)
         self.assertEqual(Error.calls,1)
+    def test_mixed_types_deletion_and_optional_uncertainty(self):
+        c={**CANDIDATE, 'attackTypes':['contradiction','unsupported-inference'], 'after':''}
+        del c['level']; del c['uncertainty']
+        validate_candidates({'status':'ok','candidates':[c]}, request()['segments'])
+        data=request(); del data['level']; data['attackTypes']=['contradiction','unsupported-inference']
+        validate_request(data)
+        class Mixed(MockBackend):
+            def infer(self, prompt, schema): return {'status':'ok','response':{'status':'ok','candidates':[c]}}
+        self.assertEqual(run_review(data,lambda _:None,threading.Event(),Mixed)['candidates'][0]['after'],'')
+    def test_real_schema_nullable_uncertainty_and_pdf_prompt(self):
+        from jsonschema import Draft202012Validator
+        data=request(); del data['level']; data['attackTypes']=['contradiction','unsupported-inference']; data['format']='PDF'
+        candidate={**CANDIDATE, 'attackTypes':data['attackTypes'], 'uncertainty':None, 'after':''}; del candidate['level']
+        class Validating(MockBackend):
+            def infer(self, prompt, schema):
+                response={'status':'ok','candidates':[candidate]}
+                Draft202012Validator(schema).validate(response)
+                assert 'ONE original line' not in prompt and 'original text width' not in prompt
+                return {'status':'ok','response':response}
+        self.assertIsNone(run_review(data,lambda _:None,threading.Event(),Validating)['candidates'][0]['uncertainty'])
+
+    def test_legacy_level_payload_and_schema_with_type_adapter(self):
+        from jsonschema import Draft202012Validator
+        data={**request(), 'attackTypes':['contradiction']}
+        class Legacy(MockBackend):
+            def infer(self, prompt, schema):
+                self.assert_payload = '"level": 1' in prompt
+                assert self.assert_payload
+                response={'status':'ok','candidates':[CANDIDATE]}
+                Draft202012Validator(schema).validate(response)
+                return {'status':'ok','response':response}
+        self.assertEqual(run_review(data,lambda _:None,threading.Event(),Legacy)['candidates'][0]['level'],1)
+
     def test_office_export_fail_closed(self):
         with self.assertRaisesRegex(ValueError,'렌더러'):handle_export({'format':'DOCX'})
 

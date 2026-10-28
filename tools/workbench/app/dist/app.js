@@ -23,9 +23,9 @@
     if(view==='agents')return {gate:'C1',title:'도구를 골라 사용하세요',detail:'내 도구를 사용하거나 팀 서랍에서 가져옵니다.',label:'내 도구 보기',action:()=>$('#harness-library')?.scrollIntoView({block:'start'})};
     if(view==='blue'){
       if(blueProgress?.busy)return {gate:'B1',title:blueProgress.phase==='import'?'변경본을 읽고 있습니다':'BLUE 검토 중입니다',detail:blueProgress.name,label:'진행 상태 보기',action:()=>focusTarget($('#doc-blue-progress'))};
-      if(blueProgress?.hasResult)return {gate:'B1',title:'BLUE 결과를 확인하세요',detail:blueProgress.name,label:'결과 보기',action:()=>$('#doc-blue-findings').closest('.role-step').scrollIntoView({block:'start'})};
+      if(blueProgress?.hasResult)return {gate:'B1',title:'BLUE 결과를 확인하세요',detail:blueProgress.name,label:'결과 보기',action:()=>{const external=globalThis.FalsifyDocumentBlueExternal?.getExternalResponses?.();const target=external?.items?.length?$('#external-blue'):$('#doc-blue-findings').closest('.role-step');target?.scrollIntoView({block:'start'});}};
       if(blueProgress?.handoff&&blueProgress.name&&$('#doc-blue-next'))return {gate:'B1',title:$('#doc-blue-handoff-state').textContent,detail:blueProgress.name,label:$('#doc-blue-next').textContent,action:()=>$('#doc-blue-next').click()};
-      if(blueProgress?.name)return {gate:'B1',title:'논문을 검토할 준비가 됐습니다',detail:blueProgress.name,label:'실행으로',action:()=>$('#doc-blue-start').closest('.role-step').scrollIntoView({block:'start'})};
+      if(blueProgress?.name)return {gate:'B1',title:'논문을 검토할 준비가 됐습니다',detail:blueProgress.name,label:'AI 답변 가져오기',action:()=>focusTarget($('#external-blue textarea')||$('#doc-blue-start'))};
       return {gate:'B1',title:'BLUE 검토 파일을 입력하세요',detail:'검토할 논문을 직접 고르세요.',label:'BLUE 파일 입력',action:()=>focusTarget($('#doc-blue-file'))};
     }
     if(documentProgress){

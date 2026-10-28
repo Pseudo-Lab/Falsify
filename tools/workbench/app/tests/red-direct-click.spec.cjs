@@ -21,11 +21,12 @@ function element(id){
     replaceChildren(...c){this.children=c;},append(...c){this.children.push(...c);},after(){},remove(){},click(){this.dispatchEvent(new Event('click'));},getClientRects:()=>[]});
   return e;
 }
-function world(cap, workspace){
+function world(cap, workspace, selectedTypes){
   const els=new Map(),get=id=>{if(!els.has(id))els.set(id,element(id));return els.get(id);},created=[],downloads=[],calls=[],handoffs=[];
   const document=new EventTarget();
   Object.assign(document,{querySelector:s=>s.startsWith('#')?get(s.slice(1)):null,querySelectorAll:()=>[],createElement:()=>{const e=element('');created.push(e);return e;},body:element('body')});
   get('red-level').value='1';get('red-budget').value='4';get('document-red').hidden=true;
+  if(selectedTypes)get('red-types').querySelectorAll=()=>selectedTypes.map(value=>({value}));
   let reply=async()=>{throw new Error('no broker reply configured');};
   const lab={busy(){},allowed:()=>true,ready:Promise.resolve(),bind:(_,r)=>r,record:async()=>nodeCrypto.randomUUID()};
   const bridge={busyCalls:[],busy(role,v){if(role==='red')bridge.busyCalls.push(!!v);},state:()=>({status:'paired',connected:true,cap}),capabilities:()=>cap,
@@ -75,5 +76,12 @@ test('a workspace source change during generation never downloads stale bytes',a
   let release,sourceHash=sha(SRC);const ws={getSource:()=>({fileHash:sourceHash}),getEditSnapshot:()=>({revision:7}),acceptProposals(){},exportRedBatch:()=>new Promise(r=>release=r)};
   const w=world({red:false,blue:false,pdf:false},ws);await w.ready();w.get('red-download').click();await flush();sourceHash='a'.repeat(64);
   release({bytes:new Uint8Array(OUT),sha256:sha(OUT),verification:{status:'passed'},workspaceRevision:7});await flush();assert.equal(w.downloads.length,0);assert.match(w.status(),/다운로드 차단/);
+});
+test('type fieldset binds selected combinations to local jobs and renders absent metadata safely',async()=>{
+  const w=world(NEW,null,['contradiction','unsupported-inference']);await w.load();
+  let posted;w.reply=async(path,body)=>{if(path==='/api/red/jobs'){posted=body;return {id:body.requestId};}return {state:'completed',result:{schema:posted.schema,revision:posted.revision,sourceHash:posted.sourceHash,status:'ok',candidates:[{id:'c1',segmentId:'s0',before:BEFORE0,after:'',rationale:'Synthetic.',evidence:[{segmentId:'s0',quote:SEG0,relation:'Synthetic.'}]}]}};};
+  w.get('red-consent').checked=true;w.get('red-start').click();await flush();
+  assert.deepEqual(Array.from(posted.attackTypes),['contradiction','unsupported-inference']);assert.equal(posted.level,undefined);
+  assert.equal(w.area(0).value,'');assert.doesNotMatch(text(w.get('red-candidates')),/undefined|null/);
 });
 (async()=>{let failed=0;for(const [name,fn] of tests){try{await fn();console.log('PASS '+name);}catch(e){failed++;console.error('FAIL '+name,e);}}if(failed)process.exitCode=1;})();

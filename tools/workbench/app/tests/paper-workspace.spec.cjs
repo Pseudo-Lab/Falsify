@@ -498,6 +498,9 @@ test('bridge: manual JSON is not a model run, and a broker result keeps its mode
   const w=dom(),edits=editCore(),storage=memory();
   const ws=api.create({document:w.document,edits,storage,subtle:crypto.subtle,timers:{setTimeout,clearTimeout},urls:URL,now:()=>1_700_000_000_000});
   w.get('red-level').value='1';w.get('red-budget').value='4';w.get('red-empty').textContent='비어 있음';
+  // This bridge fixture exercises legacy markup. The fake DOM otherwise creates absent IDs.
+  const legacyQuery=w.document.querySelector.bind(w.document);
+  w.document.querySelector=selector=>selector==='#red-types'?null:legacyQuery(selector);
   const blobs=[];const jobs=[];
   const link={request:async(path,body)=>{if(path==='/api/red/jobs'&&body){jobs.push(body);return {id:body.requestId};}if(String(path).includes('/cancel'))return {};
     const req=jobs[0];return {state:'completed',progress:{},result:{schema:'falsify.document-red.v1',revision:req.revision,sourceHash:req.sourceHash,status:'ok',model:'gpt-test-1',candidates:[{id:'c1',segmentId:'s0',level:1,before:'does not show',after:'does show',rationale:'The sentence states the opposite of the reported direction.',uncertainty:'Synthetic fixture, not a domain review.',evidence:[{segmentId:'s0',quote:'does not show',relation:'contradicts the sentence'}]}]}};}};

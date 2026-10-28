@@ -278,8 +278,8 @@
     let incomplete=0;
     for(const chunk of text.split(/\n[ \t]*---[ \t]*(?:\n|$)/)){
       if(!/(^|\n)[ \t]*before[ \t]*:/i.test(chunk))continue;
-      const before=readField(chunk,'before',['after','segmentid','pageindex','pagelabel','page']);
-      const after=readField(chunk,'after',['before','segmentid','pageindex','pagelabel','page']);
+      const before=readField(chunk,'before',['after','segmentid','pageindex','pagelabel','page','rationale','evidence','references','uncertainty']);
+      const after=readField(chunk,'after',['before','segmentid','pageindex','pagelabel','page','rationale','evidence','references','uncertainty']);
       if(before==null||after==null){incomplete+=1;continue;}
       const pageToken=readInline(chunk,'pageindex');
       const pageLabel=pageToken?null:(readInline(chunk,'pagelabel')||readInline(chunk,'page'));

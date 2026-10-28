@@ -223,7 +223,7 @@ We draw the corpus from the PMC Open Access subset, using only CC BY or CC0 pape
 기존 프로젝트 소개·계획·평가 기준을 변경하지 않는 제안 도구이며, 팀 승인 또는 공식 벤치마크 검증을 뜻하지 않습니다.
 
 - [웹앱 바로 열기](https://shinick-han.github.io/falsify-branch-preview/) · [온라인 사용설명서](https://shinick-han.github.io/falsify-branch-preview/guide.html)
-- 위 링크는 러너 개인 계정에 배포한 이 브랜치의 미리보기이며 팀 공식 사이트가 아닙니다. 모델 실행·PDF 내보내기는 각 사용자의 로컬 companion이 필요합니다. 기존 개인 Workbench와 같은 도메인이라 브라우저 기록·Harness 저장소를 공유합니다. 분리하려면 별도 브라우저 프로필을 쓰세요.
+- 위 링크는 러너 개인 계정에 배포한 이 브랜치의 미리보기이며 팀 공식 사이트가 아닙니다. 외부 AI 답변 가져오기·브라우저 PDF 편집은 PC 연결 없이 사용합니다. 로컬 CLI로 모델을 실행할 때 companion을 연결합니다. 기존 개인 Workbench와 같은 도메인이라 브라우저 기록·Harness 저장소를 공유합니다. 분리하려면 별도 브라우저 프로필을 쓰세요.
 
 - [HTML 사용설명서](tools/workbench/app/dist/guide.html): 간단한 사용법을 먼저, 설치·RED·BLUE·검수·Harness·오류 해결을 뒤에 설명합니다. GitHub 화면은 HTML 소스를 표시하므로 파일을 내려받아 브라우저로 열어 주세요.
 - [실행·소스 안내](tools/workbench/TEAM-INTEGRATION.md): 브랜치 내려받기, 폴더 위치, 로컬 실행과 코드 출처.

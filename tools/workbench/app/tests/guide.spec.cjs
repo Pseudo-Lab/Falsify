@@ -26,9 +26,9 @@ function anchors(html) {
 
 const PHRASES = [
   '적용',
-  '원문과 과제 프롬프트 복사',
-  '붙여넣은 응답',
-  '고른 위치로 확정',
+  '프롬프트 만들기 및 편집',
+  'AI 답변 가져오기',
+  '원문에서 연결',
   '수정본 미리보기 만들기',
   '마지막 생성본 · 현재 편집과 다름',
   '원본 다운로드',
@@ -73,7 +73,7 @@ test('quick three steps stay short and precede the collapsed reference', () => {
   }
   const links = quick.slice(quick.indexOf(ol[0]) + ol[0].length);
   for (const href of ['#external-ai', '#red', '#blue', '#review']) assert.ok(links.includes('href="' + href + '"'), href);
-  for (const phrase of ['12시간 초안', '팀에 공개', '과학적 정확도', '고른 위치로 확정', 'PowerShell 5.1']) {
+  for (const phrase of ['12시간 초안', '팀에 공개', '과학적 정확도', '원문에서 연결', 'PowerShell 5.1']) {
     assert.equal(quick.includes(phrase), false, phrase);
   }
   assert.ok(guide.indexOf('id="paper"') > referenceAt);

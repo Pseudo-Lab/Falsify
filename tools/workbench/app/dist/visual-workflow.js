@@ -68,7 +68,7 @@
     if(paper){
       const visibility=()=>{paper.hidden=!globalThis.FalsifyPaperWorkspace?.getSource?.();};
       document.addEventListener('falsify:paper-workspace-source',visibility);visibility();
-      const external=$('#external-red');if(external){const d=disclosure('다른 AI에서 받은 변경 넣기',[]);external.before(d);d.append(external);}
+      // External AI import is a first-class route, alongside direct editing and local execution.
     }
 
     // Fold extracted text, never the real result or editing controls.
@@ -83,6 +83,12 @@
         const incoming=el('div','visual-route');incoming.setAttribute('aria-hidden','true');incoming.append(icon('file-text'),icon('arrow-right'),icon(role==='red'?'pencil':'search'),icon('arrow-right'),icon('play'));execute.prepend(incoming);
       }
       const start=$(role==='red'?'#red-start':'#doc-blue-start');if(start){start.replaceChildren(icon('play'),el('span','',role.toUpperCase()+' 검토'));start.classList.add('visual-run');}
+      const importReply=button('file-text','AI 답변 가져오기',()=>{
+        const panel=$('#external-'+role);if(!panel)return;
+        for(let parent=panel.parentElement;parent;parent=parent.parentElement)if(parent.tagName==='DETAILS')parent.open=true;
+        panel.scrollIntoView({block:'start'});panel.querySelector('textarea')?.focus({preventScroll:true});
+      });
+      importReply.id='visual-'+role+'-external';start?.closest('.button-row')?.before(importReply);
       const runNote=el('p','visual-next');runNote.setAttribute('role','status');start?.closest('.button-row')?.after(runNote);
       state[role].note=runNote;
       // Keep the visible transmission scope beside the consent checkbox.

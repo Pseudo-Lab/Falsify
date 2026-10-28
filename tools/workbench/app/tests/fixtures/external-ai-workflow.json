@@ -1,0 +1,10 @@
+{
+  "fileHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "segments": [
+    {"id": "s0", "label": "PDF p. 1", "pageIndex": 0, "text": "A trial enrolled 120 participants [1].\nThe intervention reduced reported absence only while treatment continued.\nNo significant difference was detected.\nThis repeated sentence is shared."},
+    {"id": "s1", "label": "PDF p. 2", "pageIndex": 1, "text": "The association does not establish direct cau-\nsality.\nThis repeated sentence is shared.\nSymptom intensity was not measured."}
+  ],
+  "redFirst": {"changes": [{"segmentId": "s0", "before": "120 participants [1]", "after": "240 participants [9]", "rationale": "표본 수와 인용을 바꾼 실험용 수정입니다."}]},
+  "redAlternative": {"changes": [{"segmentId": "s0", "before": "120 participants [1]", "after": "360 participants [2]"}, {"segmentId": "s1", "before": "Symptom intensity was not measured.", "after": ""}]},
+  "blueUnlocated": "The conclusion overstates the evidence: symptom intensity was not measured, so a physiological explanation needs additional evidence."
+}

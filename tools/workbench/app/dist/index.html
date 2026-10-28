@@ -7,55 +7,60 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' http://127.0.0.1:* https://falsify-cloud-api.ai-gongbu.workers.dev; object-src 'none'; base-uri 'none'; form-action 'none'">
   <title>Falsify · Paper Workbench</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' fill='%23ffcc00'/%3E%3Cpath d='M11 10h20v5H17v5h11v5H17v10h-6z' fill='%23111315'/%3E%3C/svg%3E">
-  <link rel="stylesheet" href="styles.css?v=0.2.0-alpha.27">
-  <link rel="stylesheet" href="document-red.css?v=0.2.0-alpha.27">
-  <link rel="stylesheet" href="experiment-ledger.css?v=0.2.0-alpha.27">
-  <link rel="stylesheet" href="harness-wrapper.css?v=0.2.0-alpha.27">
-  <link rel="stylesheet" href="confluence-store.css?v=0.2.0-alpha.27">
-  <link rel="stylesheet" href="image-editor.css?v=0.2.0-alpha.27">
-  <link rel="stylesheet" href="visual-workflow.css?v=0.2.0-alpha.27">
-  <link rel="stylesheet" href="paper-workspace.css?v=0.2.0-alpha.27">
-  <link rel="stylesheet" href="external-red-ui.css?v=0.2.0-alpha.27">
-  <link rel="stylesheet" href="paper-manual-records.css?v=0.2.0-alpha.27">
-  <script src="harness-core.js?v=0.2.0-alpha.27" defer></script>
-  <script src="harness-wrapper.js?v=0.2.0-alpha.27" defer></script>
-  <script src="harness-profile.js?v=0.2.0-alpha.27" defer></script>
-  <script src="local-bridge.js?v=0.2.0-alpha.27" defer></script>
-  <script src="auto-pair.js?v=0.2.0-alpha.27" defer></script>
-  <script src="review-workbench.js?v=0.2.0-alpha.27" defer></script>
-  <script src="harness-comparison.js?v=0.2.0-alpha.27" defer></script>
-  <script src="experiment-ledger.js?v=0.2.0-alpha.27" defer></script>
-  <script src="document-import.js?v=0.2.0-alpha.27" defer></script>
-  <script src="document-red-core.js?v=0.2.0-alpha.27" defer></script>
-  <script src="paper-analysis-core.js?v=0.2.0-alpha.27" defer></script>
-  <script src="document-export.js?v=0.2.0-alpha.27" defer></script>
-  <script src="app.js?v=0.2.0-alpha.27" defer></script>
-  <script src="document-preview.js?v=0.2.0-alpha.27" defer></script>
-  <script src="image-editor-core.js?v=0.2.0-alpha.27" defer></script>
-  <script src="image-editor.js?v=0.2.0-alpha.27" defer></script>
-  <script type="module" src="paper-recompose-entry.mjs?v=0.2.0-alpha.27"></script>
-  <script src="attempt-ledger.js?v=0.2.0-alpha.27" defer></script>
-  <script src="pending-job.js?v=0.2.0-alpha.27" defer></script>
-  <script src="paper-edits.js?v=0.2.0-alpha.27" defer></script>
-  <script src="blind-pdf.js?v=0.2.0-alpha.27" defer></script>
-  <script src="external-red.js?v=0.2.0-alpha.27" defer></script>
-  <script src="browser-pdf.js?v=0.2.0-alpha.27" defer></script>
-  <script src="table-pdf.js?v=0.2.0-alpha.27" defer></script>
-  <script src="paragraph-pdf.js?v=0.2.0-alpha.27" defer></script>
-  <script src="pdf-edit-pipeline.js?v=0.2.0-alpha.27" defer></script>
-  <script src="paper-font-service.js?v=0.2.0-alpha.27" defer></script>
-  <script src="paper-change-marks.js?v=0.2.0-alpha.27" defer></script>
-  <script src="paper-workspace.js?v=0.2.0-alpha.27" defer></script>
-  <script src="external-red-ui.js?v=0.2.0-alpha.27" defer></script>
-  <script src="paper-manual-records.js?v=0.2.0-alpha.27" defer></script>
-  <script src="document-red.js?v=0.2.0-alpha.27" defer></script>
-  <script src="document-blue-core.js?v=0.2.0-alpha.27" defer></script>
-  <script src="blue-visual-input.js?v=0.2.0-alpha.27" defer></script>
-  <script src="document-blue.js?v=0.2.0-alpha.27" defer></script>
-  <script src="cloud-config.js?v=0.2.0-alpha.27" defer></script>
-  <script src="vendor/file-drop.umd.js?v=0.2.0-alpha.27" defer></script>
-  <script src="visual-workflow.js?v=0.2.0-alpha.27" defer></script>
-  <script src="confluence-store.js?v=0.2.0-alpha.27" defer></script>
+  <link rel="stylesheet" href="styles.css?v=0.2.0-alpha.28">
+  <link rel="stylesheet" href="document-red.css?v=0.2.0-alpha.28">
+  <link rel="stylesheet" href="experiment-ledger.css?v=0.2.0-alpha.28">
+  <link rel="stylesheet" href="harness-wrapper.css?v=0.2.0-alpha.28">
+  <link rel="stylesheet" href="confluence-store.css?v=0.2.0-alpha.28">
+  <link rel="stylesheet" href="image-editor.css?v=0.2.0-alpha.28">
+  <link rel="stylesheet" href="visual-workflow.css?v=0.2.0-alpha.28">
+  <link rel="stylesheet" href="paper-workspace.css?v=0.2.0-alpha.28">
+  <link rel="stylesheet" href="external-red-ui.css?v=0.2.0-alpha.28">
+  <link rel="stylesheet" href="external-blue-ui.css?v=0.2.0-alpha.28">
+  <link rel="stylesheet" href="paper-manual-records.css?v=0.2.0-alpha.28">
+  <script src="harness-core.js?v=0.2.0-alpha.28" defer></script>
+  <script src="harness-wrapper.js?v=0.2.0-alpha.28" defer></script>
+  <script src="harness-profile.js?v=0.2.0-alpha.28" defer></script>
+  <script src="local-bridge.js?v=0.2.0-alpha.28" defer></script>
+  <script src="auto-pair.js?v=0.2.0-alpha.28" defer></script>
+  <script src="review-workbench.js?v=0.2.0-alpha.28" defer></script>
+  <script src="harness-comparison.js?v=0.2.0-alpha.28" defer></script>
+  <script src="experiment-ledger.js?v=0.2.0-alpha.28" defer></script>
+  <script src="document-import.js?v=0.2.0-alpha.28" defer></script>
+  <script src="document-red-core.js?v=0.2.0-alpha.28" defer></script>
+  <script src="paper-analysis-core.js?v=0.2.0-alpha.28" defer></script>
+  <script src="document-export.js?v=0.2.0-alpha.28" defer></script>
+  <script src="app.js?v=0.2.0-alpha.28" defer></script>
+  <script src="document-preview.js?v=0.2.0-alpha.28" defer></script>
+  <script src="image-editor-core.js?v=0.2.0-alpha.28" defer></script>
+  <script src="image-editor.js?v=0.2.0-alpha.28" defer></script>
+  <script type="module" src="paper-recompose-entry.mjs?v=0.2.0-alpha.28"></script>
+  <script src="attempt-ledger.js?v=0.2.0-alpha.28" defer></script>
+  <script src="pending-job.js?v=0.2.0-alpha.28" defer></script>
+  <script src="paper-edits.js?v=0.2.0-alpha.28" defer></script>
+  <script src="external-proposals.js?v=0.2.0-alpha.28" defer></script>
+  <script src="blind-pdf.js?v=0.2.0-alpha.28" defer></script>
+  <script src="external-red.js?v=0.2.0-alpha.28" defer></script>
+  <script src="external-exchange.js?v=0.2.0-alpha.28" defer></script>
+  <script src="browser-pdf.js?v=0.2.0-alpha.28" defer></script>
+  <script src="table-pdf.js?v=0.2.0-alpha.28" defer></script>
+  <script src="paragraph-pdf.js?v=0.2.0-alpha.28" defer></script>
+  <script src="pdf-edit-pipeline.js?v=0.2.0-alpha.28" defer></script>
+  <script src="paper-font-service.js?v=0.2.0-alpha.28" defer></script>
+  <script src="paper-change-marks.js?v=0.2.0-alpha.28" defer></script>
+  <script src="paper-generation.js?v=0.2.0-alpha.28" defer></script>
+  <script src="paper-workspace.js?v=0.2.0-alpha.28" defer></script>
+  <script src="external-red-ui.js?v=0.2.0-alpha.28" defer></script>
+  <script src="paper-manual-records.js?v=0.2.0-alpha.28" defer></script>
+  <script src="document-red.js?v=0.2.0-alpha.28" defer></script>
+  <script src="document-blue-core.js?v=0.2.0-alpha.28" defer></script>
+  <script src="blue-visual-input.js?v=0.2.0-alpha.28" defer></script>
+  <script src="document-blue.js?v=0.2.0-alpha.28" defer></script>
+  <script src="external-blue-ui.js?v=0.2.0-alpha.28" defer></script>
+  <script src="cloud-config.js?v=0.2.0-alpha.28" defer></script>
+  <script src="vendor/file-drop.umd.js?v=0.2.0-alpha.28" defer></script>
+  <script src="visual-workflow.js?v=0.2.0-alpha.28" defer></script>
+  <script src="confluence-store.js?v=0.2.0-alpha.28" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main">작업 영역으로 건너뛰기</a>
@@ -193,7 +198,7 @@
               </details>
               <section id="paper-proposals" class="paper-proposals" hidden aria-labelledby="paper-proposals-title">
                 <h4 id="paper-proposals-title">받아들일 제안</h4>
-                <p class="muted">자동으로 적용하지 않습니다. 원문에서 정확히 한 곳인 제안만 받아들일 수 있습니다.</p>
+                <p class="muted">체크한 변경을 반영합니다. 위치가 없는 제안은 원문에서 연결하세요.</p>
                 <ul id="paper-proposal-list" class="paper-edits"></ul>
                 <p id="paper-proposal-status" class="form-feedback" role="status" aria-live="polite"></p>
               </section>
@@ -231,7 +236,7 @@
                   <div class="image-result" id="image-result" hidden><code id="image-result-hash" class="image-hash"></code><div class="button-row"><button class="button secondary" type="button" id="image-download-pdf" disabled>실험용 PDF 다운로드</button><button class="button secondary" type="button" id="image-download-report" disabled>교체 보고서 JSON 다운로드</button></div><p class="muted">보고서의 렌더 검사는 같은 엔진(MuPDF)의 자체 확인입니다. 독립 검사·도메인 검수는 아직 대기 중입니다.</p></div>
                 </div>
               </details>
-              <div class="red-settings"><label>공격 단계<select id="red-level"><option value="1">L1 · 명시적 모순</option><option value="2">L2 · 필요한 조건 누락</option><option value="3">L3 · 근거 없는 해석</option></select></label><label>근거 언어<select id="red-language"><option value="ko" selected>한국어</option><option value="en">English</option></select></label></div>
+              <div class="red-settings"><fieldset id="red-types"><legend>공격 유형 · 여러 개 선택</legend><label class="check-row"><input type="checkbox" value="contradiction" checked><span>명시적 모순</span></label><label class="check-row"><input type="checkbox" value="condition-omission"><span>조건 누락</span></label><label class="check-row"><input type="checkbox" value="unsupported-inference"><span>근거 없는 해석</span></label></fieldset><label>근거 언어<select id="red-language"><option value="ko" selected>한국어</option><option value="en">English</option></select></label></div>
               <details class="red-help advanced"><summary>고급 설정 · 최대 모델 호출</summary><div class="red-settings"><label>최대 모델 호출 (1–32)<input id="red-budget" type="number" min="1" max="32" value="8"></label></div></details>
               <label class="check-row"><input type="checkbox" id="red-consent"><span>추출한 논문 전체를 선택한 도구에 보내 RED 검토를 실행합니다.<small>사용자 코드·외부 서버는 해당 도구의 실행 환경을 사용합니다.</small></span></label>
               <p class="storage-note">유효한 결과와 추출 논문 텍스트는 이 브라우저에 자동 저장됩니다. 클라우드에 공유되지 않습니다.</p>
