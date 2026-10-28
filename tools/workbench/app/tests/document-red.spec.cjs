@@ -19,4 +19,7 @@ test('empty abstain is legitimate',()=>assert.deepEqual(C.validateResponse(doc,{
 test('selected-only patch plan',()=>{const c=C.validateResponse(doc,response([candidate]));assert.throws(()=>C.patches(doc,c));c[0].selected=true;assert.equal(C.patches(doc,c).length,1);});
 test('edited empty after denied',()=>assert.throws(()=>C.patches(doc,[{...candidate,selected:true,after:' '}])));
 test('overlapping candidates denied',()=>assert.throws(()=>C.patches(doc,[{...candidate,selected:true},{...candidate,id:'c2',before:'does not show',after:'does show',selected:true}])));
+test('Korean explanations are the default; exact paper text is not translated',()=>{const r=C.request(doc,2,8);assert.equal(r.explanationLanguage,'ko');assert.match(r.instructions,/in Korean/);assert.match(r.instructions,/never translate exact source/);assert.deepEqual(r.segments,doc.segments);});
+test('English explanations can be selected explicitly',()=>{assert.equal(C.request(doc,2,8,'en').explanationLanguage,'en');assert.match(C.request(doc,2,8,'en').instructions,/in English/);assert.throws(()=>C.request(doc,2,8,'unknown'));});
+
 console.log(JSON.stringify({passed:checks}));

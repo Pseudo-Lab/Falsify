@@ -90,7 +90,7 @@ details.reference > *{display:block}
 <details id="reference" class="reference">
 <summary>자세한 안내</summary>
 <p>Harness 화면에서 사용할 RED와 BLUE를 고른 뒤 <strong>선택한 RED·BLUE만 남기기</strong>를 누르면 내 도구 목록을 정리할 수 있습니다. 이전 실행·검수 기록은 유지되며, 삭제한 도구 복원으로 다시 꺼낼 수 있습니다. 팀 서랍에 보관한 페이지는 Confluence에서 따로 관리합니다.</p>
-<p class="note">이 안내는 웹앱 0.2.0-alpha.25를 기준으로 합니다. 글꼴 편집은 PC 연결 없이 브라우저에서 사용할 수 있습니다. sourceBuildVerified는 false입니다.</p>
+<p class="note">이 안내는 웹앱 0.2.0-alpha.26를 기준으로 합니다. 글꼴 편집은 PC 연결 없이 브라우저에서 사용할 수 있습니다. sourceBuildVerified는 false입니다.</p>
 <h3>원본 배치로 수정본 만들기</h3>
 <p>일반 생성은 원본의 선택 구간을 편집합니다. <b class="ui">고급 생성 옵션</b>의 <b class="ui">전체 논문 새로 배치</b>를 선택하면 문서 전체의 글꼴·줄바꿈·페이지가 달라질 수 있습니다.</p>
 <h3>원본과 같은 글꼴로 편집하기</h3>
@@ -203,6 +203,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\install-connection.ps1</co
 </section>
 <section id="red" aria-labelledby="red-title">
 <h2 id="red-title">4. RED 자세히</h2>
+<p><b class="ui">근거 언어</b>에서 한국어 또는 English를 고릅니다. 기본값은 한국어입니다. 다음 RED 검토의 공격 근거·근거 관계·검토 메모에 적용하며 논문의 Before·After·근거 인용은 원래 언어로 남습니다. 이미 받은 영어 응답은 그대로 보존합니다. 로컬 실행은 alpha.26 이상 companion을 사용하세요.</p>
+<p><b class="ui">변경 표시</b>를 켜면 원본의 삭제·교체 부분은 붉은 점선, 수정본의 추가·교체 부분은 푸른 밑줄로 표시합니다. 삭제로 새 글자가 없는 자리에는 세로선을 표시합니다. 편집 목록에서 <b class="ui">비교</b>를 누르면 해당 쪽과 위치를 양쪽에서 확인합니다. 강조 표시는 화면에만 나타나며 다운로드 PDF와 BLUE 입력에는 포함되지 않습니다.</p>
 <p class="note">쪽 단위 직접 편집과 외부 응답 가져오기는 이 장의 harness를 실행하지 않습니다. 로컬 AI는 화면의 <b class="ui">AI 검토 · 선택 사항</b>을 열었을 때만 선택입니다. 전송 동의와 실험용 사본 동의가 화면에 함께 있으면 그 체크를 각각 따르고, 화면이 하나의 동의만 보여 주면 그 컨트롤만 사용합니다.</p>
 <p>RED는 입력 문서에서 해석을 왜곡하는 변경 후보를 모델에게 제안받고, 사람이 고른 것만 실험용 사본에 반영합니다.</p>
 <ol>

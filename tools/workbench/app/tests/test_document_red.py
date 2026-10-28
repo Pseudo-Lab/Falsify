@@ -28,6 +28,18 @@ class MockBackend:
         return {'status': 'ok', 'response': response}
 
 class RedTests(unittest.TestCase):
+    def test_explanation_language_preserves_quotes_and_harness(self):
+        for code, name in [('ko', 'Korean'), ('en', 'English')]:
+            MockBackend.prompts=[]
+            data={**request(), 'explanationLanguage':code}
+            run_review(data,lambda _:None,threading.Event(),MockBackend)
+            self.assertIn(f'uncertainty and scan summaries in {name}',MockBackend.prompts[0])
+            self.assertIn('Never translate exact source quotations',MockBackend.prompts[0])
+            self.assertEqual(data['segments'][0]['text'],TEXT)
+    def test_invalid_explanation_language_denied_before_calls(self):
+        MockBackend.prompts=[]
+        with self.assertRaises(ValueError):run_review({**request(),'explanationLanguage':'invalid'},lambda _:None,threading.Event(),MockBackend)
+        self.assertEqual(MockBackend.prompts,[])
     def test_single_fulltext_call(self):
         MockBackend.prompts=[]
         result=run_review(request(), lambda _:None, threading.Event(), MockBackend)

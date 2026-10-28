@@ -1,4 +1,6 @@
 import {spawnSync} from 'node:child_process';
+const marks = spawnSync(process.execPath, ['--test', 'tests/paper-change-marks.spec.cjs'], {stdio: 'inherit'});
+if (marks.error || marks.status !== 0) process.exit(marks.status || 1);
 
 for (const file of ['paper-academic-flow.spec.mjs', 'paper-layout-quality.spec.mjs', 'paper-sparse-evidence.spec.mjs', 'paper-float-ownership.spec.mjs', 'line-identity.spec.mjs', 'paper-output-profile.spec.mjs', 'paper-output-profile-pipeline.spec.mjs', 'paper-asset-spans.spec.mjs', 'paper-native-flow.spec.mjs', 'paper-caption-flow.spec.mjs', 'paper-caption-columns.spec.mjs', 'paper-caption-continuity.spec.mjs', 'paper-frontmatter-flow.spec.mjs', 'paper-crosspage-caption.spec.mjs', 'paper-figure-fit.spec.mjs', 'paper-layout-repair.spec.mjs', 'paper-keep-next.spec.mjs', 'paper-source-wrap.spec.mjs', 'paper-furniture-spacing.spec.mjs', 'paper-repeated-furniture.spec.mjs', 'paragraph-preserve-alignment.spec.mjs', 'paragraph-preserve-two-column.spec.mjs']) {
   const result = spawnSync(process.execPath, ['--test', 'tests/' + file], {stdio: 'inherit'});

@@ -441,6 +441,7 @@
     const timers=deps.timers||globalThis,urls=deps.urls||globalThis.URL;
     const now=()=>typeof deps.now==='function'?deps.now():Date.now();
     const previewApi=()=>deps.preview||globalThis.FalsifyPreview||null;
+    const marksApi=()=>deps.changeMarks||globalThis.FalsifyChangeMarks||null;
     const editsApi=()=>deps.edits||globalThis.FalsifyPaperEdits||null;
     const tableApi=()=>deps.tablePdf||globalThis.FalsifyTablePdf||null;
     const paragraphApi=()=>deps.paragraphPdf||globalThis.FalsifyParagraphPdf||null;
@@ -492,6 +493,32 @@
     let editMode='text',tableCtl=null,tableSeq=0,tableBindings=new Map();
     let inspectCtl=null,resumeCtl=null,afterPart=0,afterSourcePage=0;
     let page=1,pages=0,zoom=1,drawSeq=0,afterSeq=0,loadTask=null,textLayerHandle=null,genCtl=null,genId=0,generating=false,afterTask=null,afterRender=null;
+    let beforeMarks=null,afterMarks=null,compareFocus=null;
+    const showChanges=doc.querySelector('#paper-show-changes'),changeStatus=doc.querySelector('#paper-change-status');
+    function syncChangeVisibility(){for(const stage of [ui.beforeStage,ui.afterStage])stage.classList.toggle('is-changes-hidden',showChanges?.checked===false);}
+    showChanges?.addEventListener('change',syncChangeVisibility);
+    function paintBeforeChanges(){
+      beforeMarks?.layer?.remove();beforeMarks=null;
+      if(pageText&&marksApi()?.paintPage)beforeMarks=marksApi().paintPage({document:doc,container:pageText.pageEl,items:pageText.items,divs:pageText.divs,edits:(snapshot?.edits||[]).filter(e=>e.pageIndex===pageText.pageIndex),side:'before'});
+      syncChangeVisibility();updateChangeStatus();
+    }
+    function updateChangeStatus(){
+      if(!changeStatus)return;
+      const edits=(snapshot?.edits||[]).filter(e=>e.enabled!==false&&e.pageIndex===page-1),missing=(beforeMarks?.missing?.length||0)+(afterMarks?.missing?.length||0);
+      changeStatus.textContent=edits.length?'이 쪽 변경 '+edits.length+'개'+(missing?' · 일부 위치는 아래 문장 비교에서 확인':''):'';
+    }
+    function focusChange(){
+      if(!compareFocus)return;
+      for(const [stage,marks] of [[ui.beforeStage,beforeMarks],[ui.afterStage,afterMarks]]){
+        const node=Array.from(marks?.layer?.children||[]).find(n=>n.dataset.edit===compareFocus);
+        if(node&&typeof stage.scrollTo==='function'){const box=node.getBoundingClientRect(),parent=stage.getBoundingClientRect();stage.scrollTo({top:stage.scrollTop+box.top-parent.top-stage.clientHeight/2,left:stage.scrollLeft+box.left-parent.left-stage.clientWidth/2,behavior:'instant'});}
+      }
+    }
+    async function compareEdit(edit){
+      if(!canLeaveInline())return;closeInline();compareFocus=edit.id;if(showChanges)showChanges.checked=true;syncChangeVisibility();
+      if(page!==edit.pageIndex+1)await drawBefore(edit.pageIndex+1);else{paintBeforeChanges();await drawAfter();}
+      focusChange();
+    }
 
     function emit(name,detail){doc.dispatchEvent(new CustomEvent(name,{detail}));}
     function say(node,text,error){if(!node)return;node.textContent=text||'';node.classList.toggle('error',!!error);}
@@ -685,10 +712,11 @@
         const del=doc.createElement('button');del.type='button';del.className='button secondary';del.dataset.edit=edit.id;del.dataset.act='delete';del.textContent='삭제';
         const note=doc.createElement('span');note.className='paper-edit-origin';note.textContent=originText(edit.origin,modelById.get(edit.id));
         const cause=editCause(edit.id);
+        const compare=doc.createElement('button');compare.type='button';compare.className='button secondary';compare.dataset.edit=edit.id;compare.dataset.act='compare';compare.textContent='비교';compare.addEventListener('click',()=>void compareEdit(edit));
         jump.addEventListener('click',()=>loadInline(edit));
         toggle.addEventListener('click',()=>{if(session)session.setEnabled(edit.id,edit.enabled===false);});
         del.addEventListener('click',()=>onDelete(edit));
-        li.append(jump,toggle,del,note);if(cause)li.append(cause);ui.edits.append(li);
+        li.append(jump,compare,toggle,del,note);if(cause)li.append(cause);ui.edits.append(li);
       }
       ui.undo.disabled=!snapshot||!snapshot.canUndo;
       ui.redo.disabled=!snapshot||!snapshot.canRedo;
@@ -740,7 +768,7 @@
         const changed=snapshot&&snapshot.revision!==snap.revision;
         snapshot=snap;if(changed&&inline?.editId&&!(snap.edits||[]).some(e=>e.id===inline.editId))closeInline();
         if(changed){clearTables(true);if(editMode==='table'&&pageText)void inspectTables(pageText,epoch,drawSeq);}
-        const copy=published(snap);if(copy)emit('falsify:paper-workspace-edits',copy);renderEdits();paintProposals();void drawAfter();
+        const copy=published(snap);if(copy)emit('falsify:paper-workspace-edits',copy);renderEdits();paintProposals();paintBeforeChanges();void drawAfter();
       }catch(e){setEditStatus('편집 목록을 그리지 못했습니다. '+safeMessage(e),true);}
     }
     function watchSession(next){
@@ -794,7 +822,7 @@
       epoch++;tableBindings.clear();abortGen();stopPdf();closeAfter();
       if(typeof unsub==='function')unsub();
       if(directEditor){const editor=directEditor;directEditor=null;editor.remove();}
-      unsub=null;session=null;snapshot=null;output=null;inline=null;pageText=null;proposalQueue=null;accepted=new Set();draftRaw=null;pendingResume=null;
+      unsub=null;session=null;snapshot=null;output=null;inline=null;pageText=null;proposalQueue=null;accepted=new Set();draftRaw=null;pendingResume=null;beforeMarks=afterMarks=null;compareFocus=null;updateChangeStatus();
       source=null;pages=0;page=1;zoom=1;
       clearStage(ui.beforeStage);clearStage(ui.afterStage);
       renderInline();renderEdits();paintProposals();renderChrome();
@@ -833,7 +861,7 @@
       abortGen();stopPdf();closeAfter();
       if(typeof unsub==='function')unsub();
       if(directEditor){const editor=directEditor;directEditor=null;editor.remove();}
-      unsub=null;session=null;snapshot=null;output=null;inline=null;pageText=null;proposalQueue=null;accepted=new Set();draftRaw=null;pendingResume=null;
+      unsub=null;session=null;snapshot=null;output=null;inline=null;pageText=null;proposalQueue=null;accepted=new Set();draftRaw=null;pendingResume=null;beforeMarks=afterMarks=null;compareFocus=null;updateChangeStatus();
       pages=0;page=1;zoom=1;
       source={file,fileHash:null,name:sessionName(file.name),segments:[],pdf:isPdf(file),doc:null,lib:null,render:null,paragraphPages:new Map()};
       clearStage(ui.beforeStage);clearStage(ui.afterStage);renderInline();renderEdits();paintProposals();renderChrome();
@@ -927,18 +955,20 @@
         const content=await contentPromise;
         if(!live()){pdfPage.cleanup&&pdfPage.cleanup();return;}
         const items=Array.isArray(content.items)?content.items:[];
+        let divs=[];
         if(source.lib&&source.lib.TextLayer){
           const handle=new source.lib.TextLayer({textContentSource:content,container:textEl,viewport});
           textLayerHandle=handle;
           await handle.render();
           if(!live()){handle.cancel&&handle.cancel();pdfPage.cleanup&&pdfPage.cleanup();return;}
-          const divs=handle.textDivs||[];
+          divs=handle.textDivs||[];
           items.forEach((item,i)=>{if(divs[i]&&divs[i].dataset)divs[i].dataset.i=String(i);});
         }
         const viewBox=viewport.viewBox||[0,0,base.width,base.height];
         const rotation=pageRotation(viewport.rotation);
-        pageText={items,styles:content.styles||{},viewBox,pageIndex:n-1,textEl,pageEl,rotation,pageWidth:viewBox[2]-viewBox[0],pageHeight:viewBox[3]-viewBox[1],scale};
+        pageText={items,divs,styles:content.styles||{},viewBox,pageIndex:n-1,textEl,pageEl,rotation,pageWidth:viewBox[2]-viewBox[0],pageHeight:viewBox[3]-viewBox[1],scale};
         clearStage(ui.beforeStage);ui.beforeStage.append(pageEl);
+        paintBeforeChanges();focusChange();
         pdfPage.cleanup&&pdfPage.cleanup();source.render=null;
         setBeforeStatus(n+' / '+pages+'쪽 · 원본 바이트'+(rotation?' · 회전된 쪽이라 좌표 편집은 받지 않습니다':''));
         renderChrome();void drawAfter();if(editMode==='table')void inspectTables(pageText,mine,seq);else void inspectParagraphs(pageText,mine,seq);
@@ -1309,6 +1339,7 @@
     }
     async function drawAfter(){
       afterNav.hidden=true;
+      afterMarks=null;
       const seq=++afterSeq,mine=epoch,current=output;
       if(!current||current.blocked){clearStage(ui.afterStage);setAfterStatus(current?'생성 파일의 바이트가 해시와 달라 그리지 않았습니다.':'아직 생성본이 없습니다.');return;}
       const preview=previewApi();
@@ -1345,7 +1376,23 @@
         const renderTask=pdfPage.render({canvasContext:ctx,canvas,viewport});
         afterRender=renderTask;await renderTask.promise;
         if(seq!==afterSeq||epoch!==mine||output!==current){canvas.width=0;canvas.height=0;return;}
-        clearStage(ui.afterStage);ui.afterStage.append(canvas);pdfPage.cleanup&&pdfPage.cleanup();
+        clearStage(ui.afterStage);ui.afterStage.append(canvas);
+        // Keep the rendered canvas as the first child for existing preview consumers.
+        // The absolute DOM overlay is comparison-only; the File remains byte-identical.
+        if(marksApi()?.paintPage&&lib.TextLayer){
+          const content=await pdfPage.getTextContent();
+          if(seq!==afterSeq||epoch!==mine||output!==current)return;
+          const textEl=doc.createElement('div');textEl.className='paper-text-layer textLayer';
+          const surface=doc.createElement('div');surface.className='paper-page paper-after-page';surface.style.width=viewport.width+'px';surface.style.height=viewport.height+'px';
+          surface.style.setProperty('--total-scale-factor',String(viewport.scale||scale));surface.style.setProperty('--scale-round-x','1px');surface.style.setProperty('--scale-round-y','1px');surface.style.setProperty('--text-scale-factor','1');
+          surface.append(textEl);ui.afterStage.append(surface);
+          const layer=new lib.TextLayer({textContentSource:content,container:textEl,viewport});await layer.render();
+          if(seq!==afterSeq||epoch!==mine||output!==current){layer.cancel?.();return;}
+          const edits=(current.edits||[]).filter(e=>independent||e.pageIndex===page-1);
+          afterMarks=marksApi().paintPage({document:doc,container:surface,items:content.items,divs:layer.textDivs,edits,side:'after'});
+          surface.classList.add('paper-after-overlay');textEl.remove();syncChangeVisibility();updateChangeStatus();focusChange();
+        }
+        pdfPage.cleanup&&pdfPage.cleanup();
         afterNav.hidden=mapped.length<2;afterPrev.disabled=afterPart===0;afterNext.disabled=afterPart===mapped.length-1;
         afterPosition.textContent=independent?'출력 '+outputPage+' / '+mapped.length+'쪽':'원본 '+page+'쪽 → 출력 '+outputPage+'쪽 · '+(afterPart+1)+' / '+mapped.length;
         setAfterStatus((stale()?'마지막 생성본':'현재 생성본')+' · 받은 파일 바이트 · 출력 '+outputPage+'쪽'+(independent?' · 원본과 쪽 대응 없음':afterPart?' · 이어지는 쪽':''));
@@ -1470,7 +1517,7 @@
         if(mine!==genId||epoch!==epochAt||!source||source.file!==file||source.fileHash!==hash||ctl.signal?.aborted||snapshot?.revision!==revision)return;
         if(actualHash!==result.sha256)throw new Error('생성 파일의 바이트와 해시가 달라 받지 않았습니다.');
         if(new TextDecoder().decode(bytes.subarray(0,1024)).indexOf('%PDF-')<0)throw new Error('생성 결과에 PDF 서명이 없어 받지 않았습니다.');
-        const candidate={file:result.file,sha256:result.sha256,originalSourceSha256:HEX.test(result.originalSourceSha256||'')?result.originalSourceSha256:hash,verification:result.verification==null?null:result.verification,warnings:Array.isArray(result.warnings)?result.warnings:null,pageMap:clone(result.pageMap)||null,recomposition:recompose,revision,fontRevision,blocked:false};
+        const candidate={file:result.file,sha256:result.sha256,edits:clone(edits),originalSourceSha256:HEX.test(result.originalSourceSha256||'')?result.originalSourceSha256:hash,verification:result.verification==null?null:result.verification,warnings:Array.isArray(result.warnings)?result.warnings:null,pageMap:clone(result.pageMap)||null,recomposition:recompose,revision,fontRevision,blocked:false};
         let tableNote='';
         const tableEdits=edits.filter(e=>String(e.segmentId||'').startsWith('table:'));
         if(tableEdits.length&&!recompose){

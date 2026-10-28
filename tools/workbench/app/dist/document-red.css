@@ -44,6 +44,9 @@
 .red-preview-stage{display:flex;justify-content:center;margin-top:12px;padding:12px;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);min-width:0}
 .red-preview-stage:empty{display:none}
 .red-preview-canvas{display:block;max-width:100%;height:auto;background:var(--paper);border:1px solid var(--line)}
+.red-preview-stage{position:relative}
+.red-preview-stage .red-preview-mark-surface{position:absolute;top:12px;left:50%;transform:translateX(-50%) scale(var(--preview-mark-scale,1));transform-origin:center top;pointer-events:none;margin:0}
+.red-change-preview{font-size:13px}
 .red-preview .button-row{align-items:center}
 .red-preview-page{font-size:13px;font-variant-numeric:tabular-nums;min-width:5em}
 #red-preview-status.error{color:var(--red-ink)}

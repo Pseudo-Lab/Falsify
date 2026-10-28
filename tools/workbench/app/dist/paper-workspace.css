@@ -12,6 +12,24 @@
 .paper-pane h4{font-size:13px;margin-bottom:8px}
 .paper-stage{max-width:100%;max-height:min(70vh,720px);overflow:auto;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);min-height:120px}
 .paper-stage:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+.paper-compare-tools{display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center;margin-top:12px;font-size:13px}
+.paper-compare-tools label{display:inline-flex;align-items:center;gap:6px;min-height:40px}
+.paper-change-key{padding:2px 5px;border-bottom:2px solid currentColor}
+.paper-change-key.is-before{color:var(--red-ink);border-bottom-style:dashed}
+.paper-change-key.is-after{color:var(--focus,#246388)}
+.paper-change-layer{position:absolute;inset:0;z-index:2;pointer-events:none;overflow:hidden}
+.paper-change-mark{position:absolute;box-sizing:border-box;pointer-events:none}
+.paper-change-mark.is-before{background:rgba(142,48,43,.18);border-bottom:2px dashed var(--red-ink)}
+.paper-change-mark.is-after{background:rgba(36,99,136,.18);border-bottom:2px solid var(--focus,#246388)}
+.paper-change-mark.is-caret{background:var(--focus,#246388);border:0}
+.paper-change-mark.is-before.is-caret{background:var(--red-ink)}
+.paper-stage.is-changes-hidden .paper-change-layer{visibility:hidden}
+.paper-after-page{position:relative;width:max-content}
+#paper-after-stage{position:relative}
+#paper-after-stage .paper-after-overlay{position:absolute;top:0;left:0;pointer-events:none;margin:0}
+.paper-change-text{color:inherit;padding:0;background:rgba(36,99,136,.14);text-decoration:underline;text-decoration-color:var(--focus,#246388);text-underline-offset:3px}
+.paper-change-text.is-before{background:rgba(142,48,43,.14);text-decoration:line-through;text-decoration-color:var(--red-ink)}
+@media(forced-colors:active){.paper-change-mark{background:transparent!important;border:2px solid Highlight}.paper-change-mark.is-before{border-style:dashed}}
 .paper-page{position:relative;margin:0 auto}
 .paper-canvas{display:block;background:var(--paper);border:1px solid var(--line)}
 .paper-text-layer{position:absolute;inset:0;overflow:clip;line-height:1;transform-origin:0 0;z-index:1;caret-color:var(--ink)}

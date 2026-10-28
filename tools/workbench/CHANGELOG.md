@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.0-alpha.26
+
+- 원본·수정본의 변경 부분 강조, 삭제 위치 표시, 편집 목록에서 비교 위치로 이동.
+- 새 RED 요청의 한국어 근거 기본값과 영어 선택. 인용문은 원래 언어 유지.
+- [변경 내용](docs/releases/0.2.0-alpha.26.md)
+
 ## 0.2.0-alpha.22
 
 - PDF direct editing, whole-paper recomposition, transparent figure replacement.

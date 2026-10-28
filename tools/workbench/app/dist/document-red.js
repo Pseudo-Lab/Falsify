@@ -34,7 +34,7 @@
     const cap=B.capabilities();$('#red-start').disabled=!active||!cap?.red||!$('#red-consent').checked||!FalsifyLab.allowed('red');
     $('#red-record').disabled=!active||!response||pending.size>0;FalsifyLab.busy('red',busy||pending.size>0);B.busy('red',busy);
     $('#red-request').disabled=!active;$('#red-import-response').disabled=!active;
-    $('#red-level').disabled=busy;$('#red-budget').disabled=busy;
+    $('#red-level').disabled=busy;$('#red-budget').disabled=busy;if($('#red-language'))$('#red-language').disabled=busy;
     $('#red-cancel').hidden=!busy||!job;
     $('#red-plan').disabled=!active||!candidates.some(c=>c.selected);
     const count=candidates.filter(c=>c.selected).length;
@@ -81,7 +81,9 @@
       const comparison=document.createElement('div');comparison.className='red-ab';const before=document.createElement('div'),beforeTitle=document.createElement('h3'),beforeText=document.createElement('p');beforeTitle.textContent='Before · 원본 인용';beforeText.textContent=c.before;before.append(beforeTitle,beforeText);
       const after=document.createElement('div'),label=document.createElement('label'),area=document.createElement('textarea');area.id='red-after-'+i;area.rows=4;area.maxLength=4000;area.value=c.after;label.htmlFor=area.id;label.textContent='After · 직접 편집 가능';after.append(label,area);comparison.append(before,after);section.append(comparison);
       const uncertainty=document.createElement('p');uncertainty.className='muted';uncertainty.textContent=c.uncertainty;notes.append(uncertainty);section.append(notes);
-      check.addEventListener('change',()=>{c.selected=check.checked;changed();});area.addEventListener('input',()=>{c.after=area.value;c.edited=true;changed();});list.append(section);
+      const marks=globalThis.FalsifyChangeMarks,afterText=document.createElement('p');afterText.className='red-change-preview';afterText.ariaLabel='변경 문구 강조';after.append(afterText);
+      const paint=()=>{if(marks){marks.paintText(beforeText,c.before,c.after,'before');marks.paintText(afterText,c.before,c.after,'after');}else afterText.hidden=true;};paint();
+      check.addEventListener('change',()=>{c.selected=check.checked;changed();});area.addEventListener('input',()=>{c.after=area.value;c.edited=true;paint();changed();});list.append(section);
     });controls();
   }
   const MODEL_ID=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$/;
@@ -91,7 +93,7 @@
     const proposals=validated.map(c=>({segmentId:c.segmentId,before:c.before,after:c.after,anchor:Number.isInteger(c.offset)?{start:c.offset,end:c.offset+c.before.length}:undefined}));
     try{ws.acceptProposals(proposals,modelRun?{origin:'ai-proposal',...(hinted?{model:hinted}:{})}:{origin:'external-ai-import'});}catch{/* the validated RED response stays either way */}}
   function applyResponse(res,origin,ask=false){const validated=C.validateResponse(doc,res);if(ask&&!keepEdits()){msg('응답 적용 취소: 기존 후보와 편집을 그대로 유지했습니다.');return;}invalidate();candidates=validated;response={...res,provenance:origin};renderCandidates();void save(null);bridgeWorkspace(validated,origin);msg((res.status==='refusal'?'모델이 거절했습니다. 우회하거나 자동 재시도하지 않습니다.':res.status==='abstain'?'모델이 유보했습니다. 후보를 강제로 만들지 않고 자동 재시도하지 않습니다.':validated.length+'개 후보 · 인용 위치 확인 완료, 과학적 타당성 미검증.')+' '+H.outcomeText('red',res,origin)+'.');}
-  async function makeRequest(){const budget=Number($('#red-budget').value);if(!Number.isInteger(budget)||budget<1||budget>32)throw new Error('호출 예산은 1–32 사이 정수입니다.');return FalsifyLab.bind('red',C.request(doc,Number($('#red-level').value),budget));}
+  async function makeRequest(){const budget=Number($('#red-budget').value);if(!Number.isInteger(budget)||budget<1||budget>32)throw new Error('호출 예산은 1–32 사이 정수입니다.');return FalsifyLab.bind('red',C.request(doc,Number($('#red-level').value),budget,$('#red-language')?.value||'ko'));}
   // While a response is retained, re-download its bound request so later final snapshots keep the root's requestId; only a fresh start mints a new execution request.
   $('#red-request').addEventListener('click',async()=>{const current=generation;try{const next=response&&request?request:await makeRequest();if(current!==generation)return;request=next;jsonDownload(request,'falsify-document-red-request.json');msg('수동 전달용 요청과 harness를 저장했습니다. 실행·전송은 하지 않았습니다.');}catch(e){msg(e.message,true);}});
   $('#red-import-response').addEventListener('click',async()=>{if(busy||!doc)return;const current=generation;try{const source=$('#red-response').value;if(source.length>150000)throw new Error('응답은 150,000자 이내입니다.');const next=request||await makeRequest();if(current!==generation)return;request=next;applyResponse(JSON.parse(source),'manual-unverified',true);}catch(e){msg('응답 적용 안 됨: '+e.message,true);}});
@@ -231,6 +233,7 @@
   document.addEventListener('falsify:harness-change',e=>{if(e.detail.role!=='red')return;snapshot();discard();msg('harness 변경: 이전 응답 무효화. 기록한 실행은 별도로 보존됩니다.');});
   $('#red-record').addEventListener('click',()=>{if(!doc||!response||busy)return;let final;try{final=finalState();}catch(e){failure={key:null,message:'현재 선택을 기록할 수 없습니다: '+e.message};renderRecord();return;}if(saved.has(key(final))){failure=null;renderRecord('변경이 없어 다시 기록하지 않았습니다. ');return;}void save(final);});
   for(const [id,name] of [['#red-level','level'],['#red-budget','budget']])$(id).addEventListener('change',()=>{const field=$(id);if(!keepEdits()){field.value=settings[name];return;}settings[name]=field.value;discard();msg('검토 설정이 바뀌어 이전 응답·후보 선택을 무효화했습니다. 새 요청을 만드세요.');});
+  $('#red-language')?.addEventListener('change',()=>{msg('다음 RED 검토의 근거를 '+($('#red-language').value==='en'?'영어':'한국어')+'로 요청합니다. 인용문과 현재 후보는 그대로입니다.');});
   function plan(patches,extra={}){return {schema:'falsify.document-edit-plan.v1',revision:doc.revision,sourceHash:doc.sourceHash,sourceFileHash:doc.fileHash,sourceName:doc.name,format:doc.format,selected:patches,
     harness:request?.harness||null,harnessHash:response?.harnessHash||null,
     candidateRationales:candidates.filter(c=>c.selected).map(c=>({id:c.id,rationale:c.rationale,evidence:c.evidence,uncertainty:c.uncertainty})),reviewProvenance:response?.provenance,coverage:response?.coverage||null,
@@ -410,7 +413,7 @@
       }
       else successStatus(pdf?layoutReport(output.verification,styled(pdf.engine)):{facts:[]},typeof output.verification?.limits==='string'?output.verification.limits.slice(0,400):'');
       // Preview the exact File just downloaded and handed to BLUE, only for PDF; a preview failure never touches `exported` or the download.
-      if(doc.format==='PDF')void preview?.show({file:exported.file,sha256:outputFileHash});
+      if(doc.format==='PDF')void preview?.show({file:exported.file,sha256:outputFileHash,changes:patches.map(p=>({...p,pageIndex:Number(/^PDF p\. (\d+)$/.exec(p.label)?.[1])-1}))});
     }catch(e){if(current===generation)exportStatus('다운로드 차단: '+e.message,true);}
     finally{if(current===generation){busy=false;controls();}}
   });
