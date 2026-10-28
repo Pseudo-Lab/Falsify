@@ -727,6 +727,7 @@ test('output: object warnings and failed checks name the candidate without claim
   const exp={mode:'warning'};
   exp.prepare=async req=>{
     const bytes=pdfBytes('MARKER-GEN');const file=new File([bytes],'checked.pdf',{type:'application/pdf'});
+    if(exp.mode==='confirmed')return {file,sha256:sha(bytes),verification:{status:'failed',checks:[{code:'edited_page_text_or_order_mismatch',pageIndex:0,status:'failed'}],report:{selfCheck:{pages:[{after_checks:[{id:'e1',present:true,method:'generated-whitespace'}]}]}}},warnings:[]};
     if(exp.mode==='warning')return {file,sha256:sha(bytes),verification:{status:'warning',applied:req.edits.length,edits:[{id:'e1',pageIndex:0,status:'applied',checks:[]}],checks:[],warnings:[{code:'font-substituted',severity:'warning',pageIndex:0,editId:'e1'}]},warnings:[{code:'font-substituted',severity:'warning',pageIndex:0,editId:'e1'},{code:'wrapped-after',severity:'info',pageIndex:0,editId:'e1'},{code:'<script>',severity:'warning',pageIndex:0,editId:'e1'}]};
     return {file,sha256:sha(bytes),verification:{status:'failed',edits:[{id:'e1',pageIndex:0,status:'failed',checks:[{id:'e1',pageIndex:0,status:'failed',code:'present-after'}]}],checks:[{id:'e1',pageIndex:0,status:'failed',code:'present-after'},{pageIndex:0,status:'failed',code:'figure-changed'}],warnings:[]},warnings:[]};
   };
@@ -759,6 +760,12 @@ test('output: object warnings and failed checks name the candidate without claim
   assert.equal(v.get('paper-current-download').disabled,false);
   assert.equal(v.ws.getOutput().verification.status,'failed');
   v.get('paper-current-download').click();assert.equal(v.downloads.at(-1),v.ws.getOutput().file);
+  exp.mode='confirmed';v.get('paper-generate').click();
+  await until(()=>/변경 문구 1\/1개는 출력에서 확인/.test(status()),'After confirmed independently');
+  assert.match(status(),/검증 상태는 failed입니다/);
+  assert.match(status(),/전체 내용·읽기 순서 검사가 일치하지 않음/);
+  assert.doesNotMatch(status(),/After가 출력에서 확인되지 않음/);
+  assert.equal(v.ws.getOutput().verification.status,'failed');
 });
 
 test('wayfinding: prompt-first sign remains intact and external import opens its containing details',async()=>{

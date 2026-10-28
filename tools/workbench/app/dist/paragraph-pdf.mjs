@@ -2034,6 +2034,7 @@ __export(quality_exports, {
   countGlyphLines: () => countGlyphLines,
   edgeGlyphs: () => edgeGlyphs,
   expectedPageText: () => expectedPageText,
+  findGeneratedWhitespaceMatches: () => findGeneratedWhitespaceMatches,
   inspectSavedPdf: () => inspectSavedPdf,
   joinFlowParts: () => joinFlowParts,
   matchesGeneratedWhitespace: () => matchesGeneratedWhitespace,
@@ -2781,9 +2782,19 @@ async function inspectSavedPdf(engineFactory, sourceBytes, outputBytes, edits, o
         }
         row.expected_text = digest(exp.text, options.includeText);
         if (!row.text_equal) failures.push({ code: "edited_page_text_or_order_mismatch", pageIndex: i });
+        row.after_checks = [];
         for (const e of pageEdits) {
           const t = normStr(o.text);
-          if (normStr(e.after) && !t.includes(normStr(e.after))) failures.push({ code: "after_missing", pageIndex: i, id: e.id });
+          if (!normStr(e.after)) continue;
+          const exact = t.includes(normStr(e.after));
+          const normalized = !exact && findGeneratedWhitespaceMatches(e.after, o.chars).length > 0;
+          row.after_checks.push({
+            id: e.id,
+            present: exact || normalized,
+            method: exact ? "extracted-text" : normalized ? "generated-whitespace" : "not-found"
+          });
+          if (normalized) warnings.push({ code: "after_generated_whitespace_normalized", pageIndex: i, id: e.id, severity: "warning" });
+          if (!exact && !normalized) failures.push({ code: "after_missing", pageIndex: i, id: e.id });
         }
       }
       row.offpage = { source: offPage(s), output: offPage(o) };
@@ -3128,7 +3139,7 @@ function joinFlowParts(parts, expected) {
   }
   return { text: normStr(acc), softJoins };
 }
-function matchesGeneratedWhitespace(expected, chars) {
+function generatedWhitespaceTokens(chars) {
   const tokens2 = [];
   for (const c of chars) {
     const ch = String.fromCharCode(c.u);
@@ -3140,6 +3151,29 @@ function matchesGeneratedWhitespace(expected, chars) {
   }
   if (tokens2[0]?.ch === " ") tokens2.shift();
   if (tokens2[tokens2.length - 1]?.ch === " ") tokens2.pop();
+  return tokens2;
+}
+function findGeneratedWhitespaceMatches(expected, chars) {
+  const text2 = normStr(expected);
+  if (!text2) return [];
+  const tokens2 = generatedWhitespaceTokens(chars), matches = [];
+  for (let start = 0; start < tokens2.length; start++) {
+    if (tokens2[start].ch !== text2[0]) continue;
+    let at = 0;
+    for (let end = start; end < tokens2.length; end++) {
+      const token = tokens2[end];
+      if (token.ch === text2[at]) at++;
+      else if (!(token.ch === " " && token.optional)) break;
+      if (at === text2.length) {
+        matches.push({ start, end: end + 1 });
+        break;
+      }
+    }
+  }
+  return matches;
+}
+function matchesGeneratedWhitespace(expected, chars) {
+  const tokens2 = generatedWhitespaceTokens(chars);
   const text2 = normStr(expected);
   let at = 0;
   for (const token of tokens2) {

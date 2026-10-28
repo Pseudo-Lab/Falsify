@@ -250,6 +250,8 @@
     'not-found':'Before를 출력 위치에 연결하지 못함',
     'not-editable':'문단 흐름 편집을 지원하지 않는 위치',
     'after-missing':'After가 출력에서 확인되지 않음',
+    'edited-page-text-or-order-mismatch':'수정한 쪽의 전체 내용·읽기 순서 검사가 일치하지 않음',
+    'after-generated-whitespace-normalized':'추출기가 추가한 공백을 구분해 After 문구 확인',
     'edited-flow-text-or-order-mismatch':'이어지는 본문 내용 또는 순서가 원문·편집과 다름',
     'glyph-overlap-increased':'글자 겹침이 늘어남',
     'header-footer-moved':'머리말 또는 꼬리말 위치가 바뀜',
@@ -318,9 +320,13 @@
   }
   function generationLead(verification,stale){
     const status=verification&&typeof verification.status==='string'?verification.status:'';
+    const pages=verification?.report?.selfCheck?.pages;
+    const afterChecks=Array.isArray(pages)?pages.flatMap(p=>Array.isArray(p?.after_checks)?p.after_checks:[]):[];
+    const confirmed=afterChecks.filter(c=>c?.present===true).length;
+    const presence=confirmed?' 변경 문구 '+confirmed+'/'+afterChecks.length+'개는 출력에서 확인했습니다.':'';
     if(verification?.bodyPending===true)return (stale?'그 사이 편집이 바뀌어 마지막 부분 생성본으로 표시합니다. ':'')+'표 편집 단계가 검증을 통과하지 못해 본문 편집은 실행하지 않았습니다. 받은 부분 생성본만 표시하며 다운로드할 수 있습니다.';
     if(status==='draft')return '검증을 통과하지 못한 초안입니다. 진단과 실제 생성본을 확인하세요. 이 파일은 다운로드할 수 있습니다.';
-    if(status==='failed'||status==='warning')return (stale?'그 사이 편집이 바뀌어 마지막 생성본으로만 표시합니다. ':'')+'검증 상태는 '+status+'입니다. 이 파일은 받을 수 있습니다.';
+    if(status==='failed'||status==='warning')return (stale?'그 사이 편집이 바뀌어 마지막 생성본으로만 표시합니다. ':'')+'검증 상태는 '+status+'입니다. 이 파일은 받을 수 있습니다.'+presence;
     if(status==='applied')return stale?'생성본을 받았지만 그 사이 편집이 바뀌어 마지막 생성본으로만 표시합니다. 검증 상태는 applied입니다.':'검증 상태는 applied입니다. 미리보기와 다운로드는 이 파일의 바이트입니다.';
     return stale?'생성본을 받았지만 그 사이 편집이 바뀌어 마지막 생성본으로만 표시합니다.':'생성본을 받았습니다. 미리보기와 다운로드는 이 파일의 바이트입니다.';
   }
