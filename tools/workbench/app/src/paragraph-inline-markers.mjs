@@ -84,6 +84,21 @@ export function planInlineMarkers(source, output, pageIndex=0) {
     const dx=(target.r+(left-parent.r))-outMarker[0].l;
     const dy=(originY(target)+(originY(m)-line.y))-originY(outMarker[0]);
     if(Math.hypot(dx,dy)>=1) for(const object of handles) repairs.push({pageIndex,sourceIndex:m.i,object,dx,dy});
+    // A body-sized punctuation glyph immediately following the citation in
+    // the source belongs to the same visual atom. Match it only by source
+    // geometry, style, and immediate text order on both pages.
+    const next = (page, group) => page.glyphs.filter(g=>g.i>Math.max(...group.map(x=>x.i)) && !/\s/u.test(String.fromCodePoint(g.u))).sort((a,b)=>a.i-b.i)[0];
+    const punctuation=next(source,marker);
+    if(punctuation && /^[.,;:!?]$/u.test(text([punctuation])) && near(size(punctuation),line.size,.2) && near(originY(punctuation),line.y,.5) && punctuation.l>=marker.at(-1).r-.2 && punctuation.l-marker.at(-1).r<=line.size*.5) {
+      const match=next(output,outMarker);
+      if(!match || text([match])!==text([punctuation]) || styleKey(match)!==styleKey(punctuation) || !match.obj || output.glyphs.some(g=>g.obj===match.obj && g!==match)) {
+        warnings.push({pageIndex,code:'inline_marker_punctuation_ambiguous',sourceIndex:punctuation.i});
+      } else {
+        const px=target.r+(punctuation.l-parent.r)-match.l;
+        const py=originY(target)+(originY(punctuation)-line.y)-originY(match);
+        if(Math.hypot(px,py)>=1) repairs.push({pageIndex,sourceIndex:punctuation.i,object:match.obj,dx:px,dy:py});
+      }
+    }
   }
   return {repairs,warnings};
 }

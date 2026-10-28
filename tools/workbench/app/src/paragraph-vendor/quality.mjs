@@ -16,6 +16,7 @@
 // self-check, not an independent or rendering-based release check.
 
 import { createHash } from "node:crypto";
+import { compareSourceGeometry } from "../paragraph-geometry-conservation.mjs";
 import { resolvePageFraction } from "./continuation-template.mjs";
 import { deriveDocumentFlowBand } from "./document-flow-band.mjs";
 import { deriveNativeLinkMoves, deriveNativeFitRMoves, nativeFitRTargetPages, savedLinkGlyphs } from "./document-flow-links.mjs";
@@ -615,7 +616,13 @@ export function readGlyphs(engine, pageIndex) {
     const u = M._FPDFText_GetUnicode(tp, i);
     text += String.fromCharCode(u);
     if (u <= 32 || !M._FPDFText_GetCharBox(tp, i, b, b + 8, b + 16, b + 24)) {
-      chars.push({ u, cy: null, generated: typeof M._FPDFText_IsGenerated === "function" && M._FPDFText_IsGenerated(tp, i) === 1 });
+      const box = M._FPDFText_GetCharBox(tp, i, b, b + 8, b + 16, b + 24)
+        ? [0, 8, 16, 24].map(k => M.HEAPF64[(b + k) >> 3]) : null;
+      const origin = typeof M._FPDFText_GetCharOrigin === 'function' && M._FPDFText_GetCharOrigin(tp, i, b, b + 8)
+        ? [M.HEAPF64[b >> 3], M.HEAPF64[(b + 8) >> 3]] : null;
+      chars.push({ u, cy: null, box, origin,
+        generated: typeof M._FPDFText_IsGenerated === "function" && M._FPDFText_IsGenerated(tp, i) === 1,
+        discretionary: typeof M._FPDFText_IsHyphen === 'function' && M._FPDFText_IsHyphen(tp, i) === 1 });
       continue;
     }
     const l = M.HEAPF64[b >> 3], r = M.HEAPF64[(b + 8) >> 3];
@@ -626,7 +633,8 @@ export function readGlyphs(engine, pageIndex) {
   M._free(b);
   if (sb) M._free(sb);
   if (tp) M._FPDFText_ClosePage(tp);
-  return { text, glyphs, chars, styled, W: M._FPDF_GetPageWidthF(engine.page), H: M._FPDF_GetPageHeightF(engine.page) };
+  return { text, glyphs, chars, styled, W: M._FPDF_GetPageWidthF(engine.page), H: M._FPDF_GetPageHeightF(engine.page),
+    frame: { rotation: M._FPDFPage_GetRotation?.(engine.page) ?? null, transform: engine.pageT ? [...engine.pageT] : null } };
 }
 
 function offPage(g) {
@@ -914,6 +922,23 @@ export async function inspectSavedPdf(engineFactory, sourceBytes, outputBytes, e
           row.text_equal = true;
           row.stationary_glyph_order_normalized = true;
           warnings.push({ code: "stationary_glyph_order_normalized", pageIndex: i, severity: "warning" });
+        }
+        if (!row.text_equal) {
+          const spatial = compareSourceGeometry(s, o, pageEdits, { expectedPageText });
+          const counts = evidence => evidence && ({
+            total: evidence.total, mapped: evidence.mapped.length,
+            generatedWhitespace: evidence.generatedWhitespace.length,
+            boundaryWhitespace: evidence.boundaryWhitespace.length,
+            normalizedDiscretionary: evidence.normalizedDiscretionary.length
+          });
+          row.spatial_conservation = { available: spatial.ok, match: spatial.match === true,
+            ...(spatial.ok ? { source: counts(spatial.sourceEvidence), output: counts(spatial.outputEvidence),
+              expected: digest(spatial.expected, options.includeText), actual: digest(spatial.actual, options.includeText) }
+              : { reason: spatial.reason }) };
+          if (spatial.ok && spatial.match) {
+            row.text_equal = true;
+            warnings.push({ code: "spatial_text_order_normalized", pageIndex: i, severity: "warning" });
+          }
         }
         row.expected_text = digest(exp.text, options.includeText);
         if (!row.text_equal) failures.push({ code: "edited_page_text_or_order_mismatch", pageIndex: i });

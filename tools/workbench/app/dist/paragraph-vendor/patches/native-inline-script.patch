@@ -1,0 +1,65 @@
+--- a/packages/pdfium/build/code/editcore/model.cpp
++++ b/packages/pdfium/build/code/editcore/model.cpp
+@@ -2253,10 +2253,48 @@
+ 
+             const bool crossLayer =
+                 (run.style.renderMode == 3) != last.invisible();
++            // Only attach a raised, short numeric marker when body objects
++            // flank it on the same baseline. This avoids widening line grouping
++            // for ordinary neighbouring rows, overlays, or column labels.
++            bool inlineMarker = false;
++            if (last.runs.size() == 1 && run.rotation == 0 &&
++                last.rotation == 0 && run.text.size() > 2) {
++                const ExtractedRun& mark = last.runs.front();
++                bool digits = !mark.text.empty() && mark.text.size() <= 4;
++                for (char16_t c : mark.text)
++                    if (c < u'0' || c > u'9') digits = false;
++                const float shift = mark.baseline - run.baseline;
++                const float base = run.size;
++                const bool left = run.maxX <= mark.minX;
++                const bool right = mark.maxX <= run.minX;
++                if (digits && mark.size < 0.76f * base &&
++                    shift > 0.12f * base && shift < 0.65f * base &&
++                    (left || right) && gap <= 0.5f * base) {
++                    for (const auto& other : runs) {
++                        if (&other == &run || other.rotation != 0 ||
++                            other.text.empty() ||
++                            (other.style.renderMode == 3) != last.invisible() ||
++                            std::abs(other.baseline - run.baseline) > 0.1f * base ||
++                            other.size < 0.86f * base || other.size > 1.16f * base)
++                            continue;
++                        const float otherGap = left ? other.minX - mark.maxX
++                                                    : mark.minX - other.maxX;
++                        if (otherGap < 0 || otherGap > 0.5f * base) continue;
++                        const float x0 = left ? mark.maxX : other.maxX;
++                        const float x1 = left ? other.minX : mark.minX;
++                        if (crossesGutter(x0, x1, run.baseline) ||
++                            verticalRulingBetween(x0, x1, run.baseline - 0.6f * base,
++                                                  run.baseline + 0.2f * base))
++                            continue;
++                        inlineMarker = true;
++                        break;
++                    }
++                }
++            }
+             if (!cellBorder && !layered && !columnBreak && !sizeGulf &&
+                 !crossLayer &&
+                 std::abs(last.rotation - run.rotation) <= 0.01f &&
+-                std::abs(last.baseline - run.baseline) <= tol &&
++                (std::abs(last.baseline - run.baseline) <= tol || inlineMarker) &&
+                 gap <= std::max(run.size, last.dominantSize) * 2.2f) {
+                 last.runs.push_back(run);
+                 last.recompute();
+@@ -3047,8 +3085,10 @@
+                 float baseSize = ln.dominantSize;
+                 float shift = er.baseline - ln.baseline;
+                 if (er.size < baseSize * 0.76f && std::abs(shift) > baseSize * 0.12f) {
+-                    st.script = shift > 0 ? 1 : -1;
+-                    st.size = baseSize;
++                    // Preserve the source size and baseline rather than
++                    // quantizing it through the editor's script scale.
++                    st.script = 0;
++                    st.rise = shift;
+                 } else if (std::abs(shift) > 0.045f * baseSize &&
+                            std::abs(shift) < 0.9f * baseSize) {
+ 

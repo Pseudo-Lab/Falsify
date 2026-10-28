@@ -58,3 +58,30 @@ test('anchors to closing punctuation across reflow without losing its geometry',
  const plan=planInlineMarkers(source,output);
  assert.equal(plan.repairs.length,1); assert.equal(plan.repairs[0].dx,18);
 });
+test('moves source-proven following punctuation even when the marker is already aligned',()=>{
+ const source=fixture(), output=fixture();
+ for(const page of [source,output]) {
+  const marker=page.glyphs.at(-1), parent=page.glyphs.find(g=>g.obj===1);
+  const x=marker.r+1;
+  page.glyphs.push({...parent,u:46,l:x,r:x+1,i:marker.i+1,obj:9,origin:[x,100]});
+ }
+ for(const g of output.glyphs.filter(g=>g.obj!==9)) {g.origin[1]-=20; g.b-=20; g.t-=20;}
+ const plan=planInlineMarkers(source,output);
+ assert.deepEqual(plan.repairs.map(r=>[r.object,r.dx,r.dy]),[[9,0,-20]]);
+});
+test('does not move following punctuation in an object shared with other text',()=>{
+ const source=fixture(), output=fixture();
+ for(const page of [source,output]) {
+  const marker=page.glyphs.at(-1), parent=page.glyphs.find(g=>g.obj===1), x=marker.r+1;
+  page.glyphs.push({...parent,u:46,l:x,r:x+1,i:marker.i+1,obj:page===output?1:9,origin:[x,100]});
+ }
+ for(const g of output.glyphs.filter(g=>g.i<output.glyphs.at(-1).i)) {g.origin[1]-=20; g.b-=20; g.t-=20;}
+ const plan=planInlineMarkers(source,output);
+ assert.ok(plan.warnings.some(w=>w.code==='inline_marker_punctuation_ambiguous'));
+ assert.ok(plan.repairs.every(r=>r.object!==1));
+});
+test('missing output marker does not move punctuation',()=>{
+ const source=fixture(), output=fixture({shift:15}); output.glyphs.pop();
+ const plan=planInlineMarkers(source,output);
+ assert.equal(plan.repairs.length,0); assert.ok(plan.warnings.some(w=>w.code==='inline_marker_ambiguous'));
+});

@@ -1,4 +1,4 @@
-import { removeForeignObjectGapSpaces } from './foreign-gap.mjs';
+import { removeForeignObjectGapSpaces, restoreSourceWordGaps } from './foreign-gap.mjs';
 import { createEngineModule, ENGINE_BUILD } from './engine-loader.js';
 
 export const EC_BUILD = ENGINE_BUILD;
@@ -953,9 +953,10 @@ export class PdfEngine {
       for (let i = 0; i < n; i++) {
         const u = M._FPDFText_GetUnicode(tp, i), obj = M._FPDFText_GetTextObject(tp, i) >>> 0;
         const ok = M._FPDFText_GetCharBox(tp, i, ptr, ptr + 8, ptr + 16, ptr + 24);
-        chars.push({index: i, ch: String.fromCharCode(u), obj, box: ok ? [0, 8, 16, 24].map(k => M.HEAPF64[(ptr + k) >> 3]) : null});
+        chars.push({index: i, ch: String.fromCharCode(u), obj, generated: typeof M._FPDFText_IsGenerated === 'function' && M._FPDFText_IsGenerated(tp, i) === 1, box: ok ? [0, 8, 16, 24].map(k => M.HEAPF64[(ptr + k) >> 3]) : null});
       }
-      return removeForeignObjectGapSpaces(model.runs, runs, chars, owned);
+      const restored = restoreSourceWordGaps(model.runs, runs, chars, owned);
+      return removeForeignObjectGapSpaces(model.runs, restored, chars, owned);
     } finally { M._free(ptr); M._FPDFText_ClosePage(tp); }
   }
 

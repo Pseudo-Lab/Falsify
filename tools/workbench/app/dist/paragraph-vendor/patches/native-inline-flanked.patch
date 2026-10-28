@@ -1,0 +1,61 @@
+--- a/packages/pdfium/build/code/editcore/model.cpp
++++ b/packages/pdfium/build/code/editcore/model.cpp
+@@ -2310,6 +2310,58 @@
+         }
+     }
+ 
++    // A different column can separate a raised citation from its two body
++    // fragments in baseline-sorted input. Join only a unique, source-proven
++    // gap between same-baseline body runs; a broad overlapping box alone
++    // is never evidence that a marker belongs to that line.
++    for (size_t mi = 0; mi < lines.size();) {
++        const ExtractedLine& markerLine = lines[mi];
++        if (markerLine.rotation != 0 || markerLine.runs.size() != 1) {
++            ++mi; continue;
++        }
++        const ExtractedRun& mark = markerLine.runs.front();
++        bool digits = !mark.text.empty() && mark.text.size() <= 4;
++        for (char16_t c : mark.text)
++            if (c < u'0' || c > u'9') digits = false;
++        size_t selected = lines.size();
++        int candidates = 0;
++        if (digits) for (size_t bi = 0; bi < lines.size(); ++bi) {
++            const ExtractedLine& body = lines[bi];
++            if (bi == mi || body.rotation != 0 ||
++                body.invisible() != markerLine.invisible()) continue;
++            const float base = body.dominantSize;
++            const float shift = mark.baseline - body.baseline;
++            if (mark.size >= 0.76f * base || shift <= 0.12f * base ||
++                shift >= 0.65f * base) continue;
++            const ExtractedRun* left = nullptr;
++            const ExtractedRun* right = nullptr;
++            bool covered = false;
++            for (const auto& part : body.runs) {
++                if (std::abs(part.baseline - body.baseline) > 0.1f * base ||
++                    part.size < 0.86f * base || part.size > 1.16f * base)
++                    continue;
++                if (part.maxX <= mark.minX + 0.2f &&
++                    mark.minX - part.maxX <= 0.5f * base &&
++                    (!left || part.maxX > left->maxX)) left = &part;
++                if (part.minX >= mark.maxX - 0.2f &&
++                    part.minX - mark.maxX <= 0.5f * base &&
++                    (!right || part.minX < right->minX)) right = &part;
++                if (std::min(part.maxX, mark.maxX) -
++                    std::max(part.minX, mark.minX) > 0.2f) covered = true;
++            }
++            if (!left || !right || covered ||
++                crossesGutter(left->maxX, right->minX, body.baseline) ||
++                verticalRulingBetween(left->maxX, right->minX,
++                    body.baseline - 0.6f * base,
++                    body.baseline + 0.2f * base)) continue;
++            selected = bi; ++candidates;
++        }
++        if (candidates != 1) { ++mi; continue; }
++        lines[selected].runs.push_back(mark);
++        lines[selected].recompute();
++        lines.erase(lines.begin() + static_cast<long>(mi));
++    }
++
+     for (bool merged = true; merged;) {
+         merged = false;
+         for (size_t i = 0; i + 1 < lines.size() && !merged; i++) {

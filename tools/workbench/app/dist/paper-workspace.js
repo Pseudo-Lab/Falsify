@@ -252,6 +252,7 @@
     'after-missing':'After가 출력에서 확인되지 않음',
     'edited-page-text-or-order-mismatch':'수정한 쪽의 전체 내용·읽기 순서 검사가 일치하지 않음',
     'after-generated-whitespace-normalized':'추출기가 추가한 공백을 구분해 After 문구 확인',
+    'spatial-text-order-normalized':'글자 좌표와 줄 경계로 전체 내용 보존 확인',
     'edited-flow-text-or-order-mismatch':'이어지는 본문 내용 또는 순서가 원문·편집과 다름',
     'glyph-overlap-increased':'글자 겹침이 늘어남',
     'header-footer-moved':'머리말 또는 꼬리말 위치가 바뀜',

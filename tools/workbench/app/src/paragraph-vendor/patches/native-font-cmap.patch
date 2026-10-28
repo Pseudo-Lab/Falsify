@@ -1,0 +1,16 @@
+--- a/core/fpdfapi/font/cpdf_simplefont.cpp
++++ b/core/fpdfapi/font/cpdf_simplefont.cpp
+@@ -333,6 +333,13 @@
+ uint32_t CPDF_SimpleFont::CharCodeFromUnicode(wchar_t unicode) const {
+   uint32_t ret = CPDF_Font::CharCodeFromUnicode(unicode);
+   if (ret) {
++    uint32_t encoded = encoding_.CharCodeFromUnicode(unicode);
++    if (encoded && encoded != ret) {
++      WideString mapped = CPDF_Font::UnicodeFromCharCode(encoded);
++      if (mapped.GetLength() == 1 && mapped[0] == unicode) {
++        return encoded;
++      }
++    }
+     return ret;
+   }
+   return encoding_.CharCodeFromUnicode(unicode);

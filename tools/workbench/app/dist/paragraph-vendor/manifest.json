@@ -32,6 +32,18 @@
     {
       "name": "editcore-reedit-space.patch",
       "sha256": "53919b15c82024b308799c58d732ae2907737fc5a7ad9188a98fd66711c7c509"
+    },
+    {
+      "name": "native-font-cmap.patch",
+      "sha256": "d6ae1c5dab1be6c8a6edd50602a9dfe0bb5a9e6a5901120e5950c7c409c5a895"
+    },
+    {
+      "name": "native-inline-script.patch",
+      "sha256": "0af612808f4a84c43df7ed031e43367648c37b54dc66bd3e74d2628afbc11b5d"
+    },
+    {
+      "name": "native-inline-flanked.patch",
+      "sha256": "9dd0fb0e72131f3fb3926eed8bb1d325b4c1d4d7e68fcf722a1df56644d4efeb"
     }
   ],
   "artifacts": {
@@ -41,14 +53,14 @@
     },
     "wasm": {
       "path": "editcore.wasm",
-      "sha256": "9b14b88937a9b21697565df94e82b28ac645547413606d4994d50d9200529c6e"
+      "sha256": "cf9f0e9ec0a68cc5932795e87622b2809ecca5561482a23bc034de3d6410696d"
     }
   },
   "sourceBuildVerified": false,
   "trust": "locally-supplied-hash-verified-artifacts",
   "editorModuleSha256": {
     "editor.mjs": "8232d16cfd04fce033b1d28cc715ff1ad9b123298ca10875df0e36a06b2b4afc",
-    "quality.mjs": "a38da7abc39ddc9f5b8a69e2201c0df699e76817d49477d1b7337ac698c9c430",
+    "quality.mjs": "c71eb1d25f767432e9a2287a9fc05eb7a4f8558c72464ff91d48a964a7825ac9",
     "pagination.mjs": "2a1d14b573357c6054fc6434b73fdb7cdf0a57c9abff41fba916fb62e55901ca",
     "inline-preservation.mjs": "84b98551dad10752016319ee0e14e953b1723cd6142079d9ed3dc0b593149de7",
     "continuation-template.mjs": "94bfc49200818466e9ec99560d00a7e2dcf72a8003fa10d485852bbace124336",

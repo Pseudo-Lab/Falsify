@@ -24,6 +24,18 @@
     {
       "name": "editcore-reedit-space.patch",
       "sha256": "53919b15c82024b308799c58d732ae2907737fc5a7ad9188a98fd66711c7c509"
+    },
+    {
+      "name": "native-font-cmap.patch",
+      "sha256": "d6ae1c5dab1be6c8a6edd50602a9dfe0bb5a9e6a5901120e5950c7c409c5a895"
+    },
+    {
+      "name": "native-inline-script.patch",
+      "sha256": "0af612808f4a84c43df7ed031e43367648c37b54dc66bd3e74d2628afbc11b5d"
+    },
+    {
+      "name": "native-inline-flanked.patch",
+      "sha256": "9dd0fb0e72131f3fb3926eed8bb1d325b4c1d4d7e68fcf722a1df56644d4efeb"
     }
   ],
   "artifacts": {
@@ -33,7 +45,7 @@
     },
     "wasm": {
       "path": "editcore.wasm",
-      "sha256": "9b14b88937a9b21697565df94e82b28ac645547413606d4994d50d9200529c6e"
+      "sha256": "cf9f0e9ec0a68cc5932795e87622b2809ecca5561482a23bc034de3d6410696d"
     }
   },
   "provenance": {
@@ -42,6 +54,13 @@
     "jsInputName": "pdfium.js",
     "wasmInputName": "pdfium.wasm",
     "verification": "Artifact and patch sha256 recorded from supplied files only; C++/WASM rebuild from the listed sources was not verified by this script.",
-    "note": "reedit-1726cc21-20261019 snapshot (provenance.json b2878492) from same-host build root /home/jcpuk/editor-wasm-build.I80fju out/wasm-resumed-20261019; native 1726cc21, parent 8ba2939, gate native-repair-review.json fea29c69 ACCEPT_SOURCE_SCOPE. Stacked patches applied in order stream-order(pdfium), natural-space, justified-space, reedit-space(engine); only stream-order and reedit-space reverse-check individually, all four bound by engine.diff 6cf69c5f (blob ids 813903c..1726cc21) and pdfium.diff d5225a53. Incremental, not clean-room."
+    "note": "reedit-1726cc21-20261019 snapshot (provenance.json b2878492) from same-host build root /home/jcpuk/editor-wasm-build.I80fju out/wasm-resumed-20261019; native 1726cc21, parent 8ba2939, gate native-repair-review.json fea29c69 ACCEPT_SOURCE_SCOPE. Stacked patches applied in order stream-order(pdfium), natural-space, justified-space, reedit-space(engine); only stream-order and reedit-space reverse-check individually, all four bound by engine.diff 6cf69c5f (blob ids 813903c..1726cc21) and pdfium.diff d5225a53. Incremental, not clean-room. Font cmap and inline script patches applied on the same-host incremental cached source build snapshot /home/jcpuk/editor-wasm-build.I80fju/out/font-inline-20261028; not a clean reproducible source build. Final flanked-marker gap merge built and individually reverse-checked in snapshot font-inline-flanked-20261028; nativeSnapshot binds its complete source diffs. Unchanged-column interleaving is handled before general line merging.",
+    "nativeSnapshot": {
+      "name": "font-inline-flanked-20261028",
+      "provenanceSha256": "2eef003731b4d0e9b21c7d33aef9c60661ced8e38cf4b2d33fdb561f146bd5ea",
+      "engineDiffSha256": "36e598ff9eadde3bfbf3801a55e164dc78d6c06abb3122e04b26a1dba8b8025a",
+      "pdfiumDiffSha256": "f6059e1c45acc5f8127ce713fb23695cd4685b8a449857b7eea8cf1f9e461c34",
+      "incremental": true
+    }
   }
 }
