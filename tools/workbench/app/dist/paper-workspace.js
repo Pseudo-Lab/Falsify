@@ -487,7 +487,7 @@
         }))
       };
     }
-    let epoch=0,source=null,session=null,unsub=null,snapshot=null,output=null,inline=null,pageText=null,directEditor=null,committingDirect=false,selectionClickPending=false;
+    let epoch=0,source=null,session=null,unsub=null,snapshot=null,output=null,inline=null,pageText=null,directEditor=null,committingDirect=false,composingDirect=false,selectionClickPending=false;
     let fontRevision=0,fontBusy=false;
     let proposalQueue=null,accepted=new Set(),modelById=new Map(),draftRaw=null,pendingFocus=null,pendingResume=null;
     let editMode='text',tableCtl=null,tableSeq=0,tableBindings=new Map();
@@ -821,7 +821,7 @@
     function clearSource(){
       epoch++;tableBindings.clear();abortGen();stopPdf();closeAfter();
       if(typeof unsub==='function')unsub();
-      if(directEditor){const editor=directEditor;directEditor=null;editor.remove();}
+      if(directEditor){const editor=directEditor;directEditor=null;composingDirect=false;editor.remove();}
       unsub=null;session=null;snapshot=null;output=null;inline=null;pageText=null;proposalQueue=null;accepted=new Set();draftRaw=null;pendingResume=null;beforeMarks=afterMarks=null;compareFocus=null;updateChangeStatus();
       source=null;pages=0;page=1;zoom=1;
       clearStage(ui.beforeStage);clearStage(ui.afterStage);
@@ -860,7 +860,7 @@
       const mine=++epoch;tableBindings.clear();
       abortGen();stopPdf();closeAfter();
       if(typeof unsub==='function')unsub();
-      if(directEditor){const editor=directEditor;directEditor=null;editor.remove();}
+      if(directEditor){const editor=directEditor;directEditor=null;composingDirect=false;editor.remove();}
       unsub=null;session=null;snapshot=null;output=null;inline=null;pageText=null;proposalQueue=null;accepted=new Set();draftRaw=null;pendingResume=null;beforeMarks=afterMarks=null;compareFocus=null;updateChangeStatus();
       pages=0;page=1;zoom=1;
       source={file,fileHash:null,name:sessionName(file.name),segments:[],pdf:isPdf(file),doc:null,lib:null,render:null,paragraphPages:new Map()};
@@ -1037,7 +1037,7 @@
       tableSeq++;if(tableCtl){tableCtl.abort();tableCtl=null;}
       if(pageText?.tableLayer){pageText.tableLayer.remove();pageText.tableLayer=null;}
       if(pageText)pageText.tableCells=null;
-      if(closeInline&&inline?.table&&ui.inlineAfter.value===inline.after){if(directEditor){const editor=directEditor;directEditor=null;editor.remove();}inline=null;renderInline();}
+      if(closeInline&&inline?.table&&ui.inlineAfter.value===inline.after){if(directEditor){const editor=directEditor;directEditor=null;composingDirect=false;editor.remove();}inline=null;renderInline();}
       say(ui.tableStatus,'');
     }
     function setEditMode(mode){
@@ -1122,15 +1122,17 @@
       const font=(hit&&display.styles?.[hit.fontName]?.fontFamily)||'serif';
       const width=Math.min(100-b[0]/w*100,Math.max((b[2]-b[0])/w*100,140/(w*display.scale)*100));
       Object.assign(editor.style,{position:'absolute',zIndex:'4',left:(b[0]/w*100)+'%',top:(b[1]/h*100)+'%',width:width+'%',minHeight:Math.max(32,(b[3]-b[1])*display.scale)+'px',height:Math.max(32,(b[3]-b[1])*display.scale)+'px',boxSizing:'border-box',resize:'vertical',background:'white',color:'black',padding:'2px',fontFamily:font,fontSize:(Number.isFinite(size)&&size>0?Math.max(8,size*display.scale):14)+'px',lineHeight:'1.25'});
-      directEditor=editor;display.pageEl.append(editor);ui.inline.hidden=true;
+      composingDirect=false;directEditor=editor;display.pageEl.append(editor);ui.inline.hidden=true;
       editor.addEventListener('input',()=>{ui.inlineAfter.value=editor.value;renderChrome();});
+      editor.addEventListener('compositionstart',()=>{if(directEditor===editor)composingDirect=true;});
+      editor.addEventListener('compositionend',()=>{if(directEditor===editor)composingDirect=false;});
       editor.addEventListener('blur',()=>{if(directEditor===editor)commitDirect();});
-      editor.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();closeInline();}});
+      editor.addEventListener('keydown',e=>{if(e.isComposing||composingDirect)return;if(e.key==='Escape'){e.preventDefault();closeInline();}});
       doc.getSelection?.()?.removeAllRanges?.();editor.focus();
       if(geometry.selectAll)editor.select?.();
     }
     function commitDirect(){
-      if(!directEditor||!inline)return;
+      if(!directEditor||!inline||composingDirect)return;
       ui.inlineAfter.value=directEditor.value;
       committingDirect=true;
       try{if(ui.inlineAfter.value===inline.after){closeInline();return;}
@@ -1177,16 +1179,17 @@
       return validBbox(box)?box:null;
     }
     function captureSelection(event){
-      if(editMode!=='text')return;
-      if(inline&&ui.inlineAfter.value!==inline.after){canLeaveInline();return;}
+      if(editMode!=='text'||fieldTarget(event?.target))return;
       const sel=typeof doc.getSelection==='function'?doc.getSelection():null;
       if(!sel||sel.isCollapsed||!sel.rangeCount||!pageText||!pageText.textEl)return;
       const textEl=pageText.textEl;
       let range=null;
       try{range=sel.getRangeAt(0);}catch{range=null;}
       if(!range)return;
-      const inside=node=>!!(node&&textEl.contains&&textEl.contains(node));
-      if(!inside(range.commonAncestorContainer)&&!inside(sel.anchorNode)&&!inside(range.startContainer))return;
+      const inside=node=>!!(node&&textEl.contains&&textEl.contains(node.nodeType===3?(node.parentElement||node.parentNode):node));
+      if(range.startContainer&&range.endContainer){if(!inside(range.startContainer)||!inside(range.endContainer))return;}
+      else if(!inside(range.commonAncestorContainer)&&!inside(sel.anchorNode)&&!inside(range.startContainer))return;
+      if(inline&&ui.inlineAfter.value!==inline.after){canLeaveInline();return;}
       if(pageText.rotation){setEditStatus('회전된 쪽은 위쪽 원점 좌표로 확정할 수 없어 편집으로 넣지 않았습니다.',true);return;}
       const geometry={rotation:0,pageWidth:pageText.pageWidth,pageHeight:pageText.pageHeight};
       const hits=[];
@@ -1243,12 +1246,14 @@
       });
     }
     function closeInline(){
-      if(directEditor){const editor=directEditor;directEditor=null;editor.remove();}
+      if(composingDirect||(!inline&&!directEditor))return;
+      if(directEditor){const editor=directEditor;directEditor=null;composingDirect=false;editor.remove();}
       const id=inline?.editId;inline=null;renderInline();
       const target=id&&buttons(ui.edits).find(b=>b.dataset.edit===id&&b.dataset.act==='edit');
       if(!committingDirect)(target||ui.beforeStage).focus();
     }
     function applyInline(){
+      if(composingDirect)return;
       const api=editsApi();
       if(!api||!session){setEditStatus('편집 코어가 없어 편집을 저장하지 않았습니다.',true);return;}
       const after=ui.inlineAfter.value;
@@ -1733,7 +1738,7 @@
       if(nav&&typeof nav.click==='function')nav.click();
     }
     function onKey(e){
-      if(e.defaultPrevented)return;
+      if(e.defaultPrevented||e.isComposing||composingDirect)return;
       if(e.key==='Escape'&&inline){e.preventDefault();closeInline();return;}
       if(fieldTarget(e.target))return;
       if((e.ctrlKey||e.metaKey)&&(e.key==='z'||e.key==='Z')){

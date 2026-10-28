@@ -955,6 +955,33 @@ test('paragraph: a click edits the exact inspected paragraph with human origin a
   v.get('paper-undo').click();assert.equal(v.ws.getEditSnapshot().edits.length,0);
   v.get('paper-redo').click();assert.equal(v.ws.getEditSnapshot().edits.length,1);
 });
+test('direct editor owns typing and caret events, while source selection and IME remain safe',async()=>{
+  const v=mount({paragraphPdf:paragraphMock('A full paragraph.')});v.file(pdfFile(pdfBytes('MARKER-A')));
+  await until(()=>/문단을 클릭/.test(v.get('paper-before-status').textContent),'paragraph ready');clickParagraph(v);
+  const editor=v.document.activeElement,stage=v.get('paper-before-stage');
+  editor.value='First';editor.dispatchEvent(new Event('input'));
+  for(const type of ['keyup','pointerup','mouseup']){
+    const e=new Event(type);Object.defineProperty(e,'target',{value:editor});stage.dispatchEvent(e);
+    assert.equal(editor.parentElement!==null,true,type+' keeps editor open');assert.equal(v.edits.added.length,0);
+  }
+  // A selection outside the PDF text layer must not commit an active editor either.
+  const outside=v.document.createElement('span');
+  v.document.getSelection=()=>({isCollapsed:false,rangeCount:1,anchorNode:outside,getRangeAt:()=>({commonAncestorContainer:outside,startContainer:outside})});
+  stage.dispatchEvent(new Event('keyup'));assert.ok(editor.parentElement);assert.equal(v.edits.added.length,0);
+  editor.dispatchEvent(new Event('compositionstart'));
+  assert.equal(keydown(editor,{key:'Escape',isComposing:true}).defaultPrevented,false);
+  assert.equal(keydown(stage,{key:'Escape',isComposing:true}).defaultPrevented,false);
+  keydown(stage,{key:'ArrowRight',isComposing:true});v.get('paper-page-next').click();editor.dispatchEvent(new Event('blur'));
+  v.get('paper-inline-apply').click();v.get('paper-inline-cancel').click();
+  assert.ok(editor.parentElement);assert.equal(v.edits.added.length,0);assert.equal(v.get('paper-page-label').textContent,'1 / 2쪽');
+  editor.dispatchEvent(new Event('compositionend'));
+  editor.value='First second';editor.dispatchEvent(new Event('input'));
+  const pageEl=editor.parentElement,textEl=pageEl.children.find(c=>String(c.className).includes('textLayer')),span=textEl.querySelectorAll('span')[0];
+  v.document.getSelection=()=>({isCollapsed:false,rangeCount:1,anchorNode:span,getRangeAt:()=>({commonAncestorContainer:textEl,intersectsNode:n=>n===span})});
+  stage.dispatchEvent(new Event('keyup'));assert.equal(v.edits.added.length,1);assert.equal(v.edits.added[0].after,'First second');assert.equal(editor.parentElement,null);
+  stage.dispatchEvent(new Event('keyup'));assert.equal(v.document.activeElement.tagName,'textarea','source Shift-arrow selection opens editor');
+  keydown(v.document.activeElement,{key:'Escape'});assert.equal(v.document.activeElement,stage);
+});
 test('paragraph list: native button opens the same source binding and stale page controls cannot reopen',async()=>{
   const v=mount({paragraphPdf:paragraphMock('Keyboard paragraph.'),tablePdf:tableMock()});v.file(pdfFile(pdfBytes('MARKER-A')));
   await until(()=>/문단을 클릭/.test(v.get('paper-before-status').textContent),'paragraph list');
