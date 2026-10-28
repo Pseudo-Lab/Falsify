@@ -26,7 +26,6 @@ function anchors(html) {
 
 const PHRASES = [
   '적용',
-  '프롬프트 만들기 및 편집',
   'AI 답변 가져오기',
   '원문에서 연결',
   '수정본 미리보기 만들기',
@@ -62,10 +61,10 @@ test('quick three steps stay short and precede the collapsed reference', () => {
   assert.ok(ol, 'quick steps list');
   const items = [...ol[0].matchAll(/<li>([\s\S]*?)<\/li>/g)].map(match => visible(match[1]));
   assert.equal(items.length, 3);
-  assert.match(items[0], /PDF를 넣습니다/);
-  assert.match(items[1], /글자를 선택하고 내용을 수정/);
-  assert.match(items[2], /미리보고/);
-  assert.match(items[2], /다운로드/);
+  assert.match(items[0], /PDF를 넣고 자유 지시문/);
+  assert.match(items[1], /외부 AI에 원본 PDF를 첨부/);
+  assert.match(items[2], /미리보/);
+  assert.match(items[2], /BLUE 기록/);
   for (const text of items) {
     const sentences = text.split(/[.!?。]/).map(part => part.trim()).filter(Boolean);
     assert.ok(sentences.length <= 2, text);
@@ -102,6 +101,7 @@ test('in-page guide links resolve and external links stay public https', () => {
 test('required anchors and terms stay inside the collapsed reference', () => {
   const detail = guide.slice(guide.indexOf('<details id="reference"'), guide.indexOf('</details>'));
   for (const phrase of PHRASES) assert.ok(detail.includes(phrase), phrase);
+  for (const phrase of ['각각 독립적으로', '이름을 붙여 저장·불러옵니다', '추출문을 넣지 않습니다', '결함 표는 행별 지적', '검토 보고서는 별도로', '가장 가까운 원문 후보', '한 번 눌러 연결·선택', '접힌 고급 도구', '구조화된 외부 응답 내보내기는 후속 범위']) assert.ok(detail.includes(phrase), phrase);
   assert.match(detail, /회전/);
   assert.match(detail, /1단/);
   assert.match(detail, /동의 체크가 화면에 하나뿐이면 그 체크와 저장 버튼을 따릅니다/);

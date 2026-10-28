@@ -1,3 +1,5 @@
 .external-blue textarea,.external-red textarea { display:block; width:100%; box-sizing:border-box; margin:.5rem 0; }
 .external-blue article { border-top:1px solid var(--line, #ccd4d9); padding:.7rem 0; }
 .external-blue input[type=file],.external-red input[type=file] { display:block; margin:.6rem 0; }
+
+.prompt-instructions{display:grid;gap:.5rem;margin:1rem 0}.prompt-instructions textarea{min-height:5rem}.prompt-instructions button{justify-self:start}.prompt-instructions input[type=text],.prompt-instructions select{max-width:32rem;width:100%;padding:.5rem}.prompt-instructions details label{display:block;margin:.5rem 0}.external-blue article p{white-space:pre-wrap}

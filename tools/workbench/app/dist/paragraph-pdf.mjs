@@ -13,7 +13,7 @@ var __export = (target, all) => {
     __defProp(target, name, { get: all[name], enumerable: true });
 };
 
-// app/src/paragraph-pdf-crypto.mjs
+// src/paragraph-pdf-crypto.mjs
 function rotr(x, n) {
   return (x >>> n | x << 32 - n) >>> 0;
 }
@@ -76,7 +76,7 @@ function createHash(algorithm) {
 }
 var K, hex;
 var init_paragraph_pdf_crypto = __esm({
-  "app/src/paragraph-pdf-crypto.mjs"() {
+  "src/paragraph-pdf-crypto.mjs"() {
     K = Uint32Array.from([
       1116352408,
       1899447441,
@@ -147,10 +147,10 @@ var init_paragraph_pdf_crypto = __esm({
   }
 });
 
-// app/src/paragraph-vendor/engine/shadingsurgery.js
+// src/paragraph-vendor/engine/shadingsurgery.js
 var PROBE_NEEDLES, probeMemo, probePdfBytes, latinMemo, latin, parsePdfMemo, parsePdf, parsePdfUncached, streamData, objStmIndex, objStmMemo, objStmIndexCached, withObjStm, dictAt;
 var init_shadingsurgery = __esm({
-  "app/src/paragraph-vendor/engine/shadingsurgery.js"() {
+  "src/paragraph-vendor/engine/shadingsurgery.js"() {
     PROBE_NEEDLES = [
       ["pattern", "/Pattern"],
       ["shading", "/Shading"],
@@ -421,7 +421,7 @@ var init_shadingsurgery = __esm({
   }
 });
 
-// app/src/paragraph-vendor/engine/streamsplice.js
+// src/paragraph-vendor/engine/streamsplice.js
 var streamsplice_exports = {};
 __export(streamsplice_exports, {
   applyPlan: () => applyPlan,
@@ -1113,7 +1113,7 @@ function prevStartXref(src) {
 }
 var ESCAPES, TM_RE, col, STD14, spliceDeletion, bin;
 var init_streamsplice = __esm({
-  "app/src/paragraph-vendor/engine/streamsplice.js"() {
+  "src/paragraph-vendor/engine/streamsplice.js"() {
     init_shadingsurgery();
     ESCAPES = { n: 10, r: 13, t: 9, b: 8, f: 12, "(": 40, ")": 41, "\\": 92 };
     TM_RE = /(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)\s+Tm/g;
@@ -1139,7 +1139,7 @@ var init_streamsplice = __esm({
   }
 });
 
-// app/src/paragraph-vendor/continuation-template.mjs
+// src/paragraph-vendor/continuation-template.mjs
 function classifyEdgeText(text) {
   const t = String(text).trim();
   if (/^\d+$/.test(t)) return "page_number";
@@ -1574,7 +1574,7 @@ function verifyPageEdges(engine, newPage, snapshot, ordinal, applied) {
 }
 var OBJ_TEXT, POS_TOL, ANCHOR_TOL, CENTER_TOL, CONTINUATION_STYLE, NUMBER_LIKE, LABELLED_NUMBER, textOf, near;
 var init_continuation_template = __esm({
-  "app/src/paragraph-vendor/continuation-template.mjs"() {
+  "src/paragraph-vendor/continuation-template.mjs"() {
     OBJ_TEXT = 1;
     POS_TOL = 0.05;
     ANCHOR_TOL = 0.1;
@@ -1587,7 +1587,7 @@ var init_continuation_template = __esm({
   }
 });
 
-// app/src/paragraph-vendor/pagination.mjs
+// src/paragraph-vendor/pagination.mjs
 function groupLines(items) {
   const seeds = items.filter((it) => it.top - it.bottom > EPS).sort((a, b) => b.top - a.top || a.order - b.order);
   const lines = [];
@@ -1888,7 +1888,7 @@ function paginateOverflow(engine, ctx, grown, { floor, maxNewPages }) {
 }
 var OBJ_TEXT2, EPS, PAGINATION_LIMITS, PAGINATION_CAPABILITY, bottomOf, hOverlap, sameColumn, coded;
 var init_pagination = __esm({
-  "app/src/paragraph-vendor/pagination.mjs"() {
+  "src/paragraph-vendor/pagination.mjs"() {
     init_continuation_template();
     OBJ_TEXT2 = 1;
     EPS = 0.01;
@@ -1928,7 +1928,7 @@ var init_pagination = __esm({
   }
 });
 
-// app/src/paragraph-vendor/document-flow-links.mjs
+// src/paragraph-vendor/document-flow-links.mjs
 function validateNativeLinkInventory(engine, pageIndex, model) {
   const M = engine.M, n = M._FPDFPage_GetAnnotCount?.(engine.page);
   if (!Number.isInteger(n) || n < 0 || n > 512) fail("document_flow_annotations_unsupported");
@@ -2130,7 +2130,7 @@ function nativeFitRTargetPages(model, pages) {
 }
 var fail, near2, bodyGlyph, intersects;
 var init_document_flow_links = __esm({
-  "app/src/paragraph-vendor/document-flow-links.mjs"() {
+  "src/paragraph-vendor/document-flow-links.mjs"() {
     fail = (code) => {
       throw Object.assign(new Error(code), { code });
     };
@@ -2140,7 +2140,7 @@ var init_document_flow_links = __esm({
   }
 });
 
-// app/src/paragraph-vendor/document-flow-underlines.mjs
+// src/paragraph-vendor/document-flow-underlines.mjs
 function float(M, fn, h) {
   const p = M._malloc(4);
   try {
@@ -2298,7 +2298,7 @@ function verifySavedUnderlines(engine, sourceBands, outputBands, moves) {
 }
 var fail2, near3, list;
 var init_document_flow_underlines = __esm({
-  "app/src/paragraph-vendor/document-flow-underlines.mjs"() {
+  "src/paragraph-vendor/document-flow-underlines.mjs"() {
     init_document_flow_links();
     fail2 = (code) => {
       throw Object.assign(new Error(code), { code });
@@ -2308,7 +2308,7 @@ var init_document_flow_underlines = __esm({
   }
 });
 
-// app/src/paragraph-vendor/document-flow-band.mjs
+// src/paragraph-vendor/document-flow-band.mjs
 function checkDocumentFlowPageBudget(e) {
   const M = e.M;
   if (M._FPDFPage_CountObjects(e.page) > 5e3) fail3("document_flow_object_budget_exceeded");
@@ -2356,7 +2356,7 @@ function deriveDocumentFlowBand(engine, sourcePageIndex, captureLayout, annotati
 }
 var fail3;
 var init_document_flow_band = __esm({
-  "app/src/paragraph-vendor/document-flow-band.mjs"() {
+  "src/paragraph-vendor/document-flow-band.mjs"() {
     init_pagination();
     init_document_flow_links();
     init_document_flow_underlines();
@@ -2366,7 +2366,7 @@ var init_document_flow_band = __esm({
   }
 });
 
-// app/src/paragraph-vendor/quality.mjs
+// src/paragraph-vendor/quality.mjs
 var quality_exports = {};
 __export(quality_exports, {
   capturePageLayout: () => capturePageLayout,
@@ -2695,15 +2695,14 @@ function restoreSourceOrder(engine, ctx, repairs, warnings) {
     if (q.sharesObjects) return fail6("paragraph_shares_objects", { id: q.id });
     if (!q.slots.length) return fail6("paragraph_without_source_slot", { id: q.id });
     const lo = q.slots[0], hi = q.slots[q.slots.length - 1];
-    for (let i = lo; i <= hi; i++) {
-      if (ownerOfSource.get(ctx.objects[i]) !== q.id) return fail6("interleaved_source_slot", { id: q.id });
-    }
+    const interleaved = ctx.objects.slice(lo, hi + 1).some((h) => ownerOfSource.get(h) !== q.id);
     for (const h of now) {
       const o = ownerOfSource.get(h);
       if (o !== void 0 && o !== q.id) return fail6("handle_identity_reused", { id: q.id });
       if (o === void 0 && ctx.objects.includes(h)) return fail6("handle_identity_reused", { id: q.id });
     }
-    changed.push({ id: q.id, first: ctx.objects[lo], now });
+    if (interleaved) warnings.push({ code: "interleaved_source_overlay_order", id: q.id, severity: "warning" });
+    changed.push({ id: q.id, first: ctx.objects[interleaved ? hi : lo], now });
   }
   if (!changed.length) {
     repairs.push({ kind: "reading_order", action: "unchanged", moved: 0 });
@@ -3532,7 +3531,7 @@ function inspectContinued(s, o, out, m, pageEdits, row, failures, warnings, incl
 }
 var TOL, EDGE_BAND, OBJ_TEXT3, normStr, paraText, bottomOf2, median, STYLE_FNS, sameStyles, inBoxes, sameGlyphs, digest, textOf2, samePlace;
 var init_quality = __esm({
-  "app/src/paragraph-vendor/quality.mjs"() {
+  "src/paragraph-vendor/quality.mjs"() {
     init_paragraph_pdf_crypto();
     init_continuation_template();
     init_document_flow_band();
@@ -3568,10 +3567,10 @@ var init_quality = __esm({
   }
 });
 
-// app/src/paragraph-vendor/editor.mjs
+// src/paragraph-vendor/editor.mjs
 init_paragraph_pdf_crypto();
 
-// app/src/paragraph-vendor/engine/foreign-gap.mjs
+// src/paragraph-vendor/engine/foreign-gap.mjs
 function removeForeignObjectGapSpaces(modelRuns, runs, chars, owned) {
   const original = modelRuns.map((r) => r.text).join("");
   const replacement = runs.map((r) => r.text).join("");
@@ -3606,12 +3605,12 @@ function removeForeignObjectGapSpaces(modelRuns, runs, chars, owned) {
   });
 }
 
-// app/src/paragraph-pdf-engine-loader.mjs
+// src/paragraph-pdf-engine-loader.mjs
 function createEngineModule() {
   throw new Error("Use verified paragraph runtime factory");
 }
 
-// app/src/paragraph-vendor/engine/type3surgery.js
+// src/paragraph-vendor/engine/type3surgery.js
 init_shadingsurgery();
 function applyType3LeftoverSurgery(savedBytes, jobs) {
   jobs = (jobs || []).filter(
@@ -3801,16 +3800,16 @@ ${xrefAt}
   return u8;
 }
 
-// app/src/paragraph-vendor/engine/core.js
+// src/paragraph-vendor/engine/core.js
 init_shadingsurgery();
 
-// app/src/paragraph-vendor/utils/freetext-script.ts
+// src/paragraph-vendor/utils/freetext-script.ts
 var WINANSI_SAFE = /^[ - -ÿ€‚ƒ„…†‡ˆ‰Š‹ŒŽ‘’“”•–—˜™š›œžŸ\r\n\t]*$/;
 function needsFontEmbedding(text) {
   return !WINANSI_SAFE.test(text ?? "");
 }
 
-// app/src/paragraph-vendor/engine/core.js
+// src/paragraph-vendor/engine/core.js
 var createEditCore = createEngineModule;
 var devBust = "";
 var RUN_SIZE = 60;
@@ -5727,10 +5726,10 @@ for (const name of OBJECT_MUTATORS) {
   };
 }
 
-// app/src/paragraph-pdf-runtime.mjs
+// src/paragraph-pdf-runtime.mjs
 init_paragraph_pdf_crypto();
 
-// app/src/paragraph-vendor/overlay.json
+// src/paragraph-vendor/overlay.json
 var overlay_default = {
   schema: "falsify.paragraph-editor.overlay.v1",
   base: "cd4ba2cdd68ae7e51198f615bd4ac6130206b162",
@@ -5741,7 +5740,7 @@ var overlay_default = {
   patchSha256: "b0eb108bae54d22a0a44e33e92e5736de2621788d40c8d7ce6b5aace4cc2864e"
 };
 
-// app/src/paragraph-pdf-runtime.mjs
+// src/paragraph-pdf-runtime.mjs
 var RUNTIME = Object.freeze({
   engine: "BentoPDF/PDFium",
   license: "AGPL-3.0-only",
@@ -5802,10 +5801,10 @@ async function initialize() {
   return { engineFactory, info: RUNTIME };
 }
 
-// app/src/paragraph-vendor/editor.mjs
+// src/paragraph-vendor/editor.mjs
 init_pagination();
 
-// app/src/paragraph-vendor/document-flow.mjs
+// src/paragraph-vendor/document-flow.mjs
 init_paragraph_pdf_crypto();
 init_quality();
 init_pagination();
@@ -6080,7 +6079,7 @@ async function compactDocumentFlow(engineFactory, sourceBytes, intermediatePdf, 
   }
 }
 
-// app/src/paragraph-vendor/inline-preservation.mjs
+// src/paragraph-vendor/inline-preservation.mjs
 init_shadingsurgery();
 var WS = /^\s+$/;
 var tokens = (s) => s.match(/\s+|\S+/g) || [];
@@ -7245,7 +7244,7 @@ function replaceReflowWithLineLocal(engine, paras, pi, del, inserts, runs, pre, 
   return { reason, upd, ids: after.map((p) => p.id) };
 }
 
-// app/src/paragraph-vendor/editor.mjs
+// src/paragraph-vendor/editor.mjs
 var LIMITS = Object.freeze({
   maxFileBytes: 64 * 1024 * 1024,
   maxEdits: 64,
@@ -7826,10 +7825,10 @@ async function editPdf(request, options = {}) {
   return { pdf, report };
 }
 
-// app/src/paragraph-pdf.mjs
+// src/paragraph-pdf.mjs
 init_paragraph_pdf_crypto();
 
-// app/src/document-flow-annotations.mjs
+// src/document-flow-annotations.mjs
 var ANNOTATION_LIMITS = Object.freeze({
   sourceBytes: 25 * 1024 * 1024,
   outputBytes: 64 * 1024 * 1024,
@@ -8423,7 +8422,7 @@ function createAnnotationTransport({ mupdf } = {}) {
   return Object.freeze({ inspect: (request) => inspect({ ...request, mupdf }), transport, validate });
 }
 
-// app/src/browser-fonts.mjs
+// src/browser-fonts.mjs
 var error = (message) => new Error(message);
 function parseFont(bytes2) {
   const bad = () => {
@@ -8480,7 +8479,7 @@ function parseFont(bytes2) {
   return { family, ...postscriptName ? { postscriptName } : {}, weight, italic: Boolean(selection & 1 || macStyle & 2), fsType };
 }
 
-// app/src/paragraph-pdf.mjs
+// src/paragraph-pdf.mjs
 var COORDINATE_SPACE = "top-left-page";
 var LIMITS2 = Object.freeze({ maxFileBytes: 25 * 1024 * 1024 });
 var ParagraphPdfError = class extends Error {

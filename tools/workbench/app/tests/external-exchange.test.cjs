@@ -6,3 +6,24 @@ test('blue prose and metadata identity',()=>{const b=X.parse('A concern without 
 test('legacy before after and unparsed raw',()=>{const b=X.parse('Before: rate is 12% [4]\nAfter: rate is 13%',{role:'red',segments,fileHash:'hash'});assert.equal(b.items.length,1);const u=X.parse('free response',{role:'red',segments,fileHash:'hash'});assert.equal(u.status,'unparsed');assert.equal(u.raw,'free response');});
 test('structured evidence, independent hashes and role',()=>{const raw=JSON.stringify({role:'blue',sourceHash:'text',findings:[{rationale:'r',evidence:[{segmentId:'s0',quote:'q',relation:'supports'}],references:[{doi:'10.x'}]}]});const b=X.parse(raw,{role:'blue',segments,fileHash:'binary'});assert.deepEqual(b.items[0].evidence,[{segmentId:'s0',quote:'q',relation:'supports'}]);assert.deepEqual(b.items[0].references,[{doi:'10.x'}]);assert.equal(b.diagnostics.length,0);assert.equal(X.parse(raw,{role:'red',segments,fileHash:'binary',sourceHash:'other'}).diagnostics.filter(d=>d.code==='role-mismatch').length,1);assert.match(X.buildPrompt({role:'blue',harness:{name:'test'},segments:[]}),/"name": "test"/);});
 test('bounded import retains original and prose pair rationale',()=>{const raw='Before: international rate is 12% [4].\nAfter: revised\nRationale: Why\nEvidence: Source';const b=X.parse(raw,{role:'red',segments,fileHash:'hash'});assert.equal(b.items[0].after,'revised');assert.equal(b.items[0].rationale,'Why');assert.deepEqual(b.items[0].evidence,['Source']);const big='x'.repeat(200001);const limited=X.parse(big,{role:'blue',segments,fileHash:'hash'});assert.equal(limited.raw,big);assert.equal(limited.diagnostics[0].code,'input-limit');});
+
+test('Korean table keeps each finding and trailing report',()=>{const raw='| 번호 | 쪽 | 위치(절, 그림, 표) | 유형 | 심각도 | 인용한 원문 | 왜 결함인가 | 확신 |\n|---|---|---|---|---|---|---|---|\n| 1 | 1 | 표 2 | 새 유형 | 확인필요 | international rate is 12% [4]. | 이유 | 낮음 |\n| 2 | 2 | 절 3 | 다른 유형 | 중 | | 별도 이유 | low |\n\n## 보고서\n후속 설명';const b=X.parse(raw,{role:'blue',segments,fileHash:'hash'});assert.equal(b.raw,raw);assert.equal(b.items.length,2);assert.equal(b.items[0].findingType,'새 유형');assert.equal(b.items[0].severity,'확인필요');assert.equal(b.items[0].confidence,'낮음');assert.equal(b.items[0].pageIndex,0);assert.equal(b.items[1].pageIndex,1);assert.equal(b.items[1].rationale,'별도 이유');assert.equal(b.report,'## 보고서\n후속 설명');});
+test('prompt includes source only when explicitly requested',()=>{assert.doesNotMatch(X.buildPrompt({segments}),/The inter-/);assert.match(X.buildPrompt({segments,includeSource:true}),/The inter-/);});
+test('page hints fall back and suggested candidates never bind automatically',()=>{const b=X.parse('{"findings":[{"quote":"international rate is 12% [4].","page":8}]}',{role:'blue',segments,fileHash:'hash'});assert.equal(b.items[0].matchStatus,'matched');assert.equal(b.items[0].pageIndex,0);globalThis.FalsifyPaperAnchors={find:()=>({status:'suggested',matches:[{segmentId:'s0',pageIndex:0,start:4,end:8,before:'test',score:0.8}]})};try{const s=X.parse('{"findings":[{"quote":"test"}]}',{role:'blue',segments,fileHash:'hash'}).items[0];assert.equal(s.matchStatus,'suggested');assert.equal(s.anchor,null);}finally{delete globalThis.FalsifyPaperAnchors;}});
+
+test('real matcher preserves reported quote and source span through proposal reload',()=>{
+  globalThis.FalsifyPaperAnchors=require('../dist/paper-anchors.js');
+  try {
+    const raw='```markdown\n| 번호 | 쪽 | 위치(절, 그림, 표) | 유형 | 심각도 | 인용한 원문 | 왜 결함인가 | 확신 |\n|---|---|---|---|---|---|---|---|\n| 1 | 1 | 표 2 | 자유 유형 | 확인필요 | international rate is 12% [4]. | 이유 \\| 보충 | 낮음 |\n| malformed | row |\n| 2 | 1 | 절 1 | 다른 유형 | 중 | | 두 번째 | low |\n```\n\n## 보고서\n설명';
+    const batch=X.parse(raw,{role:'blue',segments,fileHash:'hash'});
+    assert.equal(batch.items.length,2);assert.equal(batch.items[0].quote,'international rate is 12% [4].');
+    assert.equal(batch.items[0].sourceQuote,'inter-\nnational rate is 12% [4].');
+    assert.equal(batch.items[0].rationale,'이유 | 보충');assert.equal(batch.items[0].matchStatus,'matched');
+    assert.equal(batch.report,'## 보고서\n설명');assert.equal(batch.diagnostics[0].code,'malformed-item');
+    const P=require('../dist/external-proposals.js');const c=P.create({fileHash:'hash',role:'blue',segments});c.append(batch);c.append({...batch,id:'second'});
+    const snapshot=c.snapshot();assert.equal(snapshot.items.length,2);assert.equal(snapshot.items[0].sourceRefs.length,2);
+    const reload=P.create({fileHash:'hash',role:'blue',segments});reload.restore(snapshot);assert.deepEqual(reload.snapshot(),snapshot);
+    const suggested=X.parse(JSON.stringify({findings:[{quote:'international rate is 13% [4].'}]}),{role:'blue',segments,fileHash:'hash'}).items[0];
+    assert.equal(suggested.matchStatus,'suggested');assert.equal(suggested.anchor,null);
+  } finally { delete globalThis.FalsifyPaperAnchors; }
+});

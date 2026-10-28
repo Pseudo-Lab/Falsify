@@ -423,15 +423,19 @@ export function restoreSourceOrder(engine, ctx, repairs, warnings) {
     if (q.sharesObjects) return fail("paragraph_shares_objects", { id: q.id });
     if (!q.slots.length) return fail("paragraph_without_source_slot", { id: q.id });
     const lo = q.slots[0], hi = q.slots[q.slots.length - 1];
-    for (let i = lo; i <= hi; i++) {
-      if (ownerOfSource.get(ctx.objects[i]) !== q.id) return fail("interleaved_source_slot", { id: q.id });
-    }
+    const interleaved = ctx.objects.slice(lo, hi + 1).some(h => ownerOfSource.get(h) !== q.id);
     for (const h of now) {
       const o = ownerOfSource.get(h);
       if (o !== undefined && o !== q.id) return fail("handle_identity_reused", { id: q.id });
       if (o === undefined && ctx.objects.includes(h)) return fail("handle_identity_reused", { id: q.id });
     }
-    changed.push({ id: q.id, first: ctx.objects[lo], now });
+    // A source paragraph can end in an overlay above its own masking path.
+    // Retain that final painter slot; moving its replacement to the first
+    // slot would put the new text underneath the surviving mask. Other
+    // objects retain their relative order. The preview and saved checks
+    // still report layout changes independently of this ordering repair.
+    if (interleaved) warnings.push({ code: "interleaved_source_overlay_order", id: q.id, severity: "warning" });
+    changed.push({ id: q.id, first: ctx.objects[interleaved ? hi : lo], now });
   }
   if (!changed.length) {
     repairs.push({ kind: "reading_order", action: "unchanged", moved: 0 });

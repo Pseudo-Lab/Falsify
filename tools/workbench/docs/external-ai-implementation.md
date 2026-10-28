@@ -33,3 +33,16 @@ RED와 BLUE에서 논문을 입력하고 외부 AI의 답변을 붙여넣거나 
 그림 교체와 표 구조 변경의 외부 응답 계약, 전체 논문 재조판 확대는 후속 범위다. 기존 PDF 편집·그림·표 기능은 유지한다. 시도 기록의 과거 형식에는 복합 공격 유형이 없으므로 그 기록을 복합 조건의 시도 합계로 간주하지 않는다.
 
 스펙 기준은 [North Star](NORTH_STAR_EXTERNAL_AI.md), 기술 계약은 [external-ai-contract.md](external-ai-contract.md)다. North Star 적용 대상은 Falsify orchestrator이며 작업자에게는 개별 작업 지시를 전달한다.
+
+## 배포 결과
+
+- 공개 앱: https://shinick-han.github.io/falsify-workbench/?v=0.2.0-alpha.28
+- 공개 소스: `65770a9f8cd314cc8945464529ce117cca9677eb` ([PR 34](https://github.com/Shinick-Han/falsify-workbench/pull/34)).
+- [GitHub 검사·배포](https://github.com/Shinick-Han/falsify-workbench/actions/runs/40636080719): Linux, Windows launcher, macOS ARM/Intel 및 Pages 모두 성공.
+- [소스 릴리스](https://github.com/Shinick-Han/falsify-workbench/releases/tag/v0.2.0-alpha.28): 고정 런타임·라이선스·파일 해시 검증 후 패키징.
+- Cloudflare `falsify-cloud-api`: 버전 `6f580c48-9bfa-4be0-8e70-5f7860ccd5fe`. 배포 후 Confluence capabilities의 configured=true 확인.
+- 로컬 설치: 변경 53개 파일을 이전 릴리스 바이트와 대조·백업 후 교체. 유휴 companion 재시작, 인증된 capabilities에서 alpha.28 및 RED/BLUE 활성 확인.
+- 팀 저장소: 기존 `feat/workbench-html-guide-20261012` 브랜치의 `9023f71`. 미리보기 저장소 `ee0ea35`, Pages 배포 성공. 팀 main은 수정하지 않았다.
+- 공개 웹을 Aside로 열어 자산 버전 alpha.28, 외부 RED/BLUE UI, 공격 유형 체크박스 3개 확인.
+
+합성 문서 한 번의 브라우저 계측에서 선택 변경 핸들러는 1.2ms였다. 별도 표본의 다음 프레임 대기는 728.2ms로, 입력 처리와 그리기 대기를 구분한 추가 측정이 필요하다. 이 수치는 전체 UI가 100ms 이내라는 보장이 아니다.

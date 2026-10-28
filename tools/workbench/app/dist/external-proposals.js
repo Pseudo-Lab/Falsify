@@ -9,7 +9,7 @@
     const snap=()=>clone({schema:SCHEMA,fileHash,role,batches,items});
     const emit=()=>{const s=snap();for(const fn of listeners)try{fn(clone(s));}catch(_){}return s;};
     function valid(item){
-      const needle=role==='blue'?item.quote:item.before;if(!item.anchor||typeof needle!=='string'||!needle)return false;
+      const needle=role==='blue'?(item.sourceQuote||item.quote):item.before;if(!item.anchor||typeof needle!=='string'||!needle)return false;
       const s=source.find(x=>x.id===item.segmentId),a=item.anchor;
       if(!s||!Number.isInteger(a.start)||!Number.isInteger(a.end)||a.start<0||a.end<=a.start||a.end>s.text.length||s.text.slice(a.start,a.end)!==needle)return false;
       if(Number.isInteger(s.pageIndex)&&s.pageIndex!==item.pageIndex)return false;
@@ -29,7 +29,7 @@
       const b=clone(batch);batches.push(b);
       for(const raw of b.items){
         const item=clone(raw),ref={batchId:b.id,itemId:item.id};
-        const key=x=>JSON.stringify([x.kind,x.before,x.after,x.quote,x.segmentId,x.pageIndex,x.anchor,x.rationale,x.evidence,x.references,x.attackTypes,x.uncertainty]);
+        const key=x=>JSON.stringify([x.kind,x.before,x.after,x.quote,x.sourceQuote,x.segmentId,x.pageIndex,x.anchor,x.rationale,x.evidence,x.references,x.attackTypes,x.uncertainty,x.findingType,x.severity,x.confidence,x.locationLabel,x.reportNumber]);
         const duplicate=items.find(x=>!x.parentIds&&key(x)===key(item));
         if(duplicate){if(!duplicate.sourceRefs.some(r=>r.batchId===ref.batchId&&r.itemId===ref.itemId))duplicate.sourceRefs.push(ref);continue;}
         item.id='p'+next++;item.sourceRefs=[ref];item.enabled=false;
@@ -47,9 +47,9 @@
     }
     function bind(id,binding){
       const item=find(id),nextItem={...item,...clone(binding)};
-      if(role==='blue'&&typeof binding.before==='string')nextItem.quote=binding.before;
+      if(role==='blue'&&typeof binding.before==='string')nextItem.sourceQuote=binding.before;
       if(!valid(nextItem))throw Error('Source range does not match');
-      const s=source.find(x=>x.id===nextItem.segmentId);let occurrence=0,pos=-1;while((pos=s.text.indexOf(role==='blue'?nextItem.quote:nextItem.before,pos+1))>=0&&pos<nextItem.anchor.start)occurrence++;
+      const s=source.find(x=>x.id===nextItem.segmentId);let occurrence=0,pos=-1;while((pos=s.text.indexOf(role==='blue'?(nextItem.sourceQuote||nextItem.quote):nextItem.before,pos+1))>=0&&pos<nextItem.anchor.start)occurrence++;
       nextItem.anchor={...nextItem.anchor,occurrence};nextItem.matchStatus='matched';nextItem.enabled=false;Object.assign(item,nextItem);return emit();
     }
     function combine(ids,fields){

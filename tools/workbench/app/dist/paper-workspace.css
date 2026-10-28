@@ -84,4 +84,9 @@
 .paper-font-tools{display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin:12px 0 18px}
 .paper-font-tools .muted{flex:1 1 220px;font-size:13px}
 .paper-font-tools button svg{width:18px;height:18px;flex:none}
+.paper-location-candidate{margin:12px 0;padding:12px;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius)}
+.paper-location-candidate blockquote{margin:8px 0;white-space:pre-wrap;overflow-wrap:anywhere;max-height:180px;overflow:auto}
+.paper-location-candidate p{margin:0;font-weight:600}
+.paper-location-candidate button{margin:6px 10px 0 0}
+.paper-candidate-layer .paper-change-mark{background:color-mix(in srgb,var(--yellow) 50%,transparent)}
 @media(max-width:700px){.paper-font-tools .button{flex:1 1 160px}.paper-font-tools .muted{flex-basis:100%}}

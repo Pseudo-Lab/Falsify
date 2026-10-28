@@ -70,6 +70,39 @@ function finalize(format,segments,warnings){
 const MARK='�';
 const CONTROL=/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g;
 function unmapped(str,count){return str.replace(CONTROL,()=>{count();return MARK;});}
+// Build a separate visual reading order; canonical content-stream extraction is untouched.
+export function layoutAliases(items,pageIndex,pageWidth){
+  const runs=items.map((x,index)=>({x,index})).filter(({x})=>typeof x.str==='string'&&x.str.trim()&&Array.isArray(x.transform)&&Number.isFinite(x.transform[4])&&Number.isFinite(x.transform[5])).map(({x,index})=>({index,text:unmapped(x.str,()=>{}),x:x.transform[4],y:x.transform[5],width:x.width||0,height:Math.abs(x.height||x.transform[3]||10)}));
+  if(!runs.length)return [];
+  const mid=pageWidth/2, left=runs.filter(r=>r.x<mid&&r.x+r.width<=mid+10),right=runs.filter(r=>r.x>=mid);
+  const two=left.length>=3&&right.length>=3&&left.some(a=>right.some(b=>Math.abs(a.y-b.y)<Math.max(a.height,b.height)));
+  const groups=two?[runs.filter(r=>r.x<mid),right]:[runs];
+  return groups.flatMap((group,i)=>{
+    group.sort((a,b)=>b.y-a.y||a.x-b.x);
+    const lines=[];
+    for(const r of group){let line=lines.find(l=>Math.abs(l.y-r.y)<=Math.max(2,Math.min(l.height,r.height)*0.35));if(!line){line={y:r.y,height:r.height,runs:[]};lines.push(line);}line.runs.push(r);}
+    lines.sort((a,b)=>b.y-a.y);
+    // Overlaid source runs are alternatives, never concatenate them into a synthetic
+    // sentence or silently choose one. Preserve each possible source mapping.
+    let variants=[[]];
+    for(const line of lines){
+      const clusters=[];
+      for(const r of line.runs.sort((a,b)=>a.x-b.x)){
+        const cluster=clusters.find(c=>c.some(v=>Math.min(v.x+v.width,r.x+r.width)-Math.max(v.x,r.x)>Math.min(v.width,r.width)*0.5));
+        if(cluster)cluster.push(r);else clusters.push([r]);
+      }
+      let choices=[[]];
+      for(const cluster of clusters){choices=choices.flatMap(choice=>cluster.map(r=>choice.concat(r)));if(choices.length*variants.length>16)return [];}
+      variants=variants.flatMap(variant=>choices.map(choice=>variant.concat([choice.sort((a,b)=>a.x-b.x)])));
+    }
+    return variants.map((ordered,variant)=>{
+      const text=ordered.map(line=>line.map(r=>r.text.trim()).join(' ')).join('\n').trim();
+      const itemIndices=ordered.flatMap(line=>line.map(r=>r.index));
+      const base='layout:p'+(pageIndex+1)+':'+(two?'column'+(i+1):'page');
+      return {id:base+(variants.length>1?':overlay'+(variant+1):''),label:'PDF p. '+(pageIndex+1)+(two?' · column '+(i+1):' · layout'),text,pageIndex,itemIndices};
+    }).filter(s=>s.text);
+  });
+}
 async function pdf(bytes,{signal,onProgress}){
   if(new TextDecoder().decode(bytes.subarray(0,1024)).indexOf('%PDF-')<0)fail('PDF 서명이 없습니다. 손상된 파일인지 확인하세요.');
   const lib=await import('./vendor/pdf.mjs');check(signal);
@@ -82,15 +115,16 @@ async function pdf(bytes,{signal,onProgress}){
   try{
     doc=await task.promise;check(signal);
     if(doc.numPages>LIMITS.pages)fail('PDF는 200페이지까지 지원합니다. 필요한 부분을 나누어 가져오세요.');
-    const segments=[],blank=[],glyphPages=[];let length=0,glyphs=0;
+    const segments=[],matchSegments=[],blank=[],glyphPages=[];let length=0,glyphs=0;
     for(let n=1;n<=doc.numPages;n++){
       check(signal);onProgress?.('PDF '+n+' / '+doc.numPages+'페이지 추출 중');
       const page=await doc.getPage(n);const content=await page.getTextContent();let text='',marked=0;
       for(const item of content.items){if(typeof item.str!=='string')continue;text+=unmapped(item.str,()=>marked++)+(item.hasEOL?'\n':' ');if(text.length+length>LIMITS.chars)fail('추출 텍스트는 1,000,000자까지 지원합니다. 문서를 나누어 가져오세요.');}
+      matchSegments.push(...layoutAliases(content.items,n-1,page.getViewport({scale:1}).width));
       if(marked){glyphs+=marked;glyphPages.push(n);}
       text=text.trim();length+=text.length;if(!text)blank.push(n);segments.push({label:'PDF p. '+n,text});page.cleanup();
     }
-    return finalize('PDF',segments,['PDF 읽기 순서·다단 편집·표·수식은 원본과 대조하세요. 텍스트 추출은 레이아웃 검증이 아닙니다.',...(blank.length?['텍스트 없는 페이지: '+blank.join(', ')+'. 이미지·스캔 페이지는 OCR이 필요합니다.']:[]),...(glyphs?['유니코드 대응이 없는 PDF 글리프 '+glyphs+'개를 '+MARK+'로 표시했습니다(페이지 '+glyphPages.join(', ')+'). 수식 괄호 등 기호일 수 있으니 원본과 대조하세요.']:[])]);
+    return {...finalize('PDF',segments,['PDF 읽기 순서·다단 편집·표·수식은 원본과 대조하세요. 텍스트 추출은 레이아웃 검증이 아닙니다.',...(blank.length?['텍스트 없는 페이지: '+blank.join(', ')+'. 이미지·스캔 페이지는 OCR이 필요합니다.']:[]),...(glyphs?['유니코드 대응이 없는 PDF 글리프 '+glyphs+'개를 '+MARK+'로 표시했습니다(페이지 '+glyphPages.join(', ')+'). 수식 괄호 등 기호일 수 있으니 원본과 대조하세요.']:[])]),matchSegments};
   }catch(error){
     check(signal);if(timedOut)fail('PDF 추출이 60초를 초과했습니다. 필요한 페이지만 나누거나 TXT로 변환하세요.');if(error.name==='PasswordException')fail('암호화된 PDF입니다. 권한이 있는 원본 앱에서 암호를 해제한 사본을 가져오세요.');
     if(error.name==='InvalidPDFException')fail('PDF를 읽을 수 없습니다. 원본 앱에서 다시 저장하세요.');throw error;

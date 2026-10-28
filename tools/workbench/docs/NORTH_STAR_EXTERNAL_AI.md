@@ -1,6 +1,6 @@
 # Falsify 외부 AI RED BLUE 작업 흐름 North Star
 
-기준일: 2026-10-28 · 스펙 v1 · 상태: 구현·로컬 통합 검증 완료, 배포 진행
+기준일: 2026-10-28 · 스펙 v1 · 상태: alpha.29 프롬프트 중심 흐름 구현·검수 완료. 배포 결과는 WorkBite T-0152 참조
 
 적용 대상: 사용자가 지정한 Falsify 프로젝트 orchestrator. 다른 Codex agent·하위 작업자·검수자에게는 이 문서의 열람·준수 의무가 없다. 해당 orchestrator가 필요한 내용만 개별 작업 지시로 추려 전달한다.
 
@@ -12,7 +12,15 @@
 
 이 문서는 Falsify orchestrator가 이번 웹앱 개발을 판단·조율하는 기준이다. Falsify 팀의 공식 연구 목표나 연구용 harness의 성능을 정의하지 않는다. 구현 진행도와 검증 결과는 WorkBite T-0152 및 커밋·검사 결과에 남긴다. 계획을 구현 완료로 표시하지 않는다.
 
-구현·검증 증거: [external-ai-implementation.md](external-ai-implementation.md). 배포 결과는 WorkBite T-0152의 체크포인트로 확인한다.
+구현·검증 증거: [prompt-first-implementation.md](prompt-first-implementation.md), 이전 alpha.28 [구현 기록](external-ai-implementation.md). 배포 결과는 WorkBite T-0152의 체크포인트로 확인한다.
+
+## 2026-10-28 후속 결정: 프롬프트 중심 기본 사용
+
+기본 하네스는 자유 지시문이며 논문 PDF와 함께 외부 AI에 제공한다. 기본 지시문 복사에 원문 전체 추출문을 강제로 포함하지 않는다. 도구 실행·CLI·모델·예산·JSON 설정은 접힌 고급 기능이며 일반 사용은 펼치지 않고 완료한다. 지시문 저장·불러오기와 기존 팀 하네스의 지시문 재사용을 지원한다. 검색/Python 그림 생성 자동화의 신규 구현과 완전한 논문 분해 내보내기는 후속이다.
+
+원문은 좌표 읽기 순서와 문맥으로 후보를 찾고 근접 후보를 PDF 위에서 확인받는다. 가장 가까운 후보 하나를 먼저 보이고 필요할 때 나머지를 펼친다. 사용자 선택 전에는 유사 위치를 자동 적용하지 않는다. 원문·변경문·위치·원응답은 앱이 보존한다.
+
+BLUE는 진행자 예시처럼 Markdown 결함 표와 마지막 대조 방법 설명을 그대로 가져온다. 임의 유형, 세 단계 심각도, 낮은 확신, 확인필요를 보존하며 위치가 없어도 기록한다. PDF 내부 검토 지시와 실제 도구 사용 여부를 구분해 기록한다. 새 wave 소유권과 API는 [prompt-first-contract.md](prompt-first-contract.md)에 정의한다.
 
 ## 확정된 사용자 결정
 

@@ -48,7 +48,7 @@
   "trust": "locally-supplied-hash-verified-artifacts",
   "editorModuleSha256": {
     "editor.mjs": "9bfcec6b9d7a1cef93bef2ba1e5452e222cf54fd6ae3ca1c3de0df56276c7ecb",
-    "quality.mjs": "395f55600c880999398b05971c1d09cda96a924d243b8a5f7fb472e0867ff309",
+    "quality.mjs": "1db4fe69d4f5dfa533f08841d35410b1298b985544ccf0d53c96a72ec5fa80ac",
     "pagination.mjs": "e66e6b630c426f9d80da87781590e59ed7b67ffdaeee7aa49bd139e7507438cb",
     "inline-preservation.mjs": "84b98551dad10752016319ee0e14e953b1723cd6142079d9ed3dc0b593149de7",
     "continuation-template.mjs": "94bfc49200818466e9ec99560d00a7e2dcf72a8003fa10d485852bbace124336",
