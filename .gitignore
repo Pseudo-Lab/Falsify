@@ -1,2 +1,8 @@
 .DS_Store
 assets/branding/_archive/
+corpus/raw/
+__pycache__/
+.pytest_cache/
+
+# 이건규 님 파일럿 저장소 클론(정답지 포함). 공개 저장소에 넣지 않는다
+falsify-pilot/
