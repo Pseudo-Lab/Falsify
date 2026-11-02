@@ -1,0 +1,19 @@
+{
+  "step_id": "step-A",
+  "role": "methods drafting (Korean)",
+  "request": "Write a Korean draft of the manuscript (title, abstract, introduction, related work, data and methods, results placeholders, discussion and limitations, ethics, data and code availability, reproducibility checklist, references) for the synthetic study in this repository. Describe only what task_contract.yaml, protocol/analysis_plan.yaml, protocol/terminology_and_masks.md, the data dictionaries and the configuration define. Do not write any result values: leave every number that depends on a model run as {{TBD}}. Cite only entries of evidence/reference_registry.json and keep the educational-fiction notice.",
+  "inputs": [
+    "task_contract.yaml",
+    "protocol/analysis_plan.yaml",
+    "protocol/terminology_and_masks.md",
+    "data/feature_dictionary.json",
+    "data/label_dictionary.json",
+    "data/generation_manifest.json",
+    "evidence/reference_registry.json"
+  ],
+  "constraints": [
+    "no result values before runs exist",
+    "synthetic data only; no clinical, wet-lab or external-validation claims",
+    "venue profile: AMF methods / initial / edu-1.0 (educational profile)"
+  ]
+}

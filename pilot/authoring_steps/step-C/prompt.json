@@ -1,0 +1,13 @@
+{
+  "step_id": "step-C",
+  "role": "English editorial preparation",
+  "request": "Prepare the English manuscript from the Korean baseline and editing instructions; align run-level statements and result references, preserve artifact files, and prepare the selected submission profile.",
+  "inputs": [
+    "author/author_draft_ko.md",
+    "author/author_requested_edits.md",
+    "paper/manuscript_en.md",
+    "tables/results.csv",
+    "tables/run_registry.csv",
+    "figures/figure3_source.csv"
+  ]
+}

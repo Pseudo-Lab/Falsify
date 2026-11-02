@@ -1,0 +1,35 @@
+{
+  "schema_version": "1.0",
+  "horizon_days": 180,
+  "index_day": 0,
+  "tasks": [
+    {
+      "task_id": "SYN_T01",
+      "description": "Synthetic binary outcome SYN_T01 within 180 days after the index visit. Abstract simulated event; not a disease or clinical diagnosis."
+    },
+    {
+      "task_id": "SYN_T02",
+      "description": "Synthetic binary outcome SYN_T02 within 180 days after the index visit. Abstract simulated event; not a disease or clinical diagnosis."
+    },
+    {
+      "task_id": "SYN_T03",
+      "description": "Synthetic binary outcome SYN_T03 within 180 days after the index visit. Abstract simulated event; not a disease or clinical diagnosis."
+    },
+    {
+      "task_id": "SYN_T04",
+      "description": "Synthetic binary outcome SYN_T04 within 180 days after the index visit. Abstract simulated event; not a disease or clinical diagnosis."
+    },
+    {
+      "task_id": "SYN_T05",
+      "description": "Synthetic binary outcome SYN_T05 within 180 days after the index visit. Abstract simulated event; not a disease or clinical diagnosis."
+    },
+    {
+      "task_id": "SYN_T06",
+      "description": "Synthetic binary outcome SYN_T06 within 180 days after the index visit. Abstract simulated event; not a disease or clinical diagnosis."
+    }
+  ],
+  "values": {
+    "y": "1 = event observed in (0, 180]; 0 = no event in (0, 180] and follow-up reached day 180 (events recorded after day 180 do not count); null = follow-up ended before day 180 without an event (not observed)",
+    "observed": "false exactly when y is null"
+  }
+}

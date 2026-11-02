@@ -1,0 +1,82 @@
+# Analysis protocol (educational fiction; synthetic data only).
+# Fixed before any model run. Values here are definitions, not results.
+schema_version: "1.0"
+study: dropfusion-edu
+estimand: >-
+  Discrimination of six synthetic 180-day outcomes (SYN_T01-SYN_T06) for new
+  synthetic subjects, using features available at the index visit (day 0).
+  Internal held-out evaluation within one synthetic generator; not an
+  external or clinical validation.
+
+endpoint:
+  tasks: [SYN_T01, SYN_T02, SYN_T03, SYN_T04, SYN_T05, SYN_T06]
+  horizon_days: 180
+  positive: observed event with 0 < event_day <= 180
+  negative: no event in (0, 180] and followup_end_day >= 180
+  unobserved: follow-up ended before day 180 without an event -> y = null, observed = false
+  unobserved_handling: excluded from the training loss and from evaluation (never treated as negative)
+
+population:
+  subjects: 1200 synthetic subjects, 3 synthetic sites
+  specimens: 2 aliquots per subject from the same index visit
+  independent_unit: subject_id
+
+features:
+  modalities: {protein: 24, rna: 96}
+  prediction_time_day: 0
+  rule: use only features with available_day <= 0 (119 features); post-index features are excluded
+
+pairing:
+  join_key: canonical_specimen_id via data/modality_crosswalk.csv
+  validation: one-to-one; row order is not an identifier
+
+split:
+  unit: subject_id
+  fractions: [0.6, 0.2, 0.2]
+  seed: 1729
+  expected_subjects: {train: 720, val: 240, test: 240}
+  requirement: no subject appears in more than one split
+
+preprocessing:
+  imputer: per-feature median
+  scaler: per-feature mean and standard deviation (population std)
+  fit_scope: train specimens only; the fitted statistics are applied unchanged to val and test
+  record: fit membership and fitted statistics are stored for every run
+
+missing_modality:
+  one_absent: zero token plus explicit modality mask
+  both_absent: abstain (no score); a subject abstains when all of its aliquots abstain
+
+models:
+  linear: multi-task logistic regression on [protein, rna, modality mask]
+  attention: two modality tokens (width 16), 2-head self-attention with residual, masked mean pooling, linear head on [pooled, modality mask]
+  training: {max_epochs: 20, learning_rate: 0.001, optimizer: adam, batch_size: 64}
+  loss: binary cross-entropy over observed labels only
+
+selection:
+  checkpoint: epoch with the lowest validation loss
+  threshold: per task, grid 0.05-0.95 step 0.01, maximize validation F1 on subject-level scores (observed labels); ties -> smallest threshold
+  seeds: pre-specified per case; all scheduled runs are reported
+  test_split_use: evaluation only (never used for checkpoint, threshold or seed choice)
+
+evaluation:
+  split: test
+  subject_score: mean of the scored aliquots of the subject within the test split
+  population_per_task: test subjects with a score and an observed label
+  metrics:
+    auroc: on continuous subject scores
+    ap: average precision on continuous subject scores
+    f1: at the validation-selected threshold (score >= threshold)
+  aggregation: macro = unweighted mean over tasks with both classes present (micro pooling is not the primary summary)
+  denominators: report planned, scored and abstaining test subjects, and per task observed / unobserved counts and prevalence
+  uncertainty:
+    method: subject-level bootstrap (all aliquots of a sampled subject kept together)
+    pool: test subjects with a score (abstaining subjects contribute no rows)
+    resamples: 1000
+    seed: 2718
+    interval: 95% percentile (numpy.percentile, linear)
+
+reporting:
+  stored_precision: full float64 in metrics.json
+  display_decimals: 3
+  provenance: every reported value names its run id, task, metric, population and source artifact hash

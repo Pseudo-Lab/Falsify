@@ -1,0 +1,15 @@
+{
+  "selection_key": "val_loss",
+  "selected": {
+    "seed": 11,
+    "epoch": 3,
+    "val_loss": 0.561
+  },
+  "n_candidates": 8,
+  "ledger_columns": [
+    "seed",
+    "epoch",
+    "val_loss",
+    "test_auroc"
+  ]
+}

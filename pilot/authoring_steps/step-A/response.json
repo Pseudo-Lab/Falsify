@@ -1,0 +1,10 @@
+{
+  "step_id": "step-A",
+  "outputs": [
+    {
+      "path": "author/author_draft_ko.md",
+      "sha256": "47f874d8232e89614229729bb62a2a0b73044008156c58da3c2f08de69d850ea"
+    }
+  ],
+  "summary": "Korean draft: abstract, introduction, related work, data and methods, results placeholders, discussion and limitations, statements, reproducibility checklist and references. All run-dependent values are TBD."
+}

@@ -1,0 +1,62 @@
+{
+  "step_id": "step-C",
+  "execution_mode": "staged",
+  "parent_step_id": "step-B",
+  "input_commit": "9c49f24043b82e1f273d50187d932741573f7537",
+  "inputs": [
+    {
+      "path": "author/author_draft_ko.md",
+      "sha256": "5f89f1c108dcd6a8c5d93329e8a378111c2eef064e211ffd31b0fdc7d5fecb6b"
+    },
+    {
+      "path": "author/author_requested_edits.md",
+      "sha256": "e3dcf8f1fa8ff0e0c2df12ad3ff801fc4c1ee29c6ec018730aa70507c1bd3e74"
+    },
+    {
+      "path": "paper/manuscript_en.md",
+      "sha256": "34523353093cda3a03dd539b3838ea1a10dc58267eb50546ffa7e766e530717e"
+    },
+    {
+      "path": "tables/results.csv",
+      "sha256": "329013ce6d46a7f2a4761a67307fd438c80ba3dba17fe91a591e38805cd0b6ab"
+    },
+    {
+      "path": "tables/run_registry.csv",
+      "sha256": "b398b3a977558d0056408ec727960f2a075a30206f806e5f9e310751ddc51af2"
+    },
+    {
+      "path": "figures/figure3_source.csv",
+      "sha256": "8b8132c96caf1fb0d41fcb54d559476c009b6cbd827982e3a055d1a55522da78"
+    }
+  ],
+  "prompt_sha256": "9af9a0276ec2b4c42ad55766dbcbabe21f7536a9e2f1047b1fd2709de7816ae1",
+  "requested_operations": [
+    "English editorial preparation",
+    "run and result reference alignment",
+    "submission formatting"
+  ],
+  "model_provider": null,
+  "model_id": null,
+  "model_version": null,
+  "sampling_parameters": null,
+  "started_at": null,
+  "ended_at": null,
+  "staged_at": "2026-10-18T21:10:32+09:00",
+  "response_sha256": "458af5253b474377d2a242219515ab0a846cecaf29eb76227e88d39af46e7f14",
+  "outputs": [
+    {
+      "path": "paper/manuscript_en.md",
+      "sha256": "e3d7c956d9f4454e93521e4543900ab321c8e96d50aee66e7c02847da5bd812a"
+    },
+    {
+      "path": "paper/references.bib",
+      "sha256": "6cd284f1d2ab05b4c1357cb7635de09fe9397c941e1919ef5fb34625dec25b79"
+    },
+    {
+      "path": "figures/figure3.svg",
+      "sha256": "3db72d562e53a8d1599ac9470d8757955d2b3f9407ad63b7582ff7c7dfb82f80"
+    }
+  ],
+  "review_status": "pending_independent_final_review",
+  "output_commit_reference": null
+}

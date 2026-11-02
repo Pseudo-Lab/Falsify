@@ -1,0 +1,49 @@
+data:
+  horizon_days: 180
+  features:
+    allow_post_index: false
+  labels:
+    unknown_policy: mask
+  missing_modality:
+    one: masked_token
+    both: abstain
+model:
+  kind: attention
+  width: 16
+  heads: 2
+  max_epochs: 20
+  learning_rate: 0.001
+  batch_size: 64
+  optimizer: adam
+run_id: run_adnm
+data_dir: data
+splits_dir: splits
+seed: 1729
+split:
+  unit: subject_id
+  fractions:
+  - 0.6
+  - 0.2
+  - 0.2
+  seed: 1729
+preprocess:
+  fit_scope: train
+  imputer: median
+  scaler: standard
+selection:
+  checkpoint_split: val
+  threshold_split: val
+  threshold_grid:
+    start: 0.05
+    stop: 0.95
+    step: 0.01
+report:
+  denominator_scope: planned
+evaluation:
+  split: test
+  unit: subject_id
+  averaging: macro
+  bootstrap_unit: subject_id
+  n_bootstrap: 1000
+  bootstrap_seed: 2718
+  ci_level: 0.95

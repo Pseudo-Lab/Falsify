@@ -1,0 +1,969 @@
+{
+  "schema_version": "1.0",
+  "prediction_time_day": 0,
+  "terminology": {
+    "proteoform": "Distinct molecular form of a protein product of a single gene (Smith & Kelleher, Nature Methods 10:186-187, 2013, doi:10.1038/nmeth.2369). Used here only as the name of a simulated feature family."
+  },
+  "features": [
+    {
+      "name": "PROT_01",
+      "modality": "protein",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic proteoform-level abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "PROT_02",
+      "modality": "protein",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic proteoform-level abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "PROT_03",
+      "modality": "protein",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic proteoform-level abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "PROT_04",
+      "modality": "protein",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic proteoform-level abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "PROT_05",
+      "modality": "protein",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic proteoform-level abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "PROT_06",
+      "modality": "protein",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic proteoform-level abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "PROT_07",
+      "modality": "protein",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic proteoform-level abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "PROT_08",
+      "modality": "protein",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic proteoform-level abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "PROT_09",
+      "modality": "protein",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic proteoform-level abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "PROT_10",
+      "modality": "protein",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic proteoform-level abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "PROT_11",
+      "modality": "protein",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic proteoform-level abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "PROT_12",
+      "modality": "protein",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic proteoform-level abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "PROT_13",
+      "modality": "protein",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic proteoform-level abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "PROT_14",
+      "modality": "protein",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic proteoform-level abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "PROT_15",
+      "modality": "protein",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic proteoform-level abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "PROT_16",
+      "modality": "protein",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic proteoform-level abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "PROT_17",
+      "modality": "protein",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic proteoform-level abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "PROT_18",
+      "modality": "protein",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic proteoform-level abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "PROT_19",
+      "modality": "protein",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic proteoform-level abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "PROT_20",
+      "modality": "protein",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic proteoform-level abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "PROT_21",
+      "modality": "protein",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic proteoform-level abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "PROT_22",
+      "modality": "protein",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic proteoform-level abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "PROT_23",
+      "modality": "protein",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic proteoform-level abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "PROT_24",
+      "modality": "protein",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic proteoform-level abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_001",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_002",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_003",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_004",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_005",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_006",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_007",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_008",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_009",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_010",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_011",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_012",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_013",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_014",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_015",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_016",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_017",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_018",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_019",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_020",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_021",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_022",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_023",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_024",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_025",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_026",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_027",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_028",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_029",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_030",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_031",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_032",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_033",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_034",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_035",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_036",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_037",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_038",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_039",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_040",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_041",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_042",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_043",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_044",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_045",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_046",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_047",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_048",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_049",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_050",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_051",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_052",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_053",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_054",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_055",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_056",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_057",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_058",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_059",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_060",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_061",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_062",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_063",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_064",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_065",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_066",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_067",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_068",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_069",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_070",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_071",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_072",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_073",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_074",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_075",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_076",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_077",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_078",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_079",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_080",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_081",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_082",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_083",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_084",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_085",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_086",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_087",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_088",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_089",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_090",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_091",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_092",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_093",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_094",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "RNA_095",
+      "modality": "rna",
+      "available_day": 0,
+      "is_post_index": false,
+      "role": "baseline_synthetic",
+      "description": "Synthetic transcript abundance proxy measured at the index visit (simulated value; no assay was performed)."
+    },
+    {
+      "name": "followup_peak_synthetic",
+      "modality": "rna",
+      "available_day": 30,
+      "is_post_index": true,
+      "role": "post_index_label_proxy",
+      "description": "Synthetic follow-up measurement taken on day 30 after the index visit; it tracks events inside the 180-day window and is not available at prediction time (day 0)."
+    }
+  ]
+}

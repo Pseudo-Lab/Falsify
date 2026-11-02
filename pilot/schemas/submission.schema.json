@@ -1,0 +1,311 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:dropfusion:submission:1.0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "case_id",
+    "variant_id",
+    "findings",
+    "submission_decision"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "enum": [
+        "dropfusion.submission/1.0"
+      ]
+    },
+    "case_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "variant_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "findings": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/finding"
+      }
+    },
+    "submission_decision": {
+      "type": "string",
+      "enum": [
+        "pass",
+        "hold",
+        "block"
+      ]
+    }
+  },
+  "$defs": {
+    "span": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "start_line",
+        "end_line"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "start_line": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "end_line": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "sha256",
+        "start_line",
+        "end_line",
+        "role"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "start_line": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "end_line": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "role": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "claim_id",
+        "unit_family",
+        "axes",
+        "classes",
+        "root_cause_id",
+        "error_span",
+        "decision",
+        "decision_scope",
+        "severity",
+        "confidence",
+        "evidence",
+        "checks",
+        "unknown_reason",
+        "needed_evidence",
+        "patch"
+      ],
+      "properties": {
+        "claim_id": {
+          "type": "string",
+          "pattern": "^C[0-9]{2}$"
+        },
+        "unit_family": {
+          "type": "string",
+          "enum": [
+            "core",
+            "fidelity",
+            "venue"
+          ]
+        },
+        "axes": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "science",
+            "artifact",
+            "fidelity",
+            "venue"
+          ],
+          "properties": {
+            "science": {
+              "type": "string",
+              "enum": [
+                "supported",
+                "contradicted",
+                "unsupported",
+                "unknown",
+                "not_applicable"
+              ]
+            },
+            "artifact": {
+              "type": "string",
+              "enum": [
+                "matched",
+                "conflict",
+                "insufficient",
+                "unknown",
+                "not_applicable"
+              ]
+            },
+            "fidelity": {
+              "type": "string",
+              "enum": [
+                "faithful",
+                "inflated",
+                "meaning_lost",
+                "unapproved_addition",
+                "unknown",
+                "not_applicable"
+              ]
+            },
+            "venue": {
+              "type": "string",
+              "enum": [
+                "compliant",
+                "noncompliant",
+                "advisory",
+                "unknown",
+                "not_applicable"
+              ]
+            }
+          }
+        },
+        "classes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "root_cause_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "error_span": {
+          "$ref": "#/$defs/span"
+        },
+        "decision": {
+          "type": "string",
+          "enum": [
+            "pass",
+            "hold",
+            "block"
+          ]
+        },
+        "decision_scope": {
+          "type": "string",
+          "enum": [
+            "span",
+            "claim",
+            "submission"
+          ]
+        },
+        "severity": {
+          "type": "string",
+          "enum": [
+            "none",
+            "minor",
+            "major",
+            "critical"
+          ]
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/evidence"
+          }
+        },
+        "checks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "method",
+              "inputs",
+              "executed",
+              "observed"
+            ],
+            "properties": {
+              "method": {
+                "type": "string"
+              },
+              "inputs": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "executed": {
+                "type": "boolean"
+              },
+              "observed": {}
+            }
+          }
+        },
+        "unknown_reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "needed_evidence": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "patch": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": false,
+          "required": [
+            "target_path",
+            "before",
+            "after",
+            "rationale"
+          ],
+          "properties": {
+            "target_path": {
+              "type": "string"
+            },
+            "before": {
+              "type": "string"
+            },
+            "after": {
+              "type": "string"
+            },
+            "rationale": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    }
+  }
+}

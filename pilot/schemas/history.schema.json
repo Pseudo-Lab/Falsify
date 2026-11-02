@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "release_id",
+    "history"
+  ],
+  "properties": {
+    "release_id": {
+      "type": "string"
+    },
+    "history": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "claim_id",
+          "first_mutation",
+          "first_affected_artifact",
+          "first_affected_claim",
+          "repair_commit",
+          "unknown_reason",
+          "propagation_commits",
+          "code_status",
+          "claim_dependency_status",
+          "confidence"
+        ],
+        "properties": {
+          "claim_id": {
+            "type": "string",
+            "pattern": "^C[0-9]{2}$"
+          },
+          "first_mutation": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "first_affected_artifact": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "first_affected_claim": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "repair_commit": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "unknown_reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "propagation_commits": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "code_status": {
+            "type": "string",
+            "enum": [
+              "repaired",
+              "unrepaired",
+              "unknown",
+              "not_applicable"
+            ]
+          },
+          "claim_dependency_status": {
+            "type": "string",
+            "enum": [
+              "affected",
+              "unaffected",
+              "unknown",
+              "not_applicable"
+            ]
+          },
+          "confidence": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          }
+        }
+      }
+    }
+  }
+}

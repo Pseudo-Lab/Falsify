@@ -1,0 +1,83 @@
+{
+  "step_id": "step-B",
+  "execution_mode": "staged",
+  "staged_note": "Reconstructed handoff record for this exercise, not a transcript of a model call; model identity and call times are therefore null.",
+  "parent_step_id": "step-A",
+  "input_commit": "9566b67041aa398fd20055359818ce252f8e0adb",
+  "inputs": [
+    {
+      "path": "author/author_draft_ko.md",
+      "sha256": "47f874d8232e89614229729bb62a2a0b73044008156c58da3c2f08de69d850ea"
+    },
+    {
+      "path": "runs/run_3tjm/metrics.json",
+      "sha256": "31ba20c83cfb16e302add4744778ef0ec1c34f3bb0ee9f36adaf4612f734e706"
+    },
+    {
+      "path": "runs/run_52xe/metrics.json",
+      "sha256": "230a935d40458cc2b6734253667c43775b3c9b2b6e95221880925a209073781e"
+    },
+    {
+      "path": "runs/run_7fba/metrics.json",
+      "sha256": "3a2c883d9a80c8cb0e5491d12992a5a6db70a8a5f6b16d6ba9d873e87a4d8ae6"
+    },
+    {
+      "path": "runs/run_adnm/metrics.json",
+      "sha256": "530f781b7b7f338c5bc1c7f99d31363102eaaaaa22de6df386e53b1d12362155"
+    },
+    {
+      "path": "runs/run_b3f9/metrics.json",
+      "sha256": "888eaa274882817d5cb6fe0224ee6756d950e4cf715eabdfa31a5775f9c2f806"
+    },
+    {
+      "path": "runs/run_m72s/metrics.json",
+      "sha256": "67c01b08ca4d553f745da16c91202a8a8efcd420d10d4220f7fab7b2a4ec995f"
+    },
+    {
+      "path": "runs/run_ras4/metrics.json",
+      "sha256": "8b402915bac2e52327501e6f778d68d3d4cfbfe448d32e3a0786cdf9ef61122c"
+    },
+    {
+      "path": "runs/run_sh3j/metrics.json",
+      "sha256": "d3e00608e824d17622ff3644af668f3920d3447b27dc2b11d13a7a52032c4b03"
+    },
+    {
+      "path": "runs/run_xapp/metrics.json",
+      "sha256": "f32ee2285b388a4a062cd019c90bf8016d19bc5025bba5a78810501c4834b6ce"
+    },
+    {
+      "path": "runs/run_yy4a/metrics.json",
+      "sha256": "cec5ba6c79458ac59221e2fe35c0b60011f00f1971cb7dab9adaabda3d7aa7a7"
+    }
+  ],
+  "prompt_sha256": "7660240ce294e1a2f697a637959f983ecfcdb84f7afb894752d4be7d6b849be4",
+  "requested_operations": [
+    "fill run-dependent values from archived runs",
+    "correct method statements",
+    "record editing scope for translation"
+  ],
+  "model_provider": null,
+  "model_id": null,
+  "model_version": null,
+  "sampling_parameters": null,
+  "started_at": null,
+  "ended_at": null,
+  "staged_at": "2026-10-18T11:12:05+00:00",
+  "response_sha256": "943d3c913c3e14a432c38950cf8917e628ff9ae3edfb4fdc9f9b94bbc7626866",
+  "outputs": [
+    {
+      "path": "author/author_draft_ko.md",
+      "sha256": "0e1697992ac183b51106bb4321578921439f3a069d33a73f3dd42988a57262ae"
+    },
+    {
+      "path": "author/author_requested_edits.md",
+      "sha256": "e3dcf8f1fa8ff0e0c2df12ad3ff801fc4c1ee29c6ec018730aa70507c1bd3e74"
+    }
+  ],
+  "selected_runs": {
+    "primary_attention": "run_52xe",
+    "linear_baseline": "run_yy4a"
+  },
+  "review_status": "accepted",
+  "output_commit_reference": null
+}

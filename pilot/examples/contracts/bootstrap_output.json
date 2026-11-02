@@ -1,0 +1,127 @@
+{
+  "unit": "subject_id",
+  "n_boot": 5,
+  "seed": 7,
+  "replicates": [
+    {
+      "sampled_subject_ids": [
+        "S6",
+        "S4",
+        "S5",
+        "S6",
+        "S4",
+        "S5"
+      ],
+      "specimen_rows": [
+        "S6-A1",
+        "S6-A2",
+        "S4-A1",
+        "S4-A2",
+        "S5-A1",
+        "S5-A2",
+        "S6-A1",
+        "S6-A2",
+        "S4-A1",
+        "S4-A2",
+        "S5-A1",
+        "S5-A2"
+      ]
+    },
+    {
+      "sampled_subject_ids": [
+        "S6",
+        "S2",
+        "S1",
+        "S2",
+        "S2",
+        "S6"
+      ],
+      "specimen_rows": [
+        "S6-A1",
+        "S6-A2",
+        "S2-A1",
+        "S2-A2",
+        "S1-A1",
+        "S1-A2",
+        "S2-A1",
+        "S2-A2",
+        "S2-A1",
+        "S2-A2",
+        "S6-A1",
+        "S6-A2"
+      ]
+    },
+    {
+      "sampled_subject_ids": [
+        "S6",
+        "S1",
+        "S3",
+        "S5",
+        "S1",
+        "S5"
+      ],
+      "specimen_rows": [
+        "S6-A1",
+        "S6-A2",
+        "S1-A1",
+        "S1-A2",
+        "S3-A1",
+        "S3-A2",
+        "S5-A1",
+        "S5-A2",
+        "S1-A1",
+        "S1-A2",
+        "S5-A1",
+        "S5-A2"
+      ]
+    },
+    {
+      "sampled_subject_ids": [
+        "S1",
+        "S3",
+        "S5",
+        "S2",
+        "S3",
+        "S2"
+      ],
+      "specimen_rows": [
+        "S1-A1",
+        "S1-A2",
+        "S3-A1",
+        "S3-A2",
+        "S5-A1",
+        "S5-A2",
+        "S2-A1",
+        "S2-A2",
+        "S3-A1",
+        "S3-A2",
+        "S2-A1",
+        "S2-A2"
+      ]
+    },
+    {
+      "sampled_subject_ids": [
+        "S5",
+        "S2",
+        "S6",
+        "S3",
+        "S3",
+        "S4"
+      ],
+      "specimen_rows": [
+        "S5-A1",
+        "S5-A2",
+        "S2-A1",
+        "S2-A2",
+        "S6-A1",
+        "S6-A2",
+        "S3-A1",
+        "S3-A2",
+        "S3-A1",
+        "S3-A2",
+        "S4-A1",
+        "S4-A2"
+      ]
+    }
+  ]
+}

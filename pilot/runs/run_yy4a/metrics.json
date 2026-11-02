@@ -1,0 +1,271 @@
+{
+  "run_id": "run_yy4a",
+  "evaluation_split": "test",
+  "unit": "subject_id",
+  "averaging": "macro",
+  "unknown_policy": "mask",
+  "threshold_split": "val",
+  "coverage": {
+    "denominator_scope": "planned",
+    "population": "evaluation split subjects",
+    "n_planned": 240,
+    "n_scored": 223,
+    "n_abstain": 17,
+    "coverage": 0.9291666666666667,
+    "abstain_subject_ids": [
+      "SYN-P0042",
+      "SYN-P0241",
+      "SYN-P0244",
+      "SYN-P0319",
+      "SYN-P0425",
+      "SYN-P0510",
+      "SYN-P0515",
+      "SYN-P0545",
+      "SYN-P0595",
+      "SYN-P0680",
+      "SYN-P0820",
+      "SYN-P0829",
+      "SYN-P0895",
+      "SYN-P0909",
+      "SYN-P0932",
+      "SYN-P0984",
+      "SYN-P1049"
+    ]
+  },
+  "tasks": {
+    "SYN_T01": {
+      "auroc": 0.8245211982321164,
+      "ap": 0.6153071790505714,
+      "f1": 0.5357142857142857,
+      "threshold": 0.38,
+      "n_eval": 190,
+      "n_positive": 41,
+      "prevalence": 0.21578947368421053,
+      "ci": {
+        "auroc": [
+          0.753523859404247,
+          0.8886288787505717
+        ],
+        "auroc_n_valid": 1000,
+        "ap": [
+          0.4725409164148312,
+          0.7480752307495812
+        ],
+        "ap_n_valid": 1000,
+        "f1": [
+          0.42201834862385323,
+          0.6406287924757281
+        ],
+        "f1_n_valid": 1000
+      },
+      "n_planned": 240,
+      "n_scored": 223,
+      "n_observed": 207,
+      "n_unobserved": 33,
+      "n_observed_scored": 190
+    },
+    "SYN_T02": {
+      "auroc": 0.7398808300801315,
+      "ap": 0.3894052358020887,
+      "f1": 0.410958904109589,
+      "threshold": 0.43,
+      "n_eval": 188,
+      "n_positive": 31,
+      "prevalence": 0.16489361702127658,
+      "ci": {
+        "auroc": [
+          0.6363078328385476,
+          0.8344234582782487
+        ],
+        "auroc_n_valid": 1000,
+        "ap": [
+          0.25218844329959167,
+          0.5685224121944694
+        ],
+        "ap_n_valid": 1000,
+        "f1": [
+          0.26084133258046305,
+          0.5518550851156699
+        ],
+        "f1_n_valid": 1000
+      },
+      "n_planned": 240,
+      "n_scored": 223,
+      "n_observed": 205,
+      "n_unobserved": 35,
+      "n_observed_scored": 188
+    },
+    "SYN_T03": {
+      "auroc": 0.7959183673469388,
+      "ap": 0.6316408902282322,
+      "f1": 0.5616438356164384,
+      "threshold": 0.26,
+      "n_eval": 189,
+      "n_positive": 49,
+      "prevalence": 0.25925925925925924,
+      "ci": {
+        "auroc": [
+          0.7205504991718127,
+          0.8682346733090052
+        ],
+        "auroc_n_valid": 1000,
+        "ap": [
+          0.4901902193402764,
+          0.7511652890301811
+        ],
+        "ap_n_valid": 1000,
+        "f1": [
+          0.46808510638297873,
+          0.6463699771889805
+        ],
+        "f1_n_valid": 1000
+      },
+      "n_planned": 240,
+      "n_scored": 223,
+      "n_observed": 206,
+      "n_unobserved": 34,
+      "n_observed_scored": 189
+    },
+    "SYN_T04": {
+      "auroc": 0.7366255144032923,
+      "ap": 0.5086509160853343,
+      "f1": 0.5148514851485149,
+      "threshold": 0.45,
+      "n_eval": 189,
+      "n_positive": 54,
+      "prevalence": 0.2857142857142857,
+      "ci": {
+        "auroc": [
+          0.6540230190589292,
+          0.814414995605232
+        ],
+        "auroc_n_valid": 1000,
+        "ap": [
+          0.3915675278516402,
+          0.6481739809323781
+        ],
+        "ap_n_valid": 1000,
+        "f1": [
+          0.39079058031959635,
+          0.6261127487103906
+        ],
+        "f1_n_valid": 1000
+      },
+      "n_planned": 240,
+      "n_scored": 223,
+      "n_observed": 206,
+      "n_unobserved": 34,
+      "n_observed_scored": 189
+    },
+    "SYN_T05": {
+      "auroc": 0.5234464353793367,
+      "ap": 0.3685994064187721,
+      "f1": 0.4630541871921182,
+      "threshold": 0.26,
+      "n_eval": 190,
+      "n_positive": 61,
+      "prevalence": 0.32105263157894737,
+      "ci": {
+        "auroc": [
+          0.43654669418661024,
+          0.6125796189816951
+        ],
+        "auroc_n_valid": 1000,
+        "ap": [
+          0.27493640672243924,
+          0.4832483389131705
+        ],
+        "ap_n_valid": 1000,
+        "f1": [
+          0.3791277059049571,
+          0.5490381934764428
+        ],
+        "f1_n_valid": 1000
+      },
+      "n_planned": 240,
+      "n_scored": 223,
+      "n_observed": 207,
+      "n_unobserved": 33,
+      "n_observed_scored": 190
+    },
+    "SYN_T06": {
+      "auroc": 0.6578947368421054,
+      "ap": 0.5367613585840956,
+      "f1": 0.5833333333333334,
+      "threshold": 0.36,
+      "n_eval": 192,
+      "n_positive": 78,
+      "prevalence": 0.40625,
+      "ci": {
+        "auroc": [
+          0.5787238471916119,
+          0.7370828476032095
+        ],
+        "auroc_n_valid": 1000,
+        "ap": [
+          0.4391856932101475,
+          0.6678820197593844
+        ],
+        "ap_n_valid": 1000,
+        "f1": [
+          0.4972926105296048,
+          0.6634146341463415
+        ],
+        "f1_n_valid": 1000
+      },
+      "n_planned": 240,
+      "n_scored": 223,
+      "n_observed": 209,
+      "n_unobserved": 31,
+      "n_observed_scored": 192
+    }
+  },
+  "macro": {
+    "auroc": 0.7130478470473203,
+    "ap": 0.5083941643615157,
+    "f1": 0.51159267185238,
+    "n_tasks": 6,
+    "ci": {
+      "auroc": [
+        0.6794111076249559,
+        0.747788076856676
+      ],
+      "auroc_n_valid": 1000,
+      "ap": [
+        0.4544806961124912,
+        0.5751273404389039
+      ],
+      "ap_n_valid": 1000,
+      "f1": [
+        0.4637876531598516,
+        0.5554145117216732
+      ],
+      "f1_n_valid": 1000
+    }
+  },
+  "bootstrap": {
+    "unit": "subject_id",
+    "pool": "scored subjects of the evaluation split",
+    "n_pool": 223,
+    "n_boot": 1000,
+    "seed": 2718,
+    "ci_level": 0.95,
+    "percentile_method": "numpy.percentile (linear)"
+  },
+  "definitions": {
+    "subject_score": "mean of scored aliquot scores of the subject within the evaluation split",
+    "auroc": "sklearn.metrics.roc_auc_score on continuous subject scores",
+    "ap": "sklearn.metrics.average_precision_score on continuous subject scores",
+    "f1": "sklearn.metrics.f1_score with prediction = score >= threshold",
+    "macro": "unweighted mean over tasks with both classes present",
+    "not_evaluable": "a task without both classes among included subjects has null metrics",
+    "rounding": "values are stored as float64; reports show 3 decimals (protocol/analysis_plan.yaml)"
+  },
+  "inputs": {
+    "predictions_sha256": "6aa5b0606570cb527c6abdfc2e4204d095a00a61cb54b34c8eba3626ecfb4590",
+    "labels_sha256": "748c4dd1ee85500ffcdf37819d09eb2d63788a9d86346e86fa6ebd3eecbb4281",
+    "observation_mask_sha256": "6c92171d728ad8114320ff786f863eefb7c0021422c79cbfb02d7edb499f3acf",
+    "split_members_sha256": "605bb83366b4d96eef846ea2fdc353e0fa7e8474c78e00da1e1dd79441bc1142",
+    "selection_sha256": "a2c5edaa0b2e071fe3678682229803ec675091a0cc26bc989a9dc063bd481aab"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "schema_version": "dropfusion.layout/1.0",
+  "path": "paper/paper.pdf",
+  "sha256": "613e564ad09c2540704c599958abfecaa981683b163639e7f1b5aedeb5e2e168",
+  "source_md_sha256": "e3d7c956d9f4454e93521e4543900ab321c8e96d50aee66e7c02847da5bd812a",
+  "pages_total": 6,
+  "columns": 2,
+  "page_limit": 8,
+  "abstract_whitespace_words": 155,
+  "all_pages_rendered_and_visually_reviewed": true,
+  "layout_review": "No clipping, overlap or unreadable elements found.",
+  "metadata_author": "Anonymous Authors",
+  "scientific_approval": null
+}
