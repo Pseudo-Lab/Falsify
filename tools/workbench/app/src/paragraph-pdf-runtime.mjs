@@ -8,8 +8,8 @@ export const RUNTIME = Object.freeze({
   engineCommit: '813903c93c758dfb8df46dbd34ace3b7f7a8538b',
   moduleCommit: 'cd4ba2cdd68ae7e51198f615bd4ac6130206b162',
   moduleOverlayCommit: overlay.commit,
-  jsSha256: '6e6989a9994715951720e05355111aca7eab898e92b519ebea160167875bb3eb',
-  wasmSha256: 'cf9f0e9ec0a68cc5932795e87622b2809ecca5561482a23bc034de3d6410696d',
+  jsSha256: 'cbef240d8893fd9624c08eadbb1ffb405a583c96878d6a14d11d8e9816c0832b',
+  wasmSha256: '7674fe4cce4a8e15d702b02988610891693ac68f6121b4621e237949736778cb',
   sourceBuildVerified: false, trust: 'locally-supplied-hash-verified-artifacts',
 });
 

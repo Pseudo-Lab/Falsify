@@ -24,12 +24,12 @@
     }
     return {value,starts,ends};
   }
-  function indexItems(items){let text='';const spans=[];
-    (items||[]).forEach((item,i)=>{if(typeof item?.str!=='string')return;const start=text.length;text+=item.str;if(item.str)spans.push({i,start,end:text.length});text+=item.hasEOL?'\n':' ';});
+  function indexItems(items,separator){let text='';const spans=[];
+    (items||[]).forEach((item,i)=>{if(typeof item?.str!=='string')return;const start=text.length;text+=item.str;if(item.str)spans.push({i,start,end:text.length});text+=item.hasEOL?'\n':(typeof separator==='function'?separator(item,(items||[])[i+1],i):' ');});
     return {text,spans};
   }
-  function ranges(items,edits,side){
-    const index=indexItems(items),hay=mapped(index.text),found=[],missing=[];
+  function ranges(items,edits,side,separator){
+    const index=indexItems(items,separator),hay=mapped(index.text),found=[],missing=[];
     for(const edit of edits||[]){
       if(edit.enabled===false)continue;
       const delta=difference(mapped(String(edit.before||'')).value.trim(),mapped(String(edit.after||'')).value.trim());if(!delta.changed)continue;
@@ -61,9 +61,9 @@
       if(!value)continue;const el=d.createElement(mark?'mark':'span');el.textContent=value;if(mark)el.className='paper-change-text is-'+side;node.append(el);
     }
   }
-  function paintPage({document:d,container,items,divs,edits,side}){
+  function paintPage({document:d,container,items,divs,edits,side,separator}){
     for(let i=0;i<(divs?.length||0);i++)if(divs[i].dataset)divs[i].dataset.i=String(i);
-    const result=ranges(items,edits,side),layer=d.createElement('div');layer.className='paper-change-layer';layer.setAttribute('aria-hidden','true');
+    const result=ranges(items,edits,side,separator),layer=d.createElement('div');layer.className='paper-change-layer';layer.setAttribute('aria-hidden','true');
     container.append(layer);const pageBox=container.getBoundingClientRect();let count=0;
     for(const hit of result.found){
       const span=divs?.[hit.itemIndex],text=span?.firstChild;

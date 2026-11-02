@@ -1,9 +1,10 @@
 {
   "name": "falsify-paper-workbench",
-  "version": "0.2.0-alpha.32",
+  "version": "0.2.0-alpha.42",
   "license": "AGPL-3.0-only",
   "private": true,
   "scripts": {
+    "build:latex": "node scripts/build-latex-workbench.mjs",
     "build:fonts": "node scripts/build-paper-fonts.mjs",
     "build:blue-visual": "node scripts/build-blue-visual.mjs",
     "build:import": "node scripts/build-import.mjs",
@@ -18,6 +19,7 @@
     "test:paragraph-pdf": "node scripts/build-paragraph-pdf.mjs && node --test tests/paragraph-pdf.spec.mjs"
   },
   "dependencies": {
+    "@unified-latex/unified-latex-util-parse": "1.8.4",
     "fflate": "0.8.3",
     "mupdf": "1.28.1",
     "parse5": "8.0.1",

@@ -50,6 +50,36 @@ export function planInlineChange(paras, chars, map, hit, needle, after) {
   const place = (c, text, after = false) => ({ pi: c.pi, ri: c.ri, o: c.o + (after ? 1 : 0), text });
   const words = del.filter((c) => !isWs(c));
 
+  // A word in a PDF can contain body text, raised digits and punctuation.
+  // Trim identical characters inside that word before assigning a style.
+  if (D.length === 1 && X.length === 1 && !WS.test(D[0].t) && !WS.test(X[0]) && new Set(words.map(style)).size > 1) {
+    const b = D[0], a = X[0];
+    let first = 0, last = 0;
+    while (first < b.t.length && first < a.length && b.t[first] === a[first]) first++;
+    while (last < b.t.length - first && last < a.length - first && b.t[b.t.length - 1 - last] === a[a.length - 1 - last]) last++;
+    let start = first, end = b.t.length - last;
+    let old = b.t.slice(start, end), replacement = a.slice(first, a.length - last);
+    // Inserting a digit has no deleted character to supply its style. Keep
+    // the adjacent original number as the replacement anchor instead.
+    if (!old && /^[0-9]+$/.test(replacement)) {
+      while (start > 0 && /^[0-9]$/.test(b.t[start - 1])) start--;
+      while (end < b.t.length && /^[0-9]$/.test(b.t[end])) end++;
+      old = b.t.slice(start, end);
+      replacement = b.t.slice(start, first) + replacement + b.t.slice(first, end);
+    }
+    if ((first || last) && old) {
+      const narrow = rawOf({ k0: b.k0 + start, k1: b.k0 + end }).filter(c => c.pi >= 0);
+      if (narrow.length && new Set(narrow.map(style)).size === 1) {
+        const numeric = /^[0-9]+$/.test(old) && /^[0-9]+$/.test(replacement);
+        return {
+          del: narrow,
+          inserts: replacement ? [place(narrow[0], replacement)] : [],
+          ...(numeric ? { warning: 'numeric_marker_style_from_digits', numericMarker: { before: old, after: replacement, context: b.t, offset: start } } : {}),
+        };
+      }
+    }
+  }
+
   if (words.length) {
     const styles = new Set(words.map(style));
     const paraSet = new Set(del.map((c) => c.pi));
@@ -60,6 +90,45 @@ export function planInlineChange(paras, chars, map, hit, needle, after) {
       return { del, inserts: [place(anchor, text)], warning: styles.size > 1 ? "style_inherited_across_paragraphs" : undefined };
     }
     if (styles.size === 1) return { del, inserts: [place(words[0], text)] };
+    // Citation lists can paint their digits as links while separators use the
+    // surrounding text color. Consolidating that list into one number inherits
+    // the common digit style, including its original size/rise. No font or
+    // geometry difference is discarded, and differently styled digits remain
+    // ambiguous.
+    const marker = del.map(c => c.ch).join('');
+    const digits = words.filter(c => /^[0-9]$/.test(c.ch));
+    if (/^[0-9]+$/.test(text) && /^[0-9]+(?:\s*[,;:–-]\s*[0-9]+)+$/.test(marker) && digits.length &&
+        new Set(digits.map(style)).size === 1 &&
+        new Set(words.map(c => runStyleKey({...paras[c.pi].runs[c.ri], rgba: 0}))).size === 1) {
+      return {del, inserts:[place(digits[0], text)], warning:'numeric_marker_style_from_digits'};
+    }
+
+    // A source line may be horizontally expanded independently of its
+    // neighbours. Only classify that difference as line geometry when every
+    // affected line has one scale and all other run properties agree. The
+    // caller must still prove and preserve the preceding source lines.
+    const pi = words[0].pi;
+    const para = paras[pi], lines = para.lines || [];
+    const starts = []; let total = 0;
+    for (const r of para.runs) { starts.push(total); total += r.text.length; }
+    const offsets = lines.map(l => l.off);
+    if (paraSet.size === 1 && offsets.length > 1 && offsets[0] === 0 && offsets.every((v,i)=>Number.isInteger(v) && (i===0 || v>offsets[i-1]))) {
+      const perLine = new Map();
+      for (const c of words) {
+        const off = starts[c.ri] + c.o;
+        let line = 0; while (line + 1 < offsets.length && offsets[line + 1] <= off) line++;
+        const run = para.runs[c.ri], scale = run.hScale;
+        const set = perLine.get(line) || new Set(); set.add(scale); perLine.set(line,set);
+      }
+      const base = new Set(words.map(c => runStyleKey({...para.runs[c.ri], hScale: 1})));
+      const affected = [...perLine.keys()].map(i => lines[i]);
+      const geometry = affected.every(l => Number.isFinite(l.x) && Number.isFinite(l.w) && l.w > 1);
+      const justified = geometry && Math.max(...affected.map(l => l.x)) - Math.min(...affected.map(l => l.x)) <= 1 &&
+        Math.max(...affected.map(l => l.x + l.w)) - Math.min(...affected.map(l => l.x + l.w)) <= 1;
+      if (base.size === 1 && perLine.size > 1 && justified && [...perLine.values()].every(s => s.size === 1 && [...s].every(v => Number.isFinite(v) && v > 0))) {
+        return { del, inserts: [place(words[0], text)], requiresPrefix: true };
+      }
+    }
     // Several styles replaced: map word to word when the token shape agrees.
     if (D.length !== X.length) return { failure: "AMBIGUOUS_STYLE" };
     // A changed After word that spells a source word of the match in another
@@ -112,6 +181,146 @@ export function planInlineChange(paras, chars, map, hit, needle, after) {
   }
   const ins = [rk ? viaRight : null, lk ? viaLeft : null, viaRight, viaLeft].find((c) => c && style(c) === want);
   return ins ? { del, inserts: [ins] } : { failure: "AMBIGUOUS_STYLE" };
+}
+
+// Keep the surrounding line intact when consolidating an isolated citation.
+export function commitNumericMarker(engine, para, before, after, scope=null) {
+  if (!/^[0-9]+(?:[,;:–-][0-9]+)*$/.test(before) || !/^[0-9]+$/.test(after)) return null;
+  const M=engine.M;
+  const required=['_FPDFText_LoadPage','_FPDFText_CountChars','_FPDFText_GetUnicode','_FPDFText_GetTextObject','_FPDFText_GetCharBox','_FPDFText_ClosePage','_FPDFText_SetText','_FPDFPage_RemoveObject'];
+  if(!required.every(k=>typeof M?.[k]==='function'))return null;
+  const owner=new Set((engine.paragraphObjects(para.id)||[]).map(h=>h>>>0));
+  const pageText=M._FPDFText_LoadPage(engine.page);if(!pageText)return null;
+  const chars=[],buf=M._malloc(32);
+  try{for(let i=0;i<M._FPDFText_CountChars(pageText);i++){
+    const u=M._FPDFText_GetUnicode(pageText,i),h=M._FPDFText_GetTextObject(pageText,i)>>>0;
+    const valid=M._FPDFText_GetCharBox(pageText,i,buf,buf+8,buf+16,buf+24),v=valid?[0,1,2,3].map(k=>M.HEAPF64[(buf>>3)+k]):null;
+    chars.push({u,h,box:v&&v.every(Number.isFinite)?{x:v[0],y:v[2],w:v[1]-v[0],h:v[3]-v[2]}:null});
+  }}finally{M._FPDFText_ClosePage(pageText);M._free(buf);}
+  const text=chars.map(c=>String.fromCharCode(c.u)).join('');
+  // Keep raw indices when PDFium inserts whitespace around raised objects.
+  const indexed=scope?chars.map((c,i)=>({c,i})).filter(({c})=>!/\s/.test(String.fromCharCode(c.u))):null;
+  const search=indexed?indexed.map(({c})=>String.fromCharCode(c.u)).join(''):text,needle=scope?.context||before,where=search.indexOf(needle);
+  if(where<0||search.indexOf(needle,where+1)>=0)return null;
+  const at=where+(scope?.offset||0),start=indexed?indexed[at]?.i:at;
+  if(!Number.isInteger(start)||text.slice(start,start+before.length)!==before)return null;
+  const selected=chars.slice(start,start+before.length),handles=[...new Set(selected.map(c=>c.h))];
+  if(handles.some(h=>!h||!owner.has(h))||chars.some((c,i)=>handles.includes(c.h)&&(i<start||i>=start+before.length)))return null;
+  if(handles.length>1&&typeof engine.retainDetachedObject!=='function'&&typeof M._FPDFPageObj_Destroy!=='function')return null;
+  const firstText=selected.filter(c=>c.h===handles[0]).map(c=>String.fromCharCode(c.u)).join(''),firstEnd=selected.findIndex(c=>c.h!==handles[0]);
+  if(!/^[0-9]+$/.test(firstText)||(firstEnd>=0&&firstEnd!==firstText.length))return null;
+  const boxes=handles.map(h=>engine.objectBounds(h));if(boxes.some(b=>!b||![b.x,b.y,b.w,b.h].every(Number.isFinite)))return null;
+  const bounds={x:Math.min(...boxes.map(b=>b.x)),y:Math.min(...boxes.map(b=>b.y))};bounds.w=Math.max(...boxes.map(b=>b.x+b.w))-bounds.x;bounds.h=Math.max(...boxes.map(b=>b.y+b.h))-bounds.y;
+  const put=value=>{const p=M._malloc((value.length+1)*2);try{for(let i=0;i<value.length;i++)M.HEAPU16[(p>>1)+i]=value.charCodeAt(i);M.HEAPU16[(p>>1)+value.length]=0;return !!M._FPDFText_SetText(handles[0],p);}finally{M._free(p);}};
+  if(!put(after))throw new LineRetentionError('numeric_marker_write_failed');
+  const next=engine.objectBounds(handles[0]),overlap=(a,b)=>Math.max(0,Math.min(a.x+a.w,b.x+b.w)-Math.max(a.x,b.x))*Math.max(0,Math.min(a.y+a.h,b.y+b.h)-Math.max(a.y,b.y));
+  let fits=next&&next.x>=bounds.x-.5&&next.y>=bounds.y-.5&&next.y+next.h<=bounds.y+bounds.h+.5;
+  if(fits&&next.x+next.w>bounds.x+bounds.w+.5){
+    fits=Number.isFinite(engine.pageWidth)&&next.x+next.w<=engine.pageWidth&&chars.every((c,i)=>{
+      if(i>=start&&i<start+before.length||!c.u||/\s/.test(String.fromCharCode(c.u)))return true;
+      return !!c.box&&overlap(next,c.box)<=overlap(bounds,c.box)+.05;
+    });
+  }
+  if(!fits){if(!put(firstText))throw new LineRetentionError('numeric_marker_restore_failed');return null;}
+  for(const h of handles.slice(1)){
+    if(!M._FPDFPage_RemoveObject(engine.page,h))throw new LineRetentionError('numeric_marker_remove_failed');
+    if(typeof engine.retainDetachedObject==='function')engine.retainDetachedObject(h);
+    else M._FPDFPageObj_Destroy(h);
+  }
+  engine._pageDirty=true;engine._spliceOk=false;
+  return {status:'source_numeric_marker',objects:handles.length};
+}
+
+// A single word inside one source text object can grow into the spare space
+// at the end of its physical line. Keep every object, baseline and style;
+// translate the following text objects together, including separately modeled
+// superscripts. Never rebuild the whole mixed-style paragraph for this case.
+export function commitSourceWord(engine, para, before, after) {
+  let first=0,last=0;
+  while(first<Math.min(before.length,after.length)&&before[first]===after[first])first++;
+  while(last<Math.min(before.length,after.length)-first&&before.at(-1-last)===after.at(-1-last))last++;
+  let start=first,end=before.length-last;
+  while(start>0&&/[A-Za-z]/.test(before[start-1]))start--;
+  while(end<before.length&&/[A-Za-z]/.test(before[end]))end++;
+  const old=before.slice(start,end),next=before.slice(start,first)+after.slice(first,after.length-last)+before.slice(before.length-last,end);
+  if(!/^[A-Za-z]{2,}$/.test(old)||!/^[A-Za-z]{2,}$/.test(next)||old===next)return null;
+  const M=engine.M, required=['_FPDFText_LoadPage','_FPDFText_CountChars','_FPDFText_GetUnicode','_FPDFText_GetTextObject','_FPDFText_ClosePage','_FPDFText_SetText','_FPDFPage_CountObjects','_FPDFPage_GetObject','_FPDFPageObj_GetType','_FPDFText_GetCharOrigin','_FPDFText_GetCharBox','_FPDFTextObj_GetFont','_FPDFTextObj_GetFontSize','_FPDFPageObj_CreateTextObj','_FPDFPageObj_GetMatrix','_FPDFPageObj_SetMatrix','_FPDFPageObj_GetFillColor','_FPDFPageObj_SetFillColor','_FPDFTextObj_GetTextRenderMode','_FPDFPageObj_Destroy','_FPDFPage_RemoveObject','_FPDFPage_InsertObjectAtIndex'];
+  if(!required.every(k=>typeof M?.[k]==='function')||typeof engine.translateObject!=='function'||typeof engine.retainDetachedObject!=='function'||!Number.isFinite(engine.pageWidth))return null;
+  const owner=new Set((engine.paragraphObjects(para.id)||[]).map(h=>h>>>0)),tp=M._FPDFText_LoadPage(engine.page);
+  if(!tp)return null;
+  const chars=[],buf=M._malloc(48);
+  try{for(let i=0;i<M._FPDFText_CountChars(tp);i++){
+    const originOk=M._FPDFText_GetCharOrigin(tp,i,buf,buf+8),origin=originOk?[M.HEAPF64[buf>>3],M.HEAPF64[(buf>>3)+1]]:null;
+    const boxOk=M._FPDFText_GetCharBox(tp,i,buf,buf+8,buf+16,buf+24),box=boxOk?[0,1,2,3].map(k=>M.HEAPF64[(buf>>3)+k]):null;
+    chars.push({ch:String.fromCodePoint(M._FPDFText_GetUnicode(tp,i)),h:M._FPDFText_GetTextObject(tp,i)>>>0,origin,box});
+  }}finally{M._FPDFText_ClosePage(tp);M._free(buf);}
+  const raw=chars.map(c=>c.ch).join(''),hits=[];
+  const sizes=(para.runs||[]).map(r=>r.size).filter(n=>n>0);
+  if(raw.replace(/\s+/g,' ').includes(before.replace(/\s+/g,' '))&&!(sizes.length&&Math.min(...sizes)<Math.max(...sizes)*.85))return null;
+  for(let i=raw.indexOf(old);i>=0;i=raw.indexOf(old,i+1)){
+    const slice=chars.slice(i,i+old.length),h=slice[0]?.h;
+    if(h&&owner.has(h)&&slice.every(c=>c.h===h)&&!/[A-Za-z]/.test(raw[i-1]||'')&&!/[A-Za-z]/.test(raw[i+old.length]||''))hits.push({i,h});
+  }
+  if(hits.length!==1)return null;
+  const {h}=hits[0],full=chars.filter(c=>c.h===h).map(c=>c.ch).join('');
+  if(full.indexOf(old)!==full.lastIndexOf(old)||/[\r\n]/.test(full))return null;
+  const bounds=engine.objectBounds(h);
+  if(!bounds||![bounds.x,bounds.y,bounds.w,bounds.h].every(Number.isFinite)||bounds.h<=0)return null;
+  const objects=[];
+  for(let i=0;i<M._FPDFPage_CountObjects(engine.page);i++){
+    const handle=M._FPDFPage_GetObject(engine.page,i)>>>0,box=engine.objectBounds(handle);
+    if(!box||![box.x,box.y,box.w,box.h].every(Number.isFinite))return null;
+    objects.push({h:handle,box,type:M._FPDFPageObj_GetType(handle)});
+  }
+  const overlap=(a,b)=>Math.max(0,Math.min(a.x+a.w,b.x+b.w)-Math.max(a.x,b.x))*Math.max(0,Math.min(a.y+a.h,b.y+b.h)-Math.max(a.y,b.y));
+  const suffix=objects.filter(o=>o.h!==h&&o.type===1&&o.box.x>=bounds.x+bounds.w-.1&&overlap({...bounds,x:o.box.x,w:o.box.w},o.box)>0).sort((a,b)=>a.box.x-b.box.x);
+  // Restrict to one adjacent line, without crossing a column-sized gap.
+  let right=bounds.x+bounds.w;
+  const shifted=[];
+  for(const o of suffix){
+    const raised=o.box.h<bounds.h*.85&&o.box.w<bounds.h*3&&o.box.y>bounds.y+bounds.h*.3;
+    if(o.box.x-right>bounds.h*2||(!owner.has(o.h)&&!raised))break;
+    shifted.push(o);right=Math.max(right,o.box.x+o.box.w);
+  }
+  // The source may represent spaces with positioning rather than encoded
+  // glyphs. SetText on the complete object would introduce .notdef spaces.
+  // Stage its non-space chunks at their proven source origins instead.
+  if(M._FPDFTextObj_GetTextRenderMode(h)!==0)return null;
+  const p=M._malloc(32),staged=[];let committed=false;
+  try{
+    if(!M._FPDFPageObj_GetMatrix(h,p))return null;
+    const matrix=Array.from(M.HEAPF32.slice(p>>2,(p>>2)+6));
+    if(matrix.some(x=>!Number.isFinite(x))||Math.abs(matrix[1])>1e-6||Math.abs(matrix[2])>1e-6||matrix[0]<=0||matrix[3]<=0)return null;
+    if(!M._FPDFTextObj_GetFontSize(h,p))return null;
+    const fontSize=M.HEAPF32[p>>2],font=M._FPDFTextObj_GetFont(h);
+    if(!font||!(fontSize>0)||!M._FPDFPageObj_GetFillColor(h,p,p+4,p+8,p+12))return null;
+    const rgba=Array.from(M.HEAPU32.slice(p>>2,(p>>2)+4));if(rgba[3]!==255)return null;
+    const own=chars.filter(c=>c.h===h);let dx=0;
+    for(const match of full.matchAll(/\S+/g)){
+      const selected=own.slice(match.index,match.index+match[0].length),origin=selected[0]?.origin;
+      if(!origin||selected.some(c=>!c.box||!c.origin||Math.abs(c.origin[1]-origin[1])>.01))return null;
+      const left=Math.min(...selected.map(c=>c.box[0])),right=Math.max(...selected.map(c=>c.box[1])),bottom=Math.min(...selected.map(c=>c.box[2])),top=Math.max(...selected.map(c=>c.box[3]));
+      const changed=match[0]===old,text=changed?next:match[0],handle=M._FPDFPageObj_CreateTextObj(engine.doc,font,fontSize);
+      if(!handle)return null;staged.push({h:handle});
+      const str=M._malloc((text.length+1)*2);
+      try{for(let i=0;i<text.length;i++)M.HEAPU16[(str>>1)+i]=text.charCodeAt(i);M.HEAPU16[(str>>1)+text.length]=0;if(!M._FPDFText_SetText(handle,str))return null;}finally{M._free(str);}
+      M.HEAPF32.set([...matrix.slice(0,4),origin[0]+dx,origin[1]],p>>2);
+      if(!M._FPDFPageObj_SetMatrix(handle,p)||!M._FPDFPageObj_SetFillColor(handle,...rgba))return null;
+      const box=engine.objectBounds(handle);if(!box)return null;
+      if(!changed&&[box.x-left-dx,box.x+box.w-right-dx,box.y-bottom,box.y+box.h-top].some(v=>Math.abs(v)>.05))return null;
+      if(changed){if(Math.abs(box.x-left)>.05)return null;dx=box.x+box.w-right;}
+    }
+    if(!Number.isFinite(dx))return null;
+    const moving=new Set([h,...shifted.map(o=>o.h)]),placements=[...staged.map(o=>({before:bounds,after:engine.objectBounds(o.h)})),...shifted.map(o=>({before:o.box,after:{...o.box,x:o.box.x+dx}}))];
+    if(placements.some(q=>!q.after||q.after.x<0||q.after.x+q.after.w>engine.pageWidth||objects.some(o=>!moving.has(o.h)&&overlap(q.after,o.box)>overlap(q.before,o.box)+.05)))return null;
+    const slot=objects.findIndex(o=>o.h===h);
+    if(!M._FPDFPage_RemoveObject(engine.page,h))throw new LineRetentionError('source_word_remove_failed');
+    engine.retainDetachedObject(h);committed=true;
+    for(const [i,o] of staged.entries())if(!M._FPDFPage_InsertObjectAtIndex(engine.page,o.h,slot+i))throw new LineRetentionError('source_word_insert_failed');
+    for(const o of shifted)engine.translateObject(o.h,dx,0);
+    engine._pageDirty=true;engine._spliceOk=false;
+    return {status:'source_word_objects',objects:staged.length,translated:shifted.length,dx};
+  }finally{M._free(p);if(!committed)for(const o of staged)M._FPDFPageObj_Destroy(o.h);}
 }
 
 // A geometric chain can cross unrelated PDF object order. A shortening that
@@ -523,7 +732,7 @@ const paraKey = (p) => (p.box ? [p.box.x, p.box.top, p.box.w, p.box.h].map((v) =
  * line or the line break itself (an insertion at a line start also touches
  * the end of the previous line).
  */
-export function editedLineSpan(para, del, inserts) {
+export function editedLineSpan(para, del, inserts, allowMultiple = false) {
   const lines = para.lines || [];
   if (!lines.length || lines.some((l) => !Number.isFinite(l?.y) || !Number.isFinite(l?.x) || !Number.isFinite(l?.w) || !Number.isInteger(l?.off))) return null;
   const runStart = [];
@@ -550,13 +759,13 @@ export function editedLineSpan(para, del, inserts) {
     touched.add(lineOf(f));
     if (f > 0) touched.add(lineOf(f - 1));
   }
-  if (touched.size !== 1) return { reason: "edit_spans_lines" };
-  const [k] = touched;
+  if (!touched.size || (!allowMultiple && touched.size !== 1)) return { reason: "edit_spans_lines" };
+  const k = Math.min(...touched);
   const flat = textOf(para);
   const start = starts[k];
   let end = k + 1 < starts.length ? starts[k + 1] : n;
   while (end > start && /\s/.test(flat[end - 1])) end--;
-  if (end === start || delAt.some((f) => f >= end) || insAt.some((f) => f > end)) return { reason: "edit_crosses_line" };
+  if (end === start || (!allowMultiple && (delAt.some((f) => f >= end) || insAt.some((f) => f > end)))) return { reason: "edit_crosses_line" };
   return { k, start, end };
 }
 
@@ -908,6 +1117,63 @@ function sameGlyphs(a, b) {
   return { ok: true, max };
 }
 
+// Split a replaced suffix from unchanged source slots for painter-order repair.
+export function splitSourceOwnership(context, index, suffix, stable, fresh) {
+  const target = context.paras[index];
+  const shadowId = Math.min(0, ...context.paras.map(q => Number.isInteger(q.id) ? q.id : 0)) - 1;
+  const slotsOf = hs => hs.map(h => context.objects.indexOf(h)).sort((a, b) => a - b);
+  const suffixSlots = slotsOf(suffix), stableSlots = slotsOf(stable);
+  if (!target || !suffix.length || !stable.length || suffixSlots.some(i => i < 0) || stableSlots.some(i => i < 0) ||
+      new Set([...suffix, ...stable]).size !== suffix.length + stable.length ||
+      target.handles.length !== suffix.length + stable.length || target.handles.some(h => !suffix.includes(h) && !stable.includes(h)) ||
+      new Set(fresh).size !== fresh.length || fresh.some(h => stable.includes(h) || context.objects.includes(h)) ||
+      suffixSlots.some((n, i) => i && n !== suffixSlots[i - 1] + 1)) return null;
+  const split = { ...context, paras: context.paras.map((q, j) => j === index
+    ? { ...q, handles: suffix, slots: suffixSlots, topLevel: true } : q) };
+  split.paras.push({ ...target, id: shadowId, box: null, handles: stable, slots: stableSlots, topLevel: true });
+  const ownership = new Map(split.paras.map((q, j) => [q.id, j === index ? fresh : q.handles]));
+  return { context: split, ownership };
+}
+
+// A discretionary line-end hyphen may be a standalone PDF object omitted
+// by the paragraph model. Bind it only to one adjacent, same-baseline source
+// text owner; generated line breaks and unrelated objects are never claimed.
+export function sourceDiscretionaryHyphens(engine, context, glyphs) {
+  const M = engine.M;
+  if (typeof M._FPDFText_IsHyphen !== "function") return null;
+  const owned = new Set(context.paras.flatMap(q => q.handles));
+  const page = new Set(pageObjectList(engine));
+  const tp = M._FPDFText_LoadPage(engine.page), buf = M._malloc(16);
+  if (!tp) { M._free(buf); return null; }
+  const objects = new Map();
+  for (let i = 0, n = M._FPDFText_CountChars(tp); i < n; i++) {
+    const h = M._FPDFText_GetTextObject(tp, i) >>> 0;
+    if (!h || owned.has(h) || !page.has(h)) continue;
+    const row = objects.get(h) || [];
+    let origin = null;
+    if (M._FPDFText_GetCharOrigin(tp, i, buf, buf + 8)) origin = [M.HEAPF64[buf >> 3], M.HEAPF64[(buf + 8) >> 3]];
+    row.push({ hyphen: M._FPDFText_IsHyphen(tp, i) === 1, origin });
+    objects.set(h, row);
+  }
+  M._free(buf); M._FPDFText_ClosePage(tp);
+  const result = [];
+  for (const [h, rows] of objects) {
+    if (!rows.some(r => r.hyphen)) continue;
+    if (rows.length !== 1 || !rows[0].hyphen || !rows[0].origin) return null;
+    const [x, y] = rows[0].origin;
+    const candidates = [];
+    for (let j = 0; j < context.paras.length; j++) {
+      const nearby = glyphs[j].filter(g => g.u > 32 && Math.abs(g.y - y) <= 0.2 && g.x < x && x - g.x <= Math.max(2, drawnSize(g) * 1.5));
+      if (nearby.length) candidates.push(j);
+    }
+    if (candidates.length !== 1) return null;
+    const bounds = engine.objectBounds(h);
+    if (!bounds) return null;
+    result.push({ h, owner: context.paras[candidates[0]].id, bounds, originY: y });
+  }
+  return result;
+}
+
 /**
  * Re-lays out the edited source line and every line after it, leaving every
  * preceding line's text objects where they are. Used when the edit stays on
@@ -920,12 +1186,13 @@ function sameGlyphs(a, b) {
  * is on the first line: there is nothing to pin, and the caller keeps the
  * plain paragraph re-layout.
  */
-export function commitPrefixSuffix(engine, paras, pi, del, inserts, runs, changed = new Set()) {
+export function commitPrefixSuffix(engine, paras, pi, del, inserts, runs, changed = new Set(), options = {}) {
   if (!canCommitLineLocal(engine)) return { reason: "engine_capability_missing" };
+  if (options.context && typeof options.reserve !== "function") return { reason: "reserve_unavailable" };
   const para = paras[pi];
   const fmt = para.format || {};
   if (![0, 3].includes(fmt.align ?? 0) || fmt.dir || para.rotation || para.vertical) return { reason: "alignment_unsupported" };
-  const span = editedLineSpan(para, del, inserts);
+  const span = editedLineSpan(para, del, inserts, !!options.allowMultiple);
   if (!span || span.reason) return { reason: span?.reason ?? "line_geometry_missing" };
   const { k, start } = span;
   if (k === 0) return { reason: "no_prefix" };
@@ -976,6 +1243,16 @@ export function commitPrefixSuffix(engine, paras, pi, del, inserts, runs, change
   const suffixBounds = suffixOrdered.map((h) => JSON.stringify(engine.objectBounds(h)));
   const prefixGlyphs = collectGlyphs(engine, prefix);
   const suffixGlyphs = collectGlyphs(engine, suffixOrdered);
+  const otherGlyphs = options.context?.paras.map(q => collectGlyphs(engine, q.handles || []));
+  const hyphens = options.context ? sourceDiscretionaryHyphens(engine, options.context, otherGlyphs) : [];
+  if (!hyphens) return { reason: "discretionary_hyphen_ambiguous" };
+  if (options.context) {
+    // Replacing a suffix while leaving its independent discretionary glyph
+    // would duplicate it. Decline unless that glyph belongs to the prefix.
+    const suffixY = source.slice(k).map(l => l.y);
+    if (hyphens.some(h => h.owner === para.id && suffixY.some(y => Math.abs(h.originY - y) <= .2)))
+      return { reason: "suffix_discretionary_hyphen" };
+  }
   const onEdited = suffixGlyphs.filter((g) => g.u > 32 && Math.abs(g.y - source[k].y) <= 1);
   if (!prefixGlyphs.length || !onEdited.length) return { reason: "prefix_objects_unresolved" };
   if (onEdited.some((g) => drawnSize(g) == null)) return { reason: "suffix_matrix_unavailable" };
@@ -995,9 +1272,48 @@ export function commitPrefixSuffix(engine, paras, pi, del, inserts, runs, change
   const flat = textOf(para);
   const fullNew = runs.map((r) => r.text).join("");
   const suffixRuns = sliceRuns(runs, start);
-  if (!suffixRuns.length || squash(flat.slice(0, start) + suffixRuns.map((r) => r.text).join("")) !== squash(fullNew)) return { reason: "edited_text_mismatch" };
+  // A deletion can remove the entire suffix. Keep the prefix objects in
+  // their original painter slots and remove only fully owned suffix objects.
+  if (!suffixRuns.length) {
+    if (!options.context || inserts.length || fullNew !== flat.slice(0, start) ||
+        typeof engine.historyRemoveObject !== "function") return { reason: "edited_text_mismatch" };
+    for (let j = k; j < source.length; j++) {
+      const expected = flat.slice(source[j].off, source[j + 1]?.off ?? flat.length).replace(/\s/g, "");
+      const actual = before[j].map(g => String.fromCodePoint(g.u)).join("");
+      if (expected !== actual) return { reason: "suffix_text_unresolved" };
+    }
+    const stable = handles.filter(h => !suffixSet.has(h));
+    const target = options.context.paras[pi];
+    if (!stable.length || !target || target.handles.length !== handles.length ||
+        target.handles.some(h => !handles.includes(h))) return { reason: "paragraph_objects_changed" };
+    const ownership = new Map(options.context.paras.map((q, j) => [q.id, j === pi ? stable : q.handles]));
+    const depth = engine.historyDepth().undo;
+    engine.historyBeginStep("falsify-delete-suffix");
+    let removed = true;
+    try { for (const h of suffixOrdered) if (!engine.historyRemoveObject(h)) { removed = false; break; } }
+    finally { engine.historyEndStep(); }
+    const undo = () => {
+      if (engine.historyDepth().undo > depth && !engine.historyUndo()) throw new LineRetentionError("undo_failed");
+      if (pageObjectList(engine).join(",") !== pageBefore.join(",") ||
+          !sameGlyphs(prefixGlyphs, collectGlyphs(engine, prefix)).ok ||
+          !sameGlyphs(suffixGlyphs, collectGlyphs(engine, suffixOrdered)).ok) throw new LineRetentionError("state_drift");
+    };
+    const remaining = pageBefore.filter(h => !suffixSet.has(h));
+    const proof = sameGlyphs(prefixGlyphs, collectGlyphs(engine, prefix));
+    if (!removed || engine.historyDepth().undo <= depth || pageObjectList(engine).join(",") !== remaining.join(",") || !proof.ok) {
+      undo(); return { reason: "suffix_deletion_unproven" };
+    }
+    engine._pageDirty = true;
+    engine._spliceOk = false;
+    return { upd: { ...para, runs, lines: source.slice(0, k), surgical: true },
+      ids: paras.map(p => p.id), ownership, context: options.context,
+      reservedBaseline: source[k - 1].y,
+      lines: { status: "source_suffix_deleted", prefixKept: k, kept: k, maxKeptShift: +proof.max.toFixed(4) } };
+  }
+  if (squash(flat.slice(0, start) + suffixRuns.map((r) => r.text).join("")) !== squash(fullNew)) return { reason: "edited_text_mismatch" };
 
   let steps = 0;
+  let reservation = null;
   const step = (label, fn) => {
     const depth = engine.historyDepth().undo;
     engine.historyBeginStep(label);
@@ -1009,6 +1325,8 @@ export function commitPrefixSuffix(engine, paras, pi, del, inserts, runs, change
     }
   };
   const restore = (reason) => {
+    if (reservation && !reservation.rollback()) throw new LineRetentionError('undo_failed', { after: reason, part: 'reservation' });
+    reservation = null;
     const mutated = steps > 0;
     for (; steps > 0; steps--) if (!engine.historyUndo()) throw new LineRetentionError("undo_failed");
     const back = (engine.paragraphObjects(para.id) || []).map((h) => h >>> 0);
@@ -1077,10 +1395,13 @@ export function commitPrefixSuffix(engine, paras, pi, del, inserts, runs, change
   });
   let a = 0;
   let b = 0;
+  const isolatedRunOwners = new Map();
   while (a < suffixText.length && b < qText.length) {
     if (/\s/.test(suffixText[a])) { a++; continue; }
     if (/\s/.test(qText[b])) { b++; continue; }
     if (suffixText[a] !== qText[b] || baseStyle(q.runs[qRun[b]]) !== baseStyle(para.runs[pRun[start + a]])) return restore(suffixText[a] !== qText[b] ? "isolated_text_mismatch" : "isolated_style_mismatch");
+    const sourceIndex = pRun[start + a], owners = isolatedRunOwners.get(sourceIndex) || new Set();
+    owners.add(qRun[b]); isolatedRunOwners.set(sourceIndex, owners);
     a++;
     b++;
   }
@@ -1088,13 +1409,19 @@ export function commitPrefixSuffix(engine, paras, pi, del, inserts, runs, change
   while (b < qText.length && /\s/.test(qText[b])) b++;
   if (a !== suffixText.length || b !== qText.length) return restore("isolated_text_mismatch");
 
+  const reboundRuns = [];
+  for (const run of suffixRuns) {
+    const owners = [...(isolatedRunOwners.get(run.sourceIndex) || [])];
+    if (owners.length !== 1) return restore("isolated_font_source_ambiguous");
+    reboundRuns.push({ ...run, sourceIndex: owners[0] });
+  }
   let id = q.id;
   if (!(q.box?.w >= width - 0.5)) {
     const rz = step("falsify-prefix-width", () => engine.resizeParagraph(id, width));
     if (!rz) return restore("suffix_not_isolated");
     id = rz.id ?? id;
   }
-  const upd = step("falsify-prefix-suffix", () => engine.commitParagraph(id, suffixRuns, fmt));
+  const upd = step("falsify-prefix-suffix", () => engine.commitParagraph(id, reboundRuns, fmt));
   if (!upd?.lines?.length || !["x", "y"].every((f) => Number.isFinite(upd.lines[0][f]))) return restore("suffix_commit_failed");
   if (prefix.some((h, i) => JSON.stringify(engine.objectBounds(h)) !== prefixBounds[i])) return restore("prefix_objects_moved");
   const fresh = (engine.paragraphObjects(upd.id ?? id) || []).map((h) => h >>> 0);
@@ -1124,18 +1451,79 @@ export function commitPrefixSuffix(engine, paras, pi, del, inserts, runs, change
   if (!placed) return restore("line_order_not_restored");
   if (prefix.some((h, i) => JSON.stringify(engine.objectBounds(h)) !== prefixBounds[i])) return restore("prefix_objects_moved");
 
-  const after = engine.buildModel();
-  if (after.length !== paras.length || after.some((p, j) => j !== pi && !changed.has(j) && paraKey(p) !== paraKey(paras[j]))) return restore("page_model_changed");
-  const now = after[pi];
-  if (squash(textOf(now)) !== squash(fullNew)) return restore("edited_text_mismatch");
-  const nowHandles = (engine.paragraphObjects(now.id) || []).map((h) => h >>> 0);
-  const want = new Set([...prefix, ...fresh]);
-  if (nowHandles.length !== want.size || nowHandles.some((h) => !want.has(h))) return restore("paragraph_objects_changed");
+  // Include uniquely bound marks in the original owner before barrier and
+  // cascade planning. This makes the same rigid move and collision rules
+  // apply to them as to the text, in one undoable reservation.
+  const sourceContext = options.context && { ...options.context, paras: options.context.paras.map(q => {
+    const added = hyphens.filter(h => h.owner === q.id).map(h => h.h);
+    const handles = [...q.handles, ...added];
+    const slots = handles.map(h => options.context.objects.indexOf(h)).filter(i => i >= 0).sort((a, b) => a - b);
+    return { ...q, handles, slots, topLevel: slots.length === handles.length };
+  }) };
+  if (options.reserve && sourceContext) {
+    const last = Math.min(...upd.lines.map(l=>l.y + dy));
+    const delta = Math.max(0, source.at(-1).y - last);
+    if (delta > 0.01) {
+      reservation = options.reserve(engine, sourceContext, [{id:para.id,box:para.box,delta}], {targetHandles:[...prefix,...fresh]});
+      if (!reservation.ok) { const code=reservation.code; reservation=null; return restore(code); }
+      for (const h of hyphens) {
+        const b = engine.objectBounds(h.h), shift = reservation.shifts.get(h.owner) || 0;
+        if (!b || Math.abs(b.x - h.bounds.x) > .02 || Math.abs(b.y - (h.bounds.y - shift)) > .02 || Math.abs(b.w - h.bounds.w) > .02 || Math.abs(b.h - h.bounds.h) > .02) return restore("hyphen_moved_unexpectedly");
+      }
+    }
+  }
+
+  let now, ids, ownership, repairContext;
+  if (!options.context) {
+    const after = engine.buildModel();
+    if (after.length !== paras.length || after.some((p, j) => j !== pi && !changed.has(j) && paraKey(p) !== paraKey(paras[j]))) return restore("page_model_changed");
+    now = after[pi];
+    if (squash(textOf(now)) !== squash(fullNew)) return restore("edited_text_mismatch");
+    const nowHandles = (engine.paragraphObjects(now.id) || []).map(h => h >>> 0);
+    const want = new Set([...prefix, ...fresh]);
+    if (nowHandles.length !== want.size || nowHandles.some(h => !want.has(h))) return restore("paragraph_objects_changed");
+    ids = after.map(p => p.id);
+  } else {
+  // Source objects provide the ownership proof even when a geometric rebuild
+  // merges neighbouring paragraphs. Keep the original ownership map for the
+  // remaining page checks; do not assign rebuilt IDs by position.
+  const live = new Set(pageObjectList(engine));
+  const owners = new Map();
+  for (const [j, q] of sourceContext.paras.entries()) {
+    const hs = j === pi ? [...prefix, ...fresh] : q.handles;
+    for (const h of hs) {
+      if (!live.has(h) || owners.has(h)) return restore("paragraph_objects_changed");
+      owners.set(h, j);
+    }
+    if (j !== pi) {
+      const shift = reservation?.shifts?.get(q.id) || 0;
+      if (!sameGlyphs(otherGlyphs[j].map(g => ({ ...g, y: g.y - shift })), collectGlyphs(engine, hs)).ok)
+        return restore("reserved_objects_changed");
+    }
+  }
+  if (squash(textOf(upd)) !== squash(suffixRuns.map(r => r.text).join(""))) return restore("edited_text_mismatch");
+  const retained = sourceContext.paras[pi].handles.filter(h => !suffixSet.has(h) && !prefix.includes(h));
+  if (retained.some(h => !live.has(h) || owners.has(h))) return restore("paragraph_objects_changed");
+  const stable = [...prefix, ...retained];
+  const baseContext = reservation?.context ?? sourceContext;
+  // Unchanged objects retain their own source slots even when a mask or
+  // other object occurs between them and the replaced suffix.
+  const split = splitSourceOwnership(baseContext, pi, suffixOrdered, stable, fresh);
+  if (!split) return restore("paragraph_objects_changed");
+  repairContext = split.context;
+  ownership = split.ownership;
+  now = { ...para, runs, lines: [...source.slice(0, k), ...upd.lines.map(l => ({...l, x: l.x + dx, y: l.y + dy}))] };
+  ids = paras.map(p => p.id);
+  }
   const proof = sameGlyphs(prefixGlyphs, collectGlyphs(engine, prefix));
   if (!proof.ok) return restore("kept_lines_moved");
   const got = collectGlyphs(engine, fresh).filter((g) => g.u > 32);
   if (!got.length || got.some((g) => drawnSize(g) == null)) return restore("suffix_matrix_unavailable");
   if (got.some((g) => Math.abs(drawnSize(g) - srcSize) > DRAWN_TOL)) return restore("suffix_font_changed");
+  if (options.context) {
+    const sourceFonts = new Set(onEdited.map(g => g.font));
+    if (sourceFonts.size !== 1 || sourceFonts.has(null) || got.some(g => !sourceFonts.has(g.font))) return restore("suffix_font_changed");
+  }
   const topGlyphs = got.filter((g) => Math.abs(g.y - source[k].y) <= 0.5);
   if (!topGlyphs.length || Math.abs(Math.min(...topGlyphs.map((g) => g.x)) - source[k].x) > PLACE_TOL) return restore("suffix_misplaced");
   const inkRight = Math.max(...fresh.map((h) => {
@@ -1145,7 +1533,10 @@ export function commitPrefixSuffix(engine, paras, pi, del, inserts, runs, change
   if (inkRight > right + 1) return restore("suffix_exceeds_column");
   return {
     upd: { ...now, surgical: false },
-    ids: after.map((p) => p.id),
+    ids,
+    ownership,
+    reservedBaseline: Math.min(...upd.lines.map(l => l.y + dy)),
+    context: repairContext ?? null,
     lines: {
       status: "reflowed",
       reason: "edited_line_overflows",

@@ -5,6 +5,9 @@ import {loadRuntime, RUNTIME} from './paragraph-pdf-runtime.mjs';
 import {hex} from './paragraph-pdf-crypto.mjs';
 import {createAnnotationTransport} from './document-flow-annotations.mjs';
 import {parseFont} from './browser-fonts.mjs';
+import {deriveSourceTables, bindSourceTables} from './paragraph-source-tables.mjs';
+import {trySourceMarkerEdits} from './paragraph-pdf-marker-path.mjs';
+import {scanTextShows} from './paragraph-pdf-content-operators.mjs';
 
 export const COORDINATE_SPACE = 'top-left-page';
 export const LIMITS = Object.freeze({maxFileBytes: 25 * 1024 * 1024});
@@ -223,8 +226,46 @@ export async function prepare(request = {}) {
   const enabled = requestedEdits.filter(edit => edit?.enabled !== false);
   if (!enabled?.length) throw new ParagraphPdfError('no-edits', 'At least one enabled edit is required.');
   const edits = enabled.map((e, index) => ({id: e?.id || `edit-${index}`, pageIndex: e?.pageIndex, before: e?.before, after: e?.after}));
+  let marker = null;
+  try {
+    const mupdf = await import('./browser-pdf-vendor/mupdf.js');
+    checkAbort(request.signal);
+    marker = await trySourceMarkerEdits({bytes, edits, fontSnapshot, signal:request.signal}, {mupdf, scanTextShows});
+  } catch { checkAbort(request.signal); }
+  checkAbort(request.signal);
+  if (marker) {
+    const sha256 = hex(marker.bytes), warnings = [];
+    const pageMap=Array.from({length:marker.pageCount},(_,i)=>({sourcePageIndex:i,outputPageIndex:i,continuationPageIndices:[]}));
+    const verification = {schema:'falsify.paragraph-pdf.v1', engine:'MuPDF', license:RUNTIME.license,
+      sourceSha256:hash, outputSha256:sha256, fontSnapshotDigest:fontSnapshot?.digest ?? null,
+      fontSelections:marker.reports.map(r=>({id:r.id, font:r.font, reason:'source marker substitution'})),
+      status:'applied', layoutVerified:false, independent:false, coordinateSpace:COORDINATE_SPACE,
+      pageCount:{source:marker.pageCount,output:marker.pageCount}, edits:marker.reports, checks:[], warnings, runtime:null,
+      quality:{independent:false, method:'source-stream glyph origins and localized raster comparison', limitations:'Same-engine verification; independent visual QA is required.'},
+      reconciliation:[], report:{ok:true, method:'source-stream-marker', edits:marker.reports, pagination:{pages:{source:marker.pageCount,output:marker.pageCount},sourcePageMap:pageMap,addedPages:0}} };
+    const name=String(request.file?.name || 'document.pdf').replace(/\.pdf$/i,'')+'-edited.pdf';
+    return {file:new File([marker.bytes],name,{type:'application/pdf'}),sha256,verification,
+      pageMap,warnings};
+  }
   const {engineFactory: createEngine, info} = await loadRuntime();
-  const engineFactory = bytes => createEngine(bytes, fontSnapshot);
+  let tableProof;
+  try { const mupdf = await import('./browser-pdf-vendor/mupdf.js'); checkAbort(request.signal); tableProof = await deriveSourceTables(bytes, hash, mupdf); }
+  catch { checkAbort(request.signal); tableProof = {sha:hash, unavailable:true}; }
+  const proofs = new Map([[hash,tableProof]]);
+  const engineFactory = async input => {
+    const digest = input instanceof Uint8Array ? hex(input) : null;
+    if(digest && !proofs.has(digest)) {
+      let proof;
+      try { const mupdf=await import('./browser-pdf-vendor/mupdf.js'); checkAbort(request.signal); proof=await deriveSourceTables(input,digest,mupdf); }
+      catch { checkAbort(request.signal); proof={sha:digest,unavailable:true}; }
+      proofs.set(digest,proof);
+    }
+    const engine = await createEngine(input, fontSnapshot);
+    const open = engine.open.bind(engine);
+    engine.open = (data,...args) => { const result=open(data,...args); bindSourceTables(engine,data,data instanceof Uint8Array ? proofs.get(hex(data)) : null); return result; };
+    if(input) bindSourceTables(engine,input,proofs.get(digest));
+    return engine;
+  };
   checkAbort(request.signal);
   // Matching remains exact and all-or-nothing. Duplicate Before text is an
   // explicit AMBIGUOUS_MATCH; selection metadata never silently relocates it.

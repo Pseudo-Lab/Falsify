@@ -12,6 +12,7 @@ const faces = [
   ["Noto Sans CJK KR", "NotoSansCJKkr-Regular", 400, false, "font-assets/NotoSansCJKkr-Regular.otf", "6bcb2a0703aa137e874fc2dffa85f6c21ba9a67fa329e81b8c801663af7e992a"],
   ["Noto Serif CJK KR", "NotoSerifCJKkr-Regular", 400, false, "font-assets/NotoSerifCJKkr-Regular.otf", "77b4b741f864d27f15e90f275b17106dde90b2ad28f82bab72dc95805db5fb42"],
 ];
+const lm7 = ["Latin Modern Roman", "LMRoman7-Regular", 400, false, "font-assets/LMRoman7-Regular.otf", "48c4b46ab255eec96588fb992fba1ed6102e53d051da480738a61cc6cdb328c3"];
 const caches = new WeakMap();
 const cjk = /[\u1100-\u11ff\u2e80-\u9fff\uac00-\ud7ff\uf900-\ufaff]|[\u{20000}-\u{3134f}]/u;
 const math = /[\u2200-\u22ff\u27c0-\u27ef\u2980-\u2aff\u{1d400}-\u{1d7ff}]/u;
@@ -42,8 +43,9 @@ async function load(face, fetcher) {
 export async function getBundledFonts(requirements, {fetch = globalThis.fetch} = {}) {
   const selected = new Set();
   for (const requirement of requirements) {
-    const name = String(requirement.family || "").trim().toLowerCase();
+    const name = String(requirement.family || "").trim().replace(/^[A-Z]{6}\+/, "").toLowerCase();
     const text = String(requirement.text || "");
+    if ((name === "cmr7" || name === "lmroman7" || name === "lm roman 7") && !requirement.bold && !requirement.italic) selected.add(lm7);
     const families = serifNames.has(name) ? ["Liberation Serif"] : sansNames.has(name) ? ["Liberation Sans"] : ["Liberation Sans", "Liberation Serif"];
     for (const family of families) {
       selected.add(faces.find(f => f[0] === family && f[2] === (requirement.bold ? 700 : 400) && f[3] === !!requirement.italic));

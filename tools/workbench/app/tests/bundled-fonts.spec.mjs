@@ -57,3 +57,14 @@ test("all Latin faces have correct weight and italic metadata and validate their
   const korean = await getBundledFonts([{family: "sans", text: "한"}], {fetch});
   assert.equal(korean[1].family, "Noto Sans CJK KR");
 });
+test('LM Roman 7 is selected only for its exact family and parsed metadata', async () => {
+  const {fetch}=fixture();
+  const {parseFont}=await import('../src/browser-fonts.mjs');
+  for(const family of ['CMR7','ABCDEF+CMR7','LMRoman7']) {
+    const faces=await getBundledFonts([{family,text:'63'}],{fetch});
+    const face=faces.find(f=>f.postscriptName==='LMRoman7-Regular'); assert.ok(face);
+    const parsed=parseFont(face.bytes); for(const key of ['family','postscriptName','weight','italic']) assert.equal(face[key],parsed[key]);
+  }
+  const other=await getBundledFonts([{family:'Not CMR7',text:'63'}],{fetch});
+  assert.ok(!other.some(f=>f.postscriptName==='LMRoman7-Regular'));
+});

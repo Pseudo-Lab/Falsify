@@ -1,0 +1,26 @@
+{
+  "schema": "falsify.latex-lua-profile.v1",
+  "engine": "lualatex",
+  "compilerVersion": "1.4.1",
+  "source": "https://github.com/TeXlyre/texlyre-busytex-build/releases/tag/build_wasm_46ebb6216a5c1fe63dd1dc885831d1a8cef2dc86_31802832436_1",
+  "modifications": [
+    "fontspec and microtype runtime subset repacked with upstream Emscripten package loader; no source/font upload"
+  ],
+  "files": [
+    {
+      "name": "texlive-lua-profile.js",
+      "bytes": 51908,
+      "sha256": "16cfb34cba5032ba4660af33f78ae53eb073bed60f6c58b4bf4fbf3b4caf19bf"
+    },
+    {
+      "name": "texlive-lua-profile.data",
+      "bytes": 385627,
+      "sha256": "fb4b49f59cc79c6d25b6622b3c8e48f4a655055e14d9131c881a5762c3bfd8c3"
+    },
+    {
+      "name": "NOTICE-lua-profile.txt",
+      "bytes": 1156,
+      "sha256": "d1ae781891c7ce16245b16482d463b336d2785ea8d865ac5d93578a659eee5f2"
+    }
+  ]
+}

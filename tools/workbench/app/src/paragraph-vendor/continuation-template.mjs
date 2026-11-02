@@ -1,3 +1,4 @@
+import { sourceTableCells, inSourceTableCell } from "../paragraph-source-tables.mjs";
 // Source-style running headers/footers on continuation pages.
 //
 // A continuation page repeats the edge text of its source page: every text
@@ -253,6 +254,8 @@ export function snapshotPageEdges(engine, floor, bodyTop, exclude = null, select
   const pageW = M._FPDF_GetPageWidthF(page), pageH = M._FPDF_GetPageHeightF(page);
   const lo = floor - 0.5, hi = bodyTop + 0.5;
   const n = M._FPDFPage_CountObjects(page);
+  const tables = selection ? [] : sourceTableCells(engine);
+  if (tables === null) return fail('continuation_table_source_unavailable');
   const order = new Map();
   const edges = [];
   for (let i = 0; i < n; i++) {
@@ -262,6 +265,7 @@ export function snapshotPageEdges(engine, floor, bodyTop, exclude = null, select
     if (exclude?.has(h)) continue;
     const bx = objectBox(M, h);
     if (!bx) continue;
+    if (M._FPDFPageObj_GetType(h) === OBJ_TEXT && inSourceTableCell(bx, tables)) continue;
     const cy = (bx.b + bx.t) / 2;
     if (!selection && cy >= lo && cy <= hi) continue;
     edges.push({ h, index: i, bounds: bx, band: cy > hi ? "top" : "bottom" });

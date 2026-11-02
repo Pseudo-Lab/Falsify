@@ -1,0 +1,2520 @@
+{
+  "schema": "falsify.layout-tool-catalog.v2",
+  "tools": [
+    {
+      "name": "read_source",
+      "description": "Read a LaTeX file. Choose path and chunk, or locate before. Returns source text and chunk count.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "chunk": {
+            "type": "integer"
+          },
+          "before": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "replace_source",
+      "description": "Change an existing literal layout setting using one unique before/after source span. Keep document content and asset paths.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "before": {
+            "type": "string"
+          },
+          "after": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "before",
+          "after"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "compile_pdf",
+      "description": "Generate the current PDF. Returns its hash and compiler findings.",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "inspect_pdf",
+      "description": "Check the current PDF for overlaps, clipping, column and caption findings.",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "render_pages",
+      "description": "View up to four candidate pages. Page indices start at zero.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "pages": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 499
+            },
+            "maxItems": 4,
+            "uniqueItems": true
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "read_reference",
+      "description": "Read original PDF text and source regions. Continue each page with its returned next arguments until next is null.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "pages": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 499
+            },
+            "maxItems": 4,
+            "uniqueItems": true
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "textOffset": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "unitOffset": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "render_reference_pages",
+      "description": "View up to four original pages. Request matching candidate pages with render_pages.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "pages": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 499
+            },
+            "maxItems": 4,
+            "uniqueItems": true
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "restructure_source",
+      "description": "Set full-width front matter, body order, columns and header/footer units. Include every current unit once.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "plan": {
+            "type": "object",
+            "properties": {
+              "schema": {
+                "const": "falsify.paper-layout-plan.v1",
+                "type": "string"
+              },
+              "sourcePdfHash": {
+                "type": "string"
+              },
+              "frontMatter": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 5000
+              },
+              "order": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 5000
+              },
+              "furniture": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "placement": {
+                      "type": "string",
+                      "enum": [
+                        "header",
+                        "footer"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "placement"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "columns": {
+                "type": "integer",
+                "enum": [
+                  1,
+                  2
+                ]
+              }
+            },
+            "required": [
+              "schema",
+              "sourcePdfHash",
+              "frontMatter",
+              "order",
+              "furniture",
+              "columns"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "plan"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "finish",
+      "description": "Return the chosen candidate and a brief account of changes and remaining findings.",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "inspect_document",
+      "description": "List and search document blocks, fonts and figures. Continue with offset. Geometry identifies original and current positions.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string"
+          },
+          "pageIndex": {
+            "type": "integer"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "get_block",
+      "description": "Read one block, its source, positions and associated assets. Continue source text with offset, geometry hits with geometryOffset, and asset paths with assetOffset.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "blockId": {
+            "type": "string"
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 4096
+          },
+          "geometryOffset": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "assetOffset": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "blockId"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "render_region",
+      "description": "View an enlarged original or candidate rectangle. bbox is [left,top,right,bottom] in display points from the top left; use the geometry coordinateFrame.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "document": {
+            "type": "string",
+            "enum": [
+              "original",
+              "candidate"
+            ]
+          },
+          "pageIndex": {
+            "type": "integer"
+          },
+          "bbox": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 4,
+            "maxItems": 4
+          },
+          "scale": {
+            "type": "number"
+          },
+          "coordinateFrame": {
+            "type": "string",
+            "enum": [
+              "pdfjs-display",
+              "mupdf-display"
+            ]
+          }
+        },
+        "required": [
+          "document",
+          "pageIndex",
+          "bbox"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "update_layout",
+      "description": "Adjust one block by ID. Set spacing, type size, width, placement or neighboring block. Text stays unchanged.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "blockId": {
+            "type": "string"
+          },
+          "fontSizeBp": {
+            "type": "number"
+          },
+          "leadingBp": {
+            "type": "number"
+          },
+          "gapBeforeBp": {
+            "type": "number"
+          },
+          "gapAfterBp": {
+            "type": "number"
+          },
+          "indentBp": {
+            "type": "number"
+          },
+          "widthBp": {
+            "type": "number"
+          },
+          "columnSpan": {
+            "type": "integer",
+            "enum": [
+              1,
+              2
+            ]
+          },
+          "pageBreakBefore": {
+            "type": "boolean"
+          },
+          "keepWithNext": {
+            "type": "boolean"
+          },
+          "placement": {
+            "type": "string",
+            "enum": [
+              "flow",
+              "header",
+              "footer"
+            ]
+          },
+          "align": {
+            "type": "string",
+            "enum": [
+              "left",
+              "center",
+              "right",
+              "justify"
+            ]
+          },
+          "orderBefore": {
+            "type": "string"
+          },
+          "orderAfter": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "blockId"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "compare_document",
+      "description": "Compare candidate content and assets with the captured pre-layout PDF, including the selected RED changes.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "offset": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "checkpoint",
+      "description": "Save the current source as a named revision. A matching generated PDF is saved when available.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "restore_revision",
+      "description": "Return to a saved revision. Use revision IDs listed in execution.checkpoints.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "revisionId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "revisionId"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "inspect_fonts",
+      "description": "List project font files and inspect character coverage for text.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string"
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "set_typography",
+      "description": "Set document type size, leading and a font available in this project.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "fontPath": {
+            "type": "string"
+          },
+          "family": {
+            "type": "string"
+          },
+          "bodySizeBp": {
+            "type": "number"
+          },
+          "leadingBp": {
+            "type": "number"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "read_table",
+      "description": "Read source tables and cell previews. Select a table ID and continue its rows with rowOffset.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "blockId": {
+            "type": "string"
+          },
+          "tableId": {
+            "type": "string"
+          },
+          "pageIndex": {
+            "type": "integer"
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50
+          },
+          "rowOffset": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "rowLimit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "rebuild_table",
+      "description": "Typeset an observed table with the same cells, labels and precision. Set column widths or span; rows can describe content already present in current blocks.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "blockId": {
+            "type": "string"
+          },
+          "blockIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 5000
+          },
+          "tableId": {
+            "type": "string"
+          },
+          "columnWidthsBp": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 100
+          },
+          "columnSpan": {
+            "type": "integer",
+            "enum": [
+              1,
+              2
+            ]
+          },
+          "repeatHeader": {
+            "type": "boolean"
+          },
+          "rows": {
+            "type": "array",
+            "maxItems": 1000,
+            "items": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "text": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "text"
+                    ],
+                    "additionalProperties": false
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "get_figure",
+      "description": "List figures, panels, captions and project images, or read one selected figure.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "blockId": {
+            "type": "string"
+          },
+          "assetPath": {
+            "type": "string"
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "place_figure",
+      "description": "Size and place a figure with its caption. Preserve aspect ratio and image content.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "blockId": {
+            "type": "string"
+          },
+          "widthBp": {
+            "type": "number"
+          },
+          "heightBp": {
+            "type": "number"
+          },
+          "columnSpan": {
+            "type": "integer",
+            "enum": [
+              1,
+              2
+            ]
+          },
+          "placement": {
+            "type": "string",
+            "enum": [
+              "top",
+              "bottom",
+              "here",
+              "page"
+            ]
+          },
+          "keepCaption": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "blockId"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "replace_figure",
+      "description": "Replace one figure occurrence with a replacement image supplied by the user. Choose an allowed replacement path.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "blockId": {
+            "type": "string"
+          },
+          "assetPath": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "blockId",
+          "assetPath"
+        ],
+        "additionalProperties": false
+      }
+    }
+  ],
+  "actionSchema": {
+    "type": "object",
+    "properties": {
+      "tool": {
+        "type": "string",
+        "enum": [
+          "read_source",
+          "replace_source",
+          "compile_pdf",
+          "inspect_pdf",
+          "render_pages",
+          "read_reference",
+          "render_reference_pages",
+          "restructure_source",
+          "finish",
+          "inspect_document",
+          "get_block",
+          "render_region",
+          "update_layout",
+          "compare_document",
+          "checkpoint",
+          "restore_revision",
+          "inspect_fonts",
+          "set_typography",
+          "read_table",
+          "rebuild_table",
+          "get_figure",
+          "place_figure",
+          "replace_figure"
+        ]
+      },
+      "args": {
+        "anyOf": [
+          {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string"
+              },
+              "chunk": {
+                "type": "integer"
+              },
+              "before": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "path"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string"
+              },
+              "before": {
+                "type": "string"
+              },
+              "after": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "path",
+              "before",
+              "after"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {},
+            "required": [],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {},
+            "required": [],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "pages": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 499
+                },
+                "maxItems": 4,
+                "uniqueItems": true
+              }
+            },
+            "required": [],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "pages": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 499
+                },
+                "maxItems": 4,
+                "uniqueItems": true
+              },
+              "offset": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "textOffset": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "unitOffset": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "required": [],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "pages": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 499
+                },
+                "maxItems": 4,
+                "uniqueItems": true
+              }
+            },
+            "required": [],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "plan": {
+                "type": "object",
+                "properties": {
+                  "schema": {
+                    "const": "falsify.paper-layout-plan.v1",
+                    "type": "string"
+                  },
+                  "sourcePdfHash": {
+                    "type": "string"
+                  },
+                  "frontMatter": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "maxItems": 5000
+                  },
+                  "order": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "maxItems": 5000
+                  },
+                  "furniture": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "placement": {
+                          "type": "string",
+                          "enum": [
+                            "header",
+                            "footer"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "placement"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "columns": {
+                    "type": "integer",
+                    "enum": [
+                      1,
+                      2
+                    ]
+                  }
+                },
+                "required": [
+                  "schema",
+                  "sourcePdfHash",
+                  "frontMatter",
+                  "order",
+                  "furniture",
+                  "columns"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "plan"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {},
+            "required": [],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "query": {
+                "type": "string"
+              },
+              "pageIndex": {
+                "type": "integer"
+              },
+              "kind": {
+                "type": "string"
+              },
+              "offset": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "limit": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 50
+              }
+            },
+            "required": [],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "blockId": {
+                "type": "string"
+              },
+              "offset": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "limit": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 4096
+              },
+              "geometryOffset": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "assetOffset": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "blockId"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "document": {
+                "type": "string",
+                "enum": [
+                  "original",
+                  "candidate"
+                ]
+              },
+              "pageIndex": {
+                "type": "integer"
+              },
+              "bbox": {
+                "type": "array",
+                "items": {
+                  "type": "number"
+                },
+                "minItems": 4,
+                "maxItems": 4
+              },
+              "scale": {
+                "type": "number"
+              },
+              "coordinateFrame": {
+                "type": "string",
+                "enum": [
+                  "pdfjs-display",
+                  "mupdf-display"
+                ]
+              }
+            },
+            "required": [
+              "document",
+              "pageIndex",
+              "bbox"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "blockId": {
+                "type": "string"
+              },
+              "fontSizeBp": {
+                "type": "number"
+              },
+              "leadingBp": {
+                "type": "number"
+              },
+              "gapBeforeBp": {
+                "type": "number"
+              },
+              "gapAfterBp": {
+                "type": "number"
+              },
+              "indentBp": {
+                "type": "number"
+              },
+              "widthBp": {
+                "type": "number"
+              },
+              "columnSpan": {
+                "type": "integer",
+                "enum": [
+                  1,
+                  2
+                ]
+              },
+              "pageBreakBefore": {
+                "type": "boolean"
+              },
+              "keepWithNext": {
+                "type": "boolean"
+              },
+              "placement": {
+                "type": "string",
+                "enum": [
+                  "flow",
+                  "header",
+                  "footer"
+                ]
+              },
+              "align": {
+                "type": "string",
+                "enum": [
+                  "left",
+                  "center",
+                  "right",
+                  "justify"
+                ]
+              },
+              "orderBefore": {
+                "type": "string"
+              },
+              "orderAfter": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "blockId"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "offset": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "limit": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 50
+              }
+            },
+            "required": [],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "label": {
+                "type": "string"
+              }
+            },
+            "required": [],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "revisionId": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "revisionId"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "text": {
+                "type": "string"
+              },
+              "offset": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "limit": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 50
+              }
+            },
+            "required": [],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "fontPath": {
+                "type": "string"
+              },
+              "family": {
+                "type": "string"
+              },
+              "bodySizeBp": {
+                "type": "number"
+              },
+              "leadingBp": {
+                "type": "number"
+              }
+            },
+            "required": [],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "blockId": {
+                "type": "string"
+              },
+              "tableId": {
+                "type": "string"
+              },
+              "pageIndex": {
+                "type": "integer"
+              },
+              "offset": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "limit": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 50
+              },
+              "rowOffset": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "rowLimit": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 50
+              }
+            },
+            "required": [],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "blockId": {
+                "type": "string"
+              },
+              "blockIds": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 5000
+              },
+              "tableId": {
+                "type": "string"
+              },
+              "columnWidthsBp": {
+                "type": "array",
+                "items": {
+                  "type": "number"
+                },
+                "maxItems": 100
+              },
+              "columnSpan": {
+                "type": "integer",
+                "enum": [
+                  1,
+                  2
+                ]
+              },
+              "repeatHeader": {
+                "type": "boolean"
+              },
+              "rows": {
+                "type": "array",
+                "maxItems": 1000,
+                "items": {
+                  "type": "array",
+                  "maxItems": 100,
+                  "items": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "text": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "text"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            "required": [],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "blockId": {
+                "type": "string"
+              },
+              "assetPath": {
+                "type": "string"
+              },
+              "offset": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "limit": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 50
+              }
+            },
+            "required": [],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "blockId": {
+                "type": "string"
+              },
+              "widthBp": {
+                "type": "number"
+              },
+              "heightBp": {
+                "type": "number"
+              },
+              "columnSpan": {
+                "type": "integer",
+                "enum": [
+                  1,
+                  2
+                ]
+              },
+              "placement": {
+                "type": "string",
+                "enum": [
+                  "top",
+                  "bottom",
+                  "here",
+                  "page"
+                ]
+              },
+              "keepCaption": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "blockId"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "blockId": {
+                "type": "string"
+              },
+              "assetPath": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "blockId",
+              "assetPath"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "message": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "tool",
+      "args",
+      "message"
+    ],
+    "additionalProperties": false
+  },
+  "providerActionSchema": {
+    "type": "object",
+    "properties": {
+      "tool": {
+        "type": "string",
+        "enum": [
+          "read_source",
+          "replace_source",
+          "compile_pdf",
+          "inspect_pdf",
+          "render_pages",
+          "read_reference",
+          "render_reference_pages",
+          "restructure_source",
+          "finish",
+          "inspect_document",
+          "get_block",
+          "render_region",
+          "update_layout",
+          "compare_document",
+          "checkpoint",
+          "restore_revision",
+          "inspect_fonts",
+          "set_typography",
+          "read_table",
+          "rebuild_table",
+          "get_figure",
+          "place_figure",
+          "replace_figure"
+        ]
+      },
+      "args": {
+        "anyOf": [
+          {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string"
+              },
+              "chunk": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "before": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "path",
+              "chunk",
+              "before"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string"
+              },
+              "before": {
+                "type": "string"
+              },
+              "after": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "path",
+              "before",
+              "after"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {},
+            "required": [],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {},
+            "required": [],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "pages": {
+                "anyOf": [
+                  {
+                    "type": "array",
+                    "items": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 499
+                    },
+                    "maxItems": 4
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "pages"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "pages": {
+                "anyOf": [
+                  {
+                    "type": "array",
+                    "items": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 499
+                    },
+                    "maxItems": 4
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "offset": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "textOffset": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "unitOffset": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "pages",
+              "offset",
+              "textOffset",
+              "unitOffset"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "pages": {
+                "anyOf": [
+                  {
+                    "type": "array",
+                    "items": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 499
+                    },
+                    "maxItems": 4
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "pages"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "plan": {
+                "type": "object",
+                "properties": {
+                  "schema": {
+                    "const": "falsify.paper-layout-plan.v1",
+                    "type": "string"
+                  },
+                  "sourcePdfHash": {
+                    "type": "string"
+                  },
+                  "frontMatter": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "maxItems": 5000
+                  },
+                  "order": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "maxItems": 5000
+                  },
+                  "furniture": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "placement": {
+                          "type": "string",
+                          "enum": [
+                            "header",
+                            "footer"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "placement"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "columns": {
+                    "type": "integer",
+                    "enum": [
+                      1,
+                      2
+                    ]
+                  }
+                },
+                "required": [
+                  "schema",
+                  "sourcePdfHash",
+                  "frontMatter",
+                  "order",
+                  "furniture",
+                  "columns"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "plan"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {},
+            "required": [],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "query": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "pageIndex": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "kind": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "offset": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "limit": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 50
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "query",
+              "pageIndex",
+              "kind",
+              "offset",
+              "limit"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "blockId": {
+                "type": "string"
+              },
+              "offset": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "limit": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 4096
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "geometryOffset": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "assetOffset": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "blockId",
+              "offset",
+              "limit",
+              "geometryOffset",
+              "assetOffset"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "document": {
+                "type": "string",
+                "enum": [
+                  "original",
+                  "candidate"
+                ]
+              },
+              "pageIndex": {
+                "type": "integer"
+              },
+              "bbox": {
+                "type": "array",
+                "items": {
+                  "type": "number"
+                },
+                "minItems": 4,
+                "maxItems": 4
+              },
+              "scale": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "coordinateFrame": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "pdfjs-display",
+                      "mupdf-display"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "document",
+              "pageIndex",
+              "bbox",
+              "scale",
+              "coordinateFrame"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "blockId": {
+                "type": "string"
+              },
+              "fontSizeBp": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "leadingBp": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "gapBeforeBp": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "gapAfterBp": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "indentBp": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "widthBp": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "columnSpan": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "enum": [
+                      1,
+                      2
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "pageBreakBefore": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "keepWithNext": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "placement": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "flow",
+                      "header",
+                      "footer"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "align": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "left",
+                      "center",
+                      "right",
+                      "justify"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "orderBefore": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "orderAfter": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "blockId",
+              "fontSizeBp",
+              "leadingBp",
+              "gapBeforeBp",
+              "gapAfterBp",
+              "indentBp",
+              "widthBp",
+              "columnSpan",
+              "pageBreakBefore",
+              "keepWithNext",
+              "placement",
+              "align",
+              "orderBefore",
+              "orderAfter"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "offset": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "limit": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 50
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "offset",
+              "limit"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "label": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "label"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "revisionId": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "revisionId"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "text": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "offset": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "limit": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 50
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "text",
+              "offset",
+              "limit"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "fontPath": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "family": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "bodySizeBp": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "leadingBp": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "fontPath",
+              "family",
+              "bodySizeBp",
+              "leadingBp"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "blockId": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "tableId": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "pageIndex": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "offset": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "limit": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 50
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "rowOffset": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "rowLimit": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 50
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "blockId",
+              "tableId",
+              "pageIndex",
+              "offset",
+              "limit",
+              "rowOffset",
+              "rowLimit"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "blockId": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "blockIds": {
+                "anyOf": [
+                  {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "maxItems": 5000
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "tableId": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "columnWidthsBp": {
+                "anyOf": [
+                  {
+                    "type": "array",
+                    "items": {
+                      "type": "number"
+                    },
+                    "maxItems": 100
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "columnSpan": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "enum": [
+                      1,
+                      2
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "repeatHeader": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "rows": {
+                "anyOf": [
+                  {
+                    "type": "array",
+                    "maxItems": 1000,
+                    "items": {
+                      "type": "array",
+                      "maxItems": 100,
+                      "items": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "text": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "text"
+                            ],
+                            "additionalProperties": false
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "blockId",
+              "blockIds",
+              "tableId",
+              "columnWidthsBp",
+              "columnSpan",
+              "repeatHeader",
+              "rows"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "blockId": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "assetPath": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "offset": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "limit": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 50
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "blockId",
+              "assetPath",
+              "offset",
+              "limit"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "blockId": {
+                "type": "string"
+              },
+              "widthBp": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "heightBp": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "columnSpan": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "enum": [
+                      1,
+                      2
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "placement": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "top",
+                      "bottom",
+                      "here",
+                      "page"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "keepCaption": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "blockId",
+              "widthBp",
+              "heightBp",
+              "columnSpan",
+              "placement",
+              "keepCaption"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "blockId": {
+                "type": "string"
+              },
+              "assetPath": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "blockId",
+              "assetPath"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "message": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "tool",
+      "args",
+      "message"
+    ],
+    "additionalProperties": false
+  }
+}

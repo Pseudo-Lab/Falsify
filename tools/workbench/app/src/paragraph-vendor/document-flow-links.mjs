@@ -60,11 +60,11 @@ function normalizedSource(chars,band) {
   return {text,indices};
 }
 
-function mapSourceGlyphs(sourceEngine,sourceBands,targetGlyphs,edits,expectedPageText) {
+function mapSourceGlyphs(sourceEngine,sourceBands,targetGlyphs,edits,expectedPageText,sourceCharacterProvider) {
   const expected=[],mapping=new Map(),sources=new Map();
   for(const band of sourceBands){
     const chars=readLinkPageCharacters(sourceEngine,band.sourcePageIndex);sources.set(band.sourcePageIndex,chars);
-    const normalized=normalizedSource(chars,band);
+    const normalized=normalizedSource(sourceCharacterProvider ? sourceCharacterProvider(band,chars) : chars,band);
     const exp=expectedPageText(normalized.text,edits.filter(e=>e.pageIndex===band.sourcePageIndex),{includeSpans:true});
     if(!exp.ok)fail('document_flow_link_edit_mapping_ambiguous');
     const append=(start,end)=>{
@@ -78,9 +78,15 @@ function mapSourceGlyphs(sourceEngine,sourceBands,targetGlyphs,edits,expectedPag
     let at=0;
     for(const span of exp.spans){
       append(at,span.a);
-      // Even a same-label occurrence in After is not source identity. A link
-      // intersecting an explicit replacement is conservatively unsupported.
-      for(const ch of span.after)if(ch.charCodeAt(0)>32)expected.push(ch.charCodeAt(0));
+      // Only common outer runs have unambiguous source identity. The changed
+      // middle remains unmapped even if it happens to repeat a link label.
+      const before=normalized.text.slice(span.a,span.b), after=span.after;
+      let prefix=0, suffix=0;
+      while(prefix<before.length&&prefix<after.length&&before[prefix]===after[prefix])prefix++;
+      while(suffix<before.length-prefix&&suffix<after.length-prefix&&before[before.length-1-suffix]===after[after.length-1-suffix])suffix++;
+      append(span.a,span.a+prefix);
+      for(let j=prefix;j<after.length-suffix;j++)if(after.charCodeAt(j)>32)expected.push(after.charCodeAt(j));
+      append(span.b-suffix,span.b);
       at=span.b;
     }
     append(at,normalized.text.length);
@@ -89,10 +95,10 @@ function mapSourceGlyphs(sourceEngine,sourceBands,targetGlyphs,edits,expectedPag
   return {mapping,sources};
 }
 
-export function deriveNativeLinkMoves(sourceEngine,sourceBands,targetGlyphs,edits,model,expectedPageText,authorizedTargets=new Set()) {
+export function deriveNativeLinkMoves(sourceEngine,sourceBands,targetGlyphs,edits,model,expectedPageText,authorizedTargets=new Set(),sourceCharacterProvider) {
   if(!model||!model.annotations.some(a=>sourceBands.some(b=>b.sourcePageIndex===a.sourcePageIndex)))return [];
   const ids=sourceBands.map(b=>b.sourcePageIndex);
-  const {mapping,sources}=mapSourceGlyphs(sourceEngine,sourceBands,targetGlyphs,edits,expectedPageText);
+  const {mapping,sources}=mapSourceGlyphs(sourceEngine,sourceBands,targetGlyphs,edits,expectedPageText,sourceCharacterProvider);
   const moves=[],claimed=new Set();
   for(const descriptor of model.annotations.filter(a=>ids.includes(a.sourcePageIndex))){
     if(descriptor.eligible!==true||descriptor.kind!=='link')fail(descriptor.reason||'document_flow_annotation_unsupported');
@@ -129,7 +135,7 @@ export function deriveNativeLinkMoves(sourceEngine,sourceBands,targetGlyphs,edit
 // A FitR rectangle is only transportable when its entire area belongs to one
 // source text object and every intersecting glyph has one rigid correspondence.
 // Multi-object and partial-glyph ownership deliberately remain barriers.
-export function deriveNativeFitRMoves(sourceEngine,sourceBands,targetGlyphs,edits,model,expectedPageText) {
+export function deriveNativeFitRMoves(sourceEngine,sourceBands,targetGlyphs,edits,model,expectedPageText,sourceCharacterProvider) {
   const ids=new Set(sourceBands.map(b=>b.sourcePageIndex));
   const destinations=new Map();
   for(const a of model?.annotations||[])for(const d of a.internalDestinations||[]){
@@ -139,7 +145,7 @@ export function deriveNativeFitRMoves(sourceEngine,sourceBands,targetGlyphs,edit
     destinations.set(d.id,d);
   }
   if(!destinations.size)return [];
-  const {mapping,sources}=mapSourceGlyphs(sourceEngine,sourceBands,targetGlyphs,edits,expectedPageText);
+  const {mapping,sources}=mapSourceGlyphs(sourceEngine,sourceBands,targetGlyphs,edits,expectedPageText,sourceCharacterProvider);
   const moves=[];
   for(const d of destinations.values()){
     if(d.kind!=='FitR'||!Array.isArray(d.operands)||d.operands.length!==4||!d.operands.every(Number.isFinite))fail('document_flow_destination_unsupported');
@@ -164,6 +170,52 @@ export function deriveNativeFitRMoves(sourceEngine,sourceBands,targetGlyphs,edit
     const outputOwned=targetGlyphs.flatMap((c,i)=>c.outputPageIndex===outputPageIndex&&intersects(c.box,translated)?[i]:[]);
     if(outputOwned.length!==targetIndices.size||outputOwned.some(i=>!targetIndices.has(i)))fail('document_flow_destination_ownership_ambiguous');
     moves.push({id:d.id,sourcePageIndex:d.targetSourcePageIndex,outputPageIndex,dx,dy});
+  }
+  return moves;
+}
+
+// Bind an XYZ viewport to the unique nearby source text object at its
+// upper-left anchor. Preserve the original zoom and require every glyph of
+// that object to have a single rigid, unedited correspondence.
+export function deriveNativeXYZMoves(sourceEngine, sourceBands, targetGlyphs, edits, model, expectedPageText, sourceCharacterProvider) {
+  const ids = new Set(sourceBands.map(b => b.sourcePageIndex)), destinations = new Map();
+  for (const a of model?.annotations || []) for (const d of a.internalDestinations || []) {
+    if (!ids.has(d.targetSourcePageIndex)) continue;
+    const old = destinations.get(d.id);
+    if (old && JSON.stringify(old) !== JSON.stringify(d)) fail('document_flow_destination_alias_mismatch');
+    destinations.set(d.id, d);
+  }
+  if (!destinations.size) return [];
+  const {mapping, sources} = mapSourceGlyphs(sourceEngine, sourceBands, targetGlyphs, edits, expectedPageText, sourceCharacterProvider);
+  const moves = [];
+  for (const d of destinations.values()) {
+    if (d.kind !== 'XYZ' || d.operands.length !== 3 || !Number.isFinite(d.operands[0]) || !Number.isFinite(d.operands[1]) ||
+        !(d.operands[2] === null || Number.isFinite(d.operands[2]))) fail('document_flow_destination_unsupported');
+    const [x, y] = d.operands, chars = sources.get(d.targetSourcePageIndex);
+    const groups = new Map();
+    for (const c of chars) if (c.u > 32 && c.object && c.box && !c.generated) {
+      const group = groups.get(c.object) || []; group.push(c); groups.set(c.object, group);
+    }
+    const candidates = [...groups.values()].filter(g => {
+      const l = Math.min(...g.map(c => c.box.l)), t = Math.max(...g.map(c => c.box.t));
+      return l >= x - 0.5 && l <= x + 4 && t <= y + 2 && t >= y - 8;
+    });
+    if (candidates.length !== 1) fail('document_flow_destination_ownership_ambiguous');
+    let dx, dy, outputPageIndex; const targetIndices = new Set();
+    for (const c of candidates[0]) {
+      const at = mapping.get(`${d.targetSourcePageIndex}:${c.index}`);
+      if (at === undefined) fail('document_flow_destination_edited');
+      targetIndices.add(at);
+      const t = targetGlyphs[at];
+      if (dx === undefined) { dx = t.box.l - c.box.l; dy = t.box.b - c.box.b; outputPageIndex = t.outputPageIndex; }
+      if (t.outputPageIndex !== outputPageIndex || !near(t.box.l, c.box.l + dx) || !near(t.box.r, c.box.r + dx) ||
+          !near(t.box.b, c.box.b + dy) || !near(t.box.t, c.box.t + dy)) fail('document_flow_destination_not_rigid');
+    }
+    const bounds = {l:Math.min(...candidates[0].map(c=>c.box.l))+dx, r:Math.max(...candidates[0].map(c=>c.box.r))+dx,
+      b:Math.min(...candidates[0].map(c=>c.box.b))+dy, t:Math.max(...candidates[0].map(c=>c.box.t))+dy};
+    const overlapping = targetGlyphs.flatMap((c,i) => c.outputPageIndex===outputPageIndex && c.box && intersects(c.box,bounds) ? [i] : []);
+    if (overlapping.some(i => !targetIndices.has(i))) fail('document_flow_destination_ownership_ambiguous');
+    moves.push({id:d.id, sourcePageIndex:d.targetSourcePageIndex, outputPageIndex, dx, dy});
   }
   return moves;
 }

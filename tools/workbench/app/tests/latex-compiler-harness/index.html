@@ -1,0 +1,21 @@
+<!doctype html><meta charset="utf-8"><title>BusyTeX synthetic fixture</title>
+<button id="compile">Compile synthetic fixture</button><button id="cancel">Cancel</button><pre id="status">Ready</pre><script type="module">
+import {createLatexCompiler} from '../../src/latex-compiler-adapter.mjs';
+import * as mapApi from './map-bundle.mjs';
+import * as pdfjs from '../../dist/vendor/pdf.mjs';
+pdfjs.GlobalWorkerOptions.workerSrc=new URL('../../dist/vendor/pdf.worker.mjs',import.meta.url).href;
+window.fixtureMapApi=mapApi;
+window.fixturePdf=pdfjs;
+const paths=['main.tex','sections/body.tex','refs.bib','figure.png'];
+const compiler=createLatexCompiler();
+document.querySelector('#cancel').onclick=()=>compiler.cancel();
+window.fixtureCompiler=compiler;
+document.querySelector('#compile').onclick=async()=>{
+ const status=document.querySelector('#status'); status.textContent='Loading fixture';
+ try {const files=await Promise.all(paths.map(async path=>({path,bytes:new Uint8Array(await (await fetch('../fixtures/latex-source/project/'+path)).arrayBuffer())})));
+ window.fixtureProject={id:'synthetic',mainFile:'main.tex',engine:'pdflatex',files};
+ const result=await compiler.compile({project:window.fixtureProject,onProgress:p=>status.textContent=p.message});
+ window.compileResult=result; status.textContent=JSON.stringify({success:result.success,pdfBytes:result.pdfBytes?.length,synctexBytes:result.synctex?.length,diagnostics:result.diagnostics,timings:result.timings});
+ } catch(e){status.textContent=String(e)}
+};
+</script>

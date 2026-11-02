@@ -16,8 +16,9 @@
 // self-check, not an independent or rendering-based release check.
 
 import { createHash } from "node:crypto";
-import { compareSourceGeometry } from "../paragraph-geometry-conservation.mjs";
+import { canonicalPage, compareSourceGeometry } from "../paragraph-geometry-conservation.mjs";
 import { resolvePageFraction } from "./continuation-template.mjs";
+import { sourceTableCells, inSourceTableCell } from "../paragraph-source-tables.mjs";
 import { deriveDocumentFlowBand } from "./document-flow-band.mjs";
 import { deriveNativeLinkMoves, deriveNativeFitRMoves, nativeFitRTargetPages, savedLinkGlyphs } from "./document-flow-links.mjs";
 import { verifySavedUnderlines } from "./document-flow-underlines.mjs";
@@ -108,6 +109,25 @@ export function capturePageLayout(engine, pageIndex, paragraphs) {
       topLevel: slots.length === handles.length,
     };
   });
+  // Recover edge-band fragments only when source baselines establish that
+  // they belong to a multi-line body paragraph in the same column. A marker
+  // may sit beside a body line; a final line may continue its regular pitch.
+  for (const q of paras) {
+    if (q.role === "body" || !q.box || q.baselines.length !== 1) continue;
+    const y = q.baselines[0];
+    const owner = paras.find((p) => {
+      if (p.role !== "body" || !p.box || p.baselines.length < 3) return false;
+      const gaps = p.baselines.slice(1).map((v, i) => p.baselines[i] - v);
+      const pitch = median(gaps);
+      if (!(pitch > 0) || !gaps.every((g) => Math.abs(g - pitch) <= 0.1 * pitch)) return false;
+      const horizontalGap = Math.max(0, p.box.x - (q.box.x + q.box.w), q.box.x - (p.box.x + p.box.w));
+      const onLine = p.baselines.some((v) => Math.abs(v - y) <= Math.min(5, pitch * 0.5));
+      const continuation = Math.abs(Math.min(...p.baselines) - pitch - y) <= 1.5
+        && Math.abs(q.box.x - p.box.x) <= 2;
+      return (onLine && horizontalGap <= 0.8 * pitch && (horizontalGap === 0 || q.box.w <= 2 * pitch)) || continuation;
+    });
+    if (owner) q.role = "body";
+  }
   // A publisher footer can exceed the short-text heuristic. Require a
   // separate page number on its baseline inside the bottom edge band.
   const numbers = paras.filter((q) => q.role === "page_number" && q.box?.top <= edgeBottomY + pageH * EDGE_BAND);
@@ -332,7 +352,7 @@ export function repairPageLayout(engine, pageIndex, context, touched, options = 
 
 // Propagate only the part of growth that exceeds existing vertical gaps.
 // Use the same plan for in-page repair and continuation planning.
-export function cascadeShifts(ctx, grown) {
+export function cascadeShifts(ctx, grown, { preserveSourceGaps = false } = {}) {
   const growth = new Map(grown.map((g) => [g.id, g.delta]));
   const ordered = ctx.paras.filter((q) => q.box && q.role === "body")
     .sort((a, b) => b.box.top - a.box.top || a.box.x - b.box.x);
@@ -341,10 +361,29 @@ export function cascadeShifts(ctx, grown) {
     const q = ordered[i];
     let shift = 0;
     for (const prev of ordered.slice(0, i)) {
-      if (hOverlap(prev.box, q.box) < 0.35 * Math.min(prev.box.w, q.box.w)) continue;
-      if (q.box.top > bottomOf(prev.box) + 0.5) continue;
-      const gap = Math.max(0, bottomOf(prev.box) - q.box.top);
-      shift = Math.max(shift, (shifts.get(prev.id) || 0) + (growth.get(prev.id) || 0) - gap);
+      const displacement = (shifts.get(prev.id) || 0) + (growth.get(prev.id) || 0);
+      if (displacement <= 0.01) continue;
+      const overlap = hOverlap(prev.box, q.box);
+      const prevLines = prev.baselines || [], lines = q.baselines || [];
+      const horizontalGap = Math.max(0, -overlap);
+      // Inline markers and split runs share a source line with a multi-line
+      // owner, even when their boxes do not horizontally overlap.
+      const inline = prevLines.length > 1 && lines.some((y) => prevLines.some((v) => Math.abs(y - v) <= 1.5))
+        && horizontalGap <= Math.max(8, 0.8 * Math.max(prev.size || 0, q.size || 0))
+        && (horizontalGap === 0 || Math.min(prev.box.w, q.box.w) <= 2 * Math.max(prev.size || 0, q.size || 0, 10));
+      if (inline) { shift = Math.max(shift, displacement); continue; }
+      if (overlap < 0.35 * Math.min(prev.box.w, q.box.w)) continue;
+      // Font metric boxes can overlap while their source baselines remain
+      // ordered. Accept only a small overlap backed by distinct baselines.
+      const metricOverlap = q.box.top - bottomOf(prev.box);
+      if (metricOverlap > 0.5 && !(metricOverlap <= 2 && prevLines.length && lines.length
+        && Math.max(...lines) < Math.min(...prevLines) - 0.5)) continue;
+      const gap = Math.max(0, -metricOverlap);
+      const needed = displacement - gap;
+      // Retain two points of source separation, while allowing larger
+      // paragraph gaps to absorb growth before moving the downstream chain.
+      const reserved = displacement - Math.max(0, gap - 2);
+      shift = Math.max(shift, preserveSourceGaps && needed > 0.01 ? reserved : needed);
     }
     if (shift > 0.01) shifts.set(q.id, shift);
   }
@@ -383,13 +422,74 @@ export function cascadeBarrier(engine, ctx, grown, shifts) {
 // EDGE_BAND of the page's content extent: the saved-PDF check reads whole
 // lines inside that band as header/footer content, so body text is never
 // moved into it unless the source body already reached lower.
-function cascade(engine, ctx, grown, touchedIds, repairs, warnings, allowOverflow = false) {
+export function cascadeFloor(ctx) {
   const edgeTops = ctx.paras.filter((q) => q.box && q.role !== "body" && q.box.top < ctx.pageH / 2).map((q) => q.box.top);
   const bodyBottoms = ctx.paras.filter((q) => q.box && q.role === "body").map((q) => bottomOf(q.box));
   const pageBottom = Math.min(...ctx.paras.filter((q) => q.box).map((q) => bottomOf(q.box)));
-  const floor = edgeTops.length
+  return edgeTops.length
     ? Math.max(Math.max(...edgeTops) + 2, Math.min(pageBottom + EDGE_BAND * ctx.pageH, ...bodyBottoms))
-    : Math.min(...bodyBottoms, Infinity);
+    : Math.min(ctx.pageH * EDGE_BAND, ...bodyBottoms);
+}
+
+// Reserve room before rebuilding a model whose newly inserted suffix would
+// otherwise merge with the next paragraph. Source handles, rather than the
+// model IDs invalidated by isolation, identify the paragraphs to move.
+// The caller must undo subsequent history steps before calling rollback.
+export function reserveCascadeSpace(engine, ctx, grown, { targetHandles = [] } = {}) {
+  const fail = code => ({ ok: false, code });
+  const validBox = b => b && [b.x,b.top,b.w,b.h].every(Number.isFinite) && b.w > 0 && b.h > 0;
+  if (!ctx || !Number.isFinite(ctx.pageH) || ctx.pageH <= 0 || !Array.isArray(ctx.paras) || !Array.isArray(grown) || grown.length !== 1 ||
+      ctx.paras.some(q => q.box && !validBox(q.box)) ||
+      grown.some(g => !validBox(g?.box) || !Number.isFinite(g.delta) || g.delta <= 0 || !ctx.paras.some(q => q.id === g.id && q.role === 'body'))) return fail('reserve_invalid');
+  if (!uprightPage(engine)) return fail('reserve_transform_unsupported');
+  const live = new Set(listObjects(engine));
+  if (!Array.isArray(targetHandles) || targetHandles.some(h => !live.has(h >>> 0) || engine.M._FPDFPageObj_GetType(h) !== OBJ_TEXT)) return fail('reserve_target_invalid');
+  const shifts = cascadeShifts(ctx, grown, { preserveSourceGaps: true }), floor = cascadeFloor(ctx);
+  const moved = ctx.paras.filter(q => shifts.has(q.id));
+  if (moved.some(q => !q.editable || q.sharesObjects || !q.topLevel || !q.handles?.length || q.handles.some(h => !live.has(h >>> 0)))) return fail('reserve_objects_unavailable');
+  const handles = moved.flatMap(q => q.handles.map(h => h >>> 0));
+  if (new Set(handles).size !== handles.length || handles.some(h => targetHandles.includes(h))) return fail('reserve_shared_objects');
+  if (moved.some(q => bottomOf(q.box) - shifts.get(q.id) < floor - .01) || grown.some(g => bottomOf(g.box) - g.delta - (shifts.get(g.id) || 0) < floor - .01)) return fail('reserve_no_room');
+  const lookup = new Map(ctx.paras.map(q => [q.id, (q.handles || []).filter(h => live.has(h >>> 0))]));
+  // New target handles are body-owned for collision checking, but are never
+  // themselves moved by the reservation.
+  lookup.set(grown[0].id, [...(lookup.get(grown[0].id) || []), ...targetHandles]);
+  const view = Object.create(engine);
+  view.paragraphObjects = id => lookup.get(id) || [];
+  if (cascadeBarrier(view, ctx, grown, shifts) !== null) return fail('reserve_foreign_object');
+  const next = { ...ctx, paras: ctx.paras.map(q => {
+    const dy = shifts.get(q.id) || 0;
+    return dy ? { ...q, box: { ...q.box, top: q.box.top - dy }, baselines: q.baselines?.map(y => y - dy) } : q;
+  }) };
+  if (!handles.length) return { ok: true, context: next, shifts, rollback: () => true };
+  if (!['historyDepth','historyBeginStep','historyEndStep','historyNoteMatrix','historyUndo','translateObject'].every(k => typeof engine[k] === 'function')) return fail('reserve_history_unavailable');
+  const depth = engine.historyDepth().undo;
+  const translated = [];
+  engine.historyBeginStep('falsify-reserve-flow');
+  try {
+    for (const q of moved) for (const h of q.handles) {
+      engine.historyNoteMatrix(h);
+      engine.translateObject(h, 0, -shifts.get(q.id));
+      translated.push([h, shifts.get(q.id)]);
+    }
+  } catch (error) {
+    for (const [h, dy] of translated.reverse()) engine.translateObject(h, 0, dy);
+    throw error;
+  } finally { engine.historyEndStep(); }
+  if (engine.historyDepth().undo !== depth + 1) {
+    for (const [h, dy] of translated.reverse()) engine.translateObject(h, 0, dy);
+    return fail('reserve_history_unavailable');
+  }
+  let pending = true;
+  return { ok: true, context: next, shifts, rollback: () => {
+    if (!pending || engine.historyDepth().undo !== depth + 1) return false;
+    pending = false;
+    return engine.historyUndo();
+  } };
+}
+
+function cascade(engine, ctx, grown, touchedIds, repairs, warnings, allowOverflow = false) {
+  const floor = cascadeFloor(ctx);
   const plan = cascadeShifts(ctx, grown);
   // Never silently move a paragraph that the engine cannot edit.
   for (const [id] of plan) {
@@ -453,7 +553,14 @@ export function restoreSourceOrder(engine, ctx, repairs, warnings) {
   const current = listObjects(engine);
   const present = new Set(current);
   const ownerOfSource = new Map();
-  for (const q of ctx.paras) for (const h of q.handles) ownerOfSource.set(h, q.id);
+  for (const q of ctx.paras) for (const h of q.handles) {
+    if (ownerOfSource.has(h) && ownerOfSource.get(h) !== q.id) {
+      warnings.push({ code: "object_shared_between_paragraphs", id: q.id, severity: "warning" });
+      repairs.push({ kind: "reading_order", action: "skipped", reason: "object_shared_between_paragraphs" });
+      return;
+    }
+    ownerOfSource.set(h, q.id);
+  }
 
   const changed = [];
   const claimed = new Map();
@@ -479,29 +586,48 @@ export function restoreSourceOrder(engine, ctx, repairs, warnings) {
       if (o !== undefined && o !== q.id) return fail("handle_identity_reused", { id: q.id });
       if (o === undefined && ctx.objects.includes(h)) return fail("handle_identity_reused", { id: q.id });
     }
-    // A source paragraph can end in an overlay above its own masking path.
-    // Retain that final painter slot; moving its replacement to the first
-    // slot would put the new text underneath the surviving mask. Other
-    // objects retain their relative order. The preview and saved checks
-    // still report layout changes independently of this ordering repair.
     if (interleaved) warnings.push({ code: "interleaved_source_overlay_order", id: q.id, severity: "warning" });
-    changed.push({ id: q.id, first: ctx.objects[interleaved ? hi : lo], now });
+    const source = ctx.objects.filter((h) => ownerOfSource.get(h) === q.id);
+    const survivors = source.filter((h) => now.includes(h));
+    const currentSurvivors = now.filter((h) => source.includes(h));
+    if (survivors.length !== currentSurvivors.length || survivors.some((h, i) => h !== currentSurvivors[i])) {
+      return fail("surviving_source_order_ambiguous", { id: q.id });
+    }
+    // Surviving handles anchor their original painter slots. Fresh handles
+    // can only occupy deleted source slots in the same interval between
+    // anchors; a fully replaced interleaved paragraph keeps the existing
+    // final-slot overlay policy.
+    const insertions = new Map();
+    let srcStart = 0, nowStart = 0;
+    for (const anchor of [...survivors, null]) {
+      const srcEnd = anchor === null ? source.length : source.indexOf(anchor, srcStart);
+      const nowEnd = anchor === null ? now.length : now.indexOf(anchor, nowStart);
+      const deleted = source.slice(srcStart, srcEnd);
+      const fresh = now.slice(nowStart, nowEnd);
+      if (fresh.length && !deleted.length) return fail("replacement_without_source_slot", { id: q.id });
+      if (fresh.length) {
+        const slot = interleaved ? deleted[deleted.length - 1] : deleted[0];
+        insertions.set(slot, fresh);
+      }
+      srcStart = srcEnd + 1;
+      nowStart = nowEnd + 1;
+    }
+    changed.push({ id: q.id, insertions, survivors: new Set(survivors) });
   }
   if (!changed.length) {
     repairs.push({ kind: "reading_order", action: "unchanged", moved: 0 });
     return;
   }
   const changedIds = new Set(changed.map((c) => c.id));
-  const firstSlot = new Map(changed.map((c) => [c.first, c]));
+  const byId = new Map(changed.map((c) => [c.id, c]));
   const desired = [];
   for (const h of ctx.objects) {
-    const c = firstSlot.get(h);
+    const c = byId.get(ownerOfSource.get(h));
     if (c) {
-      const pos = new Map(current.map((x, i) => [x, i]));
-      desired.push(...[...c.now].sort((a, b) => pos.get(a) - pos.get(b)));
+      if (c.insertions.has(h)) desired.push(...c.insertions.get(h));
+      if (c.survivors.has(h)) desired.push(h);
       continue;
     }
-    if (changedIds.has(ownerOfSource.get(h))) continue;
     if (!present.has(h)) continue;
     if (claimed.has(h) && changedIds.has(claimed.get(h))) continue;
     desired.push(h);
@@ -595,8 +721,15 @@ function readStyle(M, tp, i, buf) {
 function sameStyle(a, b) {
   if (!a || !b) return a === b;
   const eq = (x, y, tol = 0) => (x === null || y === null ? x === y : x.every((v, k) => Math.abs(v - y[k]) <= tol));
-  return a.font !== null && a.font === b.font && a.flags === b.flags && Math.abs(a.size - b.size) <= 0.01 && a.render === b.render
-    && eq(a.fill, b.fill) && eq(a.stroke, b.stroke) && eq(a.mat, b.mat, 1e-3);
+  const transform = (s) => s.mat && Number.isFinite(s.size) && s.size > 0
+    ? s.mat.map((v) => v * s.size) : null;
+  // The same effective transform may be serialized as size 1 and a scaled
+  // matrix, or as the font size and an identity matrix. Do not round away
+  // metric drift: each effective component has the existing 0.01pt bound.
+  const matrixEqual = a.mat && b.mat ? eq(transform(a), transform(b), 0.01)
+    : a.mat === b.mat && Math.abs(a.size - b.size) <= 0.01;
+  return a.font !== null && a.font === b.font && a.flags === b.flags && a.render === b.render
+    && eq(a.fill, b.fill) && eq(a.stroke, b.stroke) && matrixEqual;
 }
 
 const sameStyles = (a, b) => a.length === b.length && a.every((c, k) => sameStyle(c.style ?? null, b[k].style ?? null));
@@ -692,20 +825,16 @@ export function edgeGlyphs(g) {
   return g.glyphs.filter((c) => keep.has(c));
 }
 
-// Boxes of the paragraphs a page model classifies as body (see classify)
-// that also reach out of the page's edge bands, so they cannot be a running
-// header or footer: a body paragraph whose last lines sit in the bottom band
-// of a dense page. null when model space is not plain user space.
+// Source model body boxes, including body text inside the glyph-extent edge
+// band. null when model space is not plain user space.
 function bodyBoxes(engine, pageIndex, g) {
   ensurePage(engine, pageIndex);
   if (typeof engine.buildModel !== "function" || !uprightPage(engine) || !g.glyphs.length) return null;
   const paras = engine.buildModel();
   const boxes = paras.filter((p) => p.box).map((p) => p.box);
   const edgeBottomY = boxes.length ? Math.min(0, ...boxes.map(bottomOf)) : 0;
-  const lo = Math.min(...g.glyphs.map((c) => c.b)) + EDGE_BAND * g.H;
-  const hi = Math.max(...g.glyphs.map((c) => c.t)) - EDGE_BAND * g.H;
   return paras
-    .filter((p) => p.box && classify(p, engine.pageHeight, edgeBottomY) === "body" && p.box.top > lo && bottomOf(p.box) < hi)
+    .filter((p) => p.box && classify(p, engine.pageHeight, edgeBottomY) === "body")
     .map((p) => p.box);
 }
 
@@ -724,27 +853,141 @@ const inBoxes = (c, boxes) => {
 function edgeBodySplit(src, out, i, oi, s, o, es, eo) {
   const sb = bodyBoxes(src, i, s), ob = bodyBoxes(out, oi, o);
   if (!sb || !ob) return null;
-  const pending = new Map();
-  for (const d of eo) pending.set(d.u, [...(pending.get(d.u) || []), d]);
-  const at = (c) => {
-    const list = pending.get(c.u) || [];
-    const k = list.findIndex((d) => Math.abs(c.l - d.l) <= 0.5 && Math.abs(c.b - d.b) <= 0.5 && sameStyle(c.style ?? null, d.style ?? null));
-    return k < 0 ? null : list.splice(k, 1)[0];
-  };
-  let bodyChanged = 0, edgeMissing = 0;
-  for (const c of es) {
-    if (at(c)) continue;
+  const matches = alignEdgeGlyphs(es, eo);
+  let bodyChanged = 0, edgeMissing = 0, edgeAdded = 0, edgeStyleChanged = 0;
+  for (const c of matches.missing) {
     if (inBoxes(c, sb)) bodyChanged++;
     else edgeMissing++;
   }
-  let edgeAdded = 0;
-  for (const list of pending.values()) {
-    for (const d of list) {
-      if (inBoxes(d, ob) || inBoxes(d, sb)) bodyChanged++;
-      else edgeAdded++;
-    }
+  for (const d of matches.added) {
+    if (inBoxes(d, ob) || inBoxes(d, sb)) bodyChanged++;
+    else edgeAdded++;
   }
-  return { bodyChanged, edgeMissing, edgeAdded };
+  for (const [c] of matches.restyled) {
+    if (inBoxes(c, sb)) bodyChanged++;
+    else edgeStyleChanged++;
+  }
+  return { bodyChanged, edgeMissing, edgeAdded, edgeStyleChanged };
+}
+
+// Authorize only the changed subrange of an unambiguously located edit.
+// Unchanged prefix/suffix glyphs remain subject to the ordinary edge check.
+export function authorizedEdgeChanges(source, output, edits, es, eo, body = []) {
+  let exp = expectedPageText(source.text, edits, { includeSpans: true });
+  let sn = normalizedSourceChars(source.chars), on = normalizedSourceChars(output.chars);
+  if (!exp.ok || on.map(c => c.ch).join('') !== exp.text) {
+    const verified = compareSourceGeometry(source, output, edits, { expectedPageText });
+    if (!verified.ok || !verified.match) return false;
+    const a = canonicalPage(source), b = canonicalPage(output, a.partition);
+    if (!a.ok || !b.ok) return false;
+    const normalize = chars => normalizedSourceChars(chars).map(c => ({...c, sourceIndex: c.sourceIndex === undefined ? undefined : chars[c.sourceIndex].i}));
+    sn = normalize(a.chars); on = normalize(b.chars);
+    exp = expectedPageText(a.text, edits, { includeSpans: true });
+  }
+  if (!exp.ok || on.map(c => c.ch).join('') !== exp.text) return false;
+  const sourceIndices = new Set(), outputIndices = new Set(), shiftedPairs = [];
+  const sourceGlyph = new Map(source.glyphs.map(c => [c.i, c]));
+  const outputGlyph = new Map(output.glyphs.map(c => [c.i, c]));
+  let delta = 0;
+  for (const span of exp.spans) {
+    const before = sn.slice(span.a, span.b).map(c => c.ch).join('');
+    const after = span.after;
+    let prefix = 0, suffix = 0;
+    while (prefix < before.length && prefix < after.length && before[prefix] === after[prefix]) prefix++;
+    while (suffix < before.length - prefix && suffix < after.length - prefix && before[before.length - 1 - suffix] === after[after.length - 1 - suffix]) suffix++;
+    for (const c of sn.slice(span.a, span.b)) if (c.sourceIndex !== undefined) sourceIndices.add(c.sourceIndex);
+    const start = span.a + delta;
+    // Retained glyphs on the edited baseline may shift by a fraction of a
+    // point. Pair them by text identity and require one consistent shift.
+    const changed = sn.slice(span.a + prefix, span.b - suffix).map(c => sourceGlyph.get(c.sourceIndex)).filter(Boolean);
+    const nextSpan = exp.spans.find(s => s.a >= span.b && s !== span);
+    const retainedEnd = nextSpan?.a ?? sn.length;
+    let previous = changed.at(-1);
+    for (let k = span.b - suffix; k < retainedEnd; k++) {
+      const a = sourceGlyph.get(sn[k]?.sourceIndex);
+      const b = outputGlyph.get(on[start + after.length - suffix + k - (span.b - suffix)]?.sourceIndex);
+      if (!a || !b) continue;
+      if (!previous?.origin || !a.origin || Math.abs(previous.origin[1]-a.origin[1]) > .1 ||
+          source.chars.slice(previous.i + 1, a.i).some(c => c.u === 10 || c.u === 13) ||
+          a.l - previous.r > (previous.style?.size || 0) * 2) break;
+      previous = a;
+      const dx = b.l-a.l;
+      // A retained suffix inside the explicit edit may be redrawn at the
+      // end of a shorter replacement; it is still part of that edit.
+      if (k < span.b && Math.abs(dx) > 1 && changed.some(c => c.origin && b.origin && Math.abs(c.origin[1]-b.origin[1]) <= .1) &&
+          b.l >= Math.min(...changed.map(c => c.l)) - 1 && b.r <= Math.max(a.r, ...changed.map(c => c.r)) + 1) {
+        sourceIndices.add(a.i); outputIndices.add(b.i); continue;
+      }
+      if (a.u === b.u && Math.abs(dx) > .5 && Math.abs(dx) <= 1 && Math.abs((b.r-a.r)-dx) <= .1 && Math.abs(a.b-b.b) <= .1 && Math.abs(a.t-b.t) <= .1 && sameStyle(a.style,b.style)) shiftedPairs.push({a,b,dx});
+    }
+    for (const c of on.slice(start, start + after.length)) if (c.sourceIndex !== undefined) outputIndices.add(c.sourceIndex);
+    delta += after.length - (span.b - span.a);
+  }
+  // Edge bands are derived from glyph extents and can change as the edited
+  // line shrinks. Match unchanged edge glyphs against the entire other page.
+  const sourceDiff = alignEdgeGlyphs(es, output.glyphs);
+  const outputDiff = alignEdgeGlyphs(source.glyphs, eo);
+  // Retained text in the edited source body paragraph may wrap with the
+  // replacement. Bind every such glyph to its corresponding output glyph
+  // in the independently checked text order; never extend to other boxes.
+  const reflowSource = new Set(), reflowOutput = new Set();
+  const editedGlyphs = [...sourceIndices].map(i => sourceGlyph.get(i)).filter(Boolean);
+  for (const box of body) {
+    if (!editedGlyphs.length || editedGlyphs.some(c => !inBoxes(c, [box]) || body.filter(b => inBoxes(c, [b])).length !== 1)) continue;
+    const members = source.glyphs.filter(c => inBoxes(c, [box]) && !sourceIndices.has(c.i));
+    if (members.some(c => body.filter(b => inBoxes(c, [b])).length !== 1)) continue;
+    const ids = new Set(members.map(c => c.i)), pairs = [];
+    for (let k = 0; k < sn.length; k++) {
+      const a = sourceGlyph.get(sn[k].sourceIndex);
+      if (!a || !ids.has(a.i)) continue;
+      let offset = 0;
+      for (const span of exp.spans) if (span.b <= k) offset += span.after.length - (span.b - span.a);
+      const b = outputGlyph.get(on[k + offset]?.sourceIndex);
+      if (!b || a.u !== b.u || !sameStyle(a.style, b.style)) { pairs.length = 0; break; }
+      pairs.push([a,b]);
+    }
+    if (pairs.length !== members.length) continue;
+    const placed = [...pairs.map(([,b]) => b), ...[...outputIndices].map(i => outputGlyph.get(i)).filter(Boolean)];
+    const original = source.glyphs.filter(c => inBoxes(c, [box]));
+    if (!placed.length || !original.length) continue;
+    const size = Math.max(...original.map(c => c.style?.size || 0));
+    const ys = [...new Set(placed.map(c => Math.round((c.origin?.[1] ?? c.b) * 10) / 10))].sort((a,b) => b-a);
+    const sourceTop = Math.max(...original.map(c => c.t));
+    if (!(size > 0) || Math.abs(Math.max(...placed.map(c => c.t)) - sourceTop) > size ||
+        ys.some((y,k) => k && ys[k-1] - y > size * 2.5)) continue;
+    for (const [a,b] of pairs) { reflowSource.add(a.i); reflowOutput.add(b.i); }
+  }
+  // Only whole, source-classified body paragraphs below an edit may cascade.
+  // Pair their unchanged characters in the independently checked text order,
+  // and require a single vertical translation with unchanged geometry/style.
+  const edited = [...sourceIndices].map(i => sourceGlyph.get(i)).filter(Boolean);
+  const movedSource = new Set(), movedOutput = new Set();
+  if (edited.length) for (const box of body) {
+    if (!edited.some(c => c.b >= box.top && c.l <= box.x + box.w && c.r >= box.x)) continue;
+    const members = source.glyphs.filter(c => inBoxes(c, [box]));
+    if (!members.length || members.some(c => sourceIndices.has(c.i) || body.filter(b => inBoxes(c, [b])).length !== 1)) continue;
+    const memberIds = new Set(members.map(c => c.i));
+    const pairs = [];
+    for (let k = 0; k < sn.length; k++) {
+      const a = sourceGlyph.get(sn[k].sourceIndex);
+      if (!a || !memberIds.has(a.i)) continue;
+      let offset = 0;
+      for (const span of exp.spans) if (span.b <= k) offset += span.after.length - (span.b - span.a);
+      const b = outputGlyph.get(on[k + offset]?.sourceIndex);
+      if (!b || a.u !== b.u || !sameStyle(a.style, b.style)) { pairs.length = 0; break; }
+      pairs.push([a, b]);
+    }
+    if (pairs.length !== members.length) continue;
+    const dy = pairs[0][1].b - pairs[0][0].b;
+    if (dy >= -0.5 || pairs.some(([a,b]) => Math.abs(b.l-a.l) > .1 || Math.abs(b.r-a.r) > .1 ||
+      Math.abs(b.b-a.b-dy) > .1 || Math.abs(b.t-a.t-dy) > .1)) continue;
+    for (const [a,b] of pairs) { movedSource.add(a.i); movedOutput.add(b.i); }
+  }
+  const shifts = shiftedPairs.map(p => p.dx);
+  if (shifts.length && Math.max(...shifts) - Math.min(...shifts) > .1) return false;
+  return sourceDiff.missing.every(c => sourceIndices.has(c.i) || reflowSource.has(c.i) || movedSource.has(c.i) || shiftedPairs.some(p => p.a.i === c.i)) &&
+    outputDiff.added.every(c => outputIndices.has(c.i) || reflowOutput.has(c.i) || movedOutput.has(c.i) || shiftedPairs.some(p => p.b.i === c.i)) &&
+    sourceDiff.restyled.every(([c]) => sourceIndices.has(c.i)) && outputDiff.restyled.every(([,c]) => outputIndices.has(c.i));
 }
 
 function extents(g) {
@@ -793,6 +1036,109 @@ export function expectedPageText(sourceText, pageEdits, options = {}) {
   return { ok: true, text: normStr(out + norm.slice(at)), ...(options.includeSpans ? {spans:spans.map(s=>({...s}))} : {}) };
 }
 
+// Bind a numeric change to the unique selected source paragraph and an
+// unambiguous digit anchor, then compare every extracted page character.
+export function modelNumericEditProof(source, output, edits, paragraphs) {
+  return modelInlineEditProof(source,output,edits,paragraphs,'numeric');
+}
+
+export function modelWordEditProof(source, output, edits, paragraphs) {
+  return modelInlineEditProof(source,output,edits,paragraphs,'word');
+}
+
+function modelInlineEditProof(source, output, edits, paragraphs, kind) {
+  if (edits.length !== 1 || !Array.isArray(paragraphs)) return null;
+  if ([...source.chars, ...output.chars].some(c => !Number.isInteger(c.u) || c.u < 0 || c.u > 0x10ffff)) return null;
+  const e = edits[0], before = normStr(e.before), after = normStr(e.after);
+  if (!before) return null;
+  let prefix = 0, suffix = 0;
+  while (prefix < Math.min(before.length, after.length) && before[prefix] === after[prefix]) prefix++;
+  while (suffix < Math.min(before.length, after.length) - prefix && before.at(-1-suffix) === after.at(-1-suffix)) suffix++;
+  const changed = after.slice(prefix, after.length-suffix);
+  const alphabet=kind==='word'?/^[A-Za-z]*$/:/^\d*$/;
+  if (!alphabet.test(before.slice(prefix, before.length-suffix)) || !alphabet.test(changed) || !changed) return null;
+  // As in the inline planner, an insertion is anchored to its adjacent
+  // original number; expanding replacements also binds the complete number.
+  let start=prefix, end=before.length-suffix;
+  const member=kind==='word'?/[A-Za-z]/:/[0-9]/;
+  while (start>0 && member.test(before[start-1])) start--;
+  while (end<before.length && member.test(before[end])) end++;
+  const old=before.slice(start,end);
+  if (!(kind==='word'?/^[A-Za-z]{2,}$/:/^[0-9]+$/).test(old)) return null;
+  const replacement=before.slice(start,prefix)+changed+before.slice(before.length-suffix,end);
+  const hits=[];
+  for (const p of paragraphs) {
+    const text=normStr(paraText(p));
+    for (let k=text.indexOf(before); k>=0; k=text.indexOf(before,k+1)) hits.push({p,text,k});
+  }
+  if (hits.length!==1 || !hits[0].p.box) return null;
+  const {p,text,k:hit}=hits[0], box=p.box, tokens=[];
+  source.chars.forEach((c,index)=>{
+    const ch=String.fromCodePoint(c.u);
+    if (/\s/.test(ch)) {
+      if (tokens.at(-1)?.ch===' ') tokens.at(-1).optional &&= c.generated===true;
+      else tokens.push({ch:' ',optional:c.generated===true});
+    } else tokens.push({ch,index});
+  });
+  // Grow symmetric source context until it identifies exactly one model
+  // occurrence and one extraction occurrence inside the paragraph box. This
+  // allows short selections without assuming a fixed number of characters.
+  let anchored=null;
+  const max=Math.max(start,before.length-end);
+  for (let n=0;n<=max;n++) {
+    const left=Math.min(start,n), right=Math.min(before.length-end,n);
+    const context=before.slice(start-left,end+right);
+    const modelAt=hit+start-left;
+    if (text.indexOf(context)!==modelAt || text.indexOf(context,modelAt+1)!==-1) continue;
+    const candidates=[];
+    for (let first=0;first<tokens.length;first++) {
+      if (tokens[first].ch!==context[0]) continue;
+      let at=0, ids=[];
+      for (let j=first;j<tokens.length && at<context.length;j++) {
+        const token=tokens[j];
+        if (token.ch===context[at]) {
+          if (at>=left && at<left+old.length) ids.push(token.index);
+          at++;
+        } else if (!(token.ch===' ' && token.optional)) break;
+      }
+      if (at!==context.length || ids.length!==old.length || ids.some(index=>{
+        const c=source.chars[index];
+        return !c || !Number.isFinite(c.cx) || !Number.isFinite(c.cy) || c.cx<box.x || c.cx>box.x+box.w || c.cy<box.top-box.h || c.cy>box.top;
+      })) continue;
+      candidates.push(ids);
+    }
+    if (candidates.length===1) { anchored=candidates[0]; break; }
+  }
+  if (!anchored) return null;
+  const remove=new Set(anchored);
+  const sourceChars=source.chars.flatMap((c,i)=>i===anchored[0]
+    ? [...replacement].map(ch=>({u:ch.codePointAt(0),replacement:true}))
+    : remove.has(i) ? [] : [{u:c.u,generated:c.generated,sourceIndex:i}]);
+  const a=generatedWhitespaceTokens(sourceChars, true, true), b=generatedWhitespaceTokens(output.chars, true, true);
+  const outputIndices=[], retained=[];
+  let i=0,j=0;
+  while (i<a.length && j<b.length) {
+    if (a[i].ch===b[j].ch) {
+      if (a[i].ch!==' ') {
+        const c=sourceChars[a[i].index];
+        if (c.replacement) outputIndices.push(b[j].index);
+        else retained.push({sourceIndex:c.sourceIndex,outputIndex:b[j].index});
+      }
+      i++; j++;
+    } else if (a[i].ch===' ' && a[i].optional) i++;
+    else if (b[j].ch===' ' && b[j].optional) j++;
+    else return null;
+  }
+  while (i<a.length && a[i].ch===' ' && a[i].optional) i++;
+  while (j<b.length && b[j].ch===' ' && b[j].optional) j++;
+  if (i!==a.length || j!==b.length) return null;
+  return {sourceIndices:anchored,outputIndices,retained};
+}
+
+export function compareModelNumericEdit(source, output, edits, paragraphs) {
+  return modelNumericEditProof(source, output, edits, paragraphs) !== null;
+}
+
 // Normalize whitespace while retaining each non-whitespace source character's
 // extraction index. Edits are located in the same normalized text.
 function normalizedSourceChars(chars) {
@@ -817,13 +1163,18 @@ export function matchesStationaryReorderedGlyphs(source, output, edits) {
   const normalized = normalizedSourceChars(source.chars);
   const exp = expectedPageText(source.text, edits, {includeSpans: true});
   if (!exp.ok) return false;
-  const expected = [];
+  const planned = [];
   let at = 0;
   for (const span of exp.spans) {
-    expected.push(...normalized.slice(at, span.a), ...span.after.split('').map(ch => ({ch})));
+    planned.push(...normalized.slice(at, span.a), ...span.after.split('').map(ch => ({ch})));
     at = span.b;
   }
-  expected.push(...normalized.slice(at));
+  planned.push(...normalized.slice(at));
+  // Deleting a whole fragment can join its two surrounding whitespace runs.
+  // Use the same normalization as expectedPageText without losing the source
+  // identity of any surviving non-whitespace character.
+  const expected = planned.filter((c, i) => c.ch !== ' ' || (i > 0 && planned[i - 1].ch !== ' '));
+  if (expected.at(-1)?.ch === ' ') expected.pop();
   if (expected.map(x => x.ch).join('') !== exp.text) return false;
   const sg = new Map(source.glyphs.map(g => [g.i, g]));
   const og = new Map(output.glyphs.map(g => [g.i, g]));
@@ -905,7 +1256,7 @@ export async function inspectSavedPdf(engineFactory, sourceBytes, outputBytes, e
       if (m.continuationPageIndices.length) {
         row.continuationPageIndices = [...m.continuationPageIndices];
         if (!pageEdits.length) failures.push({ code: "continuation_without_edit", pageIndex: i });
-        else inspectContinued(s, o, out, m, pageEdits, row, failures, warnings, !!options.includeText);
+        else { ensurePage(src, i); inspectContinued(s, o, out, m, pageEdits, row, failures, warnings, !!options.includeText, sourceTableCells(src)); }
         continue;
       }
       if (!pageEdits.length) {
@@ -914,7 +1265,20 @@ export async function inspectSavedPdf(engineFactory, sourceBytes, outputBytes, e
         continue;
       }
       const exp = expectedPageText(s.text, pageEdits);
-      if (!exp.ok) {
+      let modelNumericMatch = false;
+      let modelWordMatch = false;
+      if (!exp.ok && exp.reason === "before_not_found" && typeof src.buildModel === "function") {
+        ensurePage(src, i);
+        const model=src.buildModel();
+        modelNumericMatch = compareModelNumericEdit(s, o, pageEdits, model);
+        modelWordMatch = !modelNumericMatch && modelWordEditProof(s,o,pageEdits,model)!==null;
+      }
+      if (modelNumericMatch || modelWordMatch) {
+        row.text_equal = true;
+        row[modelWordMatch?'model_word_text_conservation':'model_numeric_text_conservation'] = true;
+        warnings.push({ code: modelWordMatch?"model_word_text_conservation":"model_numeric_text_conservation", pageIndex: i, severity: "warning", detail: "Unique source paragraph and changed word context matched; complete page extraction conserved with generated whitespace normalization" });
+        if(modelWordMatch)row.after_checks=pageEdits.map(e=>({id:e.id,present:true,method:'model-word-full-page-proof'}));
+      } else if (!exp.ok) {
         failures.push({ code: "expected_text_uncomputable", pageIndex: i, id: exp.id, reason: exp.reason });
       } else {
         row.text_equal = exp.text === normStr(o.text);
@@ -948,10 +1312,11 @@ export async function inspectSavedPdf(engineFactory, sourceBytes, outputBytes, e
           if (!normStr(e.after)) continue;
           const exact = t.includes(normStr(e.after));
           const normalized = !exact && findGeneratedWhitespaceMatches(e.after, o.chars).length > 0;
-          row.after_checks.push({ id: e.id, present: exact || normalized,
-            method: exact ? "extracted-text" : normalized ? "generated-whitespace" : "not-found" });
+          const physical = !exact && !normalized && row.spatial_conservation?.match === true && normStr(canonicalPage(o).text ?? '').includes(normStr(e.after));
+          row.after_checks.push({ id: e.id, present: exact || normalized || physical,
+            method: exact ? "extracted-text" : normalized ? "generated-whitespace" : physical ? "spatial-order" : "not-found" });
           if (normalized) warnings.push({ code: "after_generated_whitespace_normalized", pageIndex: i, id: e.id, severity: "warning" });
-          if (!exact && !normalized) failures.push({ code: "after_missing", pageIndex: i, id: e.id });
+          if (!exact && !normalized && !physical) failures.push({ code: "after_missing", pageIndex: i, id: e.id });
         }
       }
       row.offpage = { source: offPage(s), output: offPage(o) };
@@ -962,16 +1327,16 @@ export async function inspectSavedPdf(engineFactory, sourceBytes, outputBytes, e
       row.extents = { source: se, output: oe };
       if (se && oe && (oe.right > se.right + TOL || oe.left < se.left - TOL)) failures.push({ code: "text_outside_source_columns", pageIndex: i });
       const es = edgeGlyphs(s), eo = edgeGlyphs(o);
-      const stable = sameGlyphs(es, eo) && sameStyles(es, eo);
+      const stable = edgeGlyphsEquivalent(es, eo);
       row.edge_glyphs = es.length;
       row.edge_stable = stable;
       if (!stable) {
-        const edgeText = normStr(String.fromCharCode(...es.map((c) => c.u)));
-        const editsEdge = pageEdits.some((e) => edgeText.replace(/ /g, "").includes(normStr(e.before).replace(/ /g, "")));
+        const editsEdge = authorizedEdgeChanges(s, o, pageEdits, es, eo, bodyBoxes(src, i, s) || []);
         const split = editsEdge ? null : edgeBodySplit(src, out, i, m.outputPageIndex, s, o, es, eo);
         if (split) row.edge_split = split;
-        if (editsEdge) warnings.push({ code: "edge_edit_unverified", pageIndex: i });
+        if (editsEdge) warnings.push({ code: "edge_edit_authorized", pageIndex: i });
         else if (!split || split.edgeMissing || split.edgeAdded) failures.push({ code: "header_footer_moved", pageIndex: i, ...(split || {}) });
+        else if (split.edgeStyleChanged) failures.push({ code: "header_footer_style_changed", pageIndex: i, ...split });
         else failures.push({ code: "edge_band_body_changed", pageIndex: i, count: split.bodyChanged });
       }
     }
@@ -1106,6 +1471,27 @@ function inspectDocumentGroups(src, out, map, groups, byPage, failures, warnings
   return covered;
 }
 
+// Only unambiguous Unicode + complete ink-box matches can be reordered.
+// Ambiguous overlaps remain unmatched, including coincident different styles.
+export function alignEdgeGlyphs(source, output) {
+  const candidates = source.map((c) => output.map((d, j) => samePlace(c, d) ? j : -1).filter((j) => j >= 0));
+  const reverse = output.map((_, j) => candidates.reduce((n, cs) => n + Number(cs.includes(j)), 0));
+  const used = new Set(), missing = [], restyled = [];
+  source.forEach((c, i) => {
+    const cs = candidates[i];
+    if (cs.length !== 1 || reverse[cs[0]] !== 1) { missing.push(c); return; }
+    const j = cs[0]; used.add(j);
+    if (!sameStyle(c.style ?? null, output[j].style ?? null)) restyled.push([c, output[j]]);
+  });
+  return { missing, added: output.filter((_, j) => !used.has(j)), restyled };
+}
+
+export function edgeGlyphsEquivalent(source, output) {
+  if (source.length === output.length && source.every((c, i) => samePlace(c, output[i]) && sameStyle(c.style ?? null, output[i].style ?? null))) return true;
+  const result = alignEdgeGlyphs(source, output);
+  return !result.missing.length && !result.added.length && !result.restyled.length;
+}
+
 const sameGlyphs = (a, b) => a.length === b.length && a.every((c, k) => {
   const d = b[k];
   return c.u === d.u && Math.abs(c.l - d.l) <= 0.5 && Math.abs(c.b - d.b) <= 0.5;
@@ -1209,7 +1595,7 @@ const samePlace = (c, d) => c.u === d.u && Math.abs(c.l - d.l) <= 0.5 && Math.ab
 // the number's style and baseline, digits at their source spacing, suffix
 // at natural advance, aligned on the number's source left, centre or right
 // (by page position). Anything else outside the body band is extra.
-function checkContinuationEdges(s, es, g, edge, ordinal, pageIndex, outputPageIndex, failures) {
+export function checkContinuationEdges(s, es, g, edge, ordinal, pageIndex, outputPageIndex, failures) {
   const fail = (code, extra = {}) => failures.push({ code, pageIndex, outputPageIndex, ...extra });
   const res = { expected_glyphs: 0, output_glyphs: edge.length, page_numbers: [] };
   if (!s.styled || !g.styled) {
@@ -1318,15 +1704,15 @@ export function joinFlowParts(parts, expected) {
 // the caller's logical text has no space there. Only whitespace explicitly
 // marked generated by PDFium may be skipped; typed whitespace, visible
 // hyphens, character identity and order remain mandatory.
-function generatedWhitespaceTokens(chars) {
+function generatedWhitespaceTokens(chars, codePoints = false, includeIndices = false) {
   const tokens = [];
-  for (const c of chars) {
-    const ch = String.fromCharCode(c.u);
+  for (const [index, c] of chars.entries()) {
+    const ch = codePoints ? String.fromCodePoint(c.u) : String.fromCharCode(c.u);
     if (/\s/.test(ch)) {
       const prev = tokens[tokens.length - 1];
       if (prev?.ch === " ") prev.optional &&= c.generated === true;
       else tokens.push({ ch: " ", optional: c.generated === true });
-    } else tokens.push({ ch, optional: false });
+    } else tokens.push({ ch, optional: false, ...(includeIndices ? {index} : {}) });
   }
   if (tokens[0]?.ch === " ") tokens.shift();
   if (tokens[tokens.length - 1]?.ch === " ") tokens.pop();
@@ -1368,8 +1754,9 @@ export function matchesGeneratedWhitespace(expected, chars) {
 // the output page followed by every continuation page must equal the
 // source body-band text with the edits applied, in order; everything
 // outside the band must be glyph-for-glyph where it was.
-function inspectContinued(s, o, out, m, pageEdits, row, failures, warnings, includeText) {
+function inspectContinued(s, o, out, m, pageEdits, row, failures, warnings, includeText, sourceTables = []) {
   const i = row.pageIndex;
+  if (sourceTables === null) { failures.push({code:'continuation_table_source_unavailable',pageIndex:i}); return; }
   const { floor, bodyTop } = m;
   const lo = floor - 0.5, hi = bodyTop + 0.5;
   const flowHi = m.flowTop === undefined ? hi : Math.min(hi, m.flowTop + 0.5);
@@ -1444,8 +1831,11 @@ function inspectContinued(s, o, out, m, pageEdits, row, failures, warnings, incl
   if (parts.slice(1).some((p) => !p)) failures.push({ code: "continuation_page_empty", pageIndex: i });
   const es = outsideBand(s, lo, hi), eo = outsideBand(o, lo, hi);
   row.edge_glyphs = es.length;
-  row.edge_stable = sameGlyphs(es, eo) && sameStyles(es, eo);
-  if (!row.edge_stable) failures.push({ code: "header_footer_moved", pageIndex: i });
+  row.edge_stable = edgeGlyphsEquivalent(es, eo);
+  if (!row.edge_stable) {
+    const diff = alignEdgeGlyphs(es, eo);
+    failures.push({ code: diff.missing.length || diff.added.length ? "header_footer_moved" : "header_footer_style_changed", pageIndex: i });
+  }
   const se = extents(s);
   row.continuation = conts.map((g, k) => {
     const bodyGlyphs = inBand(g, lo, hi);
@@ -1467,7 +1857,7 @@ function inspectContinued(s, o, out, m, pageEdits, row, failures, warnings, incl
     if (c.offpage) failures.push({ code: "glyphs_off_page", pageIndex: i, outputPageIndex: c.outputPageIndex, count: c.offpage });
     if (c.overlap > overlaps(s, true)) failures.push({ code: "glyph_overlap_increased", pageIndex: i, outputPageIndex: c.outputPageIndex });
     if (m.continuationStyle) {
-      c.edges = checkContinuationEdges(s, es, g, edge, k + 1, i, c.outputPageIndex, failures);
+      c.edges = checkContinuationEdges(s, es.filter(c => !inSourceTableCell(c, sourceTables)), g, edge, k + 1, i, c.outputPageIndex, failures);
     } else if (c.outside_band) {
       failures.push({ code: "continuation_outside_body_band", pageIndex: i, outputPageIndex: c.outputPageIndex });
     }

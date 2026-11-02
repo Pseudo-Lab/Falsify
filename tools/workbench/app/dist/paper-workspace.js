@@ -256,6 +256,8 @@
     'edited-flow-text-or-order-mismatch':'이어지는 본문 내용 또는 순서가 원문·편집과 다름',
     'glyph-overlap-increased':'글자 겹침이 늘어남',
     'header-footer-moved':'머리말 또는 꼬리말 위치가 바뀜',
+    'header-footer-style-changed':'머리말 또는 꼬리말의 글꼴·크기가 바뀜',
+    'paragraph-link-unverified':'인용 링크의 위치를 확인하지 못함',
     'continued-flow-source-typography-normalized':'원문의 줄끝 하이픈과 추출 공백을 재배치함',
     'continued-flow-generated-whitespace-normalized':'PDF 추출기가 만든 공백을 구분해 검사함',
     'source-line-end-discretionary-hyphen-matched':'원문의 줄끝 하이픈을 연결해 위치를 확인함',
@@ -352,7 +354,7 @@
     return m;
   }
   function generationError(e){
-    const reasons={NOT_FOUND:'원문 인용의 위치를 찾지 못했습니다',AMBIGUOUS_MATCH:'같은 원문 인용이 여러 곳에 있습니다',OVERLAPPING_EDITS:'다른 변경과 범위가 겹칩니다',NOT_EDITABLE:'이 텍스트 배치를 편집하지 못했습니다',AMBIGUOUS_STYLE:'변경에 적용할 글꼴을 정하지 못했습니다',UNSUPPORTED_WRAP_COMBINATION:'원문의 줄바꿈을 연결하지 못했습니다'};
+    const reasons={NOT_FOUND:'원문 인용의 위치를 찾지 못했습니다',AMBIGUOUS_MATCH:'같은 원문 인용이 여러 곳에 있습니다',OVERLAPPING_EDITS:'다른 변경과 범위가 겹칩니다',NOT_EDITABLE:'이 텍스트 배치를 편집하지 못했습니다',AMBIGUOUS_STYLE:'선택한 구간의 글꼴·크기·색상이 섞여 변경 서식을 정하지 못했습니다',UNSUPPORTED_WRAP_COMBINATION:'원문의 줄바꿈을 연결하지 못했습니다'};
     const failures=e?.details?.failures;
     if(!Array.isArray(failures)||!failures.length)return safeMessage(e);
     return failures.slice(0,6).map(f=>{
@@ -495,14 +497,14 @@
         }))
       };
     }
-    let epoch=0,source=null,session=null,unsub=null,snapshot=null,output=null,inline=null,pageText=null,directEditor=null,committingDirect=false,composingDirect=false,selectionClickPending=false;
+    let epoch=0,source=null,session=null,unsub=null,snapshot=null,output=null,inline=null,pageText=null,directEditor=null,committingDirect=false,committingInline=false,composingDirect=false,selectionClickPending=false;
     let fontRevision=0,fontBusy=false;
     let proposalQueue=null,accepted=new Set(),modelById=new Map(),draftRaw=null,pendingFocus=null,pendingResume=null;
     let external=null, externalRevision=0, draftTimer=null,combineIds=new Set(),suppressExternalPaint=false,proposalInputs=new Map();
     let editMode='text',tableCtl=null,tableSeq=0,tableBindings=new Map();
     let inspectCtl=null,resumeCtl=null,afterPart=0,afterSourcePage=0;
     let page=1,pages=0,zoom=1,drawSeq=0,afterSeq=0,loadTask=null,textLayerHandle=null,genCtl=null,genId=0,generating=false,afterTask=null,afterRender=null;
-    let beforeMarks=null,afterMarks=null,compareFocus=null,afterCache=null,afterCacheKey=null,generator=null,candidatePreview=null,candidateMarks=null;
+    let beforeMarks=null,afterMarks=null,compareFocus=null,afterCache=null,afterCacheKey=null,generator=null,generatorVersion=0,candidatePreview=null,candidateMarks=null;
     const showChanges=doc.querySelector('#paper-show-changes'),changeStatus=doc.querySelector('#paper-change-status');
     function syncChangeVisibility(){for(const stage of [ui.beforeStage,ui.afterStage])stage.classList.toggle('is-changes-hidden',showChanges?.checked===false);}
     showChanges?.addEventListener('change',syncChangeVisibility);
@@ -900,7 +902,7 @@
       try{if(afterCacheKey&&afterCache)afterCache.release(afterCacheKey);else afterTask&&afterTask.destroy&&afterTask.destroy();}catch{}
       afterCacheKey=null;afterTask=null;afterRender=null;
     }
-    function closeAfter(){afterSeq++;releaseAfter();afterCache?.dispose();afterCache=null;generator?.dispose();generator=null;afterNav.hidden=true;}
+    function closeAfter(){afterSeq++;releaseAfter();afterCache?.dispose();afterCache=null;generatorVersion++;generator?.dispose();generator=null;afterNav.hidden=true;}
     function abortGen(){genId++;if(genCtl){genCtl.abort();genCtl=null;}generating=false;}
     function clearSource(){
       if(draftTimer){timers.clearTimeout(draftTimer);draftTimer=null;}
@@ -911,7 +913,7 @@
       source=null;pages=0;page=1;zoom=1;
       clearStage(ui.beforeStage);clearStage(ui.afterStage);
       renderInline();renderEdits();paintProposals();renderChrome();
-      setStatus('');setBeforeStatus('');setAfterStatus('');
+      setStatus('');setBeforeStatus('');setAfterStatus('');setGenStatus('');setEditStatus('');setProposalStatus('');say(ui.tableStatus,'');
       emit('falsify:paper-workspace-source',{fileHash:null,name:''});
       remindDraft();
     }
@@ -951,6 +953,7 @@
       pages=0;page=1;zoom=1;
       source={file,fileHash:null,name:sessionName(file.name),segments:[],pdf:isPdf(file),doc:null,lib:null,render:null,paragraphPages:new Map()};
       clearStage(ui.beforeStage);clearStage(ui.afterStage);renderInline();renderEdits();paintProposals();renderChrome();
+      setGenStatus('');setEditStatus('');setProposalStatus('');say(ui.tableStatus,'');setBeforeStatus('');setAfterStatus('');
       setStatus('원본 파일을 확인하는 중입니다.');
       try{
         const bytes=new Uint8Array(await file.arrayBuffer());
@@ -1368,10 +1371,14 @@
       const after=ui.inlineAfter.value;
       if(!inline||typeof after!=='string'){setEditStatus('After를 확인하지 못했습니다.',true);return;}
       if(after!==''&&!after.trim()){setEditStatus('공백만 있는 After는 저장하지 않습니다. 문장을 지우려면 After를 비우세요.',true);return;}
-      if(after===inline.before){if(inline.editId){session.remove(inline.editId);closeInline();setEditStatus('원문으로 되돌렸습니다.');}else closeInline();return;}
+      if(after===inline.before&&!inline.editId){closeInline();scheduleGeneration();return;}
       if(!inline.editId&&crossAliasOverlap(inline,true)){setEditStatus('같은 위치에 기록한 편집이 있습니다. 기존 편집을 수정하거나 삭제한 뒤 적용하세요.',true);return;}
+      const inlineBefore=inline.before;
+      committingInline=true;
+      generatorVersion++;generator?.dispose();generator=null;
       try{
-        if(inline.editId)session.update(inline.editId,{after});
+        if(after===inline.before)session.remove(inline.editId);
+        else if(inline.editId)session.update(inline.editId,{after});
         else{
           const segs=coreSegments(source.segments);
           let segment=inline.segmentId?segs.find(s=>s.id===inline.segmentId):null;
@@ -1383,8 +1390,9 @@
           session.add({pageIndex:inline.pageIndex,segmentId:segment.id,before:inline.before,after,anchor:built.anchor,origin:'human'});
         }
         closeInline();
-        setEditStatus('직접 편집을 기록했습니다.');
+        setEditStatus(after===inlineBefore?'원문으로 되돌렸습니다.':'직접 편집을 기록했습니다.');
       }catch(e){setEditStatus('편집을 저장하지 않았습니다. '+safeMessage(e),true);}
+      finally{committingInline=false;scheduleGeneration();}
     }
     function onJump(edit){
       const n=Number(edit.pageIndex)+1;
@@ -1595,9 +1603,10 @@
     }
     function ensureGenerator(){
       const g=generationApi();if(!g?.create)return null;if(generator)return generator;
-      generator=g.create({generate:generateCaptured,onResult:(candidate,meta)=>{if(!source||source.fileHash!==meta.spec.fileHash)return;let current;try{current=g.key(captureSpec());}catch{return;}if(current!==meta.key)return;output=candidate;output.key=meta.key;afterPart=0;afterSourcePage=page;setGenStatus(output.edits.length?generationLead(output.verification,false)+' '+diagnosticText(output.warnings,output.verification):'선택한 편집이 없어 원본 PDF를 사용합니다.');emit('falsify:paper-workspace-output',published({sha256:output.sha256,revision:output.revision,verification:scrub(output.verification,0)}));renderEdits();void drawAfter();},onState:state=>{generating=state.phase==='running';if(state.phase==='error')setGenStatus('생성하지 못했습니다. '+generationError(state.error),true);renderChrome();}});return generator;
+      const version=++generatorVersion;
+      generator=g.create({generate:generateCaptured,onResult:(candidate,meta)=>{if(version!==generatorVersion||!source||source.fileHash!==meta.spec.fileHash)return;let current;try{current=g.key(captureSpec());}catch{return;}if(current!==meta.key)return;output=candidate;output.key=meta.key;afterPart=0;afterSourcePage=page;setGenStatus(output.edits.length?generationLead(output.verification,false)+' '+diagnosticText(output.warnings,output.verification):'선택한 편집이 없어 원본 PDF를 사용합니다.');emit('falsify:paper-workspace-output',published({sha256:output.sha256,revision:output.revision,verification:scrub(output.verification,0)}));renderEdits();void drawAfter();},onState:state=>{if(version!==generatorVersion||!source)return;let current;try{current=g.key(captureSpec());}catch{return;}if(current!==state.key)return;generating=state.phase==='running';if(state.phase==='error')setGenStatus('생성하지 못했습니다. '+generationError(state.error),true);renderChrome();}});return generator;
     }
-    function scheduleGeneration(){if(!generationApi()||!source?.pdf||!snapshot)return;try{ensureGenerator().schedule(captureSpec());}catch(e){setGenStatus('현재 편집을 확인하세요. '+safeMessage(e),true);}}
+    function scheduleGeneration(){if(committingInline||!generationApi()||!source?.pdf||!snapshot)return;try{ensureGenerator().schedule(captureSpec());}catch(e){setGenStatus('현재 편집을 확인하세요. '+safeMessage(e),true);}}
     async function generateCaptured(spec,{signal,key}){
       const file=source?.file;if(!file||source.fileHash!==spec.fileHash)throw Error('원본이 바뀌었습니다.');
       if(!spec.edits.length)return {file,sha256:spec.fileHash,edits:[],revision:spec.revision,fontRevision:spec.fontRevision,externalRevision:spec.externalRevision,verification:null,pageMap:null,blocked:false,key};
@@ -1626,8 +1635,9 @@
       if(signal.aborted||source?.file!==file)throw Error('생성이 취소되었습니다.');return candidate;
     }
     async function currentAction(action){
-      try{const spec=captureSpec(),result=await ensureGenerator().flush(spec);if(action==='download')download(result.file,true);else if(action==='blue'){const ev=new CustomEvent('falsify:blue-file',{cancelable:true,detail:{file:new File([result.file],'paper.pdf',{type:'application/pdf'})}});if(!doc.dispatchEvent(ev)){setGenStatus('BLUE가 인계를 받지 않았습니다.',true);return;}const nav=[...doc.querySelectorAll('[data-view="blue"]')].find(b=>b.getClientRects&&b.getClientRects().length)||doc.querySelector('[data-view="blue"]');nav?.click();}}
-      catch(e){setGenStatus('현재 파일을 만들지 못했습니다. '+safeMessage(e),true);}
+      const actionEpoch=epoch;
+      try{const spec=captureSpec(),result=await ensureGenerator().flush(spec);if(actionEpoch!==epoch)return;if(action==='download')download(result.file,true);else if(action==='blue'){const ev=new CustomEvent('falsify:blue-file',{cancelable:true,detail:{file:new File([result.file],'paper.pdf',{type:'application/pdf'})}});if(!doc.dispatchEvent(ev)){setGenStatus('BLUE가 인계를 받지 않았습니다.',true);return;}const nav=[...doc.querySelectorAll('[data-view="blue"]')].find(b=>b.getClientRects&&b.getClientRects().length)||doc.querySelector('[data-view="blue"]');nav?.click();}}
+      catch(e){if(actionEpoch===epoch)setGenStatus('현재 파일을 만들지 못했습니다. '+safeMessage(e),true);}
     }
     async function generate(){
       if(!canLeaveInline())return;

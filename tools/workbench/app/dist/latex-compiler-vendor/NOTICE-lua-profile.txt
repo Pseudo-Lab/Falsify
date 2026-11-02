@@ -1,0 +1,16 @@
+TeXlyre BusyTeX Lua profile
+
+This profile contains the unmodified fontspec and microtype runtime files from
+TeXlyre's TeX Live recommended package, repacked for Emscripten with a separate
+filename database. The loader is derived from the upstream Emscripten package
+loader; paths, manifest, LZ4 blocks and package name were changed. The source is
+https://github.com/TeXlyre/texlyre-busytex-build/releases/tag/build_wasm_46ebb6216a5c1fe63dd1dc885831d1a8cef2dc86_31802832436_1
+Original texlive-recommended.js SHA-256: 4354ad2040462400ca856e595cec970509c95f8d2ac87fb3e06e0e17ffc9033a
+Original texlive-recommended.data SHA-256: 7a912aa15f9e534b1948566771bf2510ca704fab3c3fdece7f75bc6558525a92
+Result texlive-lua-profile.js SHA-256: 16cfb34cba5032ba4660af33f78ae53eb073bed60f6c58b4bf4fbf3b4caf19bf
+Result texlive-lua-profile.data SHA-256: fb4b49f59cc79c6d25b6622b3c8e48f4a655055e14d9131c881a5762c3bfd8c3
+
+fontspec and microtype carry their respective copyright and LPPL notices in
+the packaged source files. The accompanying BusyTeX LICENSE and TeX Live
+LICENSE.CTAN / LICENSE.TL in texlive-basic remain applicable. No font files
+are included in this profile.

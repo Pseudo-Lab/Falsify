@@ -2,7 +2,7 @@
 (function(root){
   'use strict';
   const HOST='127.0.0.1',DEFAULT_PORT=7816,WEB_ORIGIN='https://shinick-han.github.io';
-  const PATH=/^\/api\/(?:capabilities|export|paper\/(?:inspect|images(?:\/export)?)|harness\/profile\/propose|harness\/deploy|(?:red|blue)\/jobs(?:\/[A-Za-z0-9%._~-]+(?:\/cancel)?)?)$/;
+  const PATH=/^\/api\/(?:capabilities|export|paper\/(?:inspect|images(?:\/export)?|layout-agent\/(?:step|jobs(?:\/[A-Za-z0-9._-]+(?:\/cancel)?)?))|harness\/profile\/propose|harness\/deploy|(?:red|blue)\/jobs(?:\/[A-Za-z0-9%._~-]+(?:\/cancel)?)?)$/;
   // Strict decimal port only; host and scheme are never user input.
   function parsePort(value){const s=String(value??'').trim();if(s==='')return DEFAULT_PORT;if(!/^[1-9][0-9]{3,4}$/.test(s))return null;const n=Number(s);return n>=1024&&n<=65535?n:null;}
   function validToken(t){return typeof t==='string'&&t.length>=16&&t.length<=512&&/^[A-Za-z0-9._~+/-]+=*$/.test(t);}
@@ -24,7 +24,7 @@
   function companionInstance(v){return typeof v==='string'&&/^ci1\.[0-9a-f]{64}$/.test(v)?v:null;}
   function capSnapshot(d){if(!d||typeof d!=='object'||Array.isArray(d)||typeof d.red!=='boolean'||typeof d.blue!=='boolean')return null;
     return Object.freeze({red:d.red,blue:d.blue,pdf:d.pdf===true,officeLayoutVerifiedExport:d.officeLayoutVerifiedExport===true,model:typeof d.model==='string'?d.model.slice(0,80):null,isolation:typeof d.isolation==='string'?d.isolation.slice(0,200):null,
-      cliSelection:d.cliSelection===true,harnessWrapper:d.harnessWrapper===true,harnessDeployment:d.harnessDeployment===true,cliAgents:d.cliSelection===true?agents(d.cliAgents):null,pdfEditor:pdfEditor(d.pdfEditor),paperAnalysis:paperAnalysis(d.paperAnalysis),imageEditor:imageEditor(d.imageEditor),harnessProfileProposal:profileProposal(d.harnessProfileProposal),workbenchVersion:workbenchVersion(d.workbenchVersion),companionInstance:companionInstance(d.companionInstance)});}
+      paperLayoutJobs:d.paperLayoutJobs===true,cliSelection:d.cliSelection===true,harnessWrapper:d.harnessWrapper===true,harnessDeployment:d.harnessDeployment===true,cliAgents:d.cliSelection===true?agents(d.cliAgents):null,pdfEditor:pdfEditor(d.pdfEditor),paperAnalysis:paperAnalysis(d.paperAnalysis),imageEditor:imageEditor(d.imageEditor),harnessProfileProposal:profileProposal(d.harnessProfileProposal),workbenchVersion:workbenchVersion(d.workbenchVersion),companionInstance:companionInstance(d.companionInstance)});}
   // Optional advisory PDF pre-analysis from a newer broker: exact descriptor or none. An older broker without it keeps every other path.
   const ANALYSIS_SCHEMA='falsify.pdf-analysis-summary.v1',WORKBENCH_VERSION=/^[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}(?:-[0-9A-Za-z]{1,16}(?:\.[0-9A-Za-z]{1,16}){0,3})?$/;
   function paperAnalysis(d){if(!d||typeof d!=='object'||Array.isArray(d)||Object.keys(d).length!==2||typeof d.available!=='boolean'||d.schema!==ANALYSIS_SCHEMA)return null;return Object.freeze({available:d.available,schema:ANALYSIS_SCHEMA});}

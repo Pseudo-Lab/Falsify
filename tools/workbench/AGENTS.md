@@ -14,4 +14,6 @@ The Falsify orchestrator records implementation facts, tests and remaining defec
 
 ## Repository work
 
+For PDF/LaTeX layout implementation or rendered output review, use the project-local [falsify-paper-layout skill](.agents/skills/falsify-paper-layout/SKILL.md). It adapts pinned MIT layout guidance to Falsify's source-preservation and RED/BLUE contracts. Workers read the portions relevant to their assigned files; the North Star remains orchestrator-only.
+
 Use CodeGraph first when `.codegraph/` exists; do not create an index automatically. Use the search-first skill for new functionality and reuse the existing parser, edit, PDF and record APIs. Use Aside for browser work. Check `ARCHIVED.json` and applicable StorageGuardian registration before edits, builds or worker launch. Preserve private papers, original PDFs, user records, settings and credentials; do not include them in commits.

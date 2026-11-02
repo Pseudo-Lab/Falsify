@@ -24,6 +24,46 @@ function fixture() {
 function extract(bytes) { const d=mupdf.Document.openDocument(bytes,'application/pdf'); let result=''; for(let i=0;i<d.countPages();i++){const p=d.loadPage(i),t=p.toStructuredText();result+=t.asText();t.destroy();p.destroy();}d.destroy();return result; }
 const localFetch = async input => {const url=new URL(input); assert.equal(url.protocol,'file:');return new Response(readFileSync(url));};
 
+// Match the font used by the extracted Omega to its unique page resource, then
+// inspect that resource's embedded program rather than assuming a resource ID.
+function omegaFontBytes(bytes) {
+  const doc=new mupdf.PDFDocument(bytes), page=doc.loadPage(0), text=page.toStructuredText();
+  try {
+    const names=[];
+    text.walk({onChar(char, _origin, font) { if(char==='Ω') names.push(font.getName()); }});
+    assert.equal(names.length,1, 'output contains exactly one Omega glyph');
+    const glyphs=[];
+    const device=new mupdf.Device({fillText(text, _ctm, colorspace) {
+      try { text.walk({showGlyph(font, _trm, gid, scalar) {
+        try { if(scalar===0x3a9) glyphs.push({name:font.getName(), gid, advance:font.advanceGlyph(gid)}); }
+        finally { font.destroy(); }
+      }}); } finally { text.destroy(); colorspace.destroy(); }
+    }});
+    try { page.run(device,mupdf.Matrix.identity); device.close(); } finally { device.destroy(); }
+    assert.equal(glyphs.length,1, 'one painted Omega glyph');
+    assert.equal(glyphs[0].name,names[0]);
+    assert.ok(glyphs[0].gid>0 && glyphs[0].advance>0, 'Omega uses a nonmissing glyph');
+    const matches=[];
+    doc.findPage(0).get('Resources','Font').forEach(value=>{
+      const font=value.resolve();
+      if(font.get('BaseFont').asName()===names[0]) matches.push(font);
+    });
+    assert.equal(matches.length,1, 'Omega font resolves to one page resource');
+    const font=matches[0];
+    assert.equal(font.get('Subtype').asName(),'Type0');
+    const stream=font.get('DescendantFonts',0,'FontDescriptor','FontFile2');
+    assert.equal(stream.isStream(),true, 'Omega font has an embedded program');
+    const buffer=stream.readStream();
+    try {
+      const embedded=buffer.asUint8Array().slice(), face=new mupdf.Font('embedded',embedded);
+      try { assert.equal(face.advanceGlyph(glyphs[0].gid),glyphs[0].advance, 'embedded program contains the painted Omega glyph'); }
+      finally { face.destroy(); }
+      return embedded;
+    } finally { buffer.destroy(); }
+  } finally { text.destroy(); page.destroy(); doc.destroy(); }
+}
+
+
 test('font snapshot uses full font for glyph absent from subset', async () => {
   const prev=globalThis.fetch; globalThis.fetch=localFetch;
   try {
@@ -37,13 +77,12 @@ test('font snapshot uses full font for glyph absent from subset', async () => {
     assert.ok(extract(saved).replace(/\s+/g,' ').includes(after.replace(/\s+/g,' ')), extract(saved));
     assert.ok(extract(saved).includes('Unrelated paragraph remains intact.'));
     assert.equal(out.verification.fontSnapshotDigest,fonts.digest);
-    const doc=new mupdf.PDFDocument(saved);
     const sourceDoc=new mupdf.PDFDocument(source);
     const original=sourceDoc.findPage(0).get('Resources','Font','F1','FontDescriptor','FontFile2').readStream();
     const subset=new mupdf.Font('subset',original.asUint8Array());
     assert.equal(subset.encodeCharacter('Ω'),0, 'source subset lacks Omega'); subset.destroy(); original.destroy(); sourceDoc.destroy();
-    const embedded=doc.findPage(0).get('Resources','Font','FXF3','DescendantFonts',0,'FontDescriptor','FontFile2');
-    assert.equal(embedded.isStream(),true, 'new glyph has an embedded output font'); doc.destroy();
+    omegaFontBytes(saved);
+    assert.ok(out.verification.fontSelections.some(f=>f.sha256===fonts.fonts[0].sha256), 'selected supplied snapshot');
   } finally {globalThis.fetch=prev;}
 });
 
@@ -61,8 +100,11 @@ test('simultaneous requests keep their font snapshots isolated and reject tamper
     const source=fixture(), regular=snapshot(), bold=snapshot(new Uint8Array(readFileSync(new URL('../dist/vendor/standard_fonts/LiberationSans-Bold.ttf',import.meta.url))));
     const edit={pageIndex:0,before:'Original paragraph has enough words to edit safely.',after:'Original paragraph has enough words to edit safely Ω.'};
     const [a,b]=await Promise.all([prepare({file:source,fontSnapshot:regular,edits:[edit]}),prepare({file:source,fontSnapshot:bold,edits:[edit]})]);
-    const fontName=async out=>{const d=new mupdf.PDFDocument(new Uint8Array(await out.file.arrayBuffer()));try{const stream=d.findPage(0).get('Resources','Font','FXF3','DescendantFonts',0,'FontDescriptor','FontFile2').readStream();try{return hex(stream.asUint8Array());}finally{stream.destroy();}}finally{d.destroy();}};
-    assert.notEqual(await fontName(a),await fontName(b), 'each output embeds its own font bytes');
+    const embeddedA=omegaFontBytes(new Uint8Array(await a.file.arrayBuffer()));
+    const embeddedB=omegaFontBytes(new Uint8Array(await b.file.arrayBuffer()));
+    assert.notEqual(hex(embeddedA),hex(embeddedB), 'each output embeds its own font bytes');
+    assert.ok(a.verification.fontSelections.some(f=>f.sha256===regular.fonts[0].sha256));
+    assert.ok(b.verification.fontSelections.some(f=>f.sha256===bold.fonts[0].sha256));
     assert.equal(a.verification.fontSnapshotDigest,regular.digest); assert.equal(b.verification.fontSnapshotDigest,bold.digest);
     const bad=snapshot(); bad.fonts[0].bytes[100]^=1;
     await assert.rejects(inspectPage({file:source,pageIndex:0,fontSnapshot:bad}),{code:'invalid-font-snapshot'});

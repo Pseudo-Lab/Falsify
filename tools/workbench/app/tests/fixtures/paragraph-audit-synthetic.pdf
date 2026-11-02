@@ -1,0 +1,141 @@
+%PDF-1.3
+%“Œ‹ž ReportLab Generated PDF document (opensource)
+1 0 obj
+<<
+/F1 2 0 R /F2 3 0 R /F3 4 0 R
+>>
+endobj
+2 0 obj
+<<
+/BaseFont /Helvetica /Encoding /WinAnsiEncoding /Name /F1 /Subtype /Type1 /Type /Font
+>>
+endobj
+3 0 obj
+<<
+/BaseFont /Times-Bold /Encoding /WinAnsiEncoding /Name /F2 /Subtype /Type1 /Type /Font
+>>
+endobj
+4 0 obj
+<<
+/BaseFont /Times-Roman /Encoding /WinAnsiEncoding /Name /F3 /Subtype /Type1 /Type /Font
+>>
+endobj
+5 0 obj
+<<
+/A <<
+/S /URI /Type /Action /URI (https://example.invalid/reference)
+>> /Border [ 0 0 0 ] /Rect [ 201.029 697 263.982 711 ] /Subtype /Link /Type /Annot
+>>
+endobj
+6 0 obj
+<<
+/Annots [ 5 0 R ] /Contents 11 0 R /MediaBox [ 0 0 640 800 ] /Parent 10 0 R /Resources <<
+/Font 1 0 R /ProcSet [ /PDF /Text /ImageB /ImageC /ImageI ]
+>> /Rotate 0 
+  /Trans <<
+
+>> /Type /Page
+>>
+endobj
+7 0 obj
+<<
+/Contents 12 0 R /MediaBox [ 0 0 640 800 ] /Parent 10 0 R /Resources <<
+/Font 1 0 R /ProcSet [ /PDF /Text /ImageB /ImageC /ImageI ]
+>> /Rotate 0 /Trans <<
+
+>> 
+  /Type /Page
+>>
+endobj
+8 0 obj
+<<
+/PageMode /UseNone /Pages 10 0 R /Type /Catalog
+>>
+endobj
+9 0 obj
+<<
+/Author (anonymous) /CreationDate (D:20261028232811+09'00') /Creator (anonymous) /Keywords () /ModDate (D:20261028232811+09'00') /Producer (ReportLab PDF Library - \(opensource\)) 
+  /Subject (unspecified) /Title (untitled) /Trapped /False
+>>
+endobj
+10 0 obj
+<<
+/Count 2 /Kids [ 6 0 R 7 0 R ] /Type /Pages
+>>
+endobj
+11 0 obj
+<<
+/Length 783
+>>
+stream
+1 0 0 1 0 0 cm  BT /F1 12 Tf 14.4 TL ET
+BT /F2 15 Tf 18 TL ET
+BT 1 0 0 1 40 755 Tm (Synthetic editor regression) Tj T* ET
+BT /F3 9 Tf 10.8 TL ET
+BT 1 0 0 1 310 35 Tm (1) Tj T* ET
+BT /F3 11 Tf 13.2 TL ET
+BT 1 0 0 1 40 700 Tm (An initial claim includes supporting REFERENCE.) Tj T* ET
+BT /F3 11 Tf 13.2 TL ET
+BT 1 0 0 1 40 686 Tm (All measurement conditions remain explicitly stated.) Tj T* ET
+BT 1 0 0 1 40 672 Tm (The remaining evidence stays available for review.) Tj T* ET
+BT 1 0 0 1 40 560 Tm (Following paragraph remains separate and readable.) Tj T* ET
+BT 1 0 0 1 350 700 Tm (The right column is independent.) Tj T* ET
+BT 1 0 0 1 350 686 Tm (Its contents and positions should remain unchanged.) Tj T* ET
+BT 1 0 0 1 350 672 Tm (No change is requested in this column.) Tj T* ET
+ 
+endstream
+endobj
+12 0 obj
+<<
+/Length 912
+>>
+stream
+1 0 0 1 0 0 cm  BT /F1 12 Tf 14.4 TL ET
+BT /F2 15 Tf 18 TL ET
+BT 1 0 0 1 40 755 Tm (Synthetic editor regression) Tj T* ET
+BT /F3 9 Tf 10.8 TL ET
+BT 1 0 0 1 310 35 Tm (2) Tj T* ET
+BT /F3 11 Tf 13.2 TL ET
+BT 1 0 0 1 40 700 Tm (The effect of x) Tj T* ET
+BT /F3 7 Tf 8.4 TL ET
+BT 1 0 0 1 105.054 704.8 Tm (n+1) Tj T* ET
+BT /F3 11 Tf 13.2 TL ET
+BT 1 0 0 1 116.002 700 Tm ( should be interpreted cautiously.) Tj T* ET
+BT /F3 11 Tf 13.2 TL ET
+BT 1 0 0 1 40 686 Tm (All measurement conditions remain explicitly stated.) Tj T* ET
+BT 1 0 0 1 40 672 Tm (The remaining evidence stays available for review.) Tj T* ET
+BT 1 0 0 1 40 560 Tm (Following paragraph remains separate and readable.) Tj T* ET
+BT 1 0 0 1 350 700 Tm (The right column is independent.) Tj T* ET
+BT 1 0 0 1 350 686 Tm (Its contents and positions should remain unchanged.) Tj T* ET
+BT 1 0 0 1 350 672 Tm (No change is requested in this column.) Tj T* ET
+ 
+endstream
+endobj
+xref
+0 13
+0000000000 65535 f 
+0000000061 00000 n 
+0000000112 00000 n 
+0000000219 00000 n 
+0000000327 00000 n 
+0000000436 00000 n 
+0000000609 00000 n 
+0000000822 00000 n 
+0000001017 00000 n 
+0000001086 00000 n 
+0000001347 00000 n 
+0000001413 00000 n 
+0000002247 00000 n 
+trailer
+<<
+/ID 
+[<01613b720e5efce876bd5ffed4c08d8c><01613b720e5efce876bd5ffed4c08d8c>]
+% ReportLab generated PDF document -- digest (opensource)
+
+/Info 9 0 R
+/Root 8 0 R
+/Size 13
+>>
+startxref
+3210
+%%EOF

@@ -1,5 +1,5 @@
 (() => {
-  // app/src/browser-fonts.mjs
+  // src/browser-fonts.mjs
   var error = (message) => new Error(message);
   var key = (value) => String(value || "").replace(/^[A-Z]{6}\+/, "").toLowerCase().replace(/[\s_-]+/g, "");
   var style = (value) => ({ weight: /bold/i.test(value || "") ? 700 : 400, italic: /italic|oblique/i.test(value || "") });
@@ -205,7 +205,7 @@
     };
   }
 
-  // app/src/bundled-fonts.mjs
+  // src/bundled-fonts.mjs
   var faces = [
     ["Liberation Sans", "LiberationSans-Regular", 400, false, "vendor/standard_fonts/LiberationSans-Regular.ttf", "f8ace1f892b2bd9dc1792ba7f097fa7588f84fed48321480e04de5390828221f"],
     ["Liberation Sans", "LiberationSans-Bold", 700, false, "vendor/standard_fonts/LiberationSans-Bold.ttf", "361c61b82d575c5c35fd9157fda8b0194bcfcd0d88ea8521a4fb5dd53d33dddc"],
@@ -219,6 +219,7 @@
     ["Noto Sans CJK KR", "NotoSansCJKkr-Regular", 400, false, "font-assets/NotoSansCJKkr-Regular.otf", "6bcb2a0703aa137e874fc2dffa85f6c21ba9a67fa329e81b8c801663af7e992a"],
     ["Noto Serif CJK KR", "NotoSerifCJKkr-Regular", 400, false, "font-assets/NotoSerifCJKkr-Regular.otf", "77b4b741f864d27f15e90f275b17106dde90b2ad28f82bab72dc95805db5fb42"]
   ];
+  var lm7 = ["Latin Modern Roman", "LMRoman7-Regular", 400, false, "font-assets/LMRoman7-Regular.otf", "48c4b46ab255eec96588fb992fba1ed6102e53d051da480738a61cc6cdb328c3"];
   var caches = /* @__PURE__ */ new WeakMap();
   var cjk = /[\u1100-\u11ff\u2e80-\u9fff\uac00-\ud7ff\uf900-\ufaff]|[\u{20000}-\u{3134f}]/u;
   var math = /[\u2200-\u22ff\u27c0-\u27ef\u2980-\u2aff\u{1d400}-\u{1d7ff}]/u;
@@ -249,8 +250,9 @@
   async function getBundledFonts(requirements, { fetch = globalThis.fetch } = {}) {
     const selected = /* @__PURE__ */ new Set();
     for (const requirement of requirements) {
-      const name = String(requirement.family || "").trim().toLowerCase();
+      const name = String(requirement.family || "").trim().replace(/^[A-Z]{6}\+/, "").toLowerCase();
       const text = String(requirement.text || "");
+      if ((name === "cmr7" || name === "lmroman7" || name === "lm roman 7") && !requirement.bold && !requirement.italic) selected.add(lm7);
       const families = serifNames.has(name) ? ["Liberation Serif"] : sansNames.has(name) ? ["Liberation Sans"] : ["Liberation Sans", "Liberation Serif"];
       for (const family of families) {
         selected.add(faces.find((f) => f[0] === family && f[2] === (requirement.bold ? 700 : 400) && f[3] === !!requirement.italic));
@@ -264,7 +266,7 @@
     return Promise.all([...selected].map((face) => load(face, fetch)));
   }
 
-  // app/src/paper-font-service.mjs
+  // src/paper-font-service.mjs
   function createPaperFontService({ store = createBrowserFontStore(), bundled = getBundledFonts } = {}) {
     return Object.freeze({
       get revision() {

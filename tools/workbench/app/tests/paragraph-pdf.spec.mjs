@@ -10,7 +10,8 @@ import vm from 'node:vm';
 // MuPDF WASM namespaces in one Node realm do not share device callback maps.
 import * as mupdf from '../dist/browser-pdf-vendor/mupdf.js';
 import {hex} from '../src/paragraph-pdf-crypto.mjs';
-import {inspectPage, prepare} from '../dist/paragraph-pdf.mjs';
+import {pathToFileURL} from 'node:url';
+const {inspectPage, prepare} = await import(process.env.PARAGRAPH_CANDIDATE ? pathToFileURL(resolve(process.env.PARAGRAPH_CANDIDATE)).href : new URL('../dist/paragraph-pdf.mjs', import.meta.url).href);
 import {createAnnotationTransport} from '../src/document-flow-annotations.mjs';
 
 const app = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -101,12 +102,57 @@ function extraction(bytes) {
 const localFetch = async input => {
   const url = new URL(input);
   assert.equal(url.protocol, 'file:', 'Node harness forbids all external requests');
-  assert.ok(url.pathname.includes('/dist/paragraph-vendor/'));
+  assert.ok(url.pathname.includes('/dist/paragraph-vendor/') || (process.env.PARAGRAPH_CANDIDATE && url.pathname.includes('/.local/pdf-repair/paragraph-vendor/')));
   return new Response(readFileSync(url));
 };
 
 test('SHA-256 shim matches Node for strings and PDF bytes', () => {
   for(const bytes of [new Uint8Array(),new TextEncoder().encode('abc'),fixture()]) assert.equal(hex(bytes),sha(bytes));
+});
+
+test('body reflow near edge retains linked and inline-math page content', async () => {
+  const previous=globalThis.fetch; globalThis.fetch=localFetch;
+  try {
+    const source=new Uint8Array(readFileSync(join(app,'tests/fixtures/paragraph-audit-synthetic.pdf')));
+    for(const edit of [
+      {id:'link',pageIndex:0,before:'An initial claim',after:'An expanded explanation of the measured outcome and its interpretation under the experimental conditions'},
+      {id:'math',pageIndex:1,before:'The effect of',after:'The estimated magnitude of the observed effect of'}
+    ]) {
+      const result=await prepare({file:source,edits:[edit]});
+      assert.notEqual(result.verification.status,'failed',JSON.stringify(result.verification.checks));
+      const bytes=new Uint8Array(await result.file.arrayBuffer());
+      assert.ok(extraction(bytes).includes(edit.after));
+    }
+  } finally { globalThis.fetch=previous; }
+});
+
+test('full linked paragraph with empty font snapshot preserves requested text', async () => {
+  const previous=globalThis.fetch;globalThis.fetch=localFetch;
+  try {
+    const source=new Uint8Array(readFileSync(join(app,'tests/fixtures/paragraph-audit-synthetic.pdf')));
+    const before='An initial claim includes supporting REFERENCE. All measurement conditions remain explicitly stated. The remaining evidence stays available for review.';
+    const after=before.replace('An initial claim','A revised claim');
+    const digest=hex(new TextEncoder().encode('[]'));
+    const result=await prepare({file:source,fontSnapshot:{revision:0,digest,fonts:[],selections:[]},edits:[{id:'e1',segmentId:'paragraph:0:p0-1-b7070b64cbc74f9c',pageIndex:0,anchor:{bbox:[40,90.342,272.815,130.739]},before,after}]});
+    assert.notEqual(result.verification.status,'failed',JSON.stringify(result.verification.checks));
+    assert.equal(result.verification.fontSnapshotDigest,digest);
+    assert.ok(extraction(new Uint8Array(await result.file.arrayBuffer())).includes(after));
+  } finally {globalThis.fetch=previous;}
+});
+
+test('table inspection limits do not block an in-page edit', {timeout:120000}, async () => {
+  const previous=globalThis.fetch;globalThis.fetch=localFetch;
+  const document=new mupdf.PDFDocument();
+  try {
+    const font=document.addSimpleFont(new mupdf.Font('Helvetica'));
+    for(let i=0;i<201;i++) document.insertPage(-1,document.addPage([0,0,300,400],0,{Font:{F1:font}},i===0?'BT /F1 10 Tf 30 300 Td (Original short text.) Tj ET':'\n'));
+    const bytes=new Uint8Array(document.saveToBuffer().asUint8Array());
+    const result=await prepare({file:bytes,edits:[{id:'edit',pageIndex:0,before:'Original short text.',after:'Changed short text.'}]});
+    assert.notEqual(result.verification.status,'failed',JSON.stringify(result.verification.checks));
+    assert.equal(result.verification.report.pagination.addedPages,0);
+    await assert.rejects(()=>prepare({file:bytes,edits:[{id:'grow',pageIndex:0,before:'Original short text.',after:'A longer replacement sentence needs another page. '.repeat(7)}]}),e=>
+      e.details?.codes?.includes('continuation_table_source_unavailable'));
+  } finally {document.destroy();globalThis.fetch=previous;}
 });
 
 test('real PDFium paragraph inspect and reflow retain full After and following content', async () => {
@@ -243,7 +289,7 @@ test('isolated Chromium worker performs inspect/prepare with real WASM and no up
     assert.deepEqual(errors,[]);assert.ok(hits.some(h=>h.url.includes('editcore.wasm?sha256=')));
     for(const hit of hits.filter(h=>/editcore\.(js|wasm)/.test(h.url))) {
       const hash=new URL(hit.url,origin).searchParams.get('sha256');
-      assert.equal(hash,hit.url.includes('editcore.wasm') ? 'cf9f0e9ec0a68cc5932795e87622b2809ecca5561482a23bc034de3d6410696d' : '6e6989a9994715951720e05355111aca7eab898e92b519ebea160167875bb3eb');
+      assert.equal(hash,hit.url.includes('editcore.wasm') ? '7674fe4cce4a8e15d702b02988610891693ac68f6121b4621e237949736778cb' : 'cbef240d8893fd9624c08eadbb1ffb405a583c96878d6a14d11d8e9816c0832b');
     }
     const linked=linkedFlowFixture(),savedSource=linked.slice();
     const linkedResult=await page.evaluate(async({bytes,before,after})=>{

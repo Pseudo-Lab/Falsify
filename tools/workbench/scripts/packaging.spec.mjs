@@ -10,11 +10,22 @@ import {
   MUPDF_WASM, MUPDF_WASM_SHA256, PDFJS_WASM, PARAGRAPH_WASM, PARAGRAPH_WASM_SHA256,
   assertShippableSource, unexpectedReleasePaths, verifyVendoredMupdfWasm, verifyParagraphRuntime,
   RECOMPOSITION_WASM, RECOMPOSITION_WASM_SHA256, verifyRecompositionRuntime,
+  LATEX_WASM, LATEX_MANIFEST_SHA256, verifyLatexRuntime,
 } from './package-release.mjs';
 import { assertChromeLoaderExecuted, CHROME_TEST } from './assert-browser-pdf-executed.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const workflow = readFileSync(join(root, '.github/workflows/pages.yml'), 'utf8');
+
+test('the exact BusyTeX asset profile is included without accepting arbitrary wasm',()=>{
+  const proof=verifyLatexRuntime(root);
+  assert.equal(proof.manifestSha256,LATEX_MANIFEST_SHA256);
+  assert.equal(proof.files,7);
+  assert.equal(proof.lua.files,3);assert.ok(proof.lua.bytes<500000);assert.equal(proof.lua.manifestSha256.length,64);
+  assert.deepEqual(unexpectedReleasePaths([LATEX_WASM]),[]);
+  assertShippableSource([LATEX_WASM],root);
+  assert.throws(()=>assertShippableSource(['app/dist/latex-compiler-vendor/extra.wasm'],root),/Unexpected private/);
+});
 
 test('recomposition compiler, font assets and notices survive source packaging', () => {
   const proof = verifyRecompositionRuntime(root);
@@ -103,6 +114,19 @@ test('this tree is shippable with the tracked MuPDF wasm and without other binar
   assert.equal(tracked.includes(MUPDF_WASM), true);
   assert.equal(unexpectedReleasePaths(tracked).length, 0);
   verifyVendoredMupdfWasm(root);
+});
+
+test('only the pinned synthetic paragraph fixture is shippable', () => {
+  const fixture = 'app/tests/fixtures/paragraph-audit-synthetic.pdf';
+  assert.deepEqual(unexpectedReleasePaths([fixture]), []);
+  assertShippableSource([fixture], root);
+  const dir = mkdtempSync(join(tmpdir(), 'falsify-fixture-'));
+  try {
+    mkdirSync(join(dir, 'app/tests/fixtures'), {recursive: true});
+    writeFileSync(join(dir, fixture), 'changed fixture');
+    assert.throws(() => assertShippableSource([fixture], dir), /Synthetic paragraph fixture digest mismatch/);
+    assert.throws(() => assertShippableSource(['app/tests/fixtures/another.pdf'], root), /Unexpected private/);
+  } finally { rmSync(dir, {recursive: true, force: true}); }
 });
 
 test('workflow_dispatch verifies feature branches and deploys only main', () => {

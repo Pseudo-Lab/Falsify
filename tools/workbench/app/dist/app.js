@@ -28,6 +28,8 @@
       if(blueProgress?.name)return {gate:'B1',title:'논문을 검토할 준비가 됐습니다',detail:blueProgress.name,label:'지시문 작성',action:()=>focusTarget($('#external-blue .prompt-instructions textarea')||$('#external-blue textarea[aria-label="BLUE 외부 응답"]'))};
       return {gate:'B1',title:'BLUE 검토 파일을 입력하세요',detail:'검토할 논문을 직접 고르세요.',label:'BLUE 파일 입력',action:()=>focusTarget($('#doc-blue-file'))};
     }
+    const sourceWorkspace=globalThis.FalsifyLatexWorkbench;
+    if(sourceWorkspace?.active){const source=sourceWorkspace.getSource?.(),state=sourceWorkspace.getSession?.()?.snapshot();return {gate:'R1',title:state?.busy?'PDF를 만들고 있습니다':state?.error?'원본 파일을 확인하세요':state?.artifact?'원본을 눌러 수정하세요':source?'PDF 만들기를 눌러 시작하세요':'LaTeX 원본을 읽고 있습니다',detail:state?.error?.message||source?.file?.name||'',label:state?.artifact?'수정본 보기':'편집 화면 보기',action:()=>focusTarget($('#latex-source-workbench'))};}
     if(documentProgress){
       const p=documentProgress,detail=p.name+' · '+p.count+'개 후보'+(p.count?' · '+(p.selected||0)+'개 선택':'');
       if(p.busy)return {gate:'R1',title:'RED 검토 중입니다',detail,label:'진행 상태 보기',action:()=>focusTarget($('#red-progress'))};
@@ -104,6 +106,7 @@
   $('#import-clear').addEventListener('click',()=>{if(confirmDocumentChange('clear'))clearImport();});
   $('#import-segment').addEventListener('change',showSegment);
   document.addEventListener('falsify:document-state',event=>{documentProgress=event.detail;render();});
+  document.addEventListener('falsify:latex-state',render);
   document.addEventListener('falsify:blue-state',event=>{blueProgress=event.detail;render();});
   document.addEventListener('click',event=>{
     const button=event.target.closest('button');if(!button||button.disabled)return;

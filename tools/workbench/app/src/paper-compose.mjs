@@ -499,6 +499,10 @@ export async function composeDocument({document, edits=[], flow, assets, links, 
           const budget=Math.max(1,fullHeight-20);
           parts=[`#context { let overhead = measure(block(width: ${fullWidth}pt, [${probe}])).height; let remaining = ${budget}pt - overhead; let paper-fit-width = if remaining >= ${fit.height/2}pt { calc.min(${fit.width}pt, remaining * ${fit.ratio}) } else { ${fit.width}pt }; [${content}] }`];
         } else parts=[...aboveParts,...parts,...below];
+      } else if(item.kind==='table') {
+        const table=item.table, cells=table?.cells;
+        if(!Number.isSafeInteger(table?.rows) || !Number.isSafeInteger(table?.cols) || table.rows<1 || table.cols<1 || !Array.isArray(cells) || cells.length!==table.rows*table.cols || cells.some((c,i)=>c.row!==Math.floor(i/table.cols) || c.col!==i%table.cols || !Array.isArray(c.blockIds) || c.blockIds.length!==1 || c.blockIds[0]!==item.blockIds[i])) fail('Invalid structured table');
+        parts=[`#table(columns: ${table.cols}, stroke: ${table.ruled?'0.5pt':'none'}, ${cells.map(c=>`[${renderBlock(blockById.get(c.blockIds[0]))}]`).join(', ')})`];
       } else {
         parts=(item.blockIds||[]).filter(id=>!linkedCaptions.has(id)).map(id=>blockById.get(id)).filter(Boolean).map(b=>renderBlock(b));
         if(!item.inline) parts=parts.filter(Boolean);

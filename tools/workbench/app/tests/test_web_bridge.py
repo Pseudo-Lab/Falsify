@@ -102,6 +102,16 @@ class WebOriginTests(Client,unittest.TestCase):
         self.assertNotIn('access-control-allow-credentials',headers)
     def assertNoCors(self,headers):
         self.assertNotIn('access-control-allow-origin',headers);self.assertNotIn('access-control-allow-private-network',headers)
+    def test_local_compiler_data_asset_is_served_as_binary(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);asset=root/'latex-compiler-vendor'/'texlive-basic.data'
+            asset.parent.mkdir();asset.write_bytes(b'\x00synthetic-tex-data\xff')
+            with patch.object(server,'DIST',root):
+                status,headers,raw=self.call('/latex-compiler-vendor/texlive-basic.data',origin=None,token=False)
+            self.assertEqual(status,200)
+            self.assertEqual(raw,asset.read_bytes())
+            self.assertEqual(headers['content-type'],'application/octet-stream')
+
     def test_preflight_allowlisted_routes(self):
         for path,method in [('/api/capabilities','GET'),('/api/red/jobs','POST'),('/api/blue/jobs','POST'),('/api/export','POST'),
                 ('/api/red/jobs/abc','GET'),('/api/blue/jobs/abc','GET'),('/api/red/jobs/abc/cancel','POST'),('/api/blue/jobs/a%3Ab/cancel','POST')]:

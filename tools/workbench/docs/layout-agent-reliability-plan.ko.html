@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Falsify · AI 편집 후속 구현계획</title>
+<style>
+:root{--ink:#111315;--yellow:#fc0;--line:#d9dde0;--surface:#f3f4f4}*{box-sizing:border-box}body{margin:0;background:var(--surface);color:var(--ink);font:16px/1.75 system-ui,"Malgun Gothic",sans-serif}header{border-block:5px solid var(--ink);background:var(--yellow);padding:30px max(24px,calc((100vw - 1100px)/2))}main{max-width:1150px;margin:auto;padding:30px 24px 70px}section{background:white;border:1px solid var(--line);padding:26px;margin:22px 0}h1{font-size:30px;line-height:1.4;margin:0 0 12px}h2{font-size:23px;line-height:1.4;margin:0 0 18px}h3{font-size:18px;margin:25px 0 8px}a{color:#246388}code,pre{font:13px/1.7 Consolas,monospace}code{overflow-wrap:anywhere}pre{padding:18px;background:var(--surface);overflow:auto}.table-wrap{overflow:auto}table{width:100%;border-collapse:collapse;font-size:14px}th,td{border:1px solid var(--line);padding:12px;text-align:left;vertical-align:top}th{background:var(--surface)}.meta{color:#5a626a;font-size:14px}.callout{border-left:5px solid var(--yellow);padding:10px 18px;background:#fffbea}li{margin:7px 0}@media(max-width:650px){h1{font-size:25px}main{padding:16px 12px 50px}section{padding:20px 16px}header{padding:24px 20px}}
+</style>
+</head>
+<body>
+<header><h1>AI 편집 후속 구현계획</h1><p>완성된 PDF를 쉽게 확인하고, 다시 시도해도 결과를 보존하며, 중단한 작업을 이어서 편집한다.</p><p class="meta">2026-11-01 · 기준 커밋 2379a88b5391380c7116212b5aef1e54501e8f93 · 핵심 흐름 구현·검수 완료 · 표 확장 일부 완료</p></header>
+<main>
+<section><h2>2026-11-01 구현 결과</h2>
+<p>코드 기준 <code>47a5b46</code>. Claude Code Opus 5.5 medium 작업자를 Stackbite에서 분리 실행하고 반환된 부품을 통합했다. 코드·브라우저 독립 검수에서 찾은 실제 연결, 재시도, 소스 전환, 저장 경쟁과 복구 진입점 결함을 수정했다.</p>
+<div class="table-wrap"><table><thead><tr><th>범위</th><th>결과</th></tr></thead><tbody>
+<tr><td>LQ-00~06</td><td>결과·품질 분리, 후보/체크포인트 저장과 복구, 안정적인 대상 ID, 비교 캐시·취소, 대응 페이지 찾기, 문제 영역 표시, 단계별 접수/조회 및 BLUE 전달 통합</td></tr>
+<tr><td>LQ-07</td><td>독립 코드 검수·Aside 브라우저 검수 후 수정. 새로고침 뒤 보이는 복구 버튼, 다운로드/BLUE 해시 일치, 모델 호출 없는 복원, 논문 전환 시 후보 분리, 390px/44px 조작 영역 확인</td></tr>
+<tr><td>LQ-08</td><td>소유권이 확인된 여러 run 셀, 원본 LaTeX의 병합 머리글과 단일 단 longtable 지원. 실제 도구의 90행을 브라우저 BusyTeX로 3쪽 생성하고 모든 행·반복 머리글·캡션 1회 확인</td></tr>
+<tr><td>남은 표 범위</td><td>PDF에서 추정한 병합 셀, 재구성 긴 표 페이지 분할, 2단 긴 표와 multirow 머리글</td></tr>
+<tr><td>LQ-09</td><td>공개 배포·설치본 교체는 별도 실행 단계. 이번 소스 변경은 로컬 커밋에 보관</td></tr>
+</tbody></table></div>
+<p>전체 앱 검사 935개: 928개 통과, 7개 건너뜀, 실패 0개. 마지막 만료·소스 생명주기 수정 후 집중 검사 33개 통과. Python ledger/route/service 27개와 bridge 내부 검사 25개 통과. 번들 입력 53개 및 출력 해시를 대조했다. 라이브 레이아웃 모델 재실행과 실제 논문 전체의 복원 품질 검증은 이번 합성·브라우저 검증과 구분한다.</p>
+<p>작업 기록은 WorkBite T-0152, 전체 복원 충실도는 T-0157에 남긴다. 아래는 원래 구현 계약과 작업 배정표다.</p></section>
+<section>
+<h2>먼저 구현할 것</h2>
+<p><strong>결과 상태 정리 → 후보 보존·복구 → 편집 대상 유지 → 비교 화면·속도 개선 → 표·그림 배치 확장</strong></p>
+<p>기존 RED, BLUE, 검수 화면과 공항 디자인을 유지한다. AI 레이아웃 도구는 접힌 고급 기능에 둔다. 결과에서는 PDF 받기와 BLUE 검토를 바로 선택하고, 수정한 곳과 남은 문제를 해당 페이지에서 확인한다.</p>
+<p class="callout">출력 파일은 실제 상태와 함께 다운로드할 수 있다. 구현의 중심은 자연스러운 출력과 빠른 수정이다. 검사 결과는 다음에 고칠 위치를 알려준다.</p>
+<p>사용자 승인에 따라 코드 구현과 검증을 진행한다. 작업자는 Claude Code Opus 5.5 medium이다. 공개 배포와 설치본 교체는 검증 후 별도 실행 지시에 따른다.</p>
+</section>
+<section>
+<h2>현재 확인한 문제</h2>
+<div class="table-wrap"><table><thead><tr><th>우선순위</th><th>확인한 동작</th><th>바꿀 결과</th></tr></thead><tbody>
+<tr><td>P1</td><td>숫자 누락과 글자 겹침이 보고된 합성 상태 검사에서도 최종 상태가 complete가 된다.</td><td>실행 종료와 내용·배치 검사 결과를 따로 표시하고, 남은 문제의 페이지를 바로 연다.</td></tr>
+<tr><td>P1</td><td>재실행은 새 후보를 만들기 전에 이전 후보를 비운다.</td><td>새 후보가 준비될 때까지 이전 PDF·소스·기록을 유지한다.</td></tr>
+<tr><td>P1</td><td>작업 저장에 AI 후보와 실행 중 체크포인트가 포함되지 않는다.</td><td>동의한 임시 저장과 작업 파일에 후보·체크포인트·실행 위치를 함께 담는다.</td></tr>
+<tr><td>P2</td><td>원본 LaTeX 노드 ID에 project.id가 들어가 편집 후 이전 ID가 달라진다.</td><td>레이아웃 도구용 대상 식별자를 유지하고 현재 소스 위치에 다시 연결한다.</td></tr>
+<tr><td>P2</td><td>비교는 같은 쪽번호를 사용한다. 쪽을 넘길 때 두 PDF를 다시 연다.</td><td>해당 내용으로 이동하는 비교와 PDF 캐시·렌더 취소를 제공한다.</td></tr>
+<tr><td>P2</td><td>병합 셀·여러 텍스트 조각으로 구성된 셀과 재구성 긴 표의 페이지 분할 지원이 부족하다.</td><td>셀 구조와 캡션을 보존하는 표 조판을 후속 단계로 확장한다.</td></tr>
+</tbody></table></div>
+<p class="meta">상태 검사는 모델 호출·실제 PDF 컴파일 없이 응답 계약으로 재현했다. 두 독립 검수자는 코드와 초기 데스크톱·모바일 화면을 확인했다. 이번 점검에서 후보가 열린 화면의 시각 품질과 실제 보조기기 사용은 검증하지 않았다.</p>
+</section>
+<section>
+<h2>완성 후의 사용 흐름</h2>
+<ol>
+<li>논문을 넣고 원하는 부분을 수정한다. 외부 AI 응답, 직접 편집, 연결한 AI 실행을 계속 지원한다.</li>
+<li>필요하면 AI 레이아웃 조정을 시작한다. 재실행 중에도 이전 결과를 받을 수 있다.</li>
+<li>결과 카드에서 현재 후보, 바뀐 페이지, 내용 대조 결과, 남은 배치 문제를 확인한다.</li>
+<li>문제를 누르면 해당 쪽·영역을 연다. 원본과 후보를 비교하고 필요한 수정만 다시 요청한다.</li>
+<li>PDF를 받거나 BLUE로 보낸다. BLUE에는 화면에 표시한 후보 PDF와 동일한 바이트만 전달한다.</li>
+<li>작업 저장을 선택하면 후보까지 함께 보관한다. 다시 열 때 이전 상태를 복구하고 사용자가 계속하기를 누른다.</li>
+</ol>
+<p>기본 화면은 현재 단계에 맞는 주 동작을 강조한다. 결과가 생기면 PDF 받기를 강조하고, BLUE 검토는 선택 가능한 다음 동작으로 둔다. 소스 ZIP·실행 기록·전체 해시·세부 설정은 펼쳐서 확인한다.</p>
+</section>
+<section>
+<h2>공통 계약</h2>
+<h3>실행과 품질을 분리한다</h3>
+<pre>runState: running | completed | paused | cancelled | failed
+quality.content: unchanged | changed | unverified
+quality.layout: clear | issues | unverified
+quality.observedPages: 실제 모델에 전달한 페이지 목록
+quality.findings: 코드, 심각도, 문서·쪽·영역, 근거, 다음 동작
+identity: runId, sourceHash, baselineHash, projectId, pdfHash</pre>
+<p>기존 status·trace는 호환용으로 읽는다. 새 화면은 runState와 quality를 사용한다. 실행이 끝났어도 내용 차이나 겹침이 있으면 “작업 끝 · 확인할 곳 2개”로 표시한다. 전체를 확인하지 않은 결과에는 실제 관찰 범위를 표시한다.</p>
+<p>내용 대조 기준은 AI 배치 시작 직전 PDF다. 사용자가 선택한 RED 변경도 이 기준에 들어 있다. 배치 작업은 그 변경과 나머지 내용을 유지한다. 지정한 그림 교체는 별도 허용 변경으로 기록해 예상 밖의 자산 손실과 구분한다.</p>
+<p>추출 순서·Unicode·수식 때문에 판정할 수 없는 항목은 unverified로 남기고 확인한 근거를 보인다. 검사 수행 여부와 검사 결과를 서로 대신 사용하지 않는다.</p>
+<h3>후보와 소스를 한 쌍으로 보관한다</h3>
+<p>각 후보에는 소스 프로젝트, 그 소스로 생성한 PDF, 검사 결과, 출처와 체크포인트 ID를 연결한다. 미컴파일 소스는 “PDF 생성 전”으로 표시한다. 이전 후보 PDF를 현재 소스의 출력으로 붙이지 않는다.</p>
+<p>재실행은 새 runId를 만들고 이전 후보를 유지한다. 새로 완성된 후보는 별도로 추가한다. 실패·취소·단계 한도에 도달해도 마지막 후보와 체크포인트를 선택할 수 있다.</p>
+<h3>저장은 기존 보관 정책을 따른다</h3>
+<p>기본 실행 상태는 메모리에 둔다. 기존의 “이 기기에 12시간 임시 저장”을 선택하면 후보와 체크포인트도 같은 만료 정책으로 저장한다. 큰 바이트는 IndexedDB에 두고 해시로 중복 제거한다. 만료·동의 해제 시 관련 데이터도 지운다.</p>
+<p>기존 작업 JSON은 계속 불러올 수 있다. 큰 PDF·프로젝트는 기존 fflate로 작업 ZIP과 manifest를 묶는 경로를 추가한다. 저장 공간 부족을 알리고 작업 파일 받기를 제공하며, 화면의 현재 결과는 유지한다.</p>
+<p>팀 영구 보관은 Confluence를 사용한다. 공개는 팀 전체 공개를 뜻하며 사용자가 선택한다. 원격 본문 한도를 따로 적용하고 큰 PDF를 JSON/base64 본문에 통째로 넣지 않는다. 첨부 경로의 실제 지원을 확인한 뒤 큰 작업 보관을 연결한다. 임시 저장과 팀 공개는 별개 동작이다.</p>
+<h3>중단된 모델 요청은 한 번만 실행한다</h3>
+<p>runId, stepId, 요청 지문과 접수 상태를 기록한다. 서버가 받은 동일 요청은 같은 결과를 반환한다. 재개는 확인된 마지막 도구 실행 이후부터 진행한다. 새로고침 뒤 접수된 요청은 상태 조회로 연결한다.</p>
+<p>현재 레이아웃 step은 동기 POST라 조회 기능이 없다. 기존 RED/BLUE job의 식별·조회·취소·결과 보관 방식을 재사용한다. 브라우저 상태 복구와 모델 실행 재개는 각각 검증한다.</p>
+<h3>편집 대상을 계속 추적한다</h3>
+<p>기존 원본 노드 ID와 저장된 편집 계약은 유지한다. 레이아웃 세션에 stable targetId를 추가해 이전·현재 소스 범위를 연결한다. 편집 트랜잭션, 경로, 인접 구조와 내용 근거로 대상을 추적한다. 중복 문장과 구조 변경으로 여러 후보가 남으면 위치 후보를 보여준다.</p>
+</section>
+<section>
+<h2>재사용할 부품</h2>
+<div class="table-wrap"><table><thead><tr><th>기능</th><th>기존 부품</th><th>적용</th></tr></thead><tbody>
+<tr><td>품질·내용 대조</td><td><code>paper-layout-quality.mjs</code>, <code>paper-layout-document-tools.mjs</code></td><td>관찰 결과를 공통 결과 모델로 모은다.</td></tr>
+<tr><td>후보·체크포인트</td><td><code>paper-layout-agent.mjs</code></td><td>내부 Map을 외부에서 저장·복구할 수 있는 세션 상태로 확장한다.</td></tr>
+<tr><td>작업 저장</td><td><code>latex-session-archive.mjs</code>, <code>latex-workbench.mjs</code>, fflate 0.8.3</td><td>호환 읽기와 명시적 저장을 유지하며 레이아웃 결과를 추가한다.</td></tr>
+<tr><td>미리보기</td><td><code>FalsifyPaperGeneration.createDocumentCache</code>, PDF.js 6.4.299</td><td>해시별 문서 핸들을 재사용하고 오래된 렌더를 취소한다.</td></tr>
+<tr><td>대상 추적</td><td><code>latex-source-model.mjs</code>, <code>latex-source-patches.mjs</code>, 구조 unit ID</td><td>레이아웃 대상 연결 계층만 추가한다.</td></tr>
+<tr><td>실행 복구</td><td><code>app/local/server.py</code>의 RED/BLUE job, <code>layout_agent_service.py</code></td><td>기존 인증·CLI 구독 실행을 유지하며 step 조회·취소를 연결한다.</td></tr>
+<tr><td>표·그림</td><td><code>paper-layout-asset-tools.mjs</code>, 기존 TeX 런타임</td><td>셀 소유권·캡션 연결과 현재 수치를 유지하며 지원 구조를 확장한다.</td></tr>
+</tbody></table></div>
+<p>프로젝트 내부 구현과 설치된 의존성에서 부품을 확인했다. 핵심 단계는 새 편집기·상태관리 프레임워크·외부 API 없이 구성한다. 새 패키지가 필요한 긴 표 처리와 복잡한 셀 복원은 해당 구조를 정한 뒤 버전·라이선스·런타임 호환성을 조사한다.</p>
+</section>
+<section>
+<h2>병렬 작업과 파일 담당</h2>
+<p>착수 시 HEAD와 작업 트리를 다시 확인한다. 작업자는 담당 모듈과 검사만 수정한다. 조율자는 공용 진입점, 도구 카탈로그, 빌드 등록과 화면 결합을 맡는다. 동시 작업자는 가용 슬롯 내 최대 3명이다. LQ 번호는 이 계획의 작업 번호다.</p>
+<div class="table-wrap"><table><thead><tr><th>작업</th><th>담당 파일</th><th>완료 결과</th><th>선행</th></tr></thead><tbody>
+<tr><td>LQ-00 · 조율자</td><td>공통 계약·합성 fixture·<code>paper-layout-tool-catalog.mjs</code></td><td>결과·세션·대상 식별 계약과 예제 고정</td><td>없음</td></tr>
+<tr><td>LQ-01 · A</td><td><code>paper-layout-outcome.mjs</code> 신설, <code>paper-layout-agent.mjs</code>, 전용 검사</td><td>실행과 품질 분리, 새 후보·체크포인트 이벤트 반환</td><td>00</td></tr>
+<tr><td>LQ-02 · B</td><td><code>paper-layout-run-store.mjs</code> 신설, <code>latex-session-archive.mjs</code>, 전용 검사</td><td>메모리 보존·opt-in 임시 저장·호환 복구</td><td>00</td></tr>
+<tr><td>LQ-03 · C</td><td><code>paper-layout-preview.mjs</code> 신설, 전용 검사</td><td>문서 캐시·렌더 취소·페이지/영역 이동·텍스트 대안</td><td>00</td></tr>
+<tr><td>LQ-04 · D</td><td><code>paper-layout-targets.mjs</code> 신설, 전용 검사</td><td>stable targetId와 현재 소스 위치 연결; 기존 nodeId 유지</td><td>00</td></tr>
+<tr><td>LQ-05 · E</td><td><code>app/local/layout_agent_service.py</code>, step 영수증 모듈 신설, Python 검사</td><td>동일 step 중복 방지·접수 상태·조회·취소</td><td>00, 02 계약</td></tr>
+<tr><td>LQ-06 · 조율자</td><td><code>paper-layout-agent-ui.mjs</code>, <code>latex-workbench.mjs</code>, 서버 route, tool adapter 연결, 빌드 등록</td><td>결과 카드·복구·비교·BLUE 전달 결합</td><td>부품 반환 순서대로</td></tr>
+<tr><td>LQ-07 · 독립 검수</td><td>브라우저 시나리오·출력 증거; 제품 파일 수정 없음</td><td>수용 기준 독립 재현, 실패 담당자 반환</td><td>06</td></tr>
+<tr><td>LQ-08 · 표 담당</td><td><code>paper-layout-asset-tools.mjs</code>, 전용 검사</td><td>여러 run 셀·병합 셀·긴 표를 단계별 지원</td><td>핵심 흐름 검증, 04 adapter 결합 종료</td></tr>
+<tr><td>LQ-09 · 조율자</td><td>버전·번들·릴리스·설치본·문서</td><td>검증한 동일 커밋으로 공개 웹·설치본 일치</td><td>07 통과, 배포 실행 지시</td></tr>
+</tbody></table></div>
+<p>1차 wave는 A·B·C를 병렬 배치한다. 반환 슬롯에는 D·E를 넣고 조율자는 반환 모듈부터 결합한다. A와 B는 고정한 세션 이벤트 계약을 사용해 서로의 파일을 수정하지 않는다. 화면 파일은 조율자 한 명이 편집한다. 독립 검수는 실패·복구 경로와 문서 출력 경로로 나누고 완료 좌석은 결과 회수 후 닫는다.</p>
+<p>작업자는 사용자가 마지막으로 지정한 Claude Code Opus 5.5 medium을 Stackbite seat로 실행한다. 지시에 기준 SHA, 담당 파일, 입력·출력 예제와 완료 기준을 넣는다. 전체 North Star는 조율자만 참조한다.</p>
+</section>
+<section>
+<h2>완료 기준</h2>
+<div class="table-wrap"><table><thead><tr><th>시나리오</th><th>통과 조건</th></tr></thead><tbody>
+<tr><td>숫자 누락·겹침이 남은 실행</td><td>종료와 품질을 분리한다. 문제를 누르면 해당 쪽을 열고 PDF 받기는 유지한다.</td></tr>
+<tr><td>이전 성공 → 재실행 → 초기 실패·취소</td><td>이전 후보의 PDF 해시·소스·기록과 다운로드가 유지된다.</td></tr>
+<tr><td>체크포인트 복원</td><td>소스와 PDF가 같은 프로젝트를 가리킨다. 미컴파일 소스에는 이전 PDF를 현재 출력으로 표시하지 않는다.</td></tr>
+<tr><td>새로고침·작업 파일 복구</td><td>선택 후보·검사 결과·위치·체크포인트가 복구된다. 동의 해제·12시간 만료도 적용된다.</td></tr>
+<tr><td>요청 접수 직후 새로고침</td><td>동일 runId·stepId의 모델 실행은 한 번이다. 완료 결과를 조회해 다음 도구부터 이어간다.</td></tr>
+<tr><td>A 문단 수정 후 B 조정</td><td>이미 찾은 B를 전체 문서 재조회 없이 찾는다. 중복 위치·삭제·구조 이동도 검사한다.</td></tr>
+<tr><td>페이지 수가 달라진 비교</td><td>원본과 후보의 같은 내용으로 이동한다. 대응 없는 쪽은 각 쪽번호를 따로 선택한다.</td></tr>
+<tr><td>빠른 쪽 전환 20회</td><td>마지막 선택만 표시하고 이전 렌더는 취소한다. 같은 해시 문서 로드는 재사용한다. 같은 기기에서 변경 전후 시간·피크 메모리를 비교한다.</td></tr>
+<tr><td>키보드·좁은 화면</td><td>주 동작·쪽 이동·문제 이동을 키보드로 수행한다. 페이지 내용·진단의 텍스트 대안과 변화 알림을 제공한다. 데스크톱·390px에서 결과가 열린 상태를 확인한다.</td></tr>
+<tr><td>실제 논문 출력</td><td>기존 7쪽·36쪽 회귀 자료와 합성 표·그림을 사용한다. 작은 변경의 무관 영역, 긴 변경의 영향 페이지와 캡션을 비교한다. 선택한 RED 결함·숫자를 보존한다.</td></tr>
+<tr><td>BLUE 전달</td><td>선택 후보·미리보기·다운로드·BLUE 입력의 PDF 해시가 같다. RED 계획·정답·품질 힌트를 PDF나 BLUE 입력에 추가하지 않는다.</td></tr>
+<tr><td>배포 일치</td><td>소스·번들·설치본 버전과 해시를 대조한다. 재시작 전에 진행 작업 상태를 확인하고 결과·설정·논문을 보존한다.</td></tr>
+</tbody></table></div>
+<p>코드·계약 검사를 먼저 실행한다. 다음에 브라우저에서 실패·복구·비교·다운로드를 검사하고, 마지막에 동의된 CLI 실행으로 전체 흐름을 확인한다. 새 실패가 없는 범위에서 검사를 반복하지 않는다.</p>
+</section>
+<section>
+<h2>적용 범위와 회귀 관리</h2>
+<p>첫 배포는 결과 상태, 후보 보존·복구, 대상 추적, 비교 화면과 미리보기다. 표 구조 확장은 별도 변경으로 검증한다. 기존 PDF 보존 편집과 독립 RED·BLUE·검수 동선을 유지한다. 작은 수정의 처리를 위해 자동으로 논문 전체를 재조판하지 않는다.</p>
+<p>형상 충실도는 T-0157의 출력 기준으로 추적한다. 복구와 결과 활용 개선으로 전체 논문 복원 품질까지 완료 처리하지 않는다. 표 확장은 셀·구간별 지원 증거와 실제 조판 결과를 남긴다.</p>
+<p>문구와 경고를 늘리는 방식으로 완료 기준을 대신하지 않는다. 문제 위치, 보존된 결과, 다음 동작을 구현한다. 두 글쓰기 스킬은 설명·명령 문장에 적용하고, 명령 식별자·스키마·논문 인용·수치·조건은 유지한다.</p>
+<p>구현·검증은 WorkBite T-0152에 기록한다. 배포는 T-0073, 재구성 품질은 T-0157의 현재 문맥을 확인한 뒤 연결한다. 상태는 실제 수행 결과에 맞춰 갱신한다.</p>
+</section>
+<p class="meta">관련 문서: <a href="paper-layout-tools.md">현재 23개 도구와 계약</a> · <a href="NORTH_STAR_EXTERNAL_AI.md">조율자 North Star</a></p>
+</main></body></html>

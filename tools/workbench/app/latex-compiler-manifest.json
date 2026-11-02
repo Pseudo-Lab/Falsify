@@ -1,0 +1,45 @@
+{
+  "source": "https://github.com/TeXlyre/texlyre-busytex/releases/tag/assets-v1.4.1",
+  "sourceCommit": "61b83cde2836d42cf941f6559d36c9678d52cbf2",
+  "archiveSha256": "4f63731fe4ec9238d877846074ab424350add6f6e956944def389e6752d2c78b",
+  "modifications": [
+    "busytex_pipeline.js: remove compilation log and status console output"
+  ],
+  "files": [
+    {
+      "name": "busytex.js",
+      "bytes": 271047,
+      "sha256": "875b87795162cb26b15bd93cffa2e8739bcb900d623ab904029b39402508a1a4"
+    },
+    {
+      "name": "busytex.wasm",
+      "bytes": 32507525,
+      "sha256": "8d1988fc58cd1611c3cbd6bd986c3e607e5ff44f1d94252207ff7aae4cee72e0"
+    },
+    {
+      "name": "busytex_biber.js",
+      "bytes": 3688,
+      "sha256": "e1a3ff55a120e392d3a7ef27f1bff1978c7a9d5978999296e39e1cfeac01d923"
+    },
+    {
+      "name": "busytex_pipeline.js",
+      "bytes": 37130,
+      "sha256": "5448e0af0286bfba2ab2b4380af5d3a5f71341f1c2334d40195e9bc1baa262a5"
+    },
+    {
+      "name": "busytex_worker.js",
+      "bytes": 3123,
+      "sha256": "80eca56a2eb015bdfbebff26e539dd793407b73b6c1cd351170e6fdb6e17c39a"
+    },
+    {
+      "name": "texlive-basic.data",
+      "bytes": 92785062,
+      "sha256": "ccb35d98d77cbaf988e1481f8538709f72166196785cf6b8785eabe6c8fb2993"
+    },
+    {
+      "name": "texlive-basic.js",
+      "bytes": 2091651,
+      "sha256": "d4abc2e93a1ae33099107c6ad8a61813978cd44036a95697db2f2365a393c283"
+    }
+  ]
+}

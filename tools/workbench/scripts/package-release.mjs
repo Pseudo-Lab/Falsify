@@ -25,20 +25,47 @@ export const PARAGRAPH_WASM = Object.freeze([
   'app/src/paragraph-vendor/runtime/editcore.wasm',
   'app/dist/paragraph-vendor/editcore.wasm',
 ]);
-export const PARAGRAPH_WASM_SHA256 = 'cf9f0e9ec0a68cc5932795e87622b2809ecca5561482a23bc034de3d6410696d';
-export const PARAGRAPH_JS_SHA256 = '6e6989a9994715951720e05355111aca7eab898e92b519ebea160167875bb3eb';
-export const PARAGRAPH_WASM_BYTES = 7340829;
+export const PARAGRAPH_WASM_SHA256 = '7674fe4cce4a8e15d702b02988610891693ac68f6121b4621e237949736778cb';
+export const PARAGRAPH_JS_SHA256 = 'cbef240d8893fd9624c08eadbb1ffb405a583c96878d6a14d11d8e9816c0832b';
+export const PARAGRAPH_WASM_BYTES = 7350963;
 export const RECOMPOSITION_WASM = 'app/dist/recomposition-vendor/typst_ts_web_compiler_bg.wasm';
 export const RECOMPOSITION_WASM_SHA256 = '1fc968438a672366dfec39c96c842c26ed29caff4eb1bcaab19a6c60867de5fd';
+export const LATEX_WASM = 'app/dist/latex-compiler-vendor/busytex.wasm';
+export const LATEX_MANIFEST_SHA256 = '3f9a3b4f5ee5cd82530a83f6afa596a0dcd163359d89c4850af9e853455e485b';
+export const LATEX_LUA_MANIFEST_SHA256 = '90fd272bbdd003afb3e869dfeb369b881a814ea47dd27a98b4b87639559f6deb';
 
 const forbidden = /(?:^|\/)(?:\.venv|\.local|node_modules|\.pdf-editor\.local\.json|\.runtime[^/]*|output|tmp)(?:\/|$)|^experiments\/|\.(?:pdf|docx|wav|mp3|wasm)$/i;
 const pdfjsWasm = new Set(PDFJS_WASM);
 // Two-sentence synthetic handoff fixture; user papers remain excluded.
 const HANDOFF_FIXTURE = 'app/tests/fixtures/handoff-paper.pdf';
 const HANDOFF_FIXTURE_SHA256 = 'b518af142de7f30099d55a8125f9ae0e742ddefd403919106ed14b237822a275';
+// Two-page synthetic paragraph/link regression fixture; no real paper.
+const PARAGRAPH_FIXTURE = 'app/tests/fixtures/paragraph-audit-synthetic.pdf';
+const PARAGRAPH_FIXTURE_SHA256 = '188f53578f05e85a906a2ad58f34d0191408f60c8c0d448c87fe6625570b03f5';
+const MARKER_FIXTURE = 'app/tests/fixtures/paragraph-marker-synthetic.pdf';
+const MARKER_FIXTURE_SHA256 = 'a7d711cf5411ff14df9c9ec71a1ab276abd96ceac253bc41e7221c71360a116e';
 
 export function unexpectedReleasePaths(tracked) {
-  return tracked.filter(p => forbidden.test(p) && !pdfjsWasm.has(p) && p !== MUPDF_WASM && p !== RECOMPOSITION_WASM && p !== HANDOFF_FIXTURE && !PARAGRAPH_WASM.includes(p) && p !== 'experiments/selfplay_codex.py');
+  return tracked.filter(p => forbidden.test(p) && !pdfjsWasm.has(p) && p !== MUPDF_WASM && p !== RECOMPOSITION_WASM && p !== LATEX_WASM && p !== HANDOFF_FIXTURE && p !== PARAGRAPH_FIXTURE && p !== MARKER_FIXTURE && !PARAGRAPH_WASM.includes(p) && p !== 'experiments/selfplay_codex.py');
+}
+
+export function verifyLatexRuntime(rootDir) {
+  const bytes = readFileSync(join(rootDir, 'app/latex-compiler-manifest.json'));
+  if (createHash('sha256').update(bytes).digest('hex') !== LATEX_MANIFEST_SHA256) throw new Error('LaTeX compiler manifest differs from pinned asset profile.');
+  const manifest = JSON.parse(bytes.toString('utf8'));
+  const expected = ['busytex.js','busytex.wasm','busytex_biber.js','busytex_pipeline.js','busytex_worker.js','texlive-basic.data','texlive-basic.js'];
+  if (manifest.files.map(f=>f.name).sort().join(',') !== expected.sort().join(',')) throw new Error('LaTeX compiler asset set differs from pinned profile.');
+  for (const file of manifest.files) {
+    const data=readFileSync(join(rootDir,'app/dist/latex-compiler-vendor',file.name));
+    if(data.length!==file.bytes || createHash('sha256').update(data).digest('hex')!==file.sha256) throw new Error('LaTeX runtime digest mismatch: '+file.name);
+  }
+  if(!readFileSync(join(rootDir,'app/latex-compiler-LICENSE.txt'),'utf8').includes('AFFERO GENERAL PUBLIC LICENSE')) throw new Error('LaTeX compiler license is missing.');
+  const luaBytes=readFileSync(join(rootDir,'app/latex-compiler-lua-manifest.json'));
+  if(createHash('sha256').update(luaBytes).digest('hex')!==LATEX_LUA_MANIFEST_SHA256)throw new Error('Lua profile manifest differs from pinned assets.');
+  const lua=JSON.parse(luaBytes.toString('utf8'));
+  if(lua.schema!=='falsify.latex-lua-profile.v1'||lua.engine!=='lualatex'||lua.compilerVersion!=='1.4.1'||lua.files.map(f=>f.name).sort().join(',')!==['texlive-lua-profile.js','texlive-lua-profile.data','NOTICE-lua-profile.txt'].sort().join(','))throw new Error('Lua profile asset set differs from pinned profile.');
+  for(const file of lua.files){const data=readFileSync(join(rootDir,'app/dist/latex-compiler-vendor',file.name));if(data.length!==file.bytes||createHash('sha256').update(data).digest('hex')!==file.sha256)throw new Error('Lua runtime digest mismatch: '+file.name);}
+  return {manifestSha256:LATEX_MANIFEST_SHA256,files:manifest.files.length,bytes:manifest.files.reduce((n,f)=>n+f.bytes,0),lua:{manifestSha256:LATEX_LUA_MANIFEST_SHA256,files:lua.files.length,bytes:lua.files.reduce((n,f)=>n+f.bytes,0)}};
 }
 
 export function verifyRecompositionRuntime(rootDir) {
@@ -127,7 +154,10 @@ export function assertShippableSource(tracked, rootDir) {
   const bad = unexpectedReleasePaths(tracked);
   if (bad.length) throw new Error(`Unexpected private/binary paths in source release: ${bad.join(', ')}`);
   if (tracked.includes(HANDOFF_FIXTURE) && createHash('sha256').update(readFileSync(join(rootDir, HANDOFF_FIXTURE))).digest('hex') !== HANDOFF_FIXTURE_SHA256) throw new Error('Synthetic handoff fixture digest mismatch.');
+  if (tracked.includes(PARAGRAPH_FIXTURE) && createHash('sha256').update(readFileSync(join(rootDir, PARAGRAPH_FIXTURE))).digest('hex') !== PARAGRAPH_FIXTURE_SHA256) throw new Error('Synthetic paragraph fixture digest mismatch.');
+  if (tracked.includes(MARKER_FIXTURE) && createHash('sha256').update(readFileSync(join(rootDir, MARKER_FIXTURE))).digest('hex') !== MARKER_FIXTURE_SHA256) throw new Error('Synthetic marker fixture digest mismatch.');
   if (tracked.includes(RECOMPOSITION_WASM)) verifyRecompositionRuntime(rootDir);
+  if (tracked.includes(LATEX_WASM)) verifyLatexRuntime(rootDir);
   if (PARAGRAPH_WASM.some(p => tracked.includes(p))) {
     if (!PARAGRAPH_WASM.every(p => tracked.includes(p))) throw new Error('Paragraph runtime requires both source and shipped WASM.');
     verifyParagraphRuntime(rootDir);
@@ -153,7 +183,7 @@ function main() {
       && !companion.includes(`WORKBENCH_VERSION='${version}'`)
       && !companion.includes(`WORKBENCH_VERSION = "${version}"`)) throw new Error('App, companion and release versions differ.');
   const entry = readFileSync(join(root, 'app/dist/index.html'), 'utf8');
-  const assetVersions = [...entry.matchAll(/(?:src|href)="[^"\s]+\?v=([^"\s]+)"/g)].map(m => m[1]);
+  const assetVersions = [...entry.matchAll(/(?:src|href)="[^"\s]+\?v=([^"&\s]+)(?:&[^"\s]*)?"/g)].map(m => m[1]);
   if (!assetVersions.length || assetVersions.some(v => v !== version)) throw new Error('Update versioned entry asset URLs to the release VERSION.');
   const tracked = git('ls-tree', '-r', '--name-only', commit).split('\n').filter(Boolean);
   assertShippableSource(tracked, root);

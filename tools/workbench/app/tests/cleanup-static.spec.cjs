@@ -1,13 +1,17 @@
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
 const dist=path.resolve(__dirname,'../dist'),html=fs.readFileSync(path.join(dist,'index.html'),'utf8');let passed=0;
 const check=(name,condition)=>{assert.ok(condition,name);passed++;};
-const scripts=[...html.matchAll(/<script src="([^"]+)"/g)].map(m=>m[1].split('?')[0]);
+const scripts=[...html.matchAll(/<script\b[^>]*\bsrc="([^"]+)"/g)].map(m=>m[1].split('?')[0]);
 const version=fs.readFileSync(path.join(__dirname,'../../VERSION'),'utf8').trim();
 const urls=[...html.matchAll(/(?:src|href)="([^"\s]+\?v=[^"\s]+)"/g)].map(m=>new URL(m[1],'https://local.invalid/'));
 check('changed entry assets use the current release version',urls.length>=5&&urls.every(u=>u.searchParams.get('v')===version));
 for(const source of scripts)check('linked script exists: '+source,fs.existsSync(path.join(dist,source)));
 const authored=fs.readdirSync(dist).filter(f=>f.endsWith('.js'));
-check('all authored browser modules are reachable',authored.every(f=>scripts.includes(f)));
+const sourceBuild=JSON.parse(fs.readFileSync(path.join(dist,'latex-workbench-build.json'),'utf8'));
+const digest=b=>require('node:crypto').createHash('sha256').update(b).digest('hex');
+check('source bundle matches its recorded output',sourceBuild.output.path==='latex-workbench.mjs'&&digest(fs.readFileSync(path.join(dist,sourceBuild.output.path)))===sourceBuild.output.sha256);
+const consumed=new Set(sourceBuild.inputs.filter(i=>i.path.startsWith('dist/')&&digest(fs.readFileSync(path.join(dist,i.path.slice(5))))===i.sha256).map(i=>i.path.slice(5)));
+check('all authored browser modules are reachable',authored.every(f=>scripts.includes(f)||consumed.has(f)));
 const ids=[...html.matchAll(/\bid="([^"]+)"/g)].map(m=>m[1]);check('static IDs are unique',ids.length===new Set(ids).size);
 const sources=authored.filter(f=>f!=='document-import.js').map(f=>fs.readFileSync(path.join(dist,f),'utf8')).join('\n');
 // paper-workspace is now the independent PDF editor, not the removed AMAS demo.

@@ -1,0 +1,19 @@
+.latex-source-editor{background:var(--paper,#fff);color:var(--ink,#111315);border:1px solid var(--line,#d9dde0);border-radius:6px;padding:20px}
+.latex-source-editor h2{font-size:22px;line-height:1.4;margin:0 0 16px}
+.latex-source-editor label{display:block;font-weight:600;margin:12px 0}
+.latex-source-editor textarea,.latex-source-editor select,.latex-source-editor input{display:block;max-width:100%;margin-top:6px;font:inherit}
+.latex-source-editor textarea{box-sizing:border-box;width:100%;padding:10px;border:1px solid #8c949b;border-radius:4px;resize:vertical}
+.latex-source-actions{display:flex;flex-wrap:wrap;gap:10px;margin:16px 0}
+.latex-source-status{color:var(--muted,#5a626a);font-size:13px;overflow-wrap:anywhere}
+.latex-source-preview:empty{display:none}
+.latex-source-editor details{margin-top:18px}
+.latex-source-editor summary{cursor:pointer;font-weight:600}
+.latex-source-nodes{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px}
+.latex-source-node{font:inherit;text-align:left;background:var(--surface,#f3f4f4);color:inherit;border:1px solid var(--line,#d9dde0);border-radius:4px;padding:8px;max-width:100%;overflow-wrap:anywhere;cursor:pointer}
+.latex-source-node[aria-pressed=true]{border-color:var(--ink,#111315);outline:2px solid var(--ink,#111315)}
+.latex-source-editor :focus-visible{outline:3px solid var(--focus,#246388);outline-offset:3px}
+@media(max-width:700px){.latex-source-editor{padding:16px}.latex-source-actions .button{width:100%}}
+
+.latex-highlight-frame{position:relative;display:inline-block;max-width:100%}.latex-highlight-frame canvas{display:block;max-width:100%;height:auto}.latex-highlight-overlay{position:absolute;inset:0;pointer-events:none}.latex-highlight-mark{position:absolute;background:rgba(255,189,36,.35);outline:1px solid rgba(190,118,0,.65);pointer-events:none}.latex-highlight-label{font-size:13px;overflow-wrap:anywhere}
+
+.latex-pdf-text-layer{pointer-events:none;transform-origin:0 0}.latex-pdf-text-layer :is(span,br){pointer-events:none}

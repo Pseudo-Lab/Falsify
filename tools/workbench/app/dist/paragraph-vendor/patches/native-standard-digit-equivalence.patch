@@ -1,0 +1,82 @@
+--- a/packages/pdfium/build/code/editcore/reencode.cpp
++++ b/packages/pdfium/build/code/editcore/reencode.cpp
+@@ -54,6 +54,7 @@
+ 
+ class CPDF_Dictionary {
+  public:
++    bool KeyExist(fxcrt::StringViewTemplate<char> key) const;
+     fxcrt::RetainPtr<CPDF_Object> Clone() const;
+     void SetFor(const fxcrt::ByteString& key, fxcrt::RetainPtr<CPDF_Object> v);
+     fxcrt::ByteString GetByteStringFor(
+@@ -469,6 +470,59 @@
+     return std::string(buf, strnlen(buf, n));
+ }
+ 
++// Renaming an unembedded Base-14 font can change another viewer's face.
++// Skip only a narrowly proved equivalent pair for the victim's digit codes.
++bool equivalentStandardDigits(Session& s, FPDF_FONT a, FPDF_FONT b,
++                              const std::string& name,
++                              const std::vector<FPDF_PAGEOBJECT>& objects) {
++    if (name != "Helvetica" || FPDFFont_GetIsEmbedded(a) != 0 ||
++        FPDFFont_GetIsEmbedded(b) != 0 || objects.empty()) return false;
++    CPDF_IndirectObjectHolder* holder = abiValidatedHolder(s.doc);
++    if (!holder) return false;
++    auto validDict = [&](FPDF_FONT font) {
++        auto* dict = abiFontDict(s.doc, holder, font, name);
++        if (!dict || abiByteStringChars(dict->GetByteStringFor(fxcrt::StringViewTemplate<char>("BaseFont",8))) != name || abiByteStringChars(dict->GetByteStringFor(fxcrt::StringViewTemplate<char>("Subtype",7))) != "Type1" || dict->KeyExist(fxcrt::StringViewTemplate<char>("ToUnicode",9))) return false;
++        for (const auto& key : {"Widths","FirstChar","LastChar","FontDescriptor"})
++            if (dict->KeyExist(fxcrt::StringViewTemplate<char>(key,strlen(key)))) return false;
++        if (!dict->KeyExist(fxcrt::StringViewTemplate<char>("Encoding",8))) return true;
++        const std::string enc = abiByteStringChars(dict->GetByteStringFor(fxcrt::StringViewTemplate<char>("Encoding",8)));
++        return enc == "WinAnsiEncoding" || enc == "StandardEncoding";
++    };
++    if (!validDict(a) || !validDict(b)) return false;
++    std::set<uint32_t> used;
++    for (auto obj : objects) {
++        const auto glyphs = readOrigGlyphs(obj);
++        if (glyphs.empty()) return false;
++        for (const auto& g : glyphs) {
++            if (g.code < '0' || g.code > '9') return false;
++            used.insert(g.code);
++        }
++    }
++    for (uint32_t code : used) {
++        for (FPDF_FONT font : {a,b}) {
++            FPDF_PAGEOBJECT obj = FPDFPageObj_CreateTextObj(s.doc,font,1.0f);
++            if (!obj) return false;
++            const unsigned short text[] = {static_cast<unsigned short>(code),0};
++            const bool ok = FPDFText_SetText(obj,text);
++            const auto glyphs = readOrigGlyphs(obj);
++            FPDFPageObj_Destroy(obj);
++            if (!ok || glyphs.size()!=1 || glyphs[0].code!=code) return false;
++        }
++        float wa=0,wb=0;
++        if (!FPDFFont_GetGlyphWidth(a,code,1,&wa) || !FPDFFont_GetGlyphWidth(b,code,1,&wb) || std::abs(wa-wb)>1e-5f) return false;
++        auto pa=FPDFFont_GetGlyphPath(a,code,1), pb=FPDFFont_GetGlyphPath(b,code,1);
++        if (!pa || !pb) return false;
++        int n=FPDFGlyphPath_CountGlyphSegments(pa);
++        if (n<1 || n!=FPDFGlyphPath_CountGlyphSegments(pb)) return false;
++        for (int i=0;i<n;i++) {
++            auto x=FPDFGlyphPath_GetGlyphPathSegment(pa,i), y=FPDFGlyphPath_GetGlyphPathSegment(pb,i);
++            float ax=0,ay=0,bx=0,by=0;
++            if (!x || !y || FPDFPathSegment_GetType(x)!=FPDFPathSegment_GetType(y) || FPDFPathSegment_GetClose(x)!=FPDFPathSegment_GetClose(y) || !FPDFPathSegment_GetPoint(x,&ax,&ay) || !FPDFPathSegment_GetPoint(y,&bx,&by) || std::abs(ax-bx)>1e-5f || std::abs(ay-by)>1e-5f) return false;
++        }
++    }
++    return true;
++}
++
+ FPDF_FONT cloneFontWithFreshName(Session& s, FPDF_FONT victim,
+                                  const std::string& baseName,
+                                  const std::set<std::string>& namesInUse,
+@@ -706,6 +760,11 @@
+                        uses.size());
+                 fflush(stdout);
+             }
++            std::vector<FPDF_PAGEOBJECT> sourceObjects;
++            for (const auto& use : uses) sourceObjects.push_back(use.obj);
++            bool hasForm = false;
++            for (int i=0; i<n; i++) { auto o=FPDFPage_GetObject(page,i); if (o && FPDFPageObj_GetType(o)==FPDF_PAGEOBJ_FORM) hasForm=true; }
++            if (!hasForm && equivalentStandardDigits(s, keep, victim, name, sourceObjects)) continue;
+             std::string newName;
+             FPDF_FONT nf =
+                 cloneFontWithFreshName(s, victim, name, namesInUse, &newName);

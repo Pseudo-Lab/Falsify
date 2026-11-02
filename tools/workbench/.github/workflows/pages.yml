@@ -44,6 +44,9 @@ jobs:
           FALSIFY_UI_TEST_URL=http://127.0.0.1:7851/ node app/tests/paper-direct-recompose.browser.cjs
           node app/tests/harness-comparison.browser.cjs
           node --test scripts/packaging.spec.mjs
+      - name: LaTeX source project browser regression (synthetic only)
+        timeout-minutes: 15
+        run: node app/tests/latex-source.browser.cjs
       - name: Browser PDF MuPDF contracts
         working-directory: app
         run: |

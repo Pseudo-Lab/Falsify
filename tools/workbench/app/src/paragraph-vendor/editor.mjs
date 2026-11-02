@@ -11,12 +11,17 @@ import { PAGINATION_CAPABILITY, PAGINATION_LIMITS, paginateOverflow } from "./pa
 import { compactDocumentFlow } from "./document-flow.mjs";
 import { isolateColumns } from "../paragraph-column-isolation.mjs";
 import { repairInlineMarkers } from "../paragraph-inline-markers.mjs";
+import { transportParagraphLinks } from "../paragraph-link-transport.mjs";
 import {
   LineRetentionError,
   canCommitLineLocal,
   commitRetainingLines,
   commitSourceLineDeletion,
+  commitNumericMarker,
+  commitSourceWord,
   commitGeometricPrefix,
+  commitPrefixSuffix,
+  editedLineSpan,
   removeGeometricFirstLine,
   pageObjectList,
   planInlineChange,
@@ -516,11 +521,22 @@ export async function editPdf(request, options = {}) {
       const paras = engine.buildModel();
       const localStable = objectsBefore !== null && pageObjectList(engine).join(",") === objectsBefore;
       if (snapshotKey(paras) !== key) throw fail("STATE_DRIFT", "Page model changed between planning and commit", { pageIndex });
-      const context = quality.capturePageLayout(engine, at, paras);
+      let context = quality.capturePageLayout(engine, at, paras);
       const touched = [];
+      let ownershipView = null;
       const mutations = [...plan.perPara.entries()].sort((x, y) => x[0] - y[0]);
       for (const [mutationIndex, [pi, { del, inserts }]] of mutations.entries()) {
         const para = paras[pi];
+        const markerPlans=plan.plans.filter(p=>!p.noop&&p.touched.includes(pi));
+        if(mutations.length===1&&markerPlans.length===1){
+          const word=commitSourceWord(engine,para,markerPlans[0].edit.before,markerPlans[0].edit.after);
+          if(word){mutated=true;pageReport.paragraphs.push({index:pi,surgical:true,lineRetention:word});continue;}
+        }
+        if(markerPlans.length===1&&markerPlans[0].change?.warning==='numeric_marker_style_from_digits'){
+          const mapped=markerPlans[0].change.numericMarker;
+          const marker=commitNumericMarker(engine,para,mapped?.before||markerPlans[0].edit.before,mapped?.after||markerPlans[0].edit.after,mapped);
+          if(marker){mutated=true;pageReport.paragraphs.push({index:pi,surgical:true,lineRetention:marker});continue;}
+        }
         const geometric = plan.plans.some((p) => p.geometricShortening && p.touched.includes(pi));
         if (geometric && !inserts.length) {
           if (mutationIndex !== mutations.length - 1 || plan.plans.filter((p) => p.touched.includes(pi) && !p.noop).length !== 1 || !removeGeometricFirstLine(engine, para, del, inserts)) {
@@ -543,7 +559,41 @@ export async function editPdf(request, options = {}) {
           // Only a stepped commit (linePlan.breaks) can be undone here.
           const pre = linePlan?.breaks && localStable ? pageObjectList(engine) : null;
           const prefix = plan.plans.some((p) => p.geometricShortening && p.change.inserts.some((ins) => ins.pi === pi));
-          if (prefix) {
+          const sourceOwner = context?.paras?.[pi];
+          const hasSourceContext = Array.isArray(context?.objects) && Array.isArray(context?.types) && Array.isArray(sourceOwner?.handles) && Array.isArray(sourceOwner?.slots) && sourceOwner.slots.length > 0;
+          const scalePrefix = hasSourceContext && plan.plans.some((p) => p.change?.requiresPrefix && p.touched.includes(pi));
+          const ownerHandles = new Set(hasSourceContext ? sourceOwner.handles : []);
+          const deletionSpan = !inserts.length ? editedLineSpan(para, del, inserts) : null;
+          const suffixSlots = hasSourceContext && deletionSpan && !deletionSpan.reason ? sourceOwner.slots.filter(slot => {
+            const b = engine.objectBounds(context.objects[slot]);
+            return b && para.lines.slice(deletionSpan.k).some(l => l.y >= b.y - 1 && l.y <= b.y + b.h + 1);
+          }) : [];
+          const firstSuffixSlot = suffixSlots.length ? Math.min(...suffixSlots) : -1;
+          // Any intervening path overlapping a retained source line can mask it.
+          // The prefix/suffix commit separately proves suffix contiguity and preserves page order.
+          const maskPrefix = hasSourceContext && deletionSpan && !deletionSpan.reason && deletionSpan.k > 0 && firstSuffixSlot >= 0 && sourceOwner.slots.some(slot => {
+            const prefixHandle = context.objects[slot], b = engine.objectBounds(prefixHandle);
+            if (!b || slot >= firstSuffixSlot || !para.lines.slice(0, deletionSpan.k).some(l => l.y >= b.y - 1 && l.y <= b.y + b.h + 1)) return false;
+            return context.objects.slice(slot + 1, firstSuffixSlot).some((h, offset) => {
+              if (ownerHandles.has(h) || context.types[slot + 1 + offset] !== 2) return false;
+              const m = engine.objectBounds(h);
+              return m && Math.min(b.x + b.w, m.x + m.w) > Math.max(b.x, m.x) && Math.min(b.y + b.h, m.y + m.h) > Math.max(b.y, m.y);
+            });
+          });
+          if (scalePrefix || maskPrefix) {
+            if (!localStable || mutations.length !== 1 || plan.plans.filter(p=>p.touched.includes(pi) && !p.noop).length !== 1) throw new LineRetentionError('scale_prefix_unavailable');
+            committed = commitPrefixSuffix(engine, paras, pi, del, inserts, runs, new Set(touched.map(t=>t.index)), {allowMultiple:true,context,reserve:quality.reserveCascadeSpace});
+            if (!committed?.upd) throw new LineRetentionError(committed?.reason || 'scale_prefix_unavailable');
+            if (committed.context) context = committed.context;
+            committed.ids.forEach((id,j)=>{paras[j].id=id; context.paras[j].id=id;});
+            for (const t of touched) t.id=committed.ids[t.index];
+            publishedId=committed.ids[pi];
+            ownershipView = Object.create(engine);
+            Object.defineProperty(ownershipView, "_pageDirty", { get: () => engine._pageDirty, set: value => { engine._pageDirty = value; } });
+            ownershipView.paragraphObjects = id => committed.ownership.get(id) || [];
+            ownershipView.resizeParagraph = () => null;
+            ownershipView.moveParagraph = () => false;
+          } else if (prefix) {
             if (plan.plans.filter((p) => p.touched.includes(pi) && !p.noop).length !== 1) throw new LineRetentionError("geometric_prefix_shared");
             committed = await commitGeometricPrefix(engine, para, del, inserts);
             if (!committed) throw new LineRetentionError("geometric_prefix_unsupported");
@@ -555,7 +605,10 @@ export async function editPdf(request, options = {}) {
           if (lost && linePlan?.breaks && objectsBefore !== null && !localStable) lineLocal = { status: "declined", reason: "page_model_unstable" };
           // A re-layout that lost the source lines is replaced by a re-layout
           // of the edited line alone when the edit stays inside it.
-          if (pre && lost) {
+          // Retrying a deletion after undo can change the engine's choice of
+          // surgical versus reflow commit. Keep the original commit until a
+          // deletion-specific retry can prove equivalent text and ordering.
+          if (pre && lost && inserts.length && !scalePrefix && !maskPrefix) {
             const changed = new Set(touched.map((t) => t.index));
             const local = replaceReflowWithLineLocal(engine, paras, pi, del, inserts, runs, pre, changed);
             // A line-local commit and a declined prefix rollback both rebuild
@@ -592,7 +645,7 @@ export async function editPdf(request, options = {}) {
         if (committed.lines?.status === "reflowed" && committed.lines.reason !== "line_count_changed") {
           report.warnings.push({ pageIndex, code: "source_lines_reflowed", paragraphIndex: pi, reason: committed.lines.reason, severity: "warning" });
         }
-        touched.push({ id: publishedId ?? upd.id ?? para.id, index: pi, sourceBox: para.box, sourceLines: para.lines, sourceFormat: para.format });
+        touched.push({ id: publishedId ?? upd.id ?? para.id, index: pi, sourceBox: para.box, sourceLines: ownershipView ? [{ y: committed.reservedBaseline }] : para.lines, sourceFormat: para.format });
       }
       if (reflow) {
         let r;
@@ -603,7 +656,7 @@ export async function editPdf(request, options = {}) {
           ? { paginate: (eng, ctx, grown, info) => { restoreColumns?.(); restoreColumns = null; return (paginated = paginateOverflow(eng, ctx, grown, { ...info, maxNewPages: pg.max - added })); } }
           : {};
         try {
-          r = quality.repairPageLayout(engine, at, context, touched, repairOptions);
+          r = quality.repairPageLayout(ownershipView || engine, at, context, touched, repairOptions);
         } catch (err) {
           throw fail("REPAIR_FAILED", "Layout repair raised an error", { pageIndex, cause: err?.code ?? err?.name ?? "Error" });
         }
@@ -633,6 +686,13 @@ export async function editPdf(request, options = {}) {
           continued.set(pageIndex, { ...r.pagination, continuationStyle: style });
           added += r.pagination.added;
         }
+      } else if (typeof quality.restoreSourceOrder === "function") {
+        const repairs = [], warnings = [];
+        quality.restoreSourceOrder(ownershipView || engine, context, repairs, warnings);
+        report.repairs.push({ pageIndex, repairs });
+        const pageWarnings = warnings.map(w => ({ pageIndex, ...w }));
+        report.warnings.push(...pageWarnings);
+        if (pageWarnings.some(w => w.severity === "error") || repairs.some(r => r.kind === "reading_order" && r.action === "skipped")) throw fail("REPAIR_FAILED", "Source painter order could not be preserved", { pageIndex });
       }
       for (const p of plan.plans) if (!p.noop) editReport.get(p.edit.id).status = "applied";
       restoreColumns?.(); restoreColumns = null;
@@ -700,6 +760,11 @@ export async function editPdf(request, options = {}) {
   report.inlineMarkerRepairs = markerResult.repairs;
   report.warnings.push(...markerResult.warnings);
 
+  const paragraphLinks = await transportParagraphLinks({engineFactory, sourceBytes, outputBytes: pdf, edits, sourcePageMap, flowGroups, annotationAdapter: options.annotationAdapter});
+  pdf = paragraphLinks.pdf;
+  report.paragraphLinkMoves = paragraphLinks.moves;
+  report.paragraphLinkFailures = paragraphLinks.failures;
+
   // Same-engine self-check on the final bytes, including marker repairs.
   const qaCapture = captureConsole(!!options.includeEngineLog);
   let check;
@@ -712,6 +777,7 @@ export async function editPdf(request, options = {}) {
   } finally {
     report.selfCheckLog = qaCapture.restore();
   }
+  if (paragraphLinks.failures.length) check = {...check, ok: false, failures: [...(check?.failures ?? []), ...paragraphLinks.failures]};
   report.selfCheck = { status: check?.ok === true ? "passed" : "failed", ...check };
   report.pagination.flow = (check?.pages ?? [])
     .filter((row) => row.continuationPageIndices?.length)

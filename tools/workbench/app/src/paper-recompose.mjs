@@ -9,11 +9,39 @@ import {checkRecomposition} from './paper-compose-check.mjs';
 import {buildOutputProfile} from './paper-output-profile.mjs';
 import {resolveOutputAssetSpans} from './paper-asset-spans.mjs';
 import {hex} from './paragraph-pdf-crypto.mjs';
+import * as mupdf from 'mupdf';
+import {detectSourceTables} from './table-adapter.mjs';
 
 const abort = signal => { if (signal?.aborted) throw new DOMException('Recomposition cancelled', 'AbortError'); };
 const fail = (code, message, details={}) => { const e=new Error(message); e.code=code; e.details=details; throw e; };
 const box = b => Array.isArray(b) && b.length===4 && b.every(Number.isFinite) && b[0]<b[2] && b[1]<b[3];
 const overlaps = (a,b) => a[0]<b[2] && b[0]<a[2] && a[1]<b[3] && b[1]<a[3];
+
+// Promote only completely accounted-for cell text. Ambiguous ownership must
+// stay with the original flow; it must never silently remove a paragraph.
+export function attachStructuredTables(document, flow, tables) {
+  const blocks=new Map([...document.blocks,...(flow.fragments||[])].map(b=>[b.id,b]));
+  for(const table of tables) {
+    if(!table.ruled || table.cells.length!==table.rows*table.cols || table.cells.some(c=>c.rowSpan!==1 || c.colSpan!==1)) continue;
+    if(document.assets.some(a=>a.source?.pageIndex===table.pageIndex && box(a.source.bbox) && overlaps(a.source.bbox,table.bbox))) continue;
+    const cells=table.cells.slice().sort((a,b)=>a.row-b.row || a.col-b.col), owned=[];
+    let valid=true;
+    for(const cell of cells) {
+      const matches=flow.items.filter(item=>item.source?.pageIndex===table.pageIndex && item.blockIds?.length===1 && item.kind==='paragraph' && !item.inline && (()=>{
+        const b=blocks.get(item.blockIds[0]), q=b?.source?.bbox;
+        return box(q) && q[0]>=cell.bbox[0]-.2 && q[1]>=cell.bbox[1]-.2 && q[2]<=cell.bbox[2]+.2 && q[3]<=cell.bbox[3]+.2;
+      })());
+      if(matches.length!==1 || owned.includes(matches[0])) {valid=false;break;}
+      owned.push(matches[0]);
+    }
+    if(!valid) continue;
+    const indices=owned.map(i=>flow.items.indexOf(i)).sort((a,b)=>a-b);
+    if(indices.some((n,i)=>n!==indices[0]+i) || flow.items.some(i=>!owned.includes(i) && i.source?.pageIndex===table.pageIndex && box(i.source.bbox) && overlaps(i.source.bbox,table.bbox))) continue;
+    const first=flow.items[indices[0]], item={...first,id:`table-${table.id}`,kind:'table',source:{pageIndex:table.pageIndex,bbox:[...table.bbox]},blockIds:owned.map(i=>i.blockIds[0]),table:{rows:table.rows,cols:table.cols,ruled:true,cells:cells.map((c,i)=>({row:c.row,col:c.col,blockIds:[owned[i].blockIds[0]]}))}};
+    flow.items.splice(indices[0],indices.length,item);
+  }
+  return flow;
+}
 
 // Keep one map entry per UTF-16 unit. Generated separators have no source.
 function pageStreams(document, flow, visibleWrap=false) {
@@ -188,6 +216,12 @@ export async function prepare(request={}, options={}) {
   const links=await readSourceLinks({bytes,document,signal}); abort(signal);
   const flow=buildPaperFlow(document,{drawings:inventory.drawings,links});
   const {bindings,changes}=bindEdits(document,flow,edits,explicit);
+  const tableModel=await detectSourceTables({sourceBytes:bytes,sourceSha256:document.sourceSha256,revision:'recomposition',mupdf}); abort(signal);
+  attachStructuredTables(document,flow,tableModel.tables);
+  for(const edit of edits.filter(e=>e?.enabled!==false && String(e?.segmentId||'').startsWith('table:'))) {
+    const matching=flow.items.filter(i=>i.kind==='table' && i.source.pageIndex===edit.pageIndex && box(edit.anchor?.bbox) && overlaps(i.source.bbox,edit.anchor.bbox));
+    if(matching.length!==1) fail('table-structure-unavailable','The selected table cannot be recomposed with verified cell ownership.',{id:edit.id??null,pageIndex:edit.pageIndex});
+  }
   const regions=(flow.regions||[]).map(r=>structuredClone(r));
   const ids=new Set(regions.map(r=>r.id));
   for(const item of flow.items.filter(i=>i.kind==='asset' && !i.renderAssetId)) {

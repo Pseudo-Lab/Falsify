@@ -48,6 +48,18 @@ class RedTests(unittest.TestCase):
         MockBackend.prompts=[]
         result=run_review(request(TEXT+'x'*72000), lambda _:None, threading.Event(), MockBackend)
         self.assertEqual(len(MockBackend.prompts),4);self.assertEqual(result['coverage']['completedChunks'],3)
+    def test_long_chunk_notes_are_trimmed_not_rejected(self):
+        MockBackend.prompts=[]
+        class Verbose(MockBackend):
+            def infer(self, prompt, schema):
+                self.prompts.append(prompt)
+                if 'summary' in schema['properties']:
+                    return {'status':'ok','response':{'status':'ok','summary':'word '*4000,'evidence':[]}}
+                return {'status':'ok','response':{'status':'ok','candidates':[CANDIDATE]}}
+        result=run_review(request(TEXT+'x'*72000), lambda _:None, threading.Event(), Verbose)
+        self.assertTrue(result['coverage']['complete'])
+        self.assertIn('청크 요약을 예산에 맞게 줄였습니다.',result['coverage']['meaning'])
+        self.assertTrue(all(len(p)<=100000 for p in Verbose.prompts))
     def test_budget_denied_before_calls(self):
         MockBackend.prompts=[]
         with self.assertRaises(ValueError):run_review(request(TEXT+'x'*72000,2),lambda _:None,threading.Event(),MockBackend)

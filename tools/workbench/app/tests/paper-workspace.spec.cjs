@@ -129,7 +129,7 @@ function mount(opts={}){
   const sourceBlobs=opts.sourceBlobs||blobMemory();
   const clock={value:opts.clock??1_700_000_000_000};
   const ws=api.create({document:w.document,preview:opts.preview===false?undefined:{pdfParams:Preview.pdfParams,fitScale:Preview.fitScale,defaultImport:async()=>lib},
-    edits:edits||undefined,fonts:opts.fonts,exporter:exporter||undefined,paragraphPdf:opts.paragraphPdf,tablePdf:opts.tablePdf,pipeline:opts.pipeline,recompositionPdf:opts.recompositionPdf,storage,sourceBlobs,urls:{createObjectURL(file){downloads.push(file);return 'blob:'+downloads.length;},revokeObjectURL(){}},
+    edits:edits||undefined,generation:opts.generation,fonts:opts.fonts,exporter:exporter||undefined,paragraphPdf:opts.paragraphPdf,tablePdf:opts.tablePdf,pipeline:opts.pipeline,recompositionPdf:opts.recompositionPdf,storage,sourceBlobs,urls:{createObjectURL(file){downloads.push(file);return 'blob:'+downloads.length;},revokeObjectURL(){}},
     timers,subtle:opts.subtle||crypto.subtle,now:()=>clock.value});
   const file=f=>{w.get('paper-file').files=[f];w.get('paper-file').dispatchEvent(new Event('change'));};
   const canvas=()=>w.get('paper-before-stage').children.flatMap(page=>(page.children||[]).filter(c=>c.tagName==='canvas'));
@@ -1278,6 +1278,32 @@ test('whole-paper choice reports its mode and only trustworthy page count metada
   assert.match(v.get('paper-output-notes').textContent,/전체 논문 새로 배치 · 원본 2쪽 → 출력 3쪽/);
   count=99;v.get('paper-generate').click();await until(()=>!v.get('paper-generate').disabled,'whole output again');assert.doesNotMatch(v.get('paper-output-notes').textContent,/원본 99쪽/);
   assert.match(HTML,/<details class="red-help"><summary>고급 생성 옵션<\/summary><label class="paper-recompose-option"><input type="checkbox" id="paper-recompose"> 전체 논문 새로 배치/);
+});
+
+test('ui-audit-repair: blur commits a new paragraph with its real id and ignores obsolete source callbacks',async()=>{
+  const instances=[],key=spec=>JSON.stringify({fileHash:spec.fileHash,edits:spec.edits.map(({segmentId,before,after,anchor})=>({segmentId,before,after,anchor}))});
+  const generation={key,create(callbacks){const instance={callbacks,specs:[],schedule(spec){this.specs.push(structuredClone(spec));},dispose(){this.disposed=true;},flush(){return new Promise(()=>{});}};instances.push(instance);return instance;}};
+  const v=mount({generation,paragraphPdf:paragraphMock('Original paragraph.')});
+  v.file(pdfFile(pdfBytes('MARKER-A')));await until(()=>/문단을 클릭/.test(v.get('paper-before-status').textContent),'paragraph');
+  clickParagraph(v);const editor=v.document.activeElement;editor.value='Changed paragraph.';editor.dispatchEvent(new Event('input'));
+  const old=instances.at(-1);assert.equal(old.specs.at(-1).edits[0].id,'inline');
+  editor.dispatchEvent(new Event('blur'));
+  const current=instances.at(-1);assert.notEqual(current,old);assert.equal(old.disposed,true);
+  assert.equal(current.specs.at(-1).edits[0].id,v.ws.getEditSnapshot().edits[0].id);assert.doesNotMatch(v.get('paper-generate-status').textContent,/겹/);
+  v.get('paper-undo').click();assert.equal(v.ws.getEditSnapshot().edits.length,0);v.get('paper-redo').click();assert.equal(v.ws.getEditSnapshot().edits.length,1);
+  const spec=current.specs.at(-1);current.callbacks.onState({key:key(spec),phase:'error',error:new Error('old failure')});assert.match(v.get('paper-generate-status').textContent,/old failure/);
+  v.file(pdfFile(pdfBytes('MARKER-B')));await until(()=>v.ws.getSource()?.fileHash===sha(pdfBytes('MARKER-B')),'new source');
+  assert.equal(v.get('paper-generate-status').textContent,'');assert.equal(v.get('paper-edit-status').textContent,'');
+  current.callbacks.onState({key:key(spec),phase:'error',error:new Error('late failure')});assert.equal(v.get('paper-generate-status').textContent,'');
+});
+
+test('ui-audit-repair: table blur schedules the committed cell identity',async()=>{
+  const instances=[],key=spec=>JSON.stringify(spec.edits);
+  const generation={key,create(callbacks){const instance={callbacks,specs:[],schedule(spec){this.specs.push(structuredClone(spec));},dispose(){},flush(){return new Promise(()=>{});}};instances.push(instance);return instance;}};
+  const v=mount({generation,edits:require('../dist/paper-edits.js'),tablePdf:tableMock()});v.file(pdfFile(pdfBytes('MARKER-A')));
+  await until(()=>v.canvas().length,'page');v.get('paper-mode-table').click();await until(()=>tableButtons(v).length,'table');
+  tableButtons(v)[0].click();const editor=v.document.activeElement;editor.value='11';editor.dispatchEvent(new Event('input'));editor.dispatchEvent(new Event('blur'));
+  assert.equal(instances.at(-1).specs.at(-1).edits[0].id,v.ws.getEditSnapshot().edits[0].id);assert.doesNotMatch(v.get('paper-generate-status').textContent,/겹/);
 });
 
 (async()=>{let passed=0;for(const [name,fn] of tests){try{await fn();passed++;console.log('PASS '+name);}catch(e){console.error('FAIL '+name+'\n'+(e.stack||e));process.exitCode=1;}}

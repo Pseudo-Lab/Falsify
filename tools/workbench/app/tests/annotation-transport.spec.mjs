@@ -14,7 +14,7 @@ function source({shared=false,tagged=false,badRect=false,namedTarget=2,unknownAc
     const stream=doc.addStream(new Uint8Array([0,1,255,23,48]),{PrivateStreamKey:doc.newString('unknown-stream-value')});
     const next={S:'URI',URI:doc.newString('https://other.invalid/never-open'),PrivateUnknown:{Rect:[1,2,3,4],Nested:doc.newString('private-next-value')}};
     const action={S:unknownAction?'JavaScript':'URI',URI:doc.newString('https://example.invalid/never-open'),PrivateUnknown:{Nested:[17,doc.newString('retained-action-data'),pages[2]],Blob:stream},Next:next};
-    const firstObj={Type:'Annot',Subtype:'Link',Rect:badRect?[30,265,110,250]:[30,250,110,265],P:pages[0],QuadPoints:[30,265,110,265,30,250,110,250],Contents:doc.newString('Repeated label'),A:action,PrivateUnknown:{Keep:true,Other:doc.newString('do-not-report')}};
+    const firstObj={Type:'Annot',Subtype:'Link',Rect:badRect?[30,250,30,265]:[30,250,110,265],P:pages[0],QuadPoints:[30,265,110,265,30,250,110,250],Contents:doc.newString('Repeated label'),A:action,PrivateUnknown:{Keep:true,Other:doc.newString('do-not-report')}};
     if(tagged)firstObj.StructParent=4;
     const first=direct?doc.newDictionary():doc.addObject(firstObj);if(direct)for(const [k,v]of Object.entries(firstObj))first.put(k,v);
     const second=doc.addObject({Type:'Annot',Subtype:'Link',Rect:[30,200,110,215],P:pages[0],Contents:doc.newString('Repeated label'),Dest:doc.newString('namedTarget'),PrivateUnknown:stream});
@@ -58,6 +58,24 @@ test('wrong source/model/map, duplicate moves, shared annotation ownership, tagg
   await assert.rejects(()=>api.inspect({sourceBytes:src,sourceSha256:'0'.repeat(64)}),{code:'annotation-stale-source'});
   for(const change of [{sourceBytes:source({unknownAction:true})},{model:JSON.parse(JSON.stringify(model))},{sourcePageMap:[map[0],map[0],map[2]]},{moves:[move,move]},{moves:[{...move,dx:NaN}]},{moves:[{...move,split:true}]},{moves:[{...move,dx:1000}]}])assert.equal((await api.validate(args(model,src,change))).ok,false);
   for(const options of [{shared:true},{tagged:true},{badRect:true},{unknownAction:true}]){const bytes=source(options),m=await inspect(bytes);assert.ok(m.annotations.some(a=>!a.eligible));await assert.rejects(()=>api.transport(args(m,bytes)));}
+});
+test('opt-in preserves stationary annotation alias partitions and rejects moved, split or joined aliases',async()=>{
+  const src=source({shared:true}),model=await inspect(src),request=args(model,src,{moves:[],reflowedSourcePages:[],preserveUnmovedUnsupported:true});
+  const out=await api.transport(request);assert.equal((await api.validate({...request,outputBytes:out.pdf})).ok,true);
+  const staged=mutate(src,d=>d.insertPage(1,d.addPage([0,0,300,400],0,{},''))),sourcePageMap=[{sourcePageIndex:0,outputPageIndex:0},{sourcePageIndex:1,outputPageIndex:2},{sourcePageIndex:2,outputPageIndex:3}];
+  const mapped={...request,outputBytes:staged,sourcePageMap},mappedOut=await api.transport(mapped);assert.equal((await api.validate({...mapped,outputBytes:mappedOut.pdf})).ok,true);
+  assert.ok(!JSON.stringify(model).includes('aliasKey'));
+  await assert.rejects(()=>api.transport({...request,preserveUnmovedUnsupported:false}));
+  await assert.rejects(()=>api.transport({...request,moves:[move],reflowedSourcePages:[0]}));
+  const split=mutate(out.pdf,d=>{const arr=d.findPage(1).get('Annots'),original=arr.get(1);arr.put(1,d.addObject(original.resolve()));});
+  assert.equal((await api.validate({...request,outputBytes:split})).ok,false);
+  await assert.rejects(()=>api.transport({...request,outputBytes:split}));
+  const distinct=mutate(src,d=>{const arr=d.findPage(1).get('Annots'),original=arr.get(1);arr.put(1,d.addObject(original.resolve()));}),distinctModel=await inspect(distinct),distinctRequest=args(distinctModel,distinct,{moves:[],reflowedSourcePages:[],preserveUnmovedUnsupported:true});
+  const joined=mutate(distinct,d=>d.findPage(1).get('Annots').put(1,d.findPage(0).get('Annots',0)));
+  assert.equal((await api.validate({...distinctRequest,outputBytes:joined})).ok,false);
+  await assert.rejects(()=>api.transport({...distinctRequest,outputBytes:joined}));
+  const normalMove={sourcePageIndex:0,annotationIndex:1,outputPageIndex:1,dx:0,dy:-10},moving={...request,moves:[normalMove],reflowedSourcePages:[0,1]};
+  const moved=await api.transport(moving);assert.equal((await api.validate({...moving,outputBytes:moved.pdf})).ok,true);
 });
 test('validation rejects dropped links, altered nested actions/streams and unauthorized fixed-edge geometry',async()=>{
   const src=source(),model=await inspect(src),out=await api.transport(args(model,src));
@@ -198,5 +216,76 @@ test('direct FitR reaches an inserted final page and rejects staged changes and 
   const request=args(model,src,{outputBytes:staged,sourcePageMap,moves:[],reflowedSourcePages:[2],destinationMoves:[{id,sourcePageIndex:2,outputPageIndex:1,dx:5,dy:-5}]});
   const output=await api.transport(request);assert.equal((await api.validate({...request,outputBytes:output.pdf})).ok,true);
   const bad=mutate(staged,d=>d.findPage(0).get('Annots',1,'Dest').put(2,11));await assert.rejects(()=>api.transport({...request,outputBytes:bad}));
-  const other=source(),otherModel=await inspect(other),xyz=otherModel.annotations[1].internalDestinations[0];await assert.rejects(()=>api.transport(args(otherModel,other,{moves:[],reflowedSourcePages:[2],destinationMoves:[{id:xyz.id,sourcePageIndex:2,outputPageIndex:1,dx:0,dy:0}]})),{code:'annotation-destination-move-invalid'});
+  const other=mutate(source(),d=>d.getTrailer().get('Root','Names','Dests','Kids',0,'Names').put(1,{D:[d.findPage(2),'XYZ',null,375,null]})),otherModel=await inspect(other),xyz=otherModel.annotations[1].internalDestinations[0];await assert.rejects(()=>api.transport(args(otherModel,other,{moves:[],reflowedSourcePages:[2],destinationMoves:[{id:xyz.id,sourcePageIndex:2,outputPageIndex:1,dx:0,dy:0}]})),{code:'annotation-destination-move-invalid'});
+});
+
+
+test('opposite-corner annotation rectangles normalize for moves while stationary raw dictionaries stay bound',async()=>{
+  for(const raw of [[110,250,30,265],[30,265,110,250],[110,265,30,250]]){
+    const src=mutate(source(),d=>d.findPage(0).get('Annots',0).put('Rect',raw)),model=await inspect(src);
+    assert.equal(model.annotations[0].eligible,true);assert.deepEqual(model.annotations[0].rect,[30,250,110,265]);
+    const stationary=args(model,src,{moves:[],reflowedSourcePages:[]}),unchanged=await api.transport(stationary);
+    assert.equal((await api.validate({...stationary,outputBytes:unchanged.pdf})).ok,true);
+    const doc=new mupdf.PDFDocument(unchanged.pdf);try{assert.deepEqual(values(doc.findPage(0).get('Annots',0,'Rect')),raw);}finally{doc.destroy();}
+    for(const change of [d=>d.findPage(0).get('Annots',0).put('Rect',[30,250,110,265]),d=>d.findPage(0).get('Annots',0).put('Contents',d.newString('changed'))]){
+      const altered=mutate(unchanged.pdf,change);assert.equal((await api.validate({...stationary,outputBytes:altered})).ok,false);await assert.rejects(()=>api.transport({...stationary,outputBytes:altered}));
+    }
+    const request=args(model,src),out=await api.transport(request);assert.equal((await api.validate({...request,outputBytes:out.pdf})).ok,true);
+    const moved=new mupdf.PDFDocument(out.pdf);try{const link=moved.findPage(1).get('Annots',1);assert.deepEqual(values(link.get('Rect')),[50,170,130,185]);assert.equal(link.get('Contents').asString(),'Repeated label');assert.equal(link.get('A','URI').asString(),'https://example.invalid/never-open');}finally{moved.destroy();}
+    const reversedOutput=mutate(out.pdf,d=>d.findPage(1).get('Annots',1).put('Rect',[130,185,50,170]));assert.equal((await api.validate({...request,outputBytes:reversedOutput})).ok,true);
+  }
+  for(const raw of [[30,250,30,265],[30,250,110,250]]){const src=mutate(source(),d=>d.findPage(0).get('Annots',0).put('Rect',raw)),model=await inspect(src);assert.equal(model.annotations[0].eligible,false);assert.equal(model.annotations[0].reason,'annotation-geometry-invalid');}
+  const src=mutate(source(),d=>d.findPage(0).put('MediaBox',[300,0,0,400])),model=await inspect(src);assert.equal(model.annotations[0].eligible,false);
+});
+
+
+test('XYZ destination moves preserve viewport kind and zoom and reject tampering',async()=>{
+  const src=source(), model=await inspect(src), d=model.annotations[1].internalDestinations[0];
+  const destinationMoves=[{id:d.id,sourcePageIndex:2,outputPageIndex:1,dx:8,dy:-12}];
+  const request=args(model,src,{moves:[],reflowedSourcePages:[2],destinationMoves});
+  const out=await api.transport(request); assert.equal((await api.validate({...request,outputBytes:out.pdf})).ok,true);
+  const doc=new mupdf.PDFDocument(out.pdf); try {
+    const dest=doc.getTrailer().get('Root','Names','Dests','Kids',0,'Names',1,'D');
+    assert.equal(dest.get(0).asIndirect(),doc.findPage(1).asIndirect());
+    assert.equal(dest.get(1).asName(),'XYZ');assert.equal(dest.get(2).asNumber(),33);assert.equal(dest.get(3).asNumber(),363);assert.ok(dest.get(4).isNull());
+  } finally {doc.destroy();}
+  const tampered=mutate(out.pdf,doc=>doc.getTrailer().get('Root','Names','Dests','Kids',0,'Names',1,'D').put(3,364));
+  assert.equal((await api.validate({...request,outputBytes:tampered})).ok,false);
+});
+
+test('stationary Fit open action and generated Link marker preserve the complete annotation graph',async()=>{
+ const src=mutate(source(),d=>d.getTrailer().get('Root').put('OpenAction',[d.findPage(0),'Fit']));
+ const model=await inspect(src), request=args(model,src,{moves:[],reflowedSourcePages:[0],preserveUnmovedUnsupported:true});
+ const output=mutate(src,d=>{for(const page of [0,1]){const a=d.findPage(page).get('Annots');for(let i=0;i<a.length;i++)a.get(i).put('PDFIUM_HasGeneratedAP',true);}});
+ assert.equal(model.actionOwnershipUnsupported,false);
+ assert.equal((await api.validate({...request,outputBytes:output})).ok,true);
+ const corruptions=[
+  d=>d.findPage(0).get('Annots').delete(0),
+  d=>d.findPage(0).get('Annots',0).put('Rect',[31,250,110,265]),
+  d=>d.findPage(0).get('Annots',0,'A').put('URI',d.newString('https://changed.invalid')),
+  d=>d.findPage(0).get('Annots',0,'A','Next').put('URI',d.newString('https://changed.invalid')),
+  d=>d.findPage(0).get('Annots',0).put('AP',{N:{Changed:true}}),
+  d=>d.findPage(0).get('Annots',0).put('PDFIUM_HasGeneratedAP',false),
+  d=>d.findPage(0).get('Annots',0,'PrivateUnknown').put('Keep',false),
+  d=>d.getTrailer().get('Root').put('OpenAction',[d.findPage(1),'Fit']),
+  d=>d.getTrailer().get('Root').put('OpenAction',[d.findPage(0),'XYZ',25,375,null]),
+  d=>d.findPage(0).put('AA',{O:{S:'URI',URI:d.newString('https://changed.invalid')}}),
+  d=>d.getTrailer().get('Root').delete('OpenAction'),
+ ];
+ for(const change of corruptions)assert.equal((await api.validate({...request,outputBytes:mutate(output,change)})).ok,false);
+ assert.equal((await api.validate({...request,outputBytes:output,moves:[{sourcePageIndex:0,annotationIndex:0,outputPageIndex:0,dx:0,dy:0}]})).ok,true);
+ const moved={...request,moves:[{sourcePageIndex:0,annotationIndex:0,outputPageIndex:0,dx:4,dy:0}]};
+ const transported=await api.transport(moved);
+ assert.equal((await api.validate({...moved,outputBytes:transported.pdf})).ok,true);
+ assert.equal((await api.validate({...moved,outputBytes:output})).ok,false,'a supplied movement still needs the actual changed rectangle');
+ const existing=mutate(src,d=>d.findPage(0).get('Annots',0).put('PDFIUM_HasGeneratedAP',false)),existingModel=await inspect(existing);
+ assert.equal((await api.validate({...request,model:existingModel,sourceBytes:existing,outputBytes:mutate(existing,d=>d.findPage(0).get('Annots',0).put('PDFIUM_HasGeneratedAP',true))})).ok,false);
+ const withAppearance=mutate(src,d=>d.findPage(0).get('Annots',0).put('AP',{N:{Known:1}})),appearanceModel=await inspect(withAppearance);
+ assert.equal((await api.validate({...request,model:appearanceModel,sourceBytes:withAppearance,outputBytes:mutate(withAppearance,d=>d.findPage(0).get('Annots',0).put('PDFIUM_HasGeneratedAP',true))})).ok,false);
+});
+
+test('two independently expanded links cannot overlap each other',async()=>{
+ const src=mutate(source(),d=>d.findPage(0).get('Annots',0).delete('QuadPoints')),model=await inspect(src);
+ const moves=[{sourcePageIndex:0,annotationIndex:0,outputPageIndex:0,dx:0,dy:0,rect:[30,220,110,265]},{sourcePageIndex:0,annotationIndex:1,outputPageIndex:0,dx:0,dy:0,rect:[30,200,110,225]}];
+ assert.equal((await api.validate(args(model,src,{moves,reflowedSourcePages:[0]}))).code,'annotation-move-overlap');
 });

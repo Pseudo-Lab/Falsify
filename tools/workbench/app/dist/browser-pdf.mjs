@@ -355,6 +355,7 @@ function openPdf(bytes) {
 }
 function readPage(page) {
   const transform = page.getTransform();
+  const toPdf = mupdf.Matrix.invert(transform);
   const chars = [];
   const images = [];
   const text = page.toStructuredText("preserve-whitespace,preserve-images");
@@ -362,7 +363,7 @@ function readPage(page) {
   let lastY = null;
   text.walk({
     onChar(ch, origin, font, size, quad, color) {
-      const pdf = apply(transform, origin[0], origin[1]);
+      const pdf = apply(toPdf, origin[0], origin[1]);
       if (lastY === null || Math.abs(pdf[1] - lastY) > 1.25) {
         lineId += 1;
         lastY = pdf[1];
@@ -383,7 +384,7 @@ function readPage(page) {
       images.push([...bbox]);
     }
   });
-  return { chars, images, transform, bounds: page.getBounds(), rotation: rotationOf(page) };
+  return { chars, images, transform, toPdf, bounds: page.getBounds(), rotation: rotationOf(page) };
 }
 function locate(edit, index, models, pageCount, snapshot) {
   const id = typeof edit?.id === "string" && edit.id ? edit.id : `edit-${index}`;
@@ -441,7 +442,7 @@ function locate(edit, index, models, pageCount, snapshot) {
   if (snapshot && !supplied) return fail("font-unavailable");
   const encoded = supplied ? { encoding: "glyph-id", substituted: supplied.substituted } : textEncoding(face, edit.after);
   if (encoded.error) return fail(encoded.error);
-  const box = pdfSpan(model.transform, chars.filter((ch) => ch.lineId === chars[0].lineId));
+  const box = pdfSpan(model.toPdf, chars.filter((ch) => ch.lineId === chars[0].lineId));
   const partialLine = model.chars.some((ch) => ch.lineId === chars[0].lineId && !chars.includes(ch) && ch.c.trim());
   return { ok: true, plan: {
     edit: { ...edit, id },
@@ -911,7 +912,7 @@ function measure(font, size, text) {
 }
 function roomRight(plan, model, page) {
   const end = plan.origin[0] + plan.hole;
-  let limit = page.getBounds("MediaBox")[2] - 36;
+  let limit = apply(model.toPdf, model.bounds[2], model.bounds[3])[0] - 36;
   for (const ch of model.chars) {
     if (plan.charIndex.has(model.chars.indexOf(ch))) continue;
     if (ch.lineId !== plan.chars[0].lineId || !ch.c.trim()) continue;
@@ -965,7 +966,7 @@ function clear(lines, plan, model, font) {
     const x = plan.origin[0];
     const y = plan.origin[1] - index * leading;
     const corners = [[x, y - plan.size * 0.25], [x + width, y - plan.size * 0.25], [x, y + plan.size * 0.85], [x + width, y + plan.size * 0.85]];
-    const pageBox = corners.map((point) => apply(mupdf.Matrix.invert(model.transform), point[0], point[1]));
+    const pageBox = corners.map((point) => apply(model.transform, point[0], point[1]));
     const box = [Math.min(...pageBox.map((point) => point[0])), Math.min(...pageBox.map((point) => point[1])), Math.max(...pageBox.map((point) => point[0])), Math.max(...pageBox.map((point) => point[1]))];
     const bounds = model.bounds;
     if (box[0] < -2 || box[1] < -2 || box[2] > bounds[2] + 2 || box[3] > bounds[3] + 2) return false;

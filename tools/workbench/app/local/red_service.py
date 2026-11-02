@@ -11,6 +11,8 @@ from harness import resolve, guidance, backend, model_label, builtin, record
 
 VERSION = 'falsify.document-red.v1'
 CHUNK = 36000
+MAX_NOTE = 6000              # one chunk note; longer notes are shortened with an ellipsis
+NOTES_BUDGET = 60000         # all notes together, inside the 100000-char prompt ceiling
 TYPES = ['contradiction', 'condition-omission', 'unsupported-inference']
 
 def attack_types(data):
@@ -120,6 +122,7 @@ def run_review(data, progress, cancelled, backend_factory=CodexBackend, claude_f
         if cancelled.is_set(): raise ValueError('취소됨. 결과는 폐기했습니다.')
         if result['status'] != 'ok': raise ValueError('CLI 검토 중단: ' + str(result.get('error_code') or result['status']))
         return result['response']
+    notesTrimmed = False
     if len(chunks) > 1:
         for i, chunk in enumerate(chunks):
             note = invoke(policy + 'Read every supplied fragment. Summarize claim/conditions and quote at most four relevant exact source excerpts (each <= 600 chars). '
@@ -128,9 +131,15 @@ def run_review(data, progress, cancelled, backend_factory=CodexBackend, claude_f
                 return {'schema': VERSION, 'revision': data['revision'], 'sourceHash': data['sourceHash'], 'status': note['status'], 'candidates': [],
                     'harness': harness, 'harnessHash': harness_hash, 'model': model_label(harness), **record(harness),
                     'coverage': {'complete': False, 'completedChunks': i + 1, 'chunks': len(chunks), 'calls': calls}}
-            if len(note['summary']) > 2500: raise ValueError('요약 길이 제한 초과')
             evidence_check(note['evidence'], source, 600)
-            notes.append(note)
+            summary = note['summary']
+            if len(summary) > MAX_NOTE:
+                summary = summary[:MAX_NOTE].rstrip() + '…'; notesTrimmed = True
+            notes.append({**note, 'summary': summary})
+        room = max(400, NOTES_BUDGET // len(notes))
+        for n in notes:
+            if len(n['summary']) > room:
+                n['summary'] = n['summary'][:room].rstrip() + '…'; notesTrimmed = True
     selected = attack_types(data)
     legacy = type(data.get('level')) is int and data['level'] in (1, 2, 3) and selected == [TYPES[data['level'] - 1]]
     payload = {'attackTypes': selected, **({'level': data['level']} if legacy else {}), 'format': data.get('format'), **({'segments': chunks[0]} if len(chunks) == 1 else {'allChunkNotes': notes})}
@@ -145,4 +154,5 @@ def run_review(data, progress, cancelled, backend_factory=CodexBackend, claude_f
     return {'schema': VERSION, 'revision': data['revision'], 'sourceHash': data['sourceHash'], **response,
         'harness': harness, 'harnessHash': harness_hash,
         'coverage': {'complete': True, 'completedChunks': len(chunks), 'chunks': len(chunks), 'calls': calls,
-            'meaning': '전체 추출 텍스트 전달 완료. 표·수식·이미지 및 과학적 타당성 검증 아님.'}, 'model': model_label(harness), **record(harness)}
+            'meaning': '전체 추출 텍스트 전달 완료. 표·수식·이미지 및 과학적 타당성 검증 아님.'
+                 + (' 청크 요약을 예산에 맞게 줄였습니다.' if notesTrimmed else '')}, 'model': model_label(harness), **record(harness)}

@@ -1,0 +1,30 @@
+diff --git a/packages/pdfium/build/code/editcore/model.cpp b/packages/pdfium/build/code/editcore/model.cpp
+--- a/packages/pdfium/build/code/editcore/model.cpp
++++ b/packages/pdfium/build/code/editcore/model.cpp
+@@ -1690,10 +1690,11 @@
+             if (FPDFText_GetMatrix(tp, i, &cm)) {
+                 const float hMag = std::hypot(cm.a, cm.b);
+                 const float vMag = std::hypot(cm.c, cm.d);
+-                if (vMag > 0.001f) vScale = vMag;
+-                if (hMag > 0.001f && vMag > 0.001f) {
++                if (std::isfinite(vMag) && vMag > 0.001f) vScale = vMag;
++                if (std::isfinite(hMag) && hMag > 0.001f &&
++                    std::isfinite(vMag) && vMag > 0.001f) {
+                     const float hs = hMag / vMag;
+-                    if (std::abs(hs - 1.0f) > 0.02f) hScale = hs;
++                    if (std::isfinite(hs) && hs > 0.0f) hScale = hs;
+                 }
+             }
+             current.size = std::max(1.0f, tf * vScale);
+@@ -4660,7 +4661,10 @@
+         j += ",\"strokeWidth\":";
+         appendFloat(j, r.style.strokeWidth);
+         j += ",\"hScale\":";
+-        appendFloat(j, r.style.hScale);
++        // Keep enough digits to round-trip the measured float scale.
++        char scaleBuf[40];
++        snprintf(scaleBuf, sizeof(scaleBuf), "%.9g", static_cast<double>(r.style.hScale));
++        j += scaleBuf;
+         j += ",\"rise\":";
+         appendFloat(j, r.style.rise);
+ 

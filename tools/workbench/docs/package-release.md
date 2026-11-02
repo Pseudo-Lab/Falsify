@@ -24,3 +24,7 @@ node --test scripts/packaging.spec.mjs
 ```
 
 These checks are packaging evidence, not a release certification.
+
+## LaTeX runtime
+
+The pinned BusyTeX WASM and texlive-basic data are included only with the exact seven-file compiler manifest in `app/latex-compiler-manifest.json`; `verifyLatexRuntime` verifies sizes and SHA-256 hashes. Source tests include only hash-pinned synthetic PDF fixtures. Asset cache build hashes may accompany the release version in entry URLs.

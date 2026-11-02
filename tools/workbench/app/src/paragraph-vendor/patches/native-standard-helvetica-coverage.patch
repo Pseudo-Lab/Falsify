@@ -1,0 +1,67 @@
+--- a/packages/pdfium/build/code/editcore/ec_internal.h
++++ b/packages/pdfium/build/code/editcore/ec_internal.h
+@@ -390,6 +390,7 @@
+ std::map<uint32_t, std::u16string> toUnicodeLastWins(Session& s,
+                                                      FPDF_FONT font);
+ 
++bool isPlainStandardHelvetica(Session& s, FPDF_FONT font);
+ uint32_t fontObjNum(Session& s, FPDF_FONT font);
+ int fontIsType0(Session& s, FPDF_FONT font);
+ 
+--- a/packages/pdfium/build/code/editcore/reencode.cpp
++++ b/packages/pdfium/build/code/editcore/reencode.cpp
+@@ -826,6 +826,24 @@
+ #endif
+ }
+ 
++bool isPlainStandardHelvetica(Session& s, FPDF_FONT font) {
++#ifndef __EMSCRIPTEN__
++    (void)s; (void)font; return false;
++#else
++    if (!s.doc || !font || FPDFFont_GetIsEmbedded(font) != 0 || fontBaseName(font) != "Helvetica") return false;
++    CPDF_IndirectObjectHolder* holder = abiValidatedHolder(s.doc);
++    CPDF_Dictionary* dict = holder ? abiFontDict(s.doc, holder, font, "Helvetica") : nullptr;
++    if (!dict || abiByteStringChars(dict->GetByteStringFor(fxcrt::StringViewTemplate<char>("BaseFont",8))) != "Helvetica" ||
++        abiByteStringChars(dict->GetByteStringFor(fxcrt::StringViewTemplate<char>("Subtype",7))) != "Type1" ||
++        dict->KeyExist(fxcrt::StringViewTemplate<char>("ToUnicode",9))) return false;
++    for (const auto& key : {"Widths","FirstChar","LastChar","FontDescriptor"})
++        if (dict->KeyExist(fxcrt::StringViewTemplate<char>(key,strlen(key)))) return false;
++    if (!dict->KeyExist(fxcrt::StringViewTemplate<char>("Encoding",8))) return true;
++    const std::string enc = abiByteStringChars(dict->GetByteStringFor(fxcrt::StringViewTemplate<char>("Encoding",8)));
++    return enc == "WinAnsiEncoding" || enc == "StandardEncoding";
++#endif
++}
++
+ uint32_t fontObjNum(Session& s, FPDF_FONT font) {
+ #ifndef __EMSCRIPTEN__
+     (void)s;
+--- a/packages/pdfium/build/code/editcore/layout.cpp
++++ b/packages/pdfium/build/code/editcore/layout.cpp
+@@ -254,12 +254,25 @@
+     }
+     if (unproven.empty()) return true;
+     if (bytes) {
++        bool covered = true;
+         for (uint32_t cp : unproven) {
+-            if (!hbFontHasGlyph(bytes->data(), bytes->size(), cp)) return false;
++            if (!hbFontHasGlyph(bytes->data(), bytes->size(), cp)) { covered = false; break; }
++        }
++        if (covered) return true;
++    }
++    // PDFium's fallback data for plain Base-14 Helvetica is not necessarily
++    // a Unicode-cmap font. Reuse only the original standard font dictionary,
++    // with an individually proven ASCII code mapping and nonempty outline.
++    if (isPlainStandardHelvetica(s, font)) {
++        for (uint32_t cp : unproven) {
++            if (cp < 33 || cp > 126 || probeCharcode(s.doc, font, cp) != cp) return false;
++            float width = 0;
++            FPDF_GLYPHPATH path = FPDFFont_GetGlyphPath(font, cp, 1.0f);
++            if (!FPDFFont_GetGlyphWidth(font, cp, 1.0f, &width) || width <= 0 || !path || FPDFGlyphPath_CountGlyphSegments(path) <= 0) return false;
+         }
+         return true;
+     }
+-    return fontCovers(font, unproven);
++    return bytes ? false : fontCovers(font, unproven);
+ }
+ 
+ bool fontIsSubset(FPDF_FONT font) {

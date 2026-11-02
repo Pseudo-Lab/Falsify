@@ -1,0 +1,241 @@
+{
+  "schema": "falsify.browser-bundle.v1",
+  "inputs": [
+    {
+      "path": "dist/latex-source-ui.js",
+      "sha256": "0ba4a6a1068a2f2eb677c7aad3a798d3df56468d0fa897f2d371bc5ac1e6388e"
+    },
+    {
+      "path": "latex-compiler-manifest.json",
+      "sha256": "3f9a3b4f5ee5cd82530a83f6afa596a0dcd163359d89c4850af9e853455e485b"
+    },
+    {
+      "path": "src/bundled-fonts.mjs",
+      "sha256": "4b78d985b58d66eac614cd9261cc924d80e98f0de3571e0e2406c8fc9ca5d07a"
+    },
+    {
+      "path": "src/latex-compiler-adapter.mjs",
+      "sha256": "e3515a70d0a29d58712bf2c410feb260e203c745f92b8ed6396e5db06d7e9caa"
+    },
+    {
+      "path": "src/latex-draft-store.mjs",
+      "sha256": "d1a8023c7c63080d752f31babf20c92dee335978a41dcdda737594615d0952d9"
+    },
+    {
+      "path": "src/latex-layout-audit.mjs",
+      "sha256": "6ba75b25e52586769d500dcfa0cd9c713335a9883b4d2e43a2441c0e4948a8e1"
+    },
+    {
+      "path": "src/latex-project.mjs",
+      "sha256": "254330a2f145917bc58dc2e0632e411f7e8425cbcbeed044bd09a97425335a66"
+    },
+    {
+      "path": "src/latex-reference-policy.mjs",
+      "sha256": "9d792d80da09a5930f341d37fedafa52c93ab24b98ea65be355478faa760f0d0"
+    },
+    {
+      "path": "src/latex-runtime-catalog.mjs",
+      "sha256": "66ae393ca4fa04d68acb5f21b64cfab8af73aa44dc92d3b27c0978bf1590cff9"
+    },
+    {
+      "path": "src/latex-semantic-edits.mjs",
+      "sha256": "2919ac9c914dc2f57b8d1bfc1830cfc9f06792589d991def7ccf9095407a5fec"
+    },
+    {
+      "path": "src/latex-session-archive.mjs",
+      "sha256": "ab4c9f12a38a0218293cc1f815662b088e29a2d221f232faf63f94fec416f380"
+    },
+    {
+      "path": "src/latex-session.mjs",
+      "sha256": "ed4b3fc1432e1005112d87770fe1b5a7020d8a2f7e3f7aca3fe57987988904ac"
+    },
+    {
+      "path": "src/latex-source-export.mjs",
+      "sha256": "e7ba3dbddb1e8925b927ceba28fc2dc2835f06db7a7342a158d1b108be2daf61"
+    },
+    {
+      "path": "src/latex-source-model.mjs",
+      "sha256": "e645e34fc03eb84cd991a3bc720941242889c4efc582d0b99375a0370c80e9ce"
+    },
+    {
+      "path": "src/latex-source-patches.mjs",
+      "sha256": "561b0a8aff8d564cf58f4a38defe295b6373d9629c4021b29dbbcfe1362348f7"
+    },
+    {
+      "path": "src/latex-synctex-map.mjs",
+      "sha256": "7aadd169fbd8e14be16a86573171054f8cafde79fa9589b8fd037427cd89ba35"
+    },
+    {
+      "path": "src/latex-workbench.mjs",
+      "sha256": "459c8cd14917bdf451ba075957d42396c502655f3f4cad35ac19e267dee5d55c"
+    },
+    {
+      "path": "src/paper-document.mjs",
+      "sha256": "259707b830e6bd6cfb8f382db3004aa84e8ed78f9c89a5d42244a08443d4eedf"
+    },
+    {
+      "path": "src/paper-flow.mjs",
+      "sha256": "8cdc529eca04b2d768db525148531fa0e7fc5b48e0b60d217d1574dd737e075d"
+    },
+    {
+      "path": "src/paper-fonts.mjs",
+      "sha256": "12bc71a5cc278cac9b702557e6d6cf6729ac13b0c2aad6cb55bb989054ecf5ea"
+    },
+    {
+      "path": "src/paper-layout-agent-ui.mjs",
+      "sha256": "7b831db0fbc59e484e67a70c88ad0d31b48729e09c3bdd387b754a7d57bf4692"
+    },
+    {
+      "path": "src/paper-layout-agent.mjs",
+      "sha256": "3d87212f8fe9ae0d53c3b33ebea50cc5185dc823f970db7a74979977e4f985c5"
+    },
+    {
+      "path": "src/paper-layout-asset-tools.mjs",
+      "sha256": "0f99af9a4bdde4dd43014b4888ffcd11fd3b3075fa39891c8eab12e5855d90f0"
+    },
+    {
+      "path": "src/paper-layout-document-tools.mjs",
+      "sha256": "53abed824f37ed99db70655f26b43d3b2ea7a635bb9908e6c3b9bf0d43baafce"
+    },
+    {
+      "path": "src/paper-layout-edit-tools.mjs",
+      "sha256": "32df0730538d45fb96e65c317dff577a12eaf6ade1374cdf6de04a22a5f9606b"
+    },
+    {
+      "path": "src/paper-layout-outcome.mjs",
+      "sha256": "3018ac062c8323da2d36f145a912a8c7d5944816d51b1c51127acb706a8c0eb5"
+    },
+    {
+      "path": "src/paper-layout-preview.mjs",
+      "sha256": "439be9813f43c6372a4f6ae32266bcd03e2d6d7aeed498029d264f7e0424bc38"
+    },
+    {
+      "path": "src/paper-layout-quality.mjs",
+      "sha256": "4df5bae301cfa9d77f38ea530d95ad54415fa3ba3caf11abb6c77da6f7826d40"
+    },
+    {
+      "path": "src/paper-layout-reference.mjs",
+      "sha256": "fcb3c99186824112607ec2d6f0a883446714945b94ede9a1499e2437bbf807b4"
+    },
+    {
+      "path": "src/paper-layout-run-store.mjs",
+      "sha256": "b82d9035b578dd26e567bdb9e7e6ac25c1bdb0c57891913db90a9909c315c6cf"
+    },
+    {
+      "path": "src/paper-layout-structure.mjs",
+      "sha256": "ada1ac5bdb6a0b7621e40ba474349fc82b0124cf782d26c5897f35972340ff27"
+    },
+    {
+      "path": "src/paper-layout-targets.mjs",
+      "sha256": "d012077f5c9ab140613ad92a7421a6ea2f41582ec2e26d0689b571207127ab06"
+    },
+    {
+      "path": "src/paper-layout-tool-catalog.mjs",
+      "sha256": "e26ad8c00b1a0f409135f6aea86e4bba5768b75ea39bd97802f839eddeff3ab4"
+    },
+    {
+      "path": "src/paper-layout-toolbox.mjs",
+      "sha256": "c75dd2b01553743ec25c01e1b25082ec5a3ea735f38c3177a77033fb69c33c5a"
+    },
+    {
+      "path": "src/paper-layout-transport.mjs",
+      "sha256": "844fe402f6cc25e28a09d0a8024c6bdaffed1b76bd0d848038543da108a8af1c"
+    },
+    {
+      "path": "src/paper-publication-semantics.mjs",
+      "sha256": "d4aa46e82d403b5d7d96a9dd2145bf5c9a4503e66fd0515ae4986e388b36adab"
+    },
+    {
+      "path": "src/paper-publication-tables.mjs",
+      "sha256": "05585bc6a71d9d2ec165e294de619ea3308ebfb71f07d26fd49a8651a4eda5ed"
+    },
+    {
+      "path": "src/paper-source-assets.mjs",
+      "sha256": "ccc30138fae3ef8f5dcb259f6be51a561fd6fa8bd6a8465ab4888d1679b4e49c"
+    },
+    {
+      "path": "src/paper-source-links.mjs",
+      "sha256": "70438c684bcc5e2fb9b36a00d5007f51e28a0459c7f976202fb8d2ec28b43819"
+    },
+    {
+      "path": "src/paper-typography-profile.mjs",
+      "sha256": "1567ebb58bc87b03e76732a6205526e1d4eba69ea8c43551fbaaee281a09bfd4"
+    },
+    {
+      "path": "src/paragraph-pdf-crypto.mjs",
+      "sha256": "62a669dd4576506ca5911af3baf306548e153ad6bea449ad6a4dd00b1c10f2b9"
+    },
+    {
+      "path": "src/pdf-latex-baseline.mjs",
+      "sha256": "c95ac173cbb7798e968b92b74802942c868d4f30b999ba23c86af97cacefd607"
+    },
+    {
+      "path": "src/pdf-latex-evidence.mjs",
+      "sha256": "def576d156618bff3fe28a6f2d457ea0070014241b9127e3d3dff21af81d73d8"
+    },
+    {
+      "path": "src/pdf-latex-flow-serialize.mjs",
+      "sha256": "a9d5a69f31b4446e355f1e13fde83acad74ac417052e64ac2bcb0302ff018ae6"
+    },
+    {
+      "path": "src/pdf-latex-fonts.mjs",
+      "sha256": "f9b41d53bd182771ef44182ed25834b26083f291de558f908249824e42dc8366"
+    },
+    {
+      "path": "src/pdf-latex-layout.mjs",
+      "sha256": "a8e42f5390261a9550f57e7180df98f55940cd79baa35bc79b9cde38a6fe8d8f"
+    },
+    {
+      "path": "src/pdf-latex-reader-worker.mjs",
+      "sha256": "5842730aa2ff5c6ffe7511b34373d5b33e8305cc0d9ecab28bd31db28254274a"
+    },
+    {
+      "path": "src/pdf-latex-reader.mjs",
+      "sha256": "f9d757cfd8e8f2bf6c96912041907930cfff28b9ee112b4da5ded391318e2ece"
+    },
+    {
+      "path": "src/pdf-latex-regions.mjs",
+      "sha256": "213fb1e48f40f37325a9679dd52423d42798acbb9772dbc236e67a79194238cb"
+    },
+    {
+      "path": "src/pdf-latex-serialize.mjs",
+      "sha256": "ee8dda840856069237baa8e3ddded019524c069989bc6449955b7d292b3c0965"
+    },
+    {
+      "path": "src/pdf-latex-structure-audit.mjs",
+      "sha256": "050ad643352acc07bcce852c7885690c38bf93f1c94010a6522d53b805fde235"
+    },
+    {
+      "path": "src/pdf-latex-unicode.mjs",
+      "sha256": "07825a6545b3febab3999913e14e1b19d2a9577ac69588db81744c4464fcfc3a"
+    },
+    {
+      "path": "src/pdf-latex-workbench.mjs",
+      "sha256": "62b2bdf515f6fc548019800c64dce3130f8eb7ac0ec60ae72a335dc01b1de84f"
+    },
+    {
+      "path": "src/table-adapter.mjs",
+      "sha256": "41536d1d7ca96ffdccc2a1f4d1ff3c90cb79bd86933b5a9b19a0326ca4095046"
+    },
+    {
+      "path": "src/table-vendor/detection.mjs",
+      "sha256": "0b231b360fb92657760e51b910e8362c7025a16e469236e6521493f1bf4e88bf"
+    },
+    {
+      "path": "src/table-vendor/geometry.mjs",
+      "sha256": "33ecb121ecd8f152d2d5023b34db1afd28c32c959db07c2f0799cc4261ce57ea"
+    },
+    {
+      "path": "src/table-vendor/model.mjs",
+      "sha256": "33c211e144c5458db3e6994c3e0e2503ab5a74a575fed995d1d83c1c205b59e1"
+    }
+  ],
+  "output": {
+    "path": "latex-workbench.mjs",
+    "sha256": "490593bd3d2213ba54d8d2846df58aa5c7a46447c7df7675722c1781d004eac5"
+  },
+  "worker": {
+    "path": "pdf-latex-reader-worker.mjs",
+    "sha256": "090901c00851eee933da714b5d23ac85a44e7440f8fa86fd7126da488b015268"
+  }
+}

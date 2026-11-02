@@ -1,0 +1,2 @@
+# PyPI release corresponds to fork tag v0.6.9, commit a4f6e7a42268f1676b53d3640f45e21bf3cb1070.
+docvortex==0.6.9

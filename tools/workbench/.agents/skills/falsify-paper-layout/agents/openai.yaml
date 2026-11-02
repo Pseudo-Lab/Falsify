@@ -1,0 +1,4 @@
+interface:
+  display_name: "Falsify 논문 배치"
+  short_description: "원문과 RED 변경을 보존하며 논문 조판·배치 품질을 구현하고 검수합니다"
+  default_prompt: "Use $falsify-paper-layout to inspect and improve this Falsify PDF layout while preserving its source content and selected edits."

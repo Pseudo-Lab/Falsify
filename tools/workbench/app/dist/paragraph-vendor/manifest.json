@@ -44,29 +44,49 @@
     {
       "name": "native-inline-flanked.patch",
       "sha256": "9dd0fb0e72131f3fb3926eed8bb1d325b4c1d4d7e68fcf722a1df56644d4efeb"
+    },
+    {
+      "name": "native-composite-inline.patch",
+      "sha256": "8f78d98af9d3b5dea07becdcac894290e99e7ccf6e535e51937dc8b117eee515"
+    },
+    {
+      "name": "native-horizontal-scale.patch",
+      "sha256": "088a2d30015707444031ef1bd2030954ce70eb5fc6cc1dbc5bef81cedaf35d6f"
+    },
+    {
+      "name": "native-word-spacing-idempotence.patch",
+      "sha256": "7f1c580b6afd29670f11a0e0945eeaa15ac20982e59c23777f5a8766b74f1e17"
+    },
+    {
+      "name": "native-standard-digit-equivalence.patch",
+      "sha256": "07ea8445415b77d1abec998cac1aab2049d798f83d070b296aa5b08ff0c6f727"
+    },
+    {
+      "name": "native-standard-helvetica-coverage.patch",
+      "sha256": "a2ad02c2c07e1df4f7401b9e3e73d1a30c3240fb74f8ec1d395f261bc9382382"
     }
   ],
   "artifacts": {
     "js": {
       "path": "editcore.js",
-      "sha256": "6e6989a9994715951720e05355111aca7eab898e92b519ebea160167875bb3eb"
+      "sha256": "cbef240d8893fd9624c08eadbb1ffb405a583c96878d6a14d11d8e9816c0832b"
     },
     "wasm": {
       "path": "editcore.wasm",
-      "sha256": "cf9f0e9ec0a68cc5932795e87622b2809ecca5561482a23bc034de3d6410696d"
+      "sha256": "7674fe4cce4a8e15d702b02988610891693ac68f6121b4621e237949736778cb"
     }
   },
   "sourceBuildVerified": false,
   "trust": "locally-supplied-hash-verified-artifacts",
   "editorModuleSha256": {
-    "editor.mjs": "8232d16cfd04fce033b1d28cc715ff1ad9b123298ca10875df0e36a06b2b4afc",
-    "quality.mjs": "c71eb1d25f767432e9a2287a9fc05eb7a4f8558c72464ff91d48a964a7825ac9",
+    "editor.mjs": "e2ee19e041b374aab6444a7af9a6759db92a253b95afa5422dce15c9b8241344",
+    "quality.mjs": "c93b2be9ea27a5c5f1ba6ce3e8b88ef047d09ef9ba6a8260f2160dd13cf064a2",
     "pagination.mjs": "2a1d14b573357c6054fc6434b73fdb7cdf0a57c9abff41fba916fb62e55901ca",
-    "inline-preservation.mjs": "84b98551dad10752016319ee0e14e953b1723cd6142079d9ed3dc0b593149de7",
-    "continuation-template.mjs": "94bfc49200818466e9ec99560d00a7e2dcf72a8003fa10d485852bbace124336",
+    "inline-preservation.mjs": "7d31fb96575b42a31aae6042b5febaf91481c05647558af279129942f3a518c2",
+    "continuation-template.mjs": "815e43e32ce08b46ef531acf0154bdd4c94de98b851526dff46b0b7368926d38",
     "document-flow.mjs": "86f70b872d44034bc8ec33fbd045ede83b5ba8b8649305c46d86d3563bbe4067",
     "document-flow-band.mjs": "1b44eb4198fe99a60c83b742ecf6911b153bfd082e4e92a69f798828d4689a3f",
-    "document-flow-links.mjs": "50e2a0812061a7d820a71881fedd3c0a5f7fc679b3b388cb9da1b62acdc194f9",
+    "document-flow-links.mjs": "8e1c167cc31080d08fa9bea292a08a5af4474aff9a09796519fb22adb516bf0d",
     "document-flow-underlines.mjs": "ce6aff33f329de3920b93d7f1bb7be453c11dc62391e70857366be571212d85b"
   },
   "provenance": "Runtime bytes match caller-supplied candidate digests; build from listed C++ sources/patches is not verified. Editor-module overlay, if any, must accompany source distribution."

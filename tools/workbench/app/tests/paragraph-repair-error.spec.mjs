@@ -46,7 +46,7 @@ for (const [pageIndex, codes, reason] of [
 test('continuation column reaches the saved-file check and public page map', async () => {
   const para = { id: 1, runs: [{ text: 'Original text', font: 'Helvetica' }], lines: [], format: {} };
   const column = { x0: 300, x1: 550 };
-  const engine = { pageCount: 1, loadPage() {}, normalizeFontsForEdit() {}, buildModel: () => [para],
+  const engine = { pageCount: 1, M: {_FPDFPage_GetAnnotCount: () => 0}, loadPage() {}, normalizeFontsForEdit() {}, buildModel: () => [para],
     pageRegenHostile: () => false, commitParagraph: () => ({ id: 1, surgical: true }),
     save: () => new Uint8Array([1, 2]), close() {} };
   let checkedMap;

@@ -1,0 +1,46 @@
+{
+  "schema": "falsify.skill-provenance.v1",
+  "adaptation": "Falsify-specific entrypoint and rules; upstream originals retained as reference data, not active instructions.",
+  "sources": [
+    {
+      "upstream": "licongxu/cosmo-agent-skills",
+      "fork": "Shinick-Han/cosmo-agent-skills",
+      "commit": "6174ecc6accf59abb9ab5d4e8d06824667a753fb",
+      "path": "skills/paper-writing/paper-layout-review/SKILL.md",
+      "local": "references/upstream/paper-layout-review.md",
+      "sha256": "630d3ae6a5cc8c7a33eef94ed9ecaeca879ebd8b1c9e2f4f1d0c1ae60c425da8",
+      "blob": "22b9ba8cc142def47dd2036f35b326f5d0b16122",
+      "license": "MIT"
+    },
+    {
+      "upstream": "licongxu/cosmo-agent-skills",
+      "fork": "Shinick-Han/cosmo-agent-skills",
+      "commit": "6174ecc6accf59abb9ab5d4e8d06824667a753fb",
+      "path": "LICENSE",
+      "local": "references/upstream/LICENSE-cosmo-agent-skills.txt",
+      "sha256": "2f35de9de5674ea3041ecb8ffc48089c15a12bf1377e6a008559d41036fa1a9e",
+      "blob": "97de5f6fd14d91b3896ba7b43fe73fefd6d6af36",
+      "license": "MIT"
+    },
+    {
+      "upstream": "ai4s-research/ai4s-skills",
+      "fork": "Shinick-Han/ai4s-skills",
+      "commit": "744ab2049a7b52ae726c43313468fd518b330980",
+      "path": "skills/paper-writer/references/04-layout-discipline.md",
+      "local": "references/upstream/layout-discipline.md",
+      "sha256": "92affdc83f856e1326e12a135794897be336ea06fb6f8171de0b2f6fbe0d9929",
+      "blob": "d01e44004ecd1e56fc454100ff79b78d9b066255",
+      "license": "MIT"
+    },
+    {
+      "upstream": "ai4s-research/ai4s-skills",
+      "fork": "Shinick-Han/ai4s-skills",
+      "commit": "744ab2049a7b52ae726c43313468fd518b330980",
+      "path": "LICENSE",
+      "local": "references/upstream/LICENSE-ai4s-skills.txt",
+      "sha256": "51b7aee81111072e2e5f8c27a4655bd48222dbc91f9d6694dad7b07ce8577299",
+      "blob": "5fad71cabf363a0a6eb7c5c1508016c41d00fb12",
+      "license": "MIT"
+    }
+  ]
+}

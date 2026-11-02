@@ -150,12 +150,12 @@ function buildFurniturePlan({ document, flow, editedBlockIds = [] } = {}) {
   };
   for (const item of flow.items) {
     if (!["header", "footer"].includes(item.kind)) continue;
-    const p = pageMap.get(item.source?.pageIndex)?.page, bs = (item.blockIds || []).map((id2) => blocks.get(id2));
+    const p = pageMap.get(item.source?.pageIndex)?.page, bs = (item.blockIds || []).map((id3) => blocks.get(id3));
     if (!p || item.inline || item.assetIds?.length || item.blockIds?.length !== 1 || !bs[0] || !bs[0].text || isEdited(bs[0]) || bs[0].source?.pageIndex !== item.source.pageIndex || JSON.stringify(bs[0].source?.bbox) !== JSON.stringify(item.source.bbox) || !inside(bs[0].source?.bbox, p) || !inside(item.source?.bbox, p)) {
       diagnostics.push({ code: "furniture-retained", itemId: item.id, reason: "edited or unsupported ownership or geometry" });
       continue;
     }
-    const ordinary = flow.items.filter((x) => x.source?.pageIndex === item.source.pageIndex && ["paragraph", "heading"].includes(x.kind) && boxOK3(x.source?.bbox) && (x.blockIds || []).some((id2) => blocks.get(id2)?.text?.trim()));
+    const ordinary = flow.items.filter((x) => x.source?.pageIndex === item.source.pageIndex && ["paragraph", "heading"].includes(x.kind) && boxOK3(x.source?.bbox) && (x.blockIds || []).some((id3) => blocks.get(id3)?.text?.trim()));
     if (bs[0].kind !== item.kind && ordinary.some((x) => item.kind === "header" ? x.source.bbox[3] <= item.source.bbox[1] : x.source.bbox[1] >= item.source.bbox[3])) {
       diagnostics.push({ code: "furniture-retained", itemId: item.id, reason: "ordinary text outside inferred edge" });
       continue;
@@ -169,13 +169,13 @@ function buildFurniturePlan({ document, flow, editedBlockIds = [] } = {}) {
     if (!refs.length) return false;
     const near3 = refs.some((e) => box5[1] <= e.bbox[3] + 20 && box5[3] >= e.bbox[1] - 20);
     if (!near3) return false;
-    const body = flow.items.filter((x) => x.source?.pageIndex === item.source.pageIndex && !["header", "footer", "asset"].includes(x.kind) && x.id !== item.id && (x.blockIds || []).some((id2) => blocks.get(id2)?.text) && boxOK3(x.source?.bbox));
+    const body = flow.items.filter((x) => x.source?.pageIndex === item.source.pageIndex && !["header", "footer", "asset"].includes(x.kind) && x.id !== item.id && (x.blockIds || []).some((id3) => blocks.get(id3)?.text) && boxOK3(x.source?.bbox));
     return edge === "header" ? body.every((x) => x.source.bbox[2] <= box5[0] || x.source.bbox[0] >= box5[2] || box5[3] <= x.source.bbox[1]) : body.every((x) => x.source.bbox[2] <= box5[0] || x.source.bbox[0] >= box5[2] || box5[1] >= x.source.bbox[3]);
   };
   const assetGroups = /* @__PURE__ */ new Map();
   for (const item of flow.items.filter((i) => i.kind === "asset")) {
-    const as = (item.assetIds || []).map((id2) => assets.get(id2)), bs = (item.blockIds || []).map((id2) => blocks.get(id2));
-    if (!as.length || as.some((a) => !a || a.kind !== "image" || a.source?.pageIndex !== item.source?.pageIndex) || bs.some((b) => !b || b.text || isEdited(b)) || bs.some((b) => !(b.assetIds || []).some((id2) => item.assetIds.includes(id2))) || item.captionIds?.length) continue;
+    const as = (item.assetIds || []).map((id3) => assets.get(id3)), bs = (item.blockIds || []).map((id3) => blocks.get(id3));
+    if (!as.length || as.some((a) => !a || a.kind !== "image" || a.source?.pageIndex !== item.source?.pageIndex) || bs.some((b) => !b || b.text || isEdited(b)) || bs.some((b) => !(b.assetIds || []).some((id3) => item.assetIds.includes(id3))) || item.captionIds?.length) continue;
     const keys = as.map((a) => {
       const c = a.content, png = bytesKey(c?.bytes), mask = c?.mask ? bytesKey(c.mask.bytes) : "none";
       return png && mask && c.representation === "mupdf-decoded-png" && Array.isArray(a.source.transform) ? [png, mask, c.width, c.height, c.alpha, a.source.bbox, a.source.transform] : null;
@@ -186,15 +186,15 @@ function buildFurniturePlan({ document, flow, editedBlockIds = [] } = {}) {
     assetGroups.get(key).push(item);
   }
   for (const group of assetGroups.values()) {
-    const first = group[0].assetIds.map((id2) => assets.get(id2).content);
-    const identical = group.filter((item) => item.assetIds.every((id2, i) => {
-      const c = assets.get(id2).content, ref = first[i];
+    const first = group[0].assetIds.map((id3) => assets.get(id3).content);
+    const identical = group.filter((item) => item.assetIds.every((id3, i) => {
+      const c = assets.get(id3).content, ref = first[i];
       return sameBytes(c.bytes, ref.bytes) && (!c.mask && !ref.mask || c.mask && ref.mask && sameBytes(c.mask.bytes, ref.mask.bytes));
     }));
     if (new Set(identical.map((i) => i.source.pageIndex)).size < 2) continue;
     const supported = identical.filter((item) => nearEdge(item, "header") || nearEdge(item, "footer"));
-    for (const item of identical) for (const edge of ["header", "footer"]) if (nearEdge(item, edge) || edge === "header" && supported.filter((peer) => nearEdge(peer, edge)).length >= 2 && !pageMap.get(item.source.pageIndex).plan[edge].some((e) => e.kind === "text") && inside(item.source.bbox, pageMap.get(item.source.pageIndex).page) && item.source.bbox[1] < pageMap.get(item.source.pageIndex).page.height * 0.12 && flow.items.filter((x) => x.source?.pageIndex === item.source.pageIndex && !["header", "footer", "asset"].includes(x.kind) && (x.blockIds || []).some((id2) => blocks.get(id2)?.text) && boxOK3(x.source.bbox)).every((x) => x.source.bbox[2] <= item.source.bbox[0] || x.source.bbox[0] >= item.source.bbox[2] || item.source.bbox[3] <= x.source.bbox[1])) {
-      add(item, edge, { kind: "asset", itemId: item.id, source: clone(item.source), sourcePage: item.source.pageIndex, bbox: clone(item.source.bbox), blockIds: [...item.blockIds || []], assetIds: [...item.assetIds], renderAssetId: item.renderAssetId ?? null, assets: item.assetIds.map((id2) => ({ id: id2, source: clone(assets.get(id2).source) })) });
+    for (const item of identical) for (const edge of ["header", "footer"]) if (nearEdge(item, edge) || edge === "header" && supported.filter((peer) => nearEdge(peer, edge)).length >= 2 && !pageMap.get(item.source.pageIndex).plan[edge].some((e) => e.kind === "text") && inside(item.source.bbox, pageMap.get(item.source.pageIndex).page) && item.source.bbox[1] < pageMap.get(item.source.pageIndex).page.height * 0.12 && flow.items.filter((x) => x.source?.pageIndex === item.source.pageIndex && !["header", "footer", "asset"].includes(x.kind) && (x.blockIds || []).some((id3) => blocks.get(id3)?.text) && boxOK3(x.source.bbox)).every((x) => x.source.bbox[2] <= item.source.bbox[0] || x.source.bbox[0] >= item.source.bbox[2] || item.source.bbox[3] <= x.source.bbox[1])) {
+      add(item, edge, { kind: "asset", itemId: item.id, source: clone(item.source), sourcePage: item.source.pageIndex, bbox: clone(item.source.bbox), blockIds: [...item.blockIds || []], assetIds: [...item.assetIds], renderAssetId: item.renderAssetId ?? null, assets: item.assetIds.map((id3) => ({ id: id3, source: clone(assets.get(id3).source) })) });
       break;
     }
   }
@@ -203,7 +203,7 @@ function buildFurniturePlan({ document, flow, editedBlockIds = [] } = {}) {
     if (selected.has(item.id) || item.kind !== "paragraph" || item.inline || item.assetIds?.length || item.blockIds?.length !== 1) continue;
     const b = blocks.get(item.blockIds[0]), pi = item.source?.pageIndex;
     if (!b || b.source?.pageIndex !== pi || JSON.stringify(b.source?.bbox) !== JSON.stringify(item.source?.bbox) || isEdited(b) || !nearEdge(item, "footer") || b.text.trim() !== `${pi + 1} / ${document.pages.length}` && b.text.trim() !== `${pi + 1}/${document.pages.length}`) continue;
-    const style = (b.source.characters || []).map((c) => c.styleId).filter((id2, i, a) => i === 0 || id2 !== a[i - 1]);
+    const style = (b.source.characters || []).map((c) => c.styleId).filter((id3, i, a) => i === 0 || id3 !== a[i - 1]);
     const key = JSON.stringify([b.source.bbox, b.styleId, style]);
     if (!counters.has(key)) counters.set(key, []);
     counters.get(key).push({ item, b });
@@ -762,8 +762,8 @@ function splitBlock(b, hash2, styles) {
   return groups.map((group) => {
     const start = group[0].range.start, end = group.at(-1).range.end;
     const chars = characters.filter((c) => c.start >= start && c.end <= end);
-    const id2 = `fragment-${hex(new TextEncoder().encode(JSON.stringify([hash2, b.source.pageIndex, start, end]))).slice(0, 24)}`;
-    return { ...b, id: id2, parentBlockId: b.id, text: b.text.slice(start - range.start, end - range.start), source: { ...b.source, bbox: union(group.map((l) => l.bbox)), range: { start, end }, characters: chars, lines: group } };
+    const id3 = `fragment-${hex(new TextEncoder().encode(JSON.stringify([hash2, b.source.pageIndex, start, end]))).slice(0, 24)}`;
+    return { ...b, id: id3, parentBlockId: b.id, text: b.text.slice(start - range.start, end - range.start), source: { ...b.source, bbox: union(group.map((l) => l.bbox)), range: { start, end }, characters: chars, lines: group } };
   });
 }
 function inlineFragments(blocks, hash2) {
@@ -794,8 +794,8 @@ function inlineFragments(blocks, hash2) {
         parts.length = 0;
         break;
       }
-      const id2 = `fragment-${hex(new TextEncoder().encode(JSON.stringify([hash2, host.source.pageIndex, start, end]))).slice(0, 24)}`;
-      parts.push({ ...host, id: id2, parentBlockId: host.parentBlockId || host.id, text: host.text.slice(start - range.start, end - range.start), source: { ...host.source, bbox: union(partLines.map((l) => l.bbox)), range: { start, end }, characters: partChars, lines: partLines } });
+      const id3 = `fragment-${hex(new TextEncoder().encode(JSON.stringify([hash2, host.source.pageIndex, start, end]))).slice(0, 24)}`;
+      parts.push({ ...host, id: id3, parentBlockId: host.parentBlockId || host.id, text: host.text.slice(start - range.start, end - range.start), source: { ...host.source, bbox: union(partLines.map((l) => l.bbox)), range: { start, end }, characters: partChars, lines: partLines } });
     }
     if (!parts.length) continue;
     const order = inserts.filter((x) => x.at === range.start).map((x) => x.guest);
@@ -886,11 +886,11 @@ function buildPaperFlow(document, { drawings = document?.drawings || [], links }
       const raw = union([...paths, ...blocks.map((x) => x.box), ...assets.map((x) => x.box)]);
       const box5 = [Math.max(0, raw[0] - 1), Math.max(0, raw[1] - 1), Math.min(page.width, raw[2] + 1), Math.min(page.height, raw[3] + 1)];
       if (boxOK2(box5) && box5[2] - box5[0] > page.width * 0.5 && box5[3] - box5[1] > page.height * 0.5 && [...paths, ...blocks.map((x) => x.box), ...assets.map((x) => x.box)].every((b) => contains(box5, b))) {
-        const id2 = `region-${hex(new TextEncoder().encode(JSON.stringify([document.sourceSha256, pi, box5]))).slice(0, 24)}`;
+        const id3 = `region-${hex(new TextEncoder().encode(JSON.stringify([document.sourceSha256, pi, box5]))).slice(0, 24)}`;
         const entry = make("asset", blocks, assets, box5, Math.min(...blocks.map((x) => x.pos ?? Infinity)), 0);
-        entry.renderAssetId = id2;
+        entry.renderAssetId = id3;
         entries.push(entry);
-        regions.push({ id: id2, pageIndex: pi, bbox: [...box5], blockIds: blocks.map((x) => x.b.id), assetIds: assets.map((x) => x.a.id), classification: "outline-artwork" });
+        regions.push({ id: id3, pageIndex: pi, bbox: [...box5], blockIds: blocks.map((x) => x.b.id), assetIds: assets.map((x) => x.a.id), classification: "outline-artwork" });
         blocks.forEach((x) => owned.add(x.b.id));
         assets.forEach((x) => represented.add(x.a.id));
         form = true;
@@ -921,14 +921,14 @@ function buildPaperFlow(document, { drawings = document?.drawings || [], links }
         const box5 = [Math.max(0, raw[0] - 2), Math.max(0, raw[1] - 2), Math.min(page.width, raw[2] + 2), Math.min(page.height, raw[3] + 2)];
         if (box5[2] - box5[0] < page.width * 0.4 || box5[3] - box5[1] < page.height * 0.2) continue;
         if (blocks.some((x) => x.b.text && boxOK2(x.box) && overlap(box5, x.box) && !labels.includes(x)) || assets.some((x) => boxOK2(x.box) && overlap(box5, x.box) && !as.includes(x))) continue;
-        const bs = [...labels, ...blocks.filter((x) => !owned.has(x.b.id) && (x.b.assetIds || []).some((id3) => as.some((a) => a.a.id === id3)))];
+        const bs = [...labels, ...blocks.filter((x) => !owned.has(x.b.id) && (x.b.assetIds || []).some((id4) => as.some((a) => a.a.id === id4)))];
         bs.forEach((x) => owned.add(x.b.id));
         as.forEach((x) => represented.add(x.a.id));
-        const id2 = `region-${hex(new TextEncoder().encode(JSON.stringify([document.sourceSha256, pi, box5]))).slice(0, 24)}`;
+        const id3 = `region-${hex(new TextEncoder().encode(JSON.stringify([document.sourceSha256, pi, box5]))).slice(0, 24)}`;
         const entry = make("asset", bs, as, box5, Math.min(...bs.map((x) => x.pos ?? Infinity)), Math.min(...bs.map((x) => x.index)));
-        entry.renderAssetId = id2;
+        entry.renderAssetId = id3;
         entries.push(entry);
-        regions.push({ id: id2, pageIndex: pi, bbox: [...box5], blockIds: bs.map((x) => x.b.id), assetIds: as.map((x) => x.a.id), classification: "compound-figure" });
+        regions.push({ id: id3, pageIndex: pi, bbox: [...box5], blockIds: bs.map((x) => x.b.id), assetIds: as.map((x) => x.a.id), classification: "compound-figure" });
         plot = true;
       }
     }
@@ -947,15 +947,15 @@ function buildPaperFlow(document, { drawings = document?.drawings || [], links }
       if (touching.every((x) => x.box[0] >= 0 && x.box[1] >= page.height * 0.05 && x.box[2] <= page.width && x.box[3] <= plotBottom)) box5 = union([box5, ...touching.map((x) => x.box)]);
       if (plotBlocks.length >= 20 && !blocks.some((x) => x.b.text && boxOK2(x.box) && overlap(box5, x.box) && !plotBlocks.includes(x)) && touching.every((x) => contains(box5, x.box)) && box5[2] - box5[0] > page.width * 0.4 && box5[3] - box5[1] > page.height * 0.2) {
         const as = assets.filter((x) => boxOK2(x.box) && contains(box5, x.box));
-        const figureBlocks = blocks.filter((x) => (x.b.assetIds || []).some((id3) => as.some((a) => a.a.id === id3)));
+        const figureBlocks = blocks.filter((x) => (x.b.assetIds || []).some((id4) => as.some((a) => a.a.id === id4)));
         plotBlocks.push(...figureBlocks.filter((x) => !plotBlocks.includes(x)));
         plotBlocks.forEach((x) => owned.add(x.b.id));
         as.forEach((x) => represented.add(x.a.id));
-        const id2 = `region-${hex(new TextEncoder().encode(JSON.stringify([document.sourceSha256, pi, box5]))).slice(0, 24)}`;
+        const id3 = `region-${hex(new TextEncoder().encode(JSON.stringify([document.sourceSha256, pi, box5]))).slice(0, 24)}`;
         const entry = make("asset", plotBlocks, as, box5, Math.min(...plotBlocks.map((x) => x.pos ?? Infinity)), plotBlocks[0].index);
-        entry.renderAssetId = id2;
+        entry.renderAssetId = id3;
         entries.push(entry);
-        regions.push({ id: id2, pageIndex: pi, bbox: [...box5], blockIds: plotBlocks.map((x) => x.b.id), assetIds: as.map((x) => x.a.id) });
+        regions.push({ id: id3, pageIndex: pi, bbox: [...box5], blockIds: plotBlocks.map((x) => x.b.id), assetIds: as.map((x) => x.a.id) });
         plot = true;
       }
     }
@@ -981,14 +981,14 @@ function buildPaperFlow(document, { drawings = document?.drawings || [], links }
       const bs = blocks.filter((x) => x.b.text && !owned.has(x.b.id) && boxOK2(x.box) && contains(box5, x.box));
       if (bs.length < 4 || blocks.some((x) => x.b.text && boxOK2(x.box) && overlap(box5, x.box) && !bs.includes(x)) || assets.some((x) => boxOK2(x.box) && overlap(box5, x.box) && !contains(box5, x.box))) continue;
       const as = assets.filter((x) => !represented.has(x.a.id) && boxOK2(x.box) && contains(box5, x.box));
-      bs.push(...blocks.filter((x) => !owned.has(x.b.id) && !bs.includes(x) && (x.b.assetIds || []).some((id3) => as.some((a) => a.a.id === id3))));
+      bs.push(...blocks.filter((x) => !owned.has(x.b.id) && !bs.includes(x) && (x.b.assetIds || []).some((id4) => as.some((a) => a.a.id === id4))));
       bs.forEach((x) => owned.add(x.b.id));
       as.forEach((x) => represented.add(x.a.id));
-      const id2 = `region-${hex(new TextEncoder().encode(JSON.stringify([document.sourceSha256, pi, box5]))).slice(0, 24)}`;
+      const id3 = `region-${hex(new TextEncoder().encode(JSON.stringify([document.sourceSha256, pi, box5]))).slice(0, 24)}`;
       const entry = make("asset", bs, as, box5, Math.min(...bs.map((x) => x.pos ?? Infinity)), bs[0].index);
-      entry.renderAssetId = id2;
+      entry.renderAssetId = id3;
       entries.push(entry);
-      regions.push({ id: id2, pageIndex: pi, bbox: [...box5], blockIds: bs.map((x) => x.b.id), assetIds: as.map((x) => x.a.id) });
+      regions.push({ id: id3, pageIndex: pi, bbox: [...box5], blockIds: bs.map((x) => x.b.id), assetIds: as.map((x) => x.a.id) });
     }
     for (const a of assets) {
       if (represented.has(a.a.id)) continue;
@@ -1006,13 +1006,13 @@ function buildPaperFlow(document, { drawings = document?.drawings || [], links }
         const r = x.b.source.range;
         return e.ranges.some((z) => z.start <= r.start && z.end >= r.end);
       });
-      const bs = blocks.filter((x) => !owned.has(x.b.id) && ((x.b.assetIds || []).some((id2) => group.some((y) => y.a.id === id2)) || confirmed(x)));
+      const bs = blocks.filter((x) => !owned.has(x.b.id) && ((x.b.assetIds || []).some((id3) => group.some((y) => y.a.id === id3)) || confirmed(x)));
       bs.forEach((x) => owned.add(x.b.id));
       const entry = make("asset", bs, group, box5, a.pos, a.index);
       if (proofs.length && bs.some(confirmed) && boxOK2(box5)) {
-        const id2 = `region-${hex(new TextEncoder().encode(JSON.stringify([document.sourceSha256, pi, box5]))).slice(0, 24)}`;
-        entry.renderAssetId = id2;
-        regions.push({ id: id2, pageIndex: pi, bbox: [...box5], blockIds: bs.map((x) => x.b.id), assetIds: group.map((x) => x.a.id), classification: "verified-occlusion" });
+        const id3 = `region-${hex(new TextEncoder().encode(JSON.stringify([document.sourceSha256, pi, box5]))).slice(0, 24)}`;
+        entry.renderAssetId = id3;
+        regions.push({ id: id3, pageIndex: pi, bbox: [...box5], blockIds: bs.map((x) => x.b.id), assetIds: group.map((x) => x.a.id), classification: "verified-occlusion" });
       }
       entries.push(entry);
     }
@@ -1038,8 +1038,8 @@ function buildPaperFlow(document, { drawings = document?.drawings || [], links }
       entries.push(make(kind, [x], [], box5, x.pos, x.index));
     }
     for (const edge of entries.filter((x) => ["header", "footer"].includes(x.kind))) {
-      if (edge.blockIds.some((id2) => flowBlocks.find((b) => b.id === id2)?.kind === edge.kind) || !boxOK2(edge.box)) continue;
-      const ordinary = entries.filter((x) => ["paragraph", "heading"].includes(x.kind) && boxOK2(x.box) && x.blockIds.some((id2) => flowBlocks.find((b) => b.id === id2)?.text?.trim()));
+      if (edge.blockIds.some((id3) => flowBlocks.find((b) => b.id === id3)?.kind === edge.kind) || !boxOK2(edge.box)) continue;
+      const ordinary = entries.filter((x) => ["paragraph", "heading"].includes(x.kind) && boxOK2(x.box) && x.blockIds.some((id3) => flowBlocks.find((b) => b.id === id3)?.text?.trim()));
       if (ordinary.some((x) => edge.kind === "header" ? x.box[3] <= edge.box[1] : x.box[1] >= edge.box[3])) edge.kind = "paragraph";
     }
     const parentGroups = /* @__PURE__ */ new Map();
@@ -1075,7 +1075,7 @@ function buildPaperFlow(document, { drawings = document?.drawings || [], links }
     }
     const blockMap2 = new Map(flowBlocks.map((b) => [b.id, b]));
     const signature = (e) => {
-      const chars = e.blockIds.flatMap((id2) => blockMap2.get(id2)?.source?.characters || []);
+      const chars = e.blockIds.flatMap((id3) => blockMap2.get(id3)?.source?.characters || []);
       const counts = /* @__PURE__ */ new Map();
       for (const c of chars) {
         const s = styles.get(c.styleId);
@@ -1085,7 +1085,7 @@ function buildPaperFlow(document, { drawings = document?.drawings || [], links }
       }
       return [...counts].sort((a, b) => b[1] - a[1])[0]?.[0];
     };
-    const bounds = (e) => e.blockIds.map((id2) => blockMap2.get(id2)?.source?.range).filter(Boolean);
+    const bounds = (e) => e.blockIds.map((id3) => blockMap2.get(id3)?.source?.range).filter(Boolean);
     const start = (e) => Math.min(...bounds(e).map((r) => r.start));
     const end = (e) => {
       const ranges = bounds(e).sort((a, b) => a.start - b.start || a.end - b.end);
@@ -1096,7 +1096,7 @@ function buildPaperFlow(document, { drawings = document?.drawings || [], links }
       }
       return last;
     };
-    const lineCount = (e) => e.blockIds.reduce((n, id2) => n + (blockMap2.get(id2)?.source?.lines?.length || 0), 0);
+    const lineCount = (e) => e.blockIds.reduce((n, id3) => n + (blockMap2.get(id3)?.source?.lines?.length || 0), 0);
     for (const caption of entries.filter((e) => e.kind === "caption" && boxOK2(e.box))) {
       let last = caption;
       const members = [caption];
@@ -1105,7 +1105,7 @@ function buildPaperFlow(document, { drawings = document?.drawings || [], links }
         if (!Number.isFinite(lastEnd) || !sig) break;
         const next = entries.filter((e) => e.kind === "paragraph" && !members.includes(e) && boxOK2(e.box) && start(e) === lastEnd && signature(e) === sig && lineCount(e) >= 1);
         const eligible = next.filter((e) => {
-          const h = median(last.blockIds.flatMap((id2) => (blockMap2.get(id2)?.source?.lines || []).map((l) => boxOK2(l.bbox) ? l.bbox[3] - l.bbox[1] : 0)).filter(Boolean));
+          const h = median(last.blockIds.flatMap((id3) => (blockMap2.get(id3)?.source?.lines || []).map((l) => boxOK2(l.bbox) ? l.bbox[3] - l.bbox[1] : 0)).filter(Boolean));
           if (!h) return false;
           const sameColumn = Math.min(last.box[2], e.box[2]) - Math.max(last.box[0], e.box[0]) > Math.min(last.box[2] - last.box[0], e.box[2] - e.box[0]) * 0.5;
           const gap = e.box[1] - last.box[3];
@@ -1138,7 +1138,7 @@ function buildPaperFlow(document, { drawings = document?.drawings || [], links }
       }
     }
     for (const caption of entries.filter((x) => x.kind === "caption" && boxOK2(x.box))) {
-      const text = caption.blockIds.map((id2) => flowBlocks.find((b) => b.id === id2)?.text || "").join("");
+      const text = caption.blockIds.map((id3) => flowBlocks.find((b) => b.id === id3)?.text || "").join("");
       const table = /^\s*(?:extended\s+data\s+)?table\s*\d/i.test(text);
       const near3 = entries.filter((x) => x.kind === "asset" && boxOK2(x.box) && x.box[0] < caption.box[2] && caption.box[0] < x.box[2]).map((x) => {
         const position = caption.box[3] <= x.box[1] ? "above" : caption.box[1] >= x.box[3] ? "below" : null;
@@ -1150,7 +1150,7 @@ function buildPaperFlow(document, { drawings = document?.drawings || [], links }
       if (best && (near3.length === 1 || near3[1].gap - best.gap > 10 || table && best.position === "above" && best.area > near3[1].area * 2 && best.gap < near3[1].gap)) {
         best.x.captionIds.push(...caption.blockIds);
         best.x.captionPositions ||= {};
-        for (const id2 of caption.blockIds) best.x.captionPositions[id2] = best.position;
+        for (const id3 of caption.blockIds) best.x.captionPositions[id3] = best.position;
         relations.push({ kind: "caption", assetItemId: best.x.id, captionItemId: caption.id, position: best.position });
       } else diagnostics.push({ code: "caption-association-unresolved", pageIndex: pi, itemId: caption.id });
     }
@@ -1270,7 +1270,7 @@ function buildPaperFlow(document, { drawings = document?.drawings || [], links }
     const current = items.filter((i) => i.source.pageIndex === page.sourcePageIndex && !["header", "footer"].includes(i.kind));
     const caption = current.at(-1);
     if (caption?.kind !== "caption" || !boxOK2(caption.source.bbox) || caption.source.bbox[3] < page.height * 0.88 || relations.some((r) => r.kind === "caption" && r.captionItemId === caption.id)) continue;
-    const blocks = caption.blockIds.map((id2) => blockMap.get(id2));
+    const blocks = caption.blockIds.map((id3) => blockMap.get(id3));
     if (blocks.some((b) => !b || b.source?.pageIndex !== page.sourcePageIndex || !b.source.range || page.text?.slice(b.source.range.start, b.source.range.end) !== b.text)) continue;
     const text = blocks.map((b) => b.text).join("");
     if (!/^\s*(?:extended\s+data\s+)?fig(?:ure)?\.?\s*\d/i.test(text) || !/[.!?][)\]"'\u2019\u201d]*\s*$/.test(text)) continue;
@@ -1278,10 +1278,10 @@ function buildPaperFlow(document, { drawings = document?.drawings || [], links }
     if (following.length !== 1 || following[0].kind !== "asset") continue;
     const artwork = following[0], box5 = artwork.source.bbox;
     const region = regions.find((r) => r.id === artwork.renderAssetId && r.pageIndex === next.sourcePageIndex && r.classification === "compound-figure");
-    if (!region || !boxOK2(box5) || !sameNumbers(region.bbox, box5) || box5[2] - box5[0] < next.width * 0.7 || box5[3] - box5[1] < next.height * 0.7 || artwork.captionIds.length || region.blockIds.length !== artwork.blockIds.length || region.assetIds.length !== artwork.assetIds.length || region.blockIds.some((id2) => !artwork.blockIds.includes(id2)) || region.assetIds.some((id2) => !artwork.assetIds.includes(id2))) continue;
+    if (!region || !boxOK2(box5) || !sameNumbers(region.bbox, box5) || box5[2] - box5[0] < next.width * 0.7 || box5[3] - box5[1] < next.height * 0.7 || artwork.captionIds.length || region.blockIds.length !== artwork.blockIds.length || region.assetIds.length !== artwork.assetIds.length || region.blockIds.some((id3) => !artwork.blockIds.includes(id3)) || region.assetIds.some((id3) => !artwork.assetIds.includes(id3))) continue;
     artwork.captionIds.push(...caption.blockIds);
     artwork.captionPositions ||= {};
-    for (const id2 of caption.blockIds) artwork.captionPositions[id2] = "above";
+    for (const id3 of caption.blockIds) artwork.captionPositions[id3] = "above";
     relations.push({ kind: "caption", assetItemId: artwork.id, captionItemId: caption.id, position: "above", provenance: { rule: "adjacent-page-bottom-caption-full-page-artwork", sourceSha256: document.sourceSha256, captionPageIndex: page.sourcePageIndex, artworkPageIndex: next.sourcePageIndex, frame: "mupdf-display", regionId: region.id } });
     const unresolved = diagnostics.findIndex((d) => d.code === "caption-association-unresolved" && d.itemId === caption.id);
     if (unresolved >= 0) diagnostics.splice(unresolved, 1);
@@ -1465,10 +1465,10 @@ function fontFamily(bytes) {
       if (v.getUint32(t) !== 1851878757) continue;
       const base = v.getUint32(t + 8), count = v.getUint16(base + 2), strings = base + v.getUint16(base + 4), names = [];
       for (let j = 0; j < count; j++) {
-        const n = base + 6 + j * 12, platform = v.getUint16(n), language = v.getUint16(n + 4), id2 = v.getUint16(n + 6), len = v.getUint16(n + 8), off = v.getUint16(n + 10);
-        if (id2 !== 1 && id2 !== 16 || platform !== 0 && platform !== 3) continue;
+        const n = base + 6 + j * 12, platform = v.getUint16(n), language = v.getUint16(n + 4), id3 = v.getUint16(n + 6), len = v.getUint16(n + 8), off = v.getUint16(n + 10);
+        if (id3 !== 1 && id3 !== 16 || platform !== 0 && platform !== 3) continue;
         const value = decoder.decode(bytes.subarray(strings + off, strings + off + len)).replace(/\0/g, "").trim();
-        if (value) names.push({ value, rank: (id2 === 16 ? 4 : 0) + (language === 1033 ? 2 : 0) + (platform === 3 ? 1 : 0) });
+        if (value) names.push({ value, rank: (id3 === 16 ? 4 : 0) + (language === 1033 ? 2 : 0) + (platform === 3 ? 1 : 0) });
       }
       return names.sort((a, b) => b.rank - a.rank)[0]?.value || null;
     }
@@ -1476,7 +1476,7 @@ function fontFamily(bytes) {
   }
   return null;
 }
-async function createFontPlan({ text, fonts = [] }, { mupdf: mupdf6 } = {}) {
+async function createFontPlan({ text, fonts = [] }, { mupdf: mupdf7 } = {}) {
   if (typeof text !== "string" || !Array.isArray(fonts)) throw new TypeError("Expected text and fonts array");
   const codepoints = [...new Set(Array.from(text, (c) => c.codePointAt(0)))];
   if (!codepoints.every(isScalar)) throw new TypeError("Text contains an invalid Unicode scalar");
@@ -1484,13 +1484,13 @@ async function createFontPlan({ text, fonts = [] }, { mupdf: mupdf6 } = {}) {
   const layoutControls = codepoints.filter(isLayoutControl);
   const ids = /* @__PURE__ */ new Set();
   const snapshots = fonts.map((input) => {
-    const id2 = input?.id, family = input?.family, source = input?.bytes;
-    if (typeof id2 !== "string" || !id2 || ids.has(id2) || typeof family !== "string" || !family) throw new TypeError("Each font needs a unique id and family");
-    ids.add(id2);
-    return { id: id2, family, bytes: source instanceof ArrayBuffer ? new Uint8Array(source.slice(0)) : source instanceof Uint8Array ? Uint8Array.from(source) : null };
+    const id3 = input?.id, family = input?.family, source = input?.bytes;
+    if (typeof id3 !== "string" || !id3 || ids.has(id3) || typeof family !== "string" || !family) throw new TypeError("Each font needs a unique id and family");
+    ids.add(id3);
+    return { id: id3, family, bytes: source instanceof ArrayBuffer ? new Uint8Array(source.slice(0)) : source instanceof Uint8Array ? Uint8Array.from(source) : null };
   });
   const candidates = [];
-  for (const { id: id2, family: suppliedFamily, bytes: snapshot } of snapshots) {
+  for (const { id: id3, family: suppliedFamily, bytes: snapshot } of snapshots) {
     let bytes, sha2562 = null, buffer, font;
     const family = fontFamily(snapshot || new Uint8Array()) || suppliedFamily;
     const glyphs = /* @__PURE__ */ new Map();
@@ -1499,9 +1499,9 @@ async function createFontPlan({ text, fonts = [] }, { mupdf: mupdf6 } = {}) {
       if (!snapshot) throw new TypeError("Font bytes unavailable");
       bytes = snapshot;
       sha2562 = hex2(new Uint8Array(await globalThis.crypto.subtle.digest("SHA-256", bytes)));
-      if (!mupdf6?.Buffer || !mupdf6?.Font) throw new Error("MuPDF font API unavailable");
-      buffer = new mupdf6.Buffer(bytes);
-      font = new mupdf6.Font(id2, buffer);
+      if (!mupdf7?.Buffer || !mupdf7?.Font) throw new Error("MuPDF font API unavailable");
+      buffer = new mupdf7.Buffer(bytes);
+      font = new mupdf7.Font(id3, buffer);
       for (const cp of glyphCodepoints) {
         const gid = font.encodeCharacter(cp);
         if (!Number.isInteger(gid) || gid < 0) throw new Error("Invalid glyph result");
@@ -1519,7 +1519,7 @@ async function createFontPlan({ text, fonts = [] }, { mupdf: mupdf6 } = {}) {
     }
     const coverage = detail ? { status: "unavailable", missing: [], detail } : { status: glyphCodepoints.every((cp) => glyphs.get(cp)) ? "covered" : "missing", missing: glyphCodepoints.filter((cp) => !glyphs.get(cp)) };
     candidates.push(Object.freeze({
-      id: id2,
+      id: id3,
       family,
       sha256: sha2562,
       coverage: Object.freeze({ ...coverage, missing: Object.freeze(coverage.missing) }),
@@ -1557,7 +1557,7 @@ function deriveLayoutProfile(document, flow) {
   const styles = new Map((document.styles || []).map((s) => [s.id, s]));
   const blocks = new Map((document.blocks || []).map((b) => [b.id, b]));
   const items = flow?.items || [];
-  const byKind = (kind) => items.filter((i) => i.kind === kind).flatMap((i) => (i.blockIds || []).map((id2) => blocks.get(id2)).filter(Boolean));
+  const byKind = (kind) => items.filter((i) => i.kind === kind).flatMap((i) => (i.blockIds || []).map((id3) => blocks.get(id3)).filter(Boolean));
   const body = byKind("paragraph");
   const stats = (bs) => {
     const sizes = [], names = [];
@@ -1598,7 +1598,7 @@ function deriveLayoutProfile(document, flow) {
     columnGroups.set(key, { pageIndex: pi, bbox: prev ? [Math.min(prev.bbox[0], box5[0]), Math.min(prev.bbox[1], box5[1]), Math.max(prev.bbox[2], box5[2]), Math.max(prev.bbox[3], box5[3])] : [...box5] });
   }
   const columns = [...columnGroups.values()];
-  const captions = items.filter((i) => i.kind === "asset").flatMap((i) => (i.captionIds || []).map((id2) => ({ text: blocks.get(id2)?.text || "", assetPageIndex: i.source?.pageIndex, assetBbox: i.source?.bbox ? [...i.source.bbox] : null })));
+  const captions = items.filter((i) => i.kind === "asset").flatMap((i) => (i.captionIds || []).map((id3) => ({ text: blocks.get(id3)?.text || "", assetPageIndex: i.source?.pageIndex, assetBbox: i.source?.bbox ? [...i.source.bbox] : null })));
   return { coordinateSpace: "source", bodyFontSize: bodyStats.size, bodyFontNames: bodyStats.fontNames, bodyLineHeight: median2(rhythm), headingFontSize: headingStats.size, headingFontNames: headingStats.fontNames, captionFontSize: captionStats.size, captionFontNames: captionStats.fontNames, captions, headings: byKind("heading").map((b) => ({ text: b.text })), columns };
 }
 
@@ -1613,11 +1613,11 @@ function buildLinkPlan({ document, flow, links, edits = [] } = {}) {
   const blocks = new Map([...document.blocks || [], ...flow.fragments || []].map((b) => [b.id, b]));
   const parents = new Map((document.blocks || []).map((b) => [b.id, b]));
   const owned = [];
-  for (const item of flow.items) for (const id2 of item.blockIds || []) {
-    const block = blocks.get(id2);
-    if (block?.source?.range) owned.push({ item, block, parentId: block.parentBlockId || id2 });
+  for (const item of flow.items) for (const id3 of item.blockIds || []) {
+    const block = blocks.get(id3);
+    if (block?.source?.range) owned.push({ item, block, parentId: block.parentBlockId || id3 });
   }
-  const assetItem = (id2) => flow.items.find((i) => i.kind === "asset" && (i.assetIds || []).includes(id2));
+  const assetItem = (id3) => flow.items.find((i) => i.kind === "asset" && (i.assetIds || []).includes(id3));
   const diagnostics = [], targets = [], targetMap = /* @__PURE__ */ new Map(), raw = [], sourceAssets = [];
   const nativeEdits = [];
   for (const e of edits) {
@@ -1661,8 +1661,8 @@ function buildLinkPlan({ document, flow, links, edits = [] } = {}) {
           loc = { assetItemId: i.id };
           break;
         }
-        for (const id2 of i.blockIds || []) {
-          const b = blocks.get(id2), r = b?.source?.range;
+        for (const id3 of i.blockIds || []) {
+          const b = blocks.get(id3), r = b?.source?.range;
           if (!r) continue;
           let at = r.start;
           while (at < r.end) {
@@ -1709,10 +1709,10 @@ function buildLinkPlan({ document, flow, links, edits = [] } = {}) {
       }
       if (!found && !owned.some((o) => o.parentId === range.blockId && o.item.kind === "asset" && overlaps2(o.block.source.range, range))) diagnostics.push({ code: "source-unmapped", linkId: link.id, blockId: range.blockId });
     }
-    for (const id2 of link.relation?.assetIds || []) {
-      const item = assetItem(id2);
-      if (item) sourceAssets.push({ assetItemId: item.id, assetId: id2, ...dest, linkIds: [link.id] });
-      else diagnostics.push({ code: "source-asset-unmapped", linkId: link.id, assetId: id2 });
+    for (const id3 of link.relation?.assetIds || []) {
+      const item = assetItem(id3);
+      if (item) sourceAssets.push({ assetItemId: item.id, assetId: id3, ...dest, linkIds: [link.id] });
+      else diagnostics.push({ code: "source-asset-unmapped", linkId: link.id, assetId: id3 });
     }
   }
   const key = (r) => JSON.stringify([r.blockId, r.uri, r.destinationLabel, r.destinationStatus]);
@@ -1910,7 +1910,7 @@ var abort4 = (signal) => {
 var fail = (message) => {
   throw new Error(message);
 };
-var captionOrder = (item) => [...(item.captionIds || []).filter((id2) => item.captionPositions?.[id2] === "above"), ...(item.captionIds || []).filter((id2) => item.captionPositions?.[id2] !== "above")];
+var captionOrder = (item) => [...(item.captionIds || []).filter((id3) => item.captionPositions?.[id3] === "above"), ...(item.captionIds || []).filter((id3) => item.captionPositions?.[id3] !== "above")];
 var hash = async (bytes) => Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)), (x) => x.toString(16).padStart(2, "0")).join("");
 function typstString(value) {
   return '"' + Array.from(value, (c) => {
@@ -2031,8 +2031,8 @@ async function composeDocument({ document, edits = [], flow, assets, links, sign
       group.push(f);
       groups.set(parent.id, group);
     }
-    for (const [id2, group] of groups) {
-      const parent = parents.get(id2), pr = parent.source.range;
+    for (const [id3, group] of groups) {
+      const parent = parents.get(id3), pr = parent.source.range;
       group.sort((a, b) => a.source.range.start - b.source.range.start);
       let cursor = pr.start;
       for (const f of group) {
@@ -2040,7 +2040,7 @@ async function composeDocument({ document, edits = [], flow, assets, links, sign
         cursor = f.source.range.end;
       }
       if (cursor !== pr.end) fail("Flow fragments do not cover parent exactly");
-      const parentChanges = changes.get(id2) || [], parentSpaces = separators(parent);
+      const parentChanges = changes.get(id3) || [], parentSpaces = separators(parent);
       const ambiguous2 = new Set(ambiguousBoundaries(parent, parentChanges));
       for (const f of group) {
         const start = f.source.range.start - pr.start, end = f.source.range.end - pr.start;
@@ -2056,23 +2056,23 @@ async function composeDocument({ document, edits = [], flow, assets, links, sign
           changes.set(f.id, list);
         }
       }
-      changes.delete(id2);
+      changes.delete(id3);
     }
     document.blocks = document.blocks.flatMap((b) => groups.get(b.id) || [b]);
-    for (const id2 of groups.keys()) ids.delete(id2);
+    for (const id3 of groups.keys()) ids.delete(id3);
   }
   if (flow) {
     if (flow.schema !== "falsify.paper-flow.v1" || flow.sourceSha256 !== document.sourceSha256 || !Array.isArray(flow.items)) fail("Invalid paper flow");
     const owners = /* @__PURE__ */ new Set();
-    for (const item of flow.items) for (const id2 of item.blockIds || []) {
-      if (!ids.has(id2) || owners.has(id2)) fail("Unknown or duplicate flow block");
-      owners.add(id2);
-      if (item.kind === "asset" && changes.has(id2)) fail("Cannot edit text owned by a source asset");
+    for (const item of flow.items) for (const id3 of item.blockIds || []) {
+      if (!ids.has(id3) || owners.has(id3)) fail("Unknown or duplicate flow block");
+      owners.add(id3);
+      if (item.kind === "asset" && changes.has(id3)) fail("Cannot edit text owned by a source asset");
     }
     for (const block of document.blocks) if (block.text && !owners.has(block.id)) fail("Flow omits text block");
   }
   const bodyText = new Map(document.blocks.map((b) => [b.id, b.text || ""]));
-  if (layoutMode === "measured-continuous" && flow?.items.some((i) => i.columns === 2 && i.span !== "page" && i.kind === "paragraph" && (i.blockIds || []).reduce((n, id2) => n + (bodyText.get(id2)?.length || 0), 0) >= 150)) {
+  if (layoutMode === "measured-continuous" && flow?.items.some((i) => i.columns === 2 && i.span !== "page" && i.kind === "paragraph" && (i.blockIds || []).reduce((n, id3) => n + (bodyText.get(id3)?.length || 0), 0) >= 150)) {
     const pages = /* @__PURE__ */ new Map();
     for (const item of flow.items) {
       const page2 = item.source?.pageIndex;
@@ -2097,7 +2097,7 @@ async function composeDocument({ document, edits = [], flow, assets, links, sign
   const wrapOmissions = sourceWrapCandidates.filter((o) => document.blocks.some((b) => !assetOwned.has(b.id) && sourceWrapOffsetsForBlock(b, [o]).length));
   const orderedById = new Map(document.blocks.map((b) => [b.id, b]));
   const linked = new Set((flow?.items || []).filter((i) => i.kind === "asset").flatMap((i) => i.captionIds || []));
-  const orderedBlocks = flow ? flow.items.flatMap((i) => i.kind === "asset" ? captionOrder(i).map((id2) => orderedById.get(id2)) : (i.blockIds || []).filter((id2) => !linked.has(id2)).map((id2) => orderedById.get(id2))) : document.blocks;
+  const orderedBlocks = flow ? flow.items.flatMap((i) => i.kind === "asset" ? captionOrder(i).map((id3) => orderedById.get(id3)) : (i.blockIds || []).filter((id3) => !linked.has(id3)).map((id3) => orderedById.get(id3))) : document.blocks;
   const sourceGlyphResult = readSourceGlyphs({ bytes: sourceBytes, document: { ...document, blocks: document.blocks.filter((b) => !assetOwned.has(b.id)) }, changes });
   const glyphsByBlock = /* @__PURE__ */ new Map();
   for (const glyph of sourceGlyphResult.glyphs) {
@@ -2110,7 +2110,7 @@ async function composeDocument({ document, edits = [], flow, assets, links, sign
   let expectedBlocks = orderedBlocks.filter((b) => typeof b?.text === "string" && b.text.length).map((b) => ({ id: b.id, text: logicalText(b, changes.get(b.id) || [], omittedFor(b), spacesFor(b)) }));
   if (flow) for (const item of flow.items.filter((i) => i.inline)) {
     if (!Array.isArray(item.joiners) || item.joiners.length !== (item.blockIds || []).length - 1 || item.joiners.some((j) => typeof j !== "string")) fail("Invalid inline joiners");
-    const indexes = item.blockIds.map((id2) => expectedBlocks.findIndex((b) => b.id === id2));
+    const indexes = item.blockIds.map((id3) => expectedBlocks.findIndex((b) => b.id === id3));
     if (indexes.some((x, i) => x < 0 || i && x !== indexes[0] + i)) fail("Inline blocks must be consecutive");
     const text = indexes.map((idx, i) => expectedBlocks[idx].text + (item.joiners[i] || "")).join("");
     expectedBlocks.splice(indexes[0], indexes.length, { id: item.blockIds[0], text });
@@ -2126,14 +2126,14 @@ async function composeDocument({ document, edits = [], flow, assets, links, sign
   if (runningFurniture === true && flow) {
     const build = furniturePlanner || (await Promise.resolve().then(() => (init_paper_furniture(), paper_furniture_exports))).buildFurniturePlan;
     plan = build({ document: { ...plannerDocument, assets: plannerDocument.assets || [] }, flow, editedBlockIds: edits.map((e) => e.blockId) });
-    for (const id2 of plan.excludedBlockIds || []) projectedSpaces.get(id2)?.delete(0);
+    for (const id3 of plan.excludedBlockIds || []) projectedSpaces.get(id3)?.delete(0);
   }
   const suppressedLabels = new Set((linkPlan?.targets || []).filter((t) => t.label && (t.blockId && plan?.excludedBlockIds?.includes(t.blockId) || t.assetItemId && plan?.excludedItemIds?.includes(t.assetItemId))).map((t) => t.label));
   if (linkPlan) for (const label of suppressedLabels) linkPlan.diagnostics.push({ code: "target-furniture-unresolved", label });
-  if (linkPlan) for (const id2 of new Set(linkPlan.sourceAssets.map((a) => a.assetItemId))) {
-    const candidates2 = linkPlan.sourceAssets.filter((a) => a.assetItemId === id2);
+  if (linkPlan) for (const id3 of new Set(linkPlan.sourceAssets.map((a) => a.assetItemId))) {
+    const candidates2 = linkPlan.sourceAssets.filter((a) => a.assetItemId === id3);
     const destinations = new Set(candidates2.map((a) => JSON.stringify([a.destinationLabel || null, a.destinationLabel ? null : a.uri, a.destinationStatus || null])));
-    if (destinations.size > 1) linkPlan.diagnostics.push({ code: "source-asset-link-conflict", assetItemId: id2, linkIds: [...new Set(candidates2.flatMap((a) => a.linkIds))] });
+    if (destinations.size > 1) linkPlan.diagnostics.push({ code: "source-asset-link-conflict", assetItemId: id3, linkIds: [...new Set(candidates2.flatMap((a) => a.linkIds))] });
   }
   const margins = plan?.margins || { top: 36, right: 36, bottom: 36, left: 36 };
   const sourceProfile = deriveLayoutProfile(document, flow);
@@ -2149,8 +2149,8 @@ async function composeDocument({ document, edits = [], flow, assets, links, sign
   if (layoutMode != null && layoutMode !== "measured-continuous") fail("Invalid layout mode");
   if (!["float", "page"].includes(figurePlacement)) fail("Invalid figure placement");
   const flowBlockText = new Map(document.blocks.map((b) => [b.id, b.text || ""]));
-  const firstBodyIndex = flow?.items.findIndex((i) => i.columns === 2 && i.span !== "page" && i.kind === "paragraph" && (i.blockIds || []).reduce((n, id2) => n + (flowBlockText.get(id2)?.length || 0), 0) >= 150) ?? -1;
-  const lastBodyIndex = flow?.items.findLastIndex((i) => i.columns === 2 && i.span !== "page" && i.kind === "paragraph" && (i.blockIds || []).reduce((n, id2) => n + (flowBlockText.get(id2)?.length || 0), 0) >= 150) ?? -1;
+  const firstBodyIndex = flow?.items.findIndex((i) => i.columns === 2 && i.span !== "page" && i.kind === "paragraph" && (i.blockIds || []).reduce((n, id3) => n + (flowBlockText.get(id3)?.length || 0), 0) >= 150) ?? -1;
+  const lastBodyIndex = flow?.items.findLastIndex((i) => i.columns === 2 && i.span !== "page" && i.kind === "paragraph" && (i.blockIds || []).reduce((n, id3) => n + (flowBlockText.get(id3)?.length || 0), 0) >= 150) ?? -1;
   const measuredContinuous = layoutMode === "measured-continuous" && firstBodyIndex >= 0;
   const enginePlan = { requested: layoutMode || "existing", actual: measuredContinuous ? "measured-continuous" : "existing", figurePlacement: measuredContinuous ? figurePlacement : null, reason: layoutMode && !measuredContinuous ? "no explicit two-column body" : null };
   const continuousColumns = measuredContinuous || !!flow?.items.length && flow.items.every((i) => i.columns === 2 && i.span !== "page" && i.kind !== "asset");
@@ -2171,14 +2171,14 @@ async function composeDocument({ document, edits = [], flow, assets, links, sign
   const assetList = Array.isArray(assets) ? assets : assets?.assets || document.assets || [];
   for (const target of linkPlan?.targets || []) if (target.label && target.assetItemId && !suppressedLabels.has(target.label)) {
     const item = flow?.items.find((i) => i.id === target.assetItemId);
-    const id2 = item?.renderAssetId || (item?.assetIds?.length === 1 ? item.assetIds[0] : null);
-    const asset = assetList.find((a) => a.id === id2), content = asset?.content, bytes2 = content?.bytes, rep = String(content?.representation || "").toLowerCase();
+    const id3 = item?.renderAssetId || (item?.assetIds?.length === 1 ? item.assetIds[0] : null);
+    const asset = assetList.find((a) => a.id === id3), content = asset?.content, bytes2 = content?.bytes, rep = String(content?.representation || "").toLowerCase();
     const svg = rep.includes("svg") && bytes2 instanceof Uint8Array && /^\s*(?:<\?xml[^>]*>\s*)?<svg(?:\s|>)/i.test(new TextDecoder().decode(bytes2));
     const png = rep.includes("png") && bytes2 instanceof Uint8Array && bytes2.length >= 45 && [137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82].every((b, i) => bytes2[i] === b) && [73, 69, 78, 68, 174, 66, 96, 130].every((b, i) => bytes2[bytes2.length - 8 + i] === b);
     const same2 = (a, b) => a.length === b.length && a.every((x) => b.includes(x));
     const captureValid = !item?.renderAssetId || asset && same2(asset.source?.assetIds || [], item.assetIds || []) && same2(asset.source?.blockIds || [], item.blockIds || []) && asset.source?.pageIndex === item.source?.pageIndex && JSON.stringify(asset.source?.bbox) === JSON.stringify(item.source?.bbox);
-    const original = (document.assets || []).find((a) => a.id === id2), originalValid = !original?.source || asset?.source && asset.source.pageIndex === original.source.pageIndex && JSON.stringify(asset.source.bbox) === JSON.stringify(original.source.bbox);
-    if (!id2 || !(svg || png) || content?.mask || asset?.mask || !captureValid || !originalValid) {
+    const original = (document.assets || []).find((a) => a.id === id3), originalValid = !original?.source || asset?.source && asset.source.pageIndex === original.source.pageIndex && JSON.stringify(asset.source.bbox) === JSON.stringify(original.source.bbox);
+    if (!id3 || !(svg || png) || content?.mask || asset?.mask || !captureValid || !originalValid) {
       suppressedLabels.add(target.label);
       linkPlan.diagnostics.push({ code: "target-asset-unavailable", label: target.label, assetItemId: target.assetItemId });
     }
@@ -2219,13 +2219,13 @@ ${rendered}]` : rendered;
     suppliedIds.add(a.id);
   }
   const ownedIds = /* @__PURE__ */ new Set();
-  for (const item of flow?.items || []) for (const id2 of item.assetIds || []) {
-    if (ownedIds.has(id2)) fail("Duplicate flow asset ownership");
-    ownedIds.add(id2);
+  for (const item of flow?.items || []) for (const id3 of item.assetIds || []) {
+    if (ownedIds.has(id3)) fail("Duplicate flow asset ownership");
+    ownedIds.add(id3);
   }
   for (const a of document.assets || []) if (flow && !ownedIds.has(a.id)) assetFindings.push({ code: "asset-unowned", assetId: a.id });
-  function spanMarker(id2, sourcePage, edge) {
-    return `#context [#let p = here().position();#metadata((id: ${typstString(id2)}, page: p.page, x: p.x / 1pt, y: p.y / 1pt, sourcePage: ${Number.isInteger(sourcePage) ? sourcePage : "none"}, edge: ${typstString(edge)}))#label(${typstString(`paper-${edge === "start" ? "block" : "block-end"}`)})]`;
+  function spanMarker(id3, sourcePage, edge) {
+    return `#context [#let p = here().position();#metadata((id: ${typstString(id3)}, page: p.page, x: p.x / 1pt, y: p.y / 1pt, sourcePage: ${Number.isInteger(sourcePage) ? sourcePage : "none"}, edge: ${typstString(edge)}))#label(${typstString(`paper-${edge === "start" ? "block" : "block-end"}`)})]`;
   }
   function renderBlock(block, mark = true) {
     const text = textById.get(block.id);
@@ -2328,11 +2328,11 @@ ${rendered}]` : rendered;
     }
     return marker + runs.join("") + endMarker;
   }
-  function renderAsset(id2, item, mark = true, fit = null) {
-    const asset = assetList.find((a) => a.id === id2);
-    const original = (document.assets || []).find((a) => a.id === id2);
+  function renderAsset(id3, item, mark = true, fit = null) {
+    const asset = assetList.find((a) => a.id === id3);
+    const original = (document.assets || []).find((a) => a.id === id3);
     if (original?.source && (!asset?.source || asset.source.pageIndex !== original.source.pageIndex || JSON.stringify(asset.source.bbox) !== JSON.stringify(original.source.bbox))) {
-      assetFindings.push({ code: "asset-source-mismatch", assetId: id2 });
+      assetFindings.push({ code: "asset-source-mismatch", assetId: id3 });
       return "";
     }
     const content = asset?.content;
@@ -2342,16 +2342,16 @@ ${rendered}]` : rendered;
     const validPng = ext === "png" && bytes2 instanceof Uint8Array && bytes2.length >= 45 && [137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82].every((b, i) => bytes2[i] === b) && [73, 69, 78, 68, 174, 66, 96, 130].every((b, i) => bytes2[bytes2.length - 8 + i] === b);
     const validSvg = ext === "svg" && bytes2 instanceof Uint8Array && /^\s*(?:<\?xml[^>]*>\s*)?<svg(?:\s|>)/i.test(new TextDecoder().decode(bytes2));
     if (!validPng && !validSvg) {
-      assetFindings.push({ code: asset ? "asset-invalid-format" : "asset-missing", assetId: id2 });
+      assetFindings.push({ code: asset ? "asset-invalid-format" : "asset-missing", assetId: id3 });
       return "";
     }
     if (content?.mask || asset?.mask) {
-      assetFindings.push({ code: "asset-mask-unsupported", assetId: id2 });
+      assetFindings.push({ code: "asset-mask-unsupported", assetId: id3 });
       return "";
     }
     const path = `assets/${placedAssets.size}.${ext}`;
     files[path] = new Uint8Array(bytes2);
-    placedAssets.add(id2);
+    placedAssets.add(id3);
     const bbox = asset.source?.bbox || item?.source?.bbox;
     const sourceWidth = Array.isArray(bbox) ? bbox[2] - bbox[0] : null;
     const sourceHeight = Array.isArray(bbox) ? bbox[3] - bbox[1] : null;
@@ -2360,7 +2360,7 @@ ${rendered}]` : rendered;
     const heightLimited = Number.isFinite(sourceHeight) && sourceHeight > 0 && Number.isFinite(sourceWidth) && sourceWidth > 0 ? maxHeight * sourceWidth / sourceHeight : Infinity;
     const width = Number.isFinite(sourceWidth) && sourceWidth > 0 ? fit && Number.isFinite(sourceHeight) && sourceHeight > 0 ? "paper-fit-width" : `${Math.min(sourceWidth, available, heightLimited)}pt` : "100%";
     const sourcePage = asset.source?.pageIndex ?? item?.source?.pageIndex;
-    const marker = mark ? spanMarker(id2, sourcePage, "start") : "", endMarker = mark ? spanMarker(id2, sourcePage, "end") : "";
+    const marker = mark ? spanMarker(id3, sourcePage, "start") : "", endMarker = mark ? spanMarker(id3, sourcePage, "end") : "";
     const labels = mark ? (linkPlan?.targets || []).filter((t) => t.label && !suppressedLabels.has(t.label) && t.assetItemId === item?.id).map((t) => `#box[]#label(${typstString(t.label)})`).join("") : "";
     const candidates2 = (linkPlan?.sourceAssets || []).filter((a) => a.assetItemId === item?.id);
     const unique = new Map(candidates2.map((a) => [JSON.stringify([a.destinationLabel || null, a.destinationLabel ? null : a.uri, a.destinationStatus || null]), a]));
@@ -2383,20 +2383,20 @@ ${rendered}]` : rendered;
       let content = "";
       if (entry.kind === "asset") {
         const item = flow.items.find((i) => i.id === entry.itemId);
-        const id2 = entry.renderAssetId || (entry.assetIds?.length === 1 ? entry.assetIds[0] : null);
-        if (id2 && item) {
-          const capture = assetList.find((a) => a.id === id2);
+        const id3 = entry.renderAssetId || (entry.assetIds?.length === 1 ? entry.assetIds[0] : null);
+        if (id3 && item) {
+          const capture = assetList.find((a) => a.id === id3);
           const same2 = (a, b) => a.length === b.length && a.every((x) => b.includes(x));
           const validCapture = !item.renderAssetId || capture && same2(capture.source?.assetIds || [], item.assetIds || []) && same2(capture.source?.blockIds || [], item.blockIds || []) && capture.source?.pageIndex === item.source?.pageIndex && JSON.stringify(capture.source?.bbox) === JSON.stringify(item.source?.bbox);
-          if (validCapture) content = renderAsset(id2, { ...item, span: "page", columns: 1 }, false);
-          else assetFindings.push({ code: "asset-capture-mismatch", assetId: id2 });
+          if (validCapture) content = renderAsset(id3, { ...item, span: "page", columns: 1 }, false);
+          else assetFindings.push({ code: "asset-capture-mismatch", assetId: id3 });
         }
         if (!content) {
           excludedItems.delete(entry.itemId);
-          for (const id3 of entry.blockIds || []) excludedBlocks.delete(id3);
+          for (const id4 of entry.blockIds || []) excludedBlocks.delete(id4);
           continue;
         }
-        for (const id3 of entry.assetIds || []) placedAssets.add(id3);
+        for (const id4 of entry.assetIds || []) placedAssets.add(id4);
       } else {
         const block = blockById.get(entry.blockId);
         if (!block) {
@@ -2415,7 +2415,7 @@ ${rendered}]` : rendered;
       rendered.set(entry, content);
       furniture.templates.push({ kind, sourcePage: pg.sourcePage, text: entry.kind === "text" ? textById.get(entry.blockId) : entry.text, originalText: entry.text, bbox: entry.bbox, occurrences: [{ itemId: entry.itemId, blockId: entry.blockId, source: entry.source }], entryKind: entry.kind });
     }
-    for (const id2 of excludedBlocks) furnitureIds.add(id2);
+    for (const id3 of excludedBlocks) furnitureIds.add(id3);
     expectedBlocks = expectedBlocks.filter((b) => !furnitureIds.has(b.id));
     source += `#let paper-source-page() = { let p = here().page(); let starts = query(<paper-block>).filter(m => m.value.sourcePage != none); let ends = query(<paper-block-end>); let covering = starts.filter(s => { let e = ends.find(x => x.value.id == s.value.id); e != none and s.value.page <= p and e.value.page >= p }); if covering.len() > 0 { covering.first().value.sourcePage } else { none } }
 `;
@@ -2442,8 +2442,8 @@ ${rendered}]` : rendered;
           const last = entries.length - 1;
           const placements = entries.map((entry, i) => {
             const y = entry.bbox[1], dy = kind === "header" ? y : y - (page.height - margins.bottom);
-            const id2 = entry.blockId || entry.itemId;
-            return `place(top + left, dx: (if fits { x${i} - shift } else { ${entry.bbox[0]}pt }) - ${margins.left}pt, dy: ${dy}pt)[#context [#let p = here().position();#box(width: 0pt, height: 0pt)[#metadata((id: ${typstString(id2)}, sourcePage: ${pg.sourcePage}, page: p.page, x: p.x / 1pt, y: p.y / 1pt, kind: ${typstString(kind)}))#label("paper-furniture")]]#c${i}];`;
+            const id3 = entry.blockId || entry.itemId;
+            return `place(top + left, dx: (if fits { x${i} - shift } else { ${entry.bbox[0]}pt }) - ${margins.left}pt, dy: ${dy}pt)[#context [#let p = here().position();#box(width: 0pt, height: 0pt)[#metadata((id: ${typstString(id3)}, sourcePage: ${pg.sourcePage}, page: p.page, x: p.x / 1pt, y: p.y / 1pt, kind: ${typstString(kind)}))#label("paper-furniture")]]#c${i}];`;
           }).join(" ");
           return `#context { ${defs} let shift = calc.max(0pt, x${last} + w${last} - ${page.width}pt); let fits = x0 - shift >= 0pt and ${entries.map((_, i) => `fits${i}`).join(" and ")}; box(width: 0pt, height: 0pt)[#metadata((sourcePage: ${pg.sourcePage}, kind: ${typstString(kind)}, row: ${ri}, status: if fits { "measured" } else { "source-position-fallback" }))#label("paper-furniture-layout")]; ${placements} }`;
         });
@@ -2471,10 +2471,10 @@ ${content}
       if (columns === 2) bodyStarted = true;
       group = [];
     };
-    const captionById = new Map(flow.items.filter((i) => i.kind === "caption").flatMap((i) => (i.blockIds || []).map((id2) => [id2, i]))), linkedCaptions = /* @__PURE__ */ new Set();
-    for (const item of flow.items) if (item.kind === "asset") for (const id2 of item.captionIds || []) {
-      if (!captionById.has(id2) || linkedCaptions.has(id2)) fail("Unknown or duplicate caption link");
-      linkedCaptions.add(id2);
+    const captionById = new Map(flow.items.filter((i) => i.kind === "caption").flatMap((i) => (i.blockIds || []).map((id3) => [id3, i]))), linkedCaptions = /* @__PURE__ */ new Set();
+    for (const item of flow.items) if (item.kind === "asset") for (const id3 of item.captionIds || []) {
+      if (!captionById.has(id3) || linkedCaptions.has(id3)) fail("Unknown or duplicate caption link");
+      linkedCaptions.add(id3);
     }
     const keepBeforeAsset = /* @__PURE__ */ new Map(), deferredItems = /* @__PURE__ */ new Set();
     if (measuredContinuous && figurePlacement === "page") for (const [assetIndex, asset] of flow.items.entries()) {
@@ -2483,10 +2483,10 @@ ${content}
       const caption = significant.at(-1), item = significant.at(-2);
       if (!caption || caption.kind !== "caption" || !item || item.kind !== "paragraph" || item.span === "page" || item.columns !== 2) continue;
       const ids2 = caption.blockIds || [];
-      if (!ids2.length || ids2.some((id2) => !asset.captionIds.includes(id2) || asset.captionPositions?.[id2] !== "above") || asset.captionIds.length !== ids2.length) continue;
+      if (!ids2.length || ids2.some((id3) => !asset.captionIds.includes(id3) || asset.captionPositions?.[id3] !== "above") || asset.captionIds.length !== ids2.length) continue;
       const src = item.source, cs = caption.source, as = asset.source, box5 = src?.bbox, cb = cs?.bbox, sourcePage = document.pages[src?.pageIndex];
       if (!sourcePage || src.pageIndex !== cs?.pageIndex || as?.pageIndex !== src.pageIndex + 1 || !Array.isArray(box5) || !Array.isArray(cb) || box5.length !== 4 || cb.length !== 4 || !box5.every(Number.isFinite) || !cb.every(Number.isFinite) || box5[1] < sourcePage.height * 0.5 || box5[3] > cb[1] || cb[1] - box5[3] > sourcePage.height * 0.08) continue;
-      const blocks = (item.blockIds || []).map((id2) => blockById.get(id2));
+      const blocks = (item.blockIds || []).map((id3) => blockById.get(id3));
       if (!blocks.length || blocks.some((b) => !b || b.source?.pageIndex !== src.pageIndex || !b.source?.range || b.source.range.end - b.source.range.start !== b.text?.length || !b.source.lines?.length)) continue;
       const lines = blocks.reduce((n, b) => n + b.source.lines.length, 0);
       const current = blocks.reduce((n, b) => n + logicalText(b, changes.get(b.id) || [], omittedFor(b), spacesFor(b)).length, 0) + (item.joiners || []).reduce((n, j) => n + j.length, 0);
@@ -2495,7 +2495,7 @@ ${content}
       deferredItems.add(item);
     }
     const renderFlowItem = (item) => {
-      const blocks = (item.blockIds || []).map((id2) => blockById.get(id2));
+      const blocks = (item.blockIds || []).map((id3) => blockById.get(id3));
       const parts = blocks.map((b) => renderBlock(b));
       const rendered = item.inline ? parts.map((p, i) => p + (i < parts.length - 1 ? `#text(${typstString(item.joiners[i])})` : "")).join("") : parts.filter(Boolean).join("\n");
       return paragraphContext(blocks, item.kind, rendered);
@@ -2503,8 +2503,8 @@ ${content}
     const renderCaption = renderFlowItem;
     for (const [itemIndex, item] of flow.items.entries()) {
       if (plan?.excludedItemIds.includes(item.id) || deferredItems.has(item)) continue;
-      if (item.kind === "caption" && (item.blockIds || []).every((id2) => linkedCaptions.has(id2))) continue;
-      const box5 = item.source?.bbox, noteBlocks = (item.blockIds || []).map((id2) => blockById.get(id2));
+      if (item.kind === "caption" && (item.blockIds || []).every((id3) => linkedCaptions.has(id3))) continue;
+      const box5 = item.source?.bbox, noteBlocks = (item.blockIds || []).map((id3) => blockById.get(id3));
       const noteSizes = noteBlocks.flatMap((b) => (b?.source?.characters || []).map((c) => styleById.get(c.styleId)?.size));
       const titlePageNote = measuredContinuous && itemIndex >= firstBodyIndex && item.kind === "paragraph" && item.span === "page" && item.source?.pageIndex === 0 && Array.isArray(box5) && box5.length === 4 && box5.every(Number.isFinite) && box5[0] >= 0 && box5[2] <= page.width && box5[2] > box5[0] && box5[1] >= page.height * 0.8 && box5[3] <= page.height && box5[3] > box5[1] && box5[3] - box5[1] <= page.height * 0.08 && noteSizes.length > 0 && Number.isFinite(bodySize) && noteSizes.every((size) => Number.isFinite(size) && size > 0 && size <= bodySize * 0.95);
       const count = measuredContinuous && itemIndex < firstBodyIndex ? 1 : titlePageNote || measuredContinuous && item.measuredColumns === 2 ? 2 : item.span === "page" ? 1 : item.columns === 2 ? 2 : 1;
@@ -2521,14 +2521,14 @@ ${content}
           if (!capture || !same2(owned, item.assetIds || []) || !same2(blocks, item.blockIds || []) || capture.source.pageIndex !== item.source?.pageIndex || JSON.stringify(capture.source.bbox) !== JSON.stringify(item.source?.bbox)) assetFindings.push({ code: "asset-capture-mismatch", assetId: item.renderAssetId });
           else {
             parts = [renderAsset(item.renderAssetId, item, true, fit)].filter(Boolean);
-            if (parts.length) for (const id2 of item.assetIds || []) placedAssets.add(id2);
+            if (parts.length) for (const id3 of item.assetIds || []) placedAssets.add(id3);
           }
         } else if ((item.assetIds || []).length > 1) assetFindings.push({ code: "asset-union-required", assetIds: [...item.assetIds] });
-        else parts = (item.assetIds || []).map((id2) => renderAsset(id2, item, true, fit)).filter(Boolean);
-        const captionItems = [...new Set(captionOrder(item).map((id2) => captionById.get(id2)))];
+        else parts = (item.assetIds || []).map((id3) => renderAsset(id3, item, true, fit)).filter(Boolean);
+        const captionItems = [...new Set(captionOrder(item).map((id3) => captionById.get(id3)))];
         for (const caption of captionItems) {
-          const ids2 = caption.blockIds || [], position = (id2) => item.captionPositions?.[id2] === "above" ? "above" : "below";
-          if (ids2.some((id2) => !(item.captionIds || []).includes(id2) || position(id2) !== position(ids2[0]))) fail("Incomplete or inconsistent caption link");
+          const ids2 = caption.blockIds || [], position = (id3) => item.captionPositions?.[id3] === "above" ? "above" : "below";
+          if (ids2.some((id3) => !(item.captionIds || []).includes(id3) || position(id3) !== position(ids2[0]))) fail("Incomplete or inconsistent caption link");
         }
         const above = captionItems.filter((c) => item.captionPositions?.[c.blockIds[0]] === "above").map(renderCaption).filter(Boolean);
         const below = captionItems.filter((c) => item.captionPositions?.[c.blockIds[0]] !== "above").map(renderCaption).filter(Boolean);
@@ -2542,13 +2542,17 @@ ${content}
           const budget = Math.max(1, fullHeight - 20);
           parts = [`#context { let overhead = measure(block(width: ${fullWidth}pt, [${probe}])).height; let remaining = ${budget}pt - overhead; let paper-fit-width = if remaining >= ${fit.height / 2}pt { calc.min(${fit.width}pt, remaining * ${fit.ratio}) } else { ${fit.width}pt }; [${content}] }`];
         } else parts = [...aboveParts, ...parts, ...below];
+      } else if (item.kind === "table") {
+        const table = item.table, cells = table?.cells;
+        if (!Number.isSafeInteger(table?.rows) || !Number.isSafeInteger(table?.cols) || table.rows < 1 || table.cols < 1 || !Array.isArray(cells) || cells.length !== table.rows * table.cols || cells.some((c, i) => c.row !== Math.floor(i / table.cols) || c.col !== i % table.cols || !Array.isArray(c.blockIds) || c.blockIds.length !== 1 || c.blockIds[0] !== item.blockIds[i])) fail("Invalid structured table");
+        parts = [`#table(columns: ${table.cols}, stroke: ${table.ruled ? "0.5pt" : "none"}, ${cells.map((c) => `[${renderBlock(blockById.get(c.blockIds[0]))}]`).join(", ")})`];
       } else {
-        parts = (item.blockIds || []).filter((id2) => !linkedCaptions.has(id2)).map((id2) => blockById.get(id2)).filter(Boolean).map((b) => renderBlock(b));
+        parts = (item.blockIds || []).filter((id3) => !linkedCaptions.has(id3)).map((id3) => blockById.get(id3)).filter(Boolean).map((b) => renderBlock(b));
         if (!item.inline) parts = parts.filter(Boolean);
       }
       if (parts.length) {
         const rendered = item.inline ? parts.map((p, i) => p + (i < parts.length - 1 ? `#text(${typstString(item.joiners[i])})` : "")).join("") : parts.join(item.kind === "asset" ? "\n\n" : "\n");
-        const scoped = item.kind === "asset" ? rendered : paragraphContext((item.blockIds || []).map((id2) => blockById.get(id2)), item.kind, rendered);
+        const scoped = item.kind === "asset" ? rendered : paragraphContext((item.blockIds || []).map((id3) => blockById.get(id3)), item.kind, rendered);
         const result = item.kind === "heading" ? `#block(sticky: true)[${scoped}]` : scoped;
         if (measuredContinuous && itemIndex >= firstBodyIndex && item.kind === "asset" && item.span === "page") {
           flush();
@@ -2574,7 +2578,7 @@ ${document.blocks.map((b) => paragraphContext([b], b.kind || "paragraph", render
   if (sourceGlyphResult.unavailable.length) warnings.push("Source glyph artwork unavailable for " + sourceGlyphResult.unavailable.length + " character(s).");
   if (compiled?.queryError) warnings.push(`Output location query failed: ${compiled.queryError}`);
   if (compiled?.furnitureLayout?.some((x) => x.status === "source-position-fallback")) warnings.push("\uC77C\uBD80 \uBA38\uB9AC\uB9D0\xB7\uAF2C\uB9AC\uB9D0\uC740 \uC5EC\uC720 \uACF5\uAC04\uC774 \uBD80\uC871\uD574 \uC6D0\uB798 \uC704\uCE58\uB97C \uC720\uC9C0\uD588\uC2B5\uB2C8\uB2E4.");
-  if (document.assets?.some((a) => !placedAssets.has(a.id)) || document.blocks.some((b) => (b.assetIds?.length || b.kind === "figure" || b.kind === "table" || b.kind === "formula") && !(b.assetIds?.length && b.assetIds.every((id2) => placedAssets.has(id2))))) warnings.push("Source assets and non-text figure, table or formula content are not placed by this candidate, including image blocks without source ranges.");
+  if (document.assets?.some((a) => !placedAssets.has(a.id)) || document.blocks.some((b) => (b.assetIds?.length || b.kind === "figure" || b.kind === "table" || b.kind === "formula") && !(b.assetIds?.length && b.assetIds.every((id3) => placedAssets.has(id3))))) warnings.push("Source assets and non-text figure, table or formula content are not placed by this candidate, including image blocks without source ranges.");
   if (assetFindings.length) warnings.push("Source asset findings: " + assetFindings.map((f) => `${f.code} (${f.assetId || f.assetIds.join(", ")})`).join("; "));
   if (coverage.status !== "covered") warnings.push(`Font coverage ${coverage.status}; output may lose glyphs.`);
   let outputTextCheck = "unavailable", checkReport = null;
@@ -2607,17 +2611,17 @@ var contains2 = (a, b) => a[0] <= b[0] + 1 && a[1] <= b[1] + 1 && a[2] >= b[2] -
 var union2 = (boxes) => [Math.min(...boxes.map((b) => b[0])), Math.min(...boxes.map((b) => b[1])), Math.max(...boxes.map((b) => b[2])), Math.max(...boxes.map((b) => b[3]))];
 var norm = (s) => s.replace(/\s+/gu, " ").trim();
 var fontIdentity = (name) => String(name).replace(/^[A-Z]{6}\+/u, "");
-function inspectLayoutQuality({ bytes, mupdf: mupdf6, profile = {}, sourceBytes, sourcePageIndexes } = {}) {
+function inspectLayoutQuality({ bytes, mupdf: mupdf7, profile = {}, sourceBytes, sourcePageIndexes } = {}) {
   const issues = [], pages = [], captionObservations = [], limitations = [
     "Text paint bounds are glyph ink extents; structured text character boxes are font metrics.",
     "Only axis-aligned rectangular clip paths are checked; arbitrary clips, transparency, occlusion, rotated text, vector figure ownership, and reading order remain unverified.",
     "Scores measure detected defects only; they are not proof of visual quality."
   ], profileCoverage = { coordinateSpace: profile.coordinateSpace || "unspecified", bodyLines: { checked: 0, skipped: 0 }, fontNames: { checked: 0, skipped: 0 }, captions: { checked: 0, skipped: 0 }, columns: { checked: 0, skipped: 0 }, headings: { checked: 0, skipped: 0 } };
   const add = (type, pageIndex, bbox, penalty, evidence) => issues.push({ type, pageIndex, bbox: bbox.map((x) => Math.round(x * 100) / 100), penalty, evidence });
-  if (!mupdf6?.Document || !mupdf6?.Device) return { schema: "falsify.layout-quality.v1", status: "unavailable", score: null, penaltyTerms: {}, issues, limitations: [...limitations, "MuPDF unavailable."] };
+  if (!mupdf7?.Document || !mupdf7?.Device) return { schema: "falsify.layout-quality.v1", status: "unavailable", score: null, penaltyTerms: {}, issues, limitations: [...limitations, "MuPDF unavailable."] };
   let doc;
   try {
-    doc = mupdf6.Document.openDocument(bytes, "application/pdf");
+    doc = mupdf7.Document.openDocument(bytes, "application/pdf");
     if (doc.countPages() > 500) throw Error("page limit exceeded");
     for (let p = 0; p < doc.countPages(); p++) {
       const page = doc.loadPage(p);
@@ -2680,7 +2684,7 @@ function inspectLayoutQuality({ bytes, mupdf: mupdf6, profile = {}, sourceBytes,
             cs?.destroy();
           }
         };
-        dev = new mupdf6.Device({ clipPath(o, _eo, c) {
+        dev = new mupdf7.Device({ clipPath(o, _eo, c) {
           try {
             const points = [];
             let closed = false, complex = false;
@@ -2737,7 +2741,7 @@ function inspectLayoutQuality({ bytes, mupdf: mupdf6, profile = {}, sourceBytes,
         }, strokePath(o, s, c, cs, _color, a) {
           path(o, s, c, cs, a);
         } });
-        page.run(dev, mupdf6.Matrix.identity);
+        page.run(dev, mupdf7.Matrix.identity);
         dev.close();
         if (runs.length > 2e3 || lines.length > 1e4 || images.length > 2e3 || vectors.length > 2e4) throw Error("geometry limit exceeded");
         for (const b of runs) if (b[0] < -1 || b[1] < -1 || b[2] > bounds[2] + 1 || b[3] > bounds[3] + 1) add("ink-outside-page", p, b, 10, { pageBounds: bounds, source: "text-paint-ink" });
@@ -2853,7 +2857,7 @@ function inspectLayoutQuality({ bytes, mupdf: mupdf6, profile = {}, sourceBytes,
     }
     const measure = (page) => ({ pageIndex: page.pageIndex, textCharacters: page.lines.reduce((n, l) => n + l.chars.length, 0), textAreaRatio: Math.min(1, page.lines.reduce((n, l) => n + area(intersection(l.bbox, page.bounds)), 0) / area(page.bounds)), imageCount: page.images.length, vectorCount: page.vectorCount });
     const measurements = pages.map(measure);
-    const source = sourceBytes && Array.isArray(sourcePageIndexes) ? inspectLayoutQuality({ bytes: sourceBytes, mupdf: mupdf6 }) : null;
+    const source = sourceBytes && Array.isArray(sourcePageIndexes) ? inspectLayoutQuality({ bytes: sourceBytes, mupdf: mupdf7 }) : null;
     const sparsePages = measurements.map((m, i) => {
       const sparse = m.textAreaRatio < 0.08 && m.textCharacters < 1200;
       const sourceIndex = sourcePageIndexes?.[i], sm = Number.isInteger(sourceIndex) ? source?.sparsePageEvidence?.pages?.[sourceIndex] : null;
@@ -2879,8 +2883,8 @@ function inspectLayoutQuality({ bytes, mupdf: mupdf6, profile = {}, sourceBytes,
 }
 
 // app/src/paper-output-glyphs.mjs
-function readOutputGlyphs({ bytes, mupdf: mupdf6 }) {
-  const doc = mupdf6.Document.openDocument(bytes, "application/pdf");
+function readOutputGlyphs({ bytes, mupdf: mupdf7 }) {
+  const doc = mupdf7.Document.openDocument(bytes, "application/pdf");
   const pages = [];
   try {
     for (let pageIndex = 0; pageIndex < doc.countPages(); pageIndex++) {
@@ -2890,7 +2894,7 @@ function readOutputGlyphs({ bytes, mupdf: mupdf6 }) {
         try {
           text.walk({ showGlyph(font, trm, gid, scalar) {
             try {
-              const matrix = mupdf6.Matrix.concat(trm, ctm);
+              const matrix = mupdf7.Matrix.concat(trm, ctm);
               if (!Number.isInteger(scalar) || scalar <= 0 || scalar === 65533 || scalar > 1114111 || scalar >= 55296 && scalar <= 57343 || !matrix.every(Number.isFinite)) failed = true;
               else glyphs.push({ scalar, origin: [matrix[4], matrix[5]], pageIndex });
             } catch {
@@ -2906,7 +2910,7 @@ function readOutputGlyphs({ bytes, mupdf: mupdf6 }) {
           for (const resource of resources) resource?.destroy();
         }
       };
-      const dev = new mupdf6.Device({
+      const dev = new mupdf7.Device({
         fillText(text, ctm, cs) {
           collect(text, ctm, [cs]);
         },
@@ -2915,7 +2919,7 @@ function readOutputGlyphs({ bytes, mupdf: mupdf6 }) {
         }
       });
       try {
-        page.run(dev, mupdf6.Matrix.identity);
+        page.run(dev, mupdf7.Matrix.identity);
         dev.close();
       } catch {
         failed = true;
@@ -2958,10 +2962,10 @@ function representationComparison(expected, observed, prefix = false) {
   }
   return { matches: i === expected.length && (prefix || j === observed.length), differences, consumed: j };
 }
-async function checkRecomposition({ bytes, expectedBlocks, edits = {}, pdfjs, exporter, mupdf: mupdf6, expectedFurniture, outputFurniture, bodyFrame, blockSpans, layoutProfile, flowExpectations, sourceBytes, sourcePageIndexes } = {}) {
+async function checkRecomposition({ bytes, expectedBlocks, edits = {}, pdfjs, exporter, mupdf: mupdf7, expectedFurniture, outputFurniture, bodyFrame, blockSpans, layoutProfile, flowExpectations, sourceBytes, sourcePageIndexes } = {}) {
   if (!(bytes instanceof Uint8Array) || !bytes.length || !pdfjs?.getDocument) throw new TypeError("PDF bytes and PDF.js are required");
   if (!Array.isArray(expectedBlocks) || !expectedBlocks.length || expectedBlocks.some((b) => typeof b.id !== "string" || typeof b.text !== "string") || new Set(expectedBlocks.map((b) => b.id)).size !== expectedBlocks.length) throw new TypeError("unique expected blocks are required");
-  if (Object.keys(edits).some((id2) => !expectedBlocks.some((b) => b.id === id2) || typeof edits[id2] !== "string")) throw new TypeError("invalid edit");
+  if (Object.keys(edits).some((id3) => !expectedBlocks.some((b) => b.id === id3) || typeof edits[id3] !== "string")) throw new TypeError("invalid edit");
   const findings = [], pages = [], locations = [], spacingEvidence = [];
   const furnitureEnabled = expectedFurniture !== void 0 || outputFurniture !== void 0 || bodyFrame !== void 0;
   const furnitureValid = Array.isArray(expectedFurniture) && Array.isArray(outputFurniture) && bodyFrame && ["left", "top", "right", "bottom"].every((k) => Number.isFinite(bodyFrame[k])) && bodyFrame.left < bodyFrame.right && bodyFrame.top < bodyFrame.bottom;
@@ -2971,9 +2975,9 @@ async function checkRecomposition({ bytes, expectedBlocks, edits = {}, pdfjs, ex
   let furnitureAssets = false;
   let inspectedItems = 0;
   let glyphPages = null;
-  if (mupdf6) {
+  if (mupdf7) {
     try {
-      glyphPages = readOutputGlyphs({ bytes: bytes.slice(), mupdf: mupdf6 });
+      glyphPages = readOutputGlyphs({ bytes: bytes.slice(), mupdf: mupdf7 });
     } catch {
       glyphPages = null;
     }
@@ -3086,9 +3090,9 @@ async function checkRecomposition({ bytes, expectedBlocks, edits = {}, pdfjs, ex
             findings.push({ code: "wrong-furniture-source", pageIndex: n - 1, sourcePage: marker.sourcePage, expectedSourcePage: sourcePage });
           for (const t of expectedFurniture.filter((t2) => t2.sourcePage === sourcePage)) {
             for (const occurrence of t.occurrences || []) {
-              const id2 = occurrence.blockId || occurrence.itemId;
-              if (!pageMarkers.some((m) => m.sourcePage === sourcePage && m.kind === t.kind && m.id === id2))
-                findings.push({ code: "missing-furniture", pageIndex: n - 1, id: id2, sourcePage, reason: "Template occurrence has no output map entry." });
+              const id3 = occurrence.blockId || occurrence.itemId;
+              if (!pageMarkers.some((m) => m.sourcePage === sourcePage && m.kind === t.kind && m.id === id3))
+                findings.push({ code: "missing-furniture", pageIndex: n - 1, id: id3, sourcePage, reason: "Template occurrence has no output map entry." });
             }
           }
         }
@@ -3202,7 +3206,7 @@ async function checkRecomposition({ bytes, expectedBlocks, edits = {}, pdfjs, ex
   }
   const observed = normalize(pages.join(" "));
   const expected = normalize(expectedBlocks.map((b) => Object.hasOwn(edits, b.id) ? edits[b.id] : b.text).join(" "));
-  const layoutQuality = inspectLayoutQuality({ bytes, mupdf: mupdf6, profile: layoutProfile, sourceBytes, sourcePageIndexes });
+  const layoutQuality = inspectLayoutQuality({ bytes, mupdf: mupdf7, profile: layoutProfile, sourceBytes, sourcePageIndexes });
   let flow = { status: "not-requested" }, flowMatches = false, flowDifferences = [];
   if (flowExpectations !== void 0) {
     const ids = flowExpectations?.floatingCaptionBlockIds, captions = layoutProfile?.captions;
@@ -3220,9 +3224,9 @@ async function checkRecomposition({ bytes, expectedBlocks, edits = {}, pdfjs, ex
     };
     if (Array.isArray(ids) && ids.length && new Set(ids).size === ids.length && Array.isArray(captions)) {
       let left = expected, right = observed, reason = null;
-      for (const id2 of ids) {
-        const block = expectedBlocks.find((b) => b.id === id2), declarations = captions.filter((c) => c.id === id2), observations = layoutQuality.captionObservations?.filter((c) => c.id === id2 && c.status === "observed");
-        const value = block && normalize(Object.hasOwn(edits, id2) ? edits[id2] : block.text);
+      for (const id3 of ids) {
+        const block = expectedBlocks.find((b) => b.id === id3), declarations = captions.filter((c) => c.id === id3), observations = layoutQuality.captionObservations?.filter((c) => c.id === id3 && c.status === "observed");
+        const value = block && normalize(Object.hasOwn(edits, id3) ? edits[id3] : block.text);
         if (!value || declarations.length !== 1 || normalize(declarations[0].text || "") !== value || observations?.length !== 1) {
           reason = "Caption declaration or independent image association is ambiguous or unavailable.";
           break;
@@ -3234,7 +3238,7 @@ async function checkRecomposition({ bytes, expectedBlocks, edits = {}, pdfjs, ex
         }
         left = sourceCaption.stream;
         right = outputCaption.stream;
-        flowDifferences.push(...outputCaption.differences.map((d) => ({ ...d, scope: "caption", captionId: id2 })));
+        flowDifferences.push(...outputCaption.differences.map((d) => ({ ...d, scope: "caption", captionId: id3 })));
       }
       if (reason) flow = { status: "unavailable", reason };
       else {
@@ -3313,9 +3317,9 @@ function parseFont(bytes) {
   if (n + 6 + entries * 12 > end || strings > end) bad();
   const values = /* @__PURE__ */ new Map();
   for (let i = 0; i < entries; i++) {
-    const p = n + 6 + i * 12, platform = u16(p), encoding = u16(p + 2), language = u16(p + 4), id2 = u16(p + 6), length = u16(p + 8), start = strings + u16(p + 10);
+    const p = n + 6 + i * 12, platform = u16(p), encoding = u16(p + 2), language = u16(p + 4), id3 = u16(p + 6), length = u16(p + 8), start = strings + u16(p + 10);
     if (start > end || length > end - start) bad();
-    if (![1, 2, 6, 16, 17].includes(id2)) continue;
+    if (![1, 2, 6, 16, 17].includes(id3)) continue;
     let text;
     if (platform === 0 || platform === 3) {
       if (length % 2) bad();
@@ -3325,9 +3329,9 @@ function parseFont(bytes) {
     else continue;
     text = text.replace(/\0/g, "").trim();
     const score = (platform === 3 ? 4 : platform === 0 ? 3 : 1) + (language === 1033 ? 2 : 0);
-    if (text && (!values.has(id2) || values.get(id2).score < score)) values.set(id2, { text, score });
+    if (text && (!values.has(id3) || values.get(id3).score < score)) values.set(id3, { text, score });
   }
-  const get = (id2) => values.get(id2)?.text;
+  const get = (id3) => values.get(id3)?.text;
   const family = get(16) || get(1), postscriptName = get(6);
   if (!family) bad();
   const weight = u16(os2.offset + 4), fsType = u16(os2.offset + 8), selection = u16(os2.offset + 62), macStyle = u16(head.offset + 44);
@@ -3341,7 +3345,7 @@ var norm2 = (s) => String(s ?? "").replace(/\s+/gu, " ").trim();
 var valid2 = (b) => Array.isArray(b) && b.length === 4 && b.every(Number.isFinite) && b[2] > b[0] && b[3] > b[1];
 var area2 = (b) => (b[2] - b[0]) * (b[3] - b[1]);
 var overlap2 = (a, b) => Math.max(0, Math.min(a[2], b[2]) - Math.max(a[0], b[0])) * Math.max(0, Math.min(a[3], b[3]) - Math.max(a[1], b[1]));
-function buildOutputProfile({ bytes, mupdf: mupdf6, document = {}, flow = {}, expectedBlocks = [], fontPlan, selectedFamilyAliases, assetSpans = [] } = {}) {
+function buildOutputProfile({ bytes, mupdf: mupdf7, document = {}, flow = {}, expectedBlocks = [], fontPlan, selectedFamilyAliases, assetSpans = [] } = {}) {
   const evidence = { body: [], captions: [], headings: [], font: { status: "unavailable" }, columns: { status: "unavailable", reason: "Output column bounds are not independently established." } };
   const profile = { coordinateSpace: "output", bodyLines: [], captions: [], columns: [], headings: [] };
   const source = deriveLayoutProfile(document, flow);
@@ -3368,8 +3372,8 @@ function buildOutputProfile({ bytes, mupdf: mupdf6, document = {}, flow = {}, ex
   let doc;
   const pages = [];
   try {
-    if (!mupdf6?.Document) throw Error("MuPDF unavailable");
-    doc = mupdf6.Document.openDocument(bytes, "application/pdf");
+    if (!mupdf7?.Document) throw Error("MuPDF unavailable");
+    doc = mupdf7.Document.openDocument(bytes, "application/pdf");
     if (doc.countPages() > 500) throw Error("page limit exceeded");
     for (let i = 0; i < doc.countPages(); i++) {
       const page = doc.loadPage(i);
@@ -3432,8 +3436,8 @@ function buildOutputProfile({ bytes, mupdf: mupdf6, document = {}, flow = {}, ex
   const uniqueExpected = (target) => !!target && [...expected.values()].filter((x) => x === target).length === 1;
   const kinds = (kind) => (flow.items || []).filter((x) => x.kind === kind).flatMap((x) => x.blockIds || []);
   const allLines = pages.flatMap((p) => p.lines), sourceBlocks = new Map((document.blocks || []).map((b) => [b.id, b])), sourceIds = new Set(sourceBlocks.keys()), styles = new Map((document.styles || []).map((s) => [s.id, s]));
-  const sourceSize = (id2) => {
-    const b = sourceBlocks.get(id2), sizes = [];
+  const sourceSize = (id3) => {
+    const b = sourceBlocks.get(id3), sizes = [];
     for (const c of b?.source?.characters || []) {
       const size = styles.get(c.styleId)?.size;
       if (Number.isFinite(size) && size > 0) for (let n = 0; n < Math.min(256, Math.max(1, c.end - c.start)); n++) sizes.push(size);
@@ -3445,41 +3449,41 @@ function buildOutputProfile({ bytes, mupdf: mupdf6, document = {}, flow = {}, ex
     sizes.sort((a, b2) => a - b2);
     return sizes[Math.floor(sizes.length / 2)];
   };
-  for (const id2 of kinds("paragraph")) {
-    const target = expected.get(id2);
-    if (!sourceIds.has(id2) || duplicate.has(id2) || !uniqueExpected(target)) {
-      evidence.body.push({ id: id2, status: "unavailable", reason: "Missing or ambiguous source/expected block." });
+  for (const id3 of kinds("paragraph")) {
+    const target = expected.get(id3);
+    if (!sourceIds.has(id3) || duplicate.has(id3) || !uniqueExpected(target)) {
+      evidence.body.push({ id: id3, status: "unavailable", reason: "Missing or ambiguous source/expected block." });
       continue;
     }
     const matches = occurrence(target);
     if (matches.length !== 1) {
-      evidence.body.push({ id: id2, status: "unavailable", reason: matches.length ? "Ambiguous output block." : "Output block not observed." });
+      evidence.body.push({ id: id3, status: "unavailable", reason: matches.length ? "Ambiguous output block." : "Output block not observed." });
       continue;
     }
     const m = matches[0], lines = pages[m.pageIndex].lines.slice(m.start, m.end + 1);
     let count = 0;
     for (const text of lines) if (allLines.filter((x) => x === text).length === 1) {
-      profile.bodyLines.push({ text, sourceFontSize: sourceSize(id2) });
+      profile.bodyLines.push({ text, sourceFontSize: sourceSize(id3) });
       count++;
     }
-    evidence.body.push({ id: id2, status: count ? "observed" : "unavailable", pageIndex: m.pageIndex, matchedLines: lines.length, nominatedLines: count, reason: count < lines.length ? "Repeated output lines skipped." : void 0 });
+    evidence.body.push({ id: id3, status: count ? "observed" : "unavailable", pageIndex: m.pageIndex, matchedLines: lines.length, nominatedLines: count, reason: count < lines.length ? "Repeated output lines skipped." : void 0 });
   }
-  for (const id2 of kinds("heading")) {
-    const target = expected.get(id2), matches = occurrence(target);
-    if (sourceIds.has(id2) && !duplicate.has(id2) && uniqueExpected(target) && matches.length === 1 && matches[0].start === matches[0].end && allLines.filter((x) => x === target).length === 1) {
+  for (const id3 of kinds("heading")) {
+    const target = expected.get(id3), matches = occurrence(target);
+    if (sourceIds.has(id3) && !duplicate.has(id3) && uniqueExpected(target) && matches.length === 1 && matches[0].start === matches[0].end && allLines.filter((x) => x === target).length === 1) {
       profile.headings.push({ text: target });
-      evidence.headings.push({ id: id2, status: "observed" });
-    } else evidence.headings.push({ id: id2, status: "unavailable" });
+      evidence.headings.push({ id: id3, status: "observed" });
+    } else evidence.headings.push({ id: id3, status: "unavailable" });
   }
-  for (const item of (flow.items || []).filter((x) => x.kind === "asset")) for (const id2 of item.captionIds || []) {
-    const target = expected.get(id2), matches = occurrence(target), ids = [item.renderAssetId, ...item.assetIds || []].filter(Boolean), spans = assetSpans.filter((s) => ids.includes(s.id) && Number.isInteger(s.pageIndex) && valid2(s.bbox));
+  for (const item of (flow.items || []).filter((x) => x.kind === "asset")) for (const id3 of item.captionIds || []) {
+    const target = expected.get(id3), matches = occurrence(target), ids = [item.renderAssetId, ...item.assetIds || []].filter(Boolean), spans = assetSpans.filter((s) => ids.includes(s.id) && Number.isInteger(s.pageIndex) && valid2(s.bbox));
     const candidates = [];
     for (const [pageIndex, page] of pages.entries()) for (const b of page.images) if (spans.some((s) => s.pageIndex === pageIndex && overlap2(b, s.bbox) / area2(b) > 0.9 && overlap2(b, s.bbox) / area2(s.bbox) > 0.9)) candidates.push({ pageIndex, bbox: b });
-    const reason = !sourceIds.has(id2) || duplicate.has(id2) || !uniqueExpected(target) ? "Missing or ambiguous source/expected caption." : matches.length !== 1 ? "Caption output missing or ambiguous." : matches[0].end - matches[0].start + 1 > 20 ? "Caption exceeds checker 20-line limit." : candidates.length !== 1 ? "Image placement unavailable or ambiguous (vector assets are unsupported)." : null;
-    if (reason) evidence.captions.push({ id: id2, status: "unavailable", reason });
+    const reason = !sourceIds.has(id3) || duplicate.has(id3) || !uniqueExpected(target) ? "Missing or ambiguous source/expected caption." : matches.length !== 1 ? "Caption output missing or ambiguous." : matches[0].end - matches[0].start + 1 > 20 ? "Caption exceeds checker 20-line limit." : candidates.length !== 1 ? "Image placement unavailable or ambiguous (vector assets are unsupported)." : null;
+    if (reason) evidence.captions.push({ id: id3, status: "unavailable", reason });
     else {
-      profile.captions.push({ id: id2, text: target, assetPageIndex: candidates[0].pageIndex, assetBbox: candidates[0].bbox });
-      evidence.captions.push({ id: id2, status: "observed", pageIndex: matches[0].pageIndex, lineCount: matches[0].end - matches[0].start + 1 });
+      profile.captions.push({ id: id3, text: target, assetPageIndex: candidates[0].pageIndex, assetBbox: candidates[0].bbox });
+      evidence.captions.push({ id: id3, status: "observed", pageIndex: matches[0].pageIndex, lineCount: matches[0].end - matches[0].start + 1 });
     }
   }
   return { profile, evidence };
@@ -3489,25 +3493,25 @@ function buildOutputProfile({ bytes, mupdf: mupdf6, document = {}, flow = {}, ex
 var box3 = (b) => Array.isArray(b) && b.length === 4 && b.every(Number.isFinite) && b[0] < b[2] && b[1] < b[3];
 var overlaps3 = (a, b) => a[0] < b[2] && a[2] > b[0] && a[1] < b[3] && a[3] > b[1];
 var inside2 = (b, p, t = 0.5) => b[0] >= p[0] - t && b[1] >= p[1] - t && b[2] <= p[2] + t && b[3] <= p[3] + t;
-function resolveOutputAssetSpans({ bytes, mupdf: mupdf6, flow, blockSpans } = {}) {
+function resolveOutputAssetSpans({ bytes, mupdf: mupdf7, flow, blockSpans } = {}) {
   const spans = [], evidence = [];
-  if (!mupdf6 || !(bytes instanceof Uint8Array) || !flow || !Array.isArray(flow.items) || !Array.isArray(blockSpans)) return { spans, evidence: [{ reason: "invalid-input" }] };
+  if (!mupdf7 || !(bytes instanceof Uint8Array) || !flow || !Array.isArray(flow.items) || !Array.isArray(blockSpans)) return { spans, evidence: [{ reason: "invalid-input" }] };
   const items = flow.items.filter((x) => x?.kind === "asset");
   const idFor = (i) => i.renderAssetId || (i.assetIds?.length === 1 ? i.assetIds[0] : null);
   const counts = /* @__PURE__ */ new Map();
-  for (const i of items) for (const id2 of new Set([idFor(i), ...i.assetIds || []].filter(Boolean))) counts.set(id2, (counts.get(id2) || 0) + 1);
+  for (const i of items) for (const id3 of new Set([idFor(i), ...i.assetIds || []].filter(Boolean))) counts.set(id3, (counts.get(id3) || 0) + 1);
   const nominations = /* @__PURE__ */ new Map();
   for (const s of blockSpans) if (typeof s?.id === "string") nominations.set(s.id, [...nominations.get(s.id) || [], s]);
   let doc;
   try {
-    doc = mupdf6.Document.openDocument(bytes, "application/pdf");
+    doc = mupdf7.Document.openDocument(bytes, "application/pdf");
     const pages = [];
     for (let pi = 0; pi < doc.countPages(); pi++) {
       const page = doc.loadPage(pi), placements = [], clips = [];
       let failed = false, maskDepth = 0, dev;
       try {
         const bounds = [...page.getBounds()];
-        dev = new mupdf6.Device({
+        dev = new mupdf7.Device({
           clipPath(path, evenOdd, ctm) {
             try {
               const points = [];
@@ -3524,11 +3528,11 @@ function resolveOutputAssetSpans({ bytes, mupdf: mupdf6, flow, blockSpans } = {}
               if (points.length > 1 && points[0][0] === points.at(-1)[0] && points[0][1] === points.at(-1)[1]) points.pop();
               const xs = new Set(points.map((p) => p[0])), ys = new Set(points.map((p) => p[1]));
               const axis = Math.abs(ctm[1]) < 1e-8 && Math.abs(ctm[2]) < 1e-8;
-              const rect = axis && !complex && closed && points.length === 4 && xs.size === 2 && ys.size === 2 && points.every((p, i) => {
+              const rect2 = axis && !complex && closed && points.length === 4 && xs.size === 2 && ys.size === 2 && points.every((p, i) => {
                 const n = points[(i + 1) % 4];
                 return p[0] === n[0] !== (p[1] === n[1]);
               });
-              clips.push(rect ? [...path.getBounds(null, ctm)] : null);
+              clips.push(rect2 ? [...path.getBounds(null, ctm)] : null);
             } catch {
               clips.push(null);
             } finally {
@@ -3598,7 +3602,7 @@ function resolveOutputAssetSpans({ bytes, mupdf: mupdf6, flow, blockSpans } = {}
             } else failed = true;
           }
         });
-        page.run(dev, mupdf6.Matrix.identity);
+        page.run(dev, mupdf7.Matrix.identity);
         dev.close();
         pages.push({ bounds, placements, failed });
       } catch {
@@ -3611,9 +3615,9 @@ function resolveOutputAssetSpans({ bytes, mupdf: mupdf6, flow, blockSpans } = {}
     }
     const claims = [];
     for (const item of items) {
-      const id2 = idFor(item), ids = item.assetIds || [], ns = nominations.get(id2) || [], b = item.source?.bbox;
+      const id3 = idFor(item), ids = item.assetIds || [], ns = nominations.get(id3) || [], b = item.source?.bbox;
       let reason = null, candidates = [];
-      if (!id2 || !Array.isArray(ids) || ids.some((x) => typeof x !== "string" || !x) || new Set(ids).size !== ids.length || [id2, ...ids].some((x) => counts.get(x) !== 1)) reason = "unbound-or-duplicate-id";
+      if (!id3 || !Array.isArray(ids) || ids.some((x) => typeof x !== "string" || !x) || new Set(ids).size !== ids.length || [id3, ...ids].some((x) => counts.get(x) !== 1)) reason = "unbound-or-duplicate-id";
       else if (ns.length !== 1) reason = "missing-or-duplicate-marker";
       else if (box3(b) && items.some((other) => other !== item && other.source?.pageIndex === item.source?.pageIndex && box3(other.source?.bbox) && overlaps3(b, other.source.bbox))) reason = "overlapping-source-assets";
       else {
@@ -3627,11 +3631,11 @@ function resolveOutputAssetSpans({ bytes, mupdf: mupdf6, flow, blockSpans } = {}
             candidates = matching.filter((p) => p.valid);
             if (candidates.length !== 1) reason = candidates.length ? "ambiguous-placement" : matching.some((p) => p.uncertainClip) ? "masked-or-clipped-placement" : "no-matching-placement";
             else if (pg.placements.some((p) => p !== candidates[0] && box3(p.bbox) && overlaps3(p.bbox, candidates[0].bbox))) reason = "overlapping-placement";
-            else claims.push({ id: id2, ids, pageIndex: s.page - 1, placement: candidates[0] });
+            else claims.push({ id: id3, ids, pageIndex: s.page - 1, placement: candidates[0] });
           }
         }
       }
-      evidence.push({ id: id2, reason: reason || "candidate", candidateCount: candidates.length });
+      evidence.push({ id: id3, reason: reason || "candidate", candidateCount: candidates.length });
     }
     for (const claim of claims) {
       const shared = claims.filter((c) => c.pageIndex === claim.pageIndex && c.placement === claim.placement).length > 1;
@@ -3641,7 +3645,7 @@ function resolveOutputAssetSpans({ bytes, mupdf: mupdf6, flow, blockSpans } = {}
         continue;
       }
       entry.reason = "resolved";
-      for (const id2 of /* @__PURE__ */ new Set([claim.id, ...claim.ids])) spans.push({ id: id2, pageIndex: claim.pageIndex, bbox: [...claim.placement.bbox] });
+      for (const id3 of /* @__PURE__ */ new Set([claim.id, ...claim.ids])) spans.push({ id: id3, pageIndex: claim.pageIndex, bbox: [...claim.placement.bbox] });
     }
   } catch {
     return { spans: [], evidence: [{ reason: "pdf-unavailable" }] };
@@ -3653,10 +3657,795 @@ function resolveOutputAssetSpans({ bytes, mupdf: mupdf6, flow, blockSpans } = {}
 
 // app/src/paper-recompose.mjs
 init_paragraph_pdf_crypto();
+import * as mupdf5 from "./browser-pdf-vendor/mupdf.js";
+
+// app/src/table-vendor/detection.mjs
+var RULE_COVERAGE = 0.5;
+var RULE_EDGE_MARGIN_PT = 12;
+var ROW_GAP_TOLERANCE = 2;
+var DEFAULT_TABLE_OPTIONS = {
+  rowTolFactor: 0.6,
+  colTolFactor: 0.9,
+  maxRowGapFactor: 2.5,
+  minRows: 2,
+  minCols: 2
+};
+function median3(values) {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
+}
+function toCandidates(run) {
+  if (run.locked) return [];
+  if (!run.text || run.text.trim().length === 0) return [];
+  const { x, y, width, height } = run.bounds;
+  if (width <= 0 || height <= 0) return [];
+  const lines = run.paragraphLineCount ?? 1;
+  if (lines <= 1) {
+    return [
+      {
+        run,
+        left: x,
+        right: x + width,
+        cx: x + width / 2,
+        cy: y + height / 2,
+        height
+      }
+    ];
+  }
+  return expandParagraph(run, lines);
+}
+function expandParagraph(run, lines) {
+  const baselines = run.paragraphBaselines;
+  const lefts = run.paragraphLineLefts;
+  const texts = run.text.split("\n");
+  if (!baselines || baselines.length !== lines || texts.length < lines)
+    return [];
+  const { x, y, width, height } = run.bounds;
+  const descent = baselines[lines - 1] - y;
+  const ascent = y + height - baselines[0];
+  const lineHeight = ascent + descent;
+  if (lineHeight <= 0) return [];
+  const lengths = texts.slice(0, lines).map((s) => s.trim().length);
+  const maxLen = Math.max(...lengths, 1);
+  const out = [];
+  for (let i = 0; i < lines; i++) {
+    if (lengths[i] === 0) continue;
+    const left = lefts?.[i] ?? x;
+    const w = Math.max(1, width * lengths[i] / maxLen);
+    const bottom = baselines[i] - descent;
+    out.push({
+      run,
+      left,
+      right: left + w,
+      cx: left + w / 2,
+      cy: bottom + lineHeight / 2,
+      height: lineHeight
+    });
+  }
+  return out;
+}
+function groupRows(cands, rowTol) {
+  const sorted = [...cands].sort((a, b) => b.cy - a.cy);
+  const rows = [];
+  let current = [];
+  let ref = 0;
+  for (const c of sorted) {
+    if (current.length === 0 || Math.abs(c.cy - ref) <= rowTol) {
+      if (current.length === 0) ref = c.cy;
+      current.push(c);
+      ref += (c.cy - ref) / current.length;
+    } else {
+      rows.push(finishRow(current));
+      current = [c];
+      ref = c.cy;
+    }
+  }
+  if (current.length > 0) rows.push(finishRow(current));
+  return rows;
+}
+function finishRow(cands) {
+  const ordered = [...cands].sort((a, b) => a.left - b.left);
+  const tops = ordered.map((c) => c.cy + c.height / 2);
+  const bottoms = ordered.map((c) => c.cy - c.height / 2);
+  return {
+    cands: ordered,
+    cy: ordered.reduce((s, c) => s + c.cy, 0) / ordered.length,
+    top: Math.max(...tops),
+    bottom: Math.min(...bottoms)
+  };
+}
+function columnBands(cands, minGap) {
+  const intervals = cands.map((c) => ({ left: c.left, right: c.right })).sort((a, b) => a.left - b.left);
+  const bands = [];
+  for (const iv of intervals) {
+    const last = bands[bands.length - 1];
+    if (last && iv.left - last.right <= minGap) {
+      last.right = Math.max(last.right, iv.right);
+    } else {
+      bands.push({ left: iv.left, right: iv.right });
+    }
+  }
+  return bands;
+}
+function mergeAlignmentBands(bands, rows) {
+  let merged = bands;
+  let changed = true;
+  while (changed && merged.length > 1) {
+    changed = false;
+    for (let i = 0; i < merged.length - 1; i++) {
+      const together = rows.some((r) => {
+        let a = false;
+        let b = false;
+        for (const c of r.cands) {
+          const idx = bandIndex(merged, c.cx);
+          if (idx === i) a = true;
+          else if (idx === i + 1) b = true;
+        }
+        return a && b;
+      });
+      if (together) continue;
+      merged = [
+        ...merged.slice(0, i),
+        { left: merged[i].left, right: merged[i + 1].right },
+        ...merged.slice(i + 2)
+      ];
+      changed = true;
+      break;
+    }
+  }
+  return merged;
+}
+var RULE_COLLINEAR_EPS = 0.75;
+var RULE_JOIN_GAP = 2;
+function ruleLines(rules, vertical) {
+  const pieces = [];
+  for (const r of rules) {
+    if (r.width <= r.height !== vertical) continue;
+    pieces.push(
+      vertical ? { at: r.x + r.width / 2, from: r.y, to: r.y + r.height } : { at: r.y + r.height / 2, from: r.x, to: r.x + r.width }
+    );
+  }
+  pieces.sort((a, b) => a.at - b.at || a.from - b.from);
+  const out = [];
+  for (const piece of pieces) {
+    const last = out[out.length - 1];
+    if (last && Math.abs(piece.at - last.at) <= RULE_COLLINEAR_EPS && piece.from <= last.to + RULE_JOIN_GAP) {
+      last.to = Math.max(last.to, piece.to);
+      continue;
+    }
+    out.push({ ...piece });
+  }
+  return out;
+}
+function pinsAcross(lines, lo, hi, minCover, atLo, atHi) {
+  const span = hi - lo;
+  if (span <= 0) return [];
+  const hits = lines.filter(
+    (l) => (
+      // Running the length of the table is not enough on its own: a second
+      // table further down the page has rules just as wide, and taking those
+      // in wrecks the grid. The line must sit within this table's extent too.
+      l.at >= atLo - RULE_EDGE_MARGIN_PT && l.at <= atHi + RULE_EDGE_MARGIN_PT && (Math.min(l.to, hi) - Math.max(l.from, lo)) / span >= minCover
+    )
+  ).map((l) => l.at).sort((a, b) => a - b);
+  const merged = [];
+  for (const v of hits) {
+    if (merged.length > 0 && v - merged[merged.length - 1] < 0.75) continue;
+    merged.push(v);
+  }
+  return merged;
+}
+function pinsSeparate(centres, pins) {
+  if (pins.length !== centres.length + 1) return false;
+  const sorted = [...centres].sort((a, b) => a - b);
+  for (let i = 0; i < sorted.length; i++) {
+    if (sorted[i] <= pins[i] || sorted[i] >= pins[i + 1]) return false;
+  }
+  return true;
+}
+function snapAxis(edges, pins, centres, tol) {
+  if (pins.length === 0) return { edges, drawn: false };
+  const descending = edges[0] > edges[edges.length - 1];
+  if (pinsSeparate(centres, pins)) {
+    return { edges: descending ? [...pins].reverse() : pins, drawn: true };
+  }
+  const snapped = edges.map((e) => {
+    let best = e;
+    let bestDist = tol;
+    for (const p of pins) {
+      const d = Math.abs(p - e);
+      if (d < bestDist) {
+        bestDist = d;
+        best = p;
+      }
+    }
+    return best;
+  });
+  for (let i = 1; i < snapped.length; i++) {
+    const ordered = descending ? snapped[i] < snapped[i - 1] : snapped[i] > snapped[i - 1];
+    if (!ordered) return { edges, drawn: false };
+  }
+  return { edges: snapped, drawn: false };
+}
+var PIN_ROW_COVERAGE = 0.6;
+var PIN_EDGE_MARGIN_FRACTION = 0.2;
+function rowPins(lines, colEdges, lo, hi) {
+  const cols = colEdges.length - 1;
+  const margin = Math.max(
+    RULE_EDGE_MARGIN_PT,
+    (hi - lo) * PIN_EDGE_MARGIN_FRACTION
+  );
+  const out = [];
+  for (const line of lines) {
+    if (line.at < lo - margin || line.at > hi + margin) continue;
+    const covered = /* @__PURE__ */ new Set();
+    for (let c = 0; c < cols; c++) {
+      const width = colEdges[c + 1] - colEdges[c];
+      if (width <= 0) continue;
+      const overlap3 = Math.min(line.to, colEdges[c + 1]) - Math.max(line.from, colEdges[c]);
+      if (overlap3 / width >= PIN_ROW_COVERAGE) covered.add(c);
+    }
+    if (covered.size === 0) continue;
+    const near3 = out.find((p) => Math.abs(p.at - line.at) < 0.75);
+    if (near3) {
+      for (const c of covered) near3.cols.add(c);
+    } else {
+      out.push({ at: line.at, cols: covered });
+    }
+  }
+  return out.sort((a, b) => b.at - a.at);
+}
+function clusterRowPins(pins) {
+  if (pins.length < 2) return pins.length > 0 ? [pins] : [];
+  const gaps = [];
+  for (let i = 1; i < pins.length; i++) gaps.push(pins[i - 1].at - pins[i].at);
+  const typical = median3(gaps.filter((g) => g > 0));
+  const limit = typical > 0 ? typical * ROW_GAP_TOLERANCE : Infinity;
+  const out = [[pins[0]]];
+  for (let i = 1; i < pins.length; i++) {
+    if (pins[i - 1].at - pins[i].at > limit) out.push([]);
+    out[out.length - 1].push(pins[i]);
+  }
+  return out;
+}
+function bandByRules(cands, pins) {
+  if (pins.length < 3) return null;
+  const rows = [];
+  for (let i = 0; i < pins.length - 1; i++) {
+    const hi = pins[i].at;
+    const lo = pins[i + 1].at;
+    const inBand = cands.filter((c) => c.cy <= hi && c.cy >= lo);
+    rows.push({
+      cands: [...inBand].sort((a, b) => a.left - b.left),
+      cy: (hi + lo) / 2,
+      top: hi,
+      bottom: lo
+    });
+  }
+  return rows;
+}
+function columnPins(lines, rows, atLo, atHi) {
+  const margin = Math.max(
+    RULE_EDGE_MARGIN_PT,
+    (atHi - atLo) * PIN_EDGE_MARGIN_FRACTION
+  );
+  const out = [];
+  for (const line of lines) {
+    if (line.at < atLo - margin) continue;
+    if (line.at > atHi + margin) continue;
+    const covered = /* @__PURE__ */ new Set();
+    for (let r = 0; r < rows.length; r++) {
+      const band = rows[r].top - rows[r].bottom;
+      if (band <= 0) continue;
+      const overlap3 = Math.min(line.to, rows[r].top) - Math.max(line.from, rows[r].bottom);
+      if (overlap3 / band >= PIN_ROW_COVERAGE) covered.add(r);
+    }
+    if (covered.size === 0) continue;
+    const near3 = out.find((p) => Math.abs(p.at - line.at) < 0.75);
+    if (near3) {
+      for (const r of covered) near3.rows.add(r);
+    } else {
+      out.push({ at: line.at, rows: covered });
+    }
+  }
+  return out.sort((a, b) => a.at - b.at);
+}
+function rowSpans(pins, cols, row) {
+  const out = [];
+  let start = 0;
+  for (let c = 1; c < cols; c++) {
+    const pin = pins[c];
+    if (pin && !pin.rows.has(row)) continue;
+    out.push({ start, span: c - start });
+    start = c;
+  }
+  out.push({ start, span: cols - start });
+  return out;
+}
+function downSpan(pins, rows, row, start, span) {
+  let reach = 1;
+  while (row + reach < rows) {
+    const pin = pins[row + reach];
+    if (!pin) break;
+    let dividesAll = true;
+    for (let c = start; c < start + span; c++) {
+      if (!pin.cols.has(c)) dividesAll = false;
+    }
+    if (dividesAll) break;
+    reach++;
+  }
+  return reach;
+}
+function edgeIndex(edges, x) {
+  const descending = edges[0] > edges[edges.length - 1];
+  for (let i = 0; i < edges.length - 1; i++) {
+    const lo = descending ? edges[i + 1] : edges[i];
+    const hi = descending ? edges[i] : edges[i + 1];
+    if (x >= lo && x <= hi) return i;
+  }
+  const firstMid = (edges[0] + edges[1]) / 2;
+  return Math.abs(x - firstMid) <= Math.abs(x - edges[edges.length - 1]) ? 0 : edges.length - 2;
+}
+function bandIndex(bands, x) {
+  for (let i = 0; i < bands.length; i++) {
+    if (x >= bands[i].left && x <= bands[i].right) return i;
+  }
+  let best = 0;
+  let bestDist = Infinity;
+  for (let i = 0; i < bands.length; i++) {
+    const centre = (bands[i].left + bands[i].right) / 2;
+    const d = Math.abs(centre - x);
+    if (d < bestDist) {
+      bestDist = d;
+      best = i;
+    }
+  }
+  return best;
+}
+function trimEdgeRows(block) {
+  let start = 0;
+  let end = block.length;
+  while (start < end && block[start].cands.length < 2) start++;
+  while (end > start && block[end - 1].cands.length < 2) end--;
+  return block.slice(start, end);
+}
+function splitBlocks(rows, minGap) {
+  const gaps = [];
+  for (let i = 1; i < rows.length; i++) {
+    gaps.push(rows[i - 1].bottom - rows[i].top);
+  }
+  const typical = median3(gaps.filter((g) => g > 0));
+  const maxGap = Math.max(minGap, typical * ROW_GAP_TOLERANCE);
+  const blocks = [];
+  let current = [];
+  for (let i = 0; i < rows.length; i++) {
+    if (current.length === 0) {
+      current.push(rows[i]);
+      continue;
+    }
+    const prev = current[current.length - 1];
+    const gap = prev.bottom - rows[i].top;
+    if (gap > maxGap) {
+      blocks.push(current);
+      current = [rows[i]];
+    } else {
+      current.push(rows[i]);
+    }
+  }
+  if (current.length > 0) blocks.push(current);
+  return blocks;
+}
+function ruledColumnBands(block, rules) {
+  const cands = block.flatMap((row) => row.cands);
+  if (cands.length === 0) return null;
+  const pins = columnPins(
+    ruleLines(rules, true),
+    block,
+    Math.min(...cands.map((c) => c.left)),
+    Math.max(...cands.map((c) => c.right))
+  );
+  if (pins.length < 3) return null;
+  const edges = pins.map((pin) => pin.at);
+  const horizontal = rowPins(
+    ruleLines(rules, false),
+    edges,
+    block[block.length - 1].bottom,
+    block[0].top
+  );
+  const rows = [block[0].top, ...block.map((row) => row.bottom)];
+  if (horizontal.length !== rows.length || horizontal.some((pin, i) => Math.abs(pin.at - rows[i]) > RULE_COLLINEAR_EPS))
+    return null;
+  const bands = edges.slice(0, -1).map((left, i) => ({
+    left,
+    right: edges[i + 1]
+  }));
+  if (bands.some(
+    (band) => block.filter(
+      (row) => row.cands.some((c) => c.cx > band.left && c.cx < band.right)
+    ).length < 2
+  ))
+    return null;
+  return bands;
+}
+function buildTable(block, bands, pageIndex, index, opts, rules, snapTol) {
+  const cols = bands.length;
+  const rows = block.length;
+  if (rows < opts.minRows || cols < opts.minCols) return null;
+  const colGaps = [];
+  for (let i = 1; i < cols; i++)
+    colGaps.push(bands[i].left - bands[i - 1].right);
+  const colPad = Math.max(1, median3(colGaps) / 2);
+  const derivedCols = [bands[0].left - colPad];
+  for (let i = 1; i < cols; i++) {
+    derivedCols.push((bands[i - 1].right + bands[i].left) / 2);
+  }
+  derivedCols.push(bands[cols - 1].right + colPad);
+  const rowGaps = [];
+  for (let i = 1; i < rows; i++)
+    rowGaps.push(block[i - 1].bottom - block[i].top);
+  const rowPad = Math.max(1, median3(rowGaps) / 2);
+  const derivedRows = [block[0].top + rowPad];
+  for (let i = 1; i < rows; i++) {
+    derivedRows.push((block[i - 1].bottom + block[i].top) / 2);
+  }
+  derivedRows.push(block[rows - 1].bottom - rowPad);
+  const pins = columnPins(
+    ruleLines(rules, true),
+    block,
+    derivedCols[0],
+    derivedCols[cols]
+  );
+  const snappedCols = snapAxis(
+    derivedCols,
+    pins.map((p) => p.at),
+    bands.map((b) => (b.left + b.right) / 2),
+    snapTol
+  );
+  const colEdges = snappedCols.edges;
+  const snappedRows = snapAxis(
+    derivedRows,
+    pinsAcross(
+      ruleLines(rules, false),
+      colEdges[0],
+      colEdges[cols],
+      RULE_COVERAGE,
+      derivedRows[rows],
+      derivedRows[0]
+    ),
+    block.map((r) => r.cy),
+    snapTol
+  );
+  const rowEdges = snappedRows.edges;
+  const spannable = snappedCols.drawn && pins.length === cols + 1;
+  const hPins = rowPins(
+    ruleLines(rules, false),
+    colEdges,
+    rowEdges[rows],
+    rowEdges[0]
+  );
+  const downMergeable = spannable && hPins.length === rows + 1;
+  const byCol = block.map((row) => {
+    const map = /* @__PURE__ */ new Map();
+    for (const c of row.cands) {
+      const col = edgeIndex(colEdges, c.cx);
+      const list = map.get(col) ?? [];
+      list.push(c.run.id);
+      map.set(col, list);
+    }
+    return map;
+  });
+  const cells = [];
+  const covered = /* @__PURE__ */ new Set();
+  let occupiedCells = 0;
+  for (let r = 0; r < rows; r++) {
+    const spans = spannable ? rowSpans(pins, cols, r) : Array.from({ length: cols }, (_, col) => ({ start: col, span: 1 }));
+    for (const { start, span } of spans) {
+      if (covered.has(`${r},${start}`)) continue;
+      const rowSpan = downMergeable ? downSpan(hPins, rows, r, start, span) : 1;
+      const runIds = [];
+      for (let rr = r; rr < r + rowSpan; rr++) {
+        for (let col = start; col < start + span; col++) {
+          runIds.push(...byCol[rr]?.get(col) ?? []);
+        }
+      }
+      for (let rr = r; rr < r + rowSpan; rr++) {
+        for (let cc = start; cc < start + span; cc++) {
+          if (rr !== r || cc !== start) covered.add(`${rr},${cc}`);
+        }
+      }
+      if (runIds.length > 0) occupiedCells++;
+      cells.push({
+        row: r,
+        col: start,
+        runIds,
+        colSpan: span,
+        rowSpan,
+        rect: {
+          x: colEdges[start],
+          y: rowEdges[r + rowSpan],
+          width: colEdges[start + span] - colEdges[start],
+          height: rowEdges[r] - rowEdges[r + rowSpan]
+        }
+      });
+    }
+  }
+  const fill = occupiedCells / cells.length;
+  if (fill < 0.4) return null;
+  const rowsWithMultipleCols = block.filter(
+    (r) => new Set(r.cands.map((c) => edgeIndex(colEdges, c.cx))).size >= 2
+  ).length;
+  if (rowsWithMultipleCols < 2) return null;
+  const bounds = {
+    x: colEdges[0],
+    y: rowEdges[rows],
+    width: colEdges[cols] - colEdges[0],
+    height: rowEdges[0] - rowEdges[rows]
+  };
+  const confidence = Math.min(
+    1,
+    0.5 * fill + 0.5 * (rowsWithMultipleCols / rows)
+  );
+  return {
+    id: `p${pageIndex}-table-${index}`,
+    pageIndex,
+    rows,
+    cols,
+    colEdges,
+    rowEdges,
+    bounds,
+    cells,
+    confidence,
+    synthetic: false,
+    // Only adoption can tell: it needs the render modes behind the text.
+    scanned: false,
+    ruled: false,
+    pageRuled: snappedCols.drawn && snappedRows.drawn,
+    adopted: false,
+    // Styles are read off the runs when the table is adopted for editing.
+    columnStyles: [],
+    headerStyle: null
+  };
+}
+function detectTables(runs, pageIndex, options = {}, rules = []) {
+  const opts = { ...DEFAULT_TABLE_OPTIONS, ...options };
+  const cands = runs.flatMap(toCandidates);
+  if (cands.length < opts.minRows * opts.minCols) return [];
+  const medHeight = median3(cands.map((c) => c.height)) || 1;
+  const rowTol = medHeight * opts.rowTolFactor;
+  const minColGap = Math.max(3, medHeight * opts.colTolFactor);
+  const maxGap = medHeight * opts.maxRowGapFactor;
+  const allPins = rowPins(
+    ruleLines(rules, false),
+    [
+      Math.min(...cands.map((c) => c.left)),
+      Math.max(...cands.map((c) => c.right))
+    ],
+    Math.min(...cands.map((c) => c.cy)),
+    Math.max(...cands.map((c) => c.cy))
+  );
+  const blocks = [];
+  const claimed = /* @__PURE__ */ new Set();
+  for (const group of clusterRowPins(allPins)) {
+    if (group.length < 3) continue;
+    const top = group[0].at;
+    const bottom = group[group.length - 1].at;
+    const inside3 = cands.filter((c) => c.cy <= top && c.cy >= bottom);
+    if (inside3.length < opts.minRows * opts.minCols) continue;
+    const banded = bandByRules(inside3, group);
+    if (!banded) continue;
+    blocks.push(banded);
+    for (const c of inside3) claimed.add(c);
+  }
+  const loose = cands.filter((c) => !claimed.has(c));
+  if (loose.length > 0) {
+    blocks.push(
+      ...splitBlocks(
+        groupRows(loose, rowTol).filter((r) => r.cands.length >= 1),
+        maxGap
+      )
+    );
+  }
+  const tables = [];
+  for (const raw of blocks) {
+    const block = trimEdgeRows(raw);
+    const multiRunRows = block.filter((r) => r.cands.length >= 2);
+    if (multiRunRows.length < opts.minRows) continue;
+    const bands = ruledColumnBands(block, rules) ?? mergeAlignmentBands(
+      columnBands(
+        multiRunRows.flatMap((r) => r.cands),
+        minColGap
+      ),
+      block
+    );
+    const table = buildTable(
+      block,
+      bands,
+      pageIndex,
+      tables.length,
+      opts,
+      rules,
+      Math.max(4, medHeight * 1.5)
+    );
+    if (table) tables.push(table);
+  }
+  return tables;
+}
+
+// app/src/table-adapter.mjs
+var TABLE_LIMITS = Object.freeze({ maxBytes: 25 * 1024 * 1024, maxPages: 200, maxRuns: 12e3, maxRules: 12e3, maxChars: 15e4, maxCellChars: 4e3 });
+var SCHEMA = "falsify.source-tables.v1";
+var issued = /* @__PURE__ */ new WeakSet();
+var TableAdapterError = class extends Error {
+  constructor(code) {
+    super(code);
+    this.name = "TableAdapterError";
+    this.code = code;
+  }
+};
+var fail2 = (code) => {
+  throw new TableAdapterError(code);
+};
+var boxOK4 = (b) => Array.isArray(b) && b.length === 4 && b.every(Number.isFinite) && b[2] > b[0] && b[3] > b[1];
+var union3 = (bs) => [Math.min(...bs.map((b) => b[0])), Math.min(...bs.map((b) => b[1])), Math.max(...bs.map((b) => b[2])), Math.max(...bs.map((b) => b[3]))];
+var contains3 = (outer, inner, tol = 0) => outer[0] - tol <= inner[0] && outer[1] - tol <= inner[1] && outer[2] + tol >= inner[2] && outer[3] + tol >= inner[3];
+function frozen(v) {
+  if (v && typeof v === "object") {
+    for (const x of Object.values(v)) frozen(x);
+    Object.freeze(v);
+  }
+  return v;
+}
+async function digest(data) {
+  return [...new Uint8Array(await globalThis.crypto.subtle.digest("SHA-256", data))].map((x) => x.toString(16).padStart(2, "0")).join("");
+}
+var id2 = async (prefix, value) => prefix + (await digest(new TextEncoder().encode(JSON.stringify(value)))).slice(0, 24);
+var rect = (b) => ({ x: b[0], y: b[1], width: b[2] - b[0], height: b[3] - b[1] });
+var publicBox = (r, h) => [r.x, h - r.y - r.height, r.x + r.width, h - r.y];
+async function detectSourceTables({ sourceBytes, sourceSha256, revision, mupdf: mupdf7, readPages } = {}) {
+  if (!(sourceBytes instanceof Uint8Array) || sourceBytes.byteLength > TABLE_LIMITS.maxBytes || sourceBytes.byteLength < 5) fail2("invalid-source");
+  if (typeof revision !== "string" || !revision || revision.length > 200) fail2("invalid-revision");
+  const bytes = sourceBytes.slice(), sha = await digest(bytes);
+  if (typeof sourceSha256 !== "string" || sha !== sourceSha256) fail2("stale-source");
+  if (readPages !== void 0 && typeof readPages !== "function") fail2("invalid-reader");
+  const pages = await (readPages ? readPages(bytes) : readMuPdfTablePages(bytes, mupdf7));
+  if (await digest(bytes) !== sha) fail2("reader-mutated-source");
+  if (!Array.isArray(pages) || !pages.length || pages.length > TABLE_LIMITS.maxPages) fail2("page-limit");
+  const tables = [], pageModels = [];
+  let charsTotal = 0;
+  for (let p = 0; p < pages.length; p++) {
+    const page = pages[p];
+    if (page.pageIndex !== p || !(page.width > 0 && page.height > 0) || ![page.width, page.height].every(Number.isFinite) || page.coordinateSpace !== "top-left-page") fail2("invalid-page");
+    if (!Array.isArray(page.runs) || page.runs.length > TABLE_LIMITS.maxRuns || !Array.isArray(page.rules) || page.rules.length > TABLE_LIMITS.maxRules) fail2("snapshot-limit");
+    const seen = /* @__PURE__ */ new Set(), runs = page.runs.map((r) => {
+      if (typeof r.id !== "string" || !r.id || seen.has(r.id) || typeof r.text !== "string" || !boxOK4(r.bbox) || !contains3([0, 0, page.width, page.height], r.bbox, 0.1)) fail2("invalid-run");
+      seen.add(r.id);
+      charsTotal += r.text.length;
+      if (charsTotal > TABLE_LIMITS.maxChars) fail2("character-limit");
+      return { id: r.id, text: r.text, bbox: [...r.bbox], horizontal: r.horizontal !== false };
+    });
+    const rules = page.rules.map((r) => {
+      if (!boxOK4(r.bbox)) fail2("invalid-rule");
+      return rect([r.bbox[0], page.height - r.bbox[3], r.bbox[2], page.height - r.bbox[1]]);
+    });
+    if (page.chars && (!Array.isArray(page.chars) || page.chars.length > TABLE_LIMITS.maxChars)) fail2("character-limit");
+    const pm = { pageIndex: p, width: page.width, height: page.height, rotation: page.rotation, runs, chars: page.chars?.map((c) => ({ c: c.c, bbox: [...c.bbox], lineId: c.lineId })) ?? null };
+    if (pm.chars && pm.chars.some((c) => typeof c.c !== "string" || !boxOK4(c.bbox) || !Number.isInteger(c.lineId))) fail2("invalid-characters");
+    pageModels.push(pm);
+    if (page.rotation !== 0) continue;
+    const candidates = detectTables(runs.map((r) => ({ id: r.id, text: r.text, bounds: rect([r.bbox[0], page.height - r.bbox[3], r.bbox[2], page.height - r.bbox[1]]), locked: !r.horizontal })), p, {}, rules);
+    for (const table of candidates) {
+      const numeric = table.cells.filter((c) => c.runIds.some((rid) => /^[\s$€£¥+−\-\d.,()%±:eE/]+$/.test(runs.find((r) => r.id === rid)?.text || "") && /\d/.test(runs.find((r) => r.id === rid)?.text || ""))).length;
+      if (!table.pageRuled && (table.rows < 3 || numeric < 2)) continue;
+      const bbox = publicBox(table.bounds, page.height), tableId = await id2("tbl-", [sha, revision, p, bbox, table.rowEdges, table.colEdges]);
+      const cells = [];
+      for (const cell of table.cells) {
+        const bbox2 = publicBox(cell.rect, page.height), cellId = await id2("cell-", [sha, revision, p, tableId, cell.row, cell.col, bbox2, cell.runIds]);
+        cells.push({ id: cellId, row: cell.row, col: cell.col, rowSpan: cell.rowSpan, colSpan: cell.colSpan, bbox: bbox2, runIds: [...cell.runIds] });
+      }
+      tables.push({ id: tableId, pageIndex: p, bbox, rows: table.rows, cols: table.cols, ruled: table.pageRuled, confidence: table.confidence, cells });
+    }
+  }
+  const model = frozen({ schema: SCHEMA, authority: "structure-hint", sourceBinding: readPages ? "verified-bytes-reader-adapter" : "mupdf-source-read", sourceSha256: sha, revision, coordinateSpace: "top-left-page", tables, pages: pageModels });
+  issued.add(model);
+  return model;
+}
+function readMuPdfTablePages(bytes, mupdf7) {
+  if (!mupdf7?.Document || !mupdf7?.Device) fail2("reader-unavailable");
+  let doc;
+  const pages = [];
+  try {
+    doc = mupdf7.Document.openDocument(bytes, "application/pdf").asPDF();
+    if (!doc || doc.needsPassword()) fail2("unsupported-document");
+    if (doc.countPages() > TABLE_LIMITS.maxPages) fail2("page-limit");
+    for (let p = 0; p < doc.countPages(); p++) {
+      const page = doc.loadPage(p), runs = [], chars = [], rules = [];
+      let st, dev;
+      try {
+        const bounds = page.getBounds(), width = bounds[2] - bounds[0], height = bounds[3] - bounds[1];
+        const object = page.getObject(), rotation = object.getInheritable("Rotate").asNumber() || 0;
+        if (bounds[0] !== 0 || bounds[1] !== 0) fail2("unsupported-page-origin");
+        let lineChars = [], horizontal = true, lineId = -1, lastY = null;
+        const transform = page.getTransform();
+        const finish = () => {
+          if (!lineChars.length) return;
+          let start = 0;
+          for (let i = 1; i <= lineChars.length; i++) {
+            const a = lineChars[i - 1], b = lineChars[i];
+            if (!b || b.bbox[0] - a.bbox[2] > Math.max(3, a.size * 1.5)) {
+              const group = lineChars.slice(start, i);
+              while (group.length && !group[0].c.trim()) group.shift();
+              while (group.length && !group.at(-1).c.trim()) group.pop();
+              if (group.length) runs.push({ id: `p${p}-run${runs.length}`, text: group.map((c) => c.c).join(""), bbox: union3(group.map((c) => c.bbox)), horizontal });
+              start = i;
+            }
+          }
+          lineChars = [];
+        };
+        st = page.toStructuredText("preserve-whitespace,preserve-images");
+        st.walk({ beginLine(_b, wmode, direction) {
+          finish();
+          horizontal = wmode === 0 && Math.abs(direction[1]) < 0.01 && direction[0] > 0;
+        }, onChar(c, origin, _font, size, quad) {
+          const bbox = [Math.min(quad[0], quad[2], quad[4], quad[6]), Math.min(quad[1], quad[3], quad[5], quad[7]), Math.max(quad[0], quad[2], quad[4], quad[6]), Math.max(quad[1], quad[3], quad[5], quad[7])];
+          const y = transform[1] * origin[0] + transform[3] * origin[1] + transform[5];
+          if (lastY === null || Math.abs(y - lastY) > 1.25) {
+            lineId++;
+            lastY = y;
+          }
+          if (boxOK4(bbox)) {
+            const item = { c, bbox, lineId, size };
+            chars.push(item);
+            lineChars.push(item);
+          }
+          if (chars.length > TABLE_LIMITS.maxChars) fail2("character-limit");
+        }, endLine() {
+          finish();
+        } });
+        finish();
+        dev = new mupdf7.Device({ strokePath(path, stroke, ctm, _cs, _color, alpha) {
+          if (alpha !== 1) return;
+          let current = null, first = null;
+          const point = (x, y) => [ctm[0] * x + ctm[2] * y + ctm[4], ctm[1] * x + ctm[3] * y + ctm[5]];
+          const segment = (next) => {
+            if (current) {
+              const dx = Math.abs(next[0] - current[0]), dy = Math.abs(next[1] - current[1]), t = Math.max(0.1, stroke.getLineWidth() * Math.hypot(ctm[0], ctm[1]));
+              if (dx < 0.1 && dy > 2 || dy < 0.1 && dx > 2) rules.push({ bbox: [Math.min(current[0], next[0]) - t / 2, Math.min(current[1], next[1]) - t / 2, Math.max(current[0], next[0]) + t / 2, Math.max(current[1], next[1]) + t / 2] });
+            }
+            current = next;
+            if (rules.length > TABLE_LIMITS.maxRules) fail2("rule-limit");
+          };
+          path.walk({ moveTo(x, y) {
+            current = first = point(x, y);
+          }, lineTo(x, y) {
+            segment(point(x, y));
+          }, curveTo() {
+            current = null;
+          }, closePath() {
+            if (first) segment(first);
+          } });
+        } });
+        page.run(dev, [1, 0, 0, 1, 0, 0]);
+        dev.close();
+        pages.push({ pageIndex: p, width, height, rotation, coordinateSpace: "top-left-page", runs, rules, chars });
+      } finally {
+        dev?.destroy();
+        st?.destroy();
+        page.destroy();
+      }
+    }
+    return pages;
+  } finally {
+    doc?.destroy();
+  }
+}
+
+// app/src/paper-recompose.mjs
 var abort5 = (signal) => {
   if (signal?.aborted) throw new DOMException("Recomposition cancelled", "AbortError");
 };
-var fail2 = (code, message, details = {}) => {
+var fail3 = (code, message, details = {}) => {
   const e = new Error(message);
   e.code = code;
   e.details = details;
@@ -3664,12 +4453,38 @@ var fail2 = (code, message, details = {}) => {
 };
 var box4 = (b) => Array.isArray(b) && b.length === 4 && b.every(Number.isFinite) && b[0] < b[2] && b[1] < b[3];
 var overlaps4 = (a, b) => a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3];
+function attachStructuredTables(document, flow, tables) {
+  const blocks = new Map([...document.blocks, ...flow.fragments || []].map((b) => [b.id, b]));
+  for (const table of tables) {
+    if (!table.ruled || table.cells.length !== table.rows * table.cols || table.cells.some((c) => c.rowSpan !== 1 || c.colSpan !== 1)) continue;
+    if (document.assets.some((a) => a.source?.pageIndex === table.pageIndex && box4(a.source.bbox) && overlaps4(a.source.bbox, table.bbox))) continue;
+    const cells = table.cells.slice().sort((a, b) => a.row - b.row || a.col - b.col), owned = [];
+    let valid3 = true;
+    for (const cell of cells) {
+      const matches = flow.items.filter((item2) => item2.source?.pageIndex === table.pageIndex && item2.blockIds?.length === 1 && item2.kind === "paragraph" && !item2.inline && (() => {
+        const b = blocks.get(item2.blockIds[0]), q = b?.source?.bbox;
+        return box4(q) && q[0] >= cell.bbox[0] - 0.2 && q[1] >= cell.bbox[1] - 0.2 && q[2] <= cell.bbox[2] + 0.2 && q[3] <= cell.bbox[3] + 0.2;
+      })());
+      if (matches.length !== 1 || owned.includes(matches[0])) {
+        valid3 = false;
+        break;
+      }
+      owned.push(matches[0]);
+    }
+    if (!valid3) continue;
+    const indices = owned.map((i) => flow.items.indexOf(i)).sort((a, b) => a - b);
+    if (indices.some((n, i) => n !== indices[0] + i) || flow.items.some((i) => !owned.includes(i) && i.source?.pageIndex === table.pageIndex && box4(i.source.bbox) && overlaps4(i.source.bbox, table.bbox))) continue;
+    const first = flow.items[indices[0]], item = { ...first, id: `table-${table.id}`, kind: "table", source: { pageIndex: table.pageIndex, bbox: [...table.bbox] }, blockIds: owned.map((i) => i.blockIds[0]), table: { rows: table.rows, cols: table.cols, ruled: true, cells: cells.map((c, i) => ({ row: c.row, col: c.col, blockIds: [owned[i].blockIds[0]] })) } };
+    flow.items.splice(indices[0], indices.length, item);
+  }
+  return flow;
+}
 function pageStreams(document, flow, visibleWrap = false) {
   const lookup = new Map([...document.blocks, ...flow.fragments || []].map((b) => [b.id, b]));
   const streams = /* @__PURE__ */ new Map();
   for (const item of flow.items) {
     if (item.kind === "asset") continue;
-    const blocks = (item.blockIds || []).map((id2) => lookup.get(id2)).filter((b) => b?.text);
+    const blocks = (item.blockIds || []).map((id3) => lookup.get(id3)).filter((b) => b?.text);
     for (const [index, b] of blocks.entries()) {
       const p = b.source.pageIndex, s = streams.get(p) || { chars: [] };
       streams.set(p, s);
@@ -3709,23 +4524,23 @@ function pageStreams(document, flow, visibleWrap = false) {
   return streams;
 }
 function explicitParts(document, flow, edit, selection, index) {
-  const bad = (message, code = "INVALID_EXPLICIT") => fail2("source-binding", message, { index, id: edit.id, code });
-  if (typeof selection.sourceSha256 !== "string" || selection.sourceSha256 !== document.sourceSha256) fail2("stale-source", "Explicit selection source hash mismatch.", { index, id: edit.id });
+  const bad = (message, code = "INVALID_EXPLICIT") => fail3("source-binding", message, { index, id: edit.id, code });
+  if (typeof selection.sourceSha256 !== "string" || selection.sourceSha256 !== document.sourceSha256) fail3("stale-source", "Explicit selection source hash mismatch.", { index, id: edit.id });
   if (!Array.isArray(selection.parts) || !selection.parts.length) bad("Explicit selection requires parts.");
   const blocks = new Map(document.blocks.map((b) => [b.id, b]));
   const lookup = new Map([...document.blocks, ...flow.fragments || []].map((b) => [b.id, b]));
   const units = [], assetRanges = [];
   for (const item of flow.items) {
     if (item.kind === "asset") {
-      for (const id2 of item.blockIds || []) {
-        const b = lookup.get(id2);
+      for (const id3 of item.blockIds || []) {
+        const b = lookup.get(id3);
         if (b?.source?.range) assetRanges.push({ blockId: b.parentBlockId || b.id, ...b.source.range });
       }
       units.push(null);
       continue;
     }
-    for (const id2 of item.blockIds || []) {
-      const b = lookup.get(id2);
+    for (const id3 of item.blockIds || []) {
+      const b = lookup.get(id3);
       if (!b?.text || !b.source?.range) continue;
       for (let offset = b.source.range.start; offset < b.source.range.end; offset++) units.push({ blockId: b.parentBlockId || b.id, pageIndex: b.source.pageIndex, offset });
     }
@@ -3755,21 +4570,21 @@ function bindEdits(document, flow, edits, explicit = []) {
   const streams = pageStreams(document, flow), wrapped = pageStreams(document, flow, true), blocks = new Map(document.blocks.map((b) => [b.id, b]));
   const bindings = [], changes = [], used = /* @__PURE__ */ new Map(), selections = /* @__PURE__ */ new Map(), ids = /* @__PURE__ */ new Map();
   for (const [index, e] of edits.entries()) if (e?.id != null) {
-    if (typeof e.id !== "string" || !e.id || ids.has(e.id)) fail2("invalid-edit", "Edit IDs must be unique nonempty strings.", { index, id: e.id });
+    if (typeof e.id !== "string" || !e.id || ids.has(e.id)) fail3("invalid-edit", "Edit IDs must be unique nonempty strings.", { index, id: e.id });
     ids.set(e.id, index);
   }
-  if (!Array.isArray(explicit)) fail2("source-binding", "Explicit bindings must be an array.", { code: "INVALID_EXPLICIT" });
+  if (!Array.isArray(explicit)) fail3("source-binding", "Explicit bindings must be an array.", { code: "INVALID_EXPLICIT" });
   for (const selection of explicit) {
-    if (!selection || selection.id == null && selection.index == null) fail2("source-binding", "Explicit binding requires an edit id or index.", { code: "INVALID_EXPLICIT" });
+    if (!selection || selection.id == null && selection.index == null) fail3("source-binding", "Explicit binding requires an edit id or index.", { code: "INVALID_EXPLICIT" });
     const byId = selection.id == null ? null : ids.get(selection.id), byIndex = selection.index == null ? null : selection.index;
-    if (selection.id != null && byId === void 0 || byIndex != null && (!Number.isInteger(byIndex) || byIndex < 0 || byIndex >= edits.length) || byId != null && byIndex != null && byId !== byIndex) fail2("source-binding", "Explicit binding identifies an unknown or inconsistent edit.", { code: "INVALID_EXPLICIT" });
+    if (selection.id != null && byId === void 0 || byIndex != null && (!Number.isInteger(byIndex) || byIndex < 0 || byIndex >= edits.length) || byId != null && byIndex != null && byId !== byIndex) fail3("source-binding", "Explicit binding identifies an unknown or inconsistent edit.", { code: "INVALID_EXPLICIT" });
     const target = byId ?? byIndex;
-    if (selections.has(target)) fail2("source-binding", "Duplicate explicit binding.", { index: target, code: "INVALID_EXPLICIT" });
+    if (selections.has(target)) fail3("source-binding", "Duplicate explicit binding.", { index: target, code: "INVALID_EXPLICIT" });
     selections.set(target, selection);
   }
   for (const [index, e] of edits.entries()) {
     if (e?.enabled === false) continue;
-    if (!Number.isInteger(e.pageIndex) || typeof e.before !== "string" || !e.before.trim() || typeof e.after !== "string") fail2("invalid-edit", "Edit requires pageIndex, Before and After.", { index, id: e.id });
+    if (!Number.isInteger(e.pageIndex) || typeof e.before !== "string" || !e.before.trim() || typeof e.after !== "string") fail3("invalid-edit", "Edit requires pageIndex, Before and After.", { index, id: e.id });
     const selection = selections.get(index);
     let parts;
     if (selection) parts = explicitParts(document, flow, e, selection, index);
@@ -3793,7 +4608,7 @@ function bindEdits(document, flow, edits, explicit = []) {
           if (!hits.some((hit) => JSON.stringify(hit.map((r) => [r.blockId, r.start, r.end])) === JSON.stringify(refs.map((r) => [r.blockId, r.start, r.end])))) hits.push(refs);
         }
       }
-      if (hits.length !== 1) fail2("source-binding", hits.length ? "Source quote is ambiguous." : "Source quote was not found.", { index, id: e.id, pageIndex: e.pageIndex, code: hits.length ? "AMBIGUOUS_MATCH" : "NO_MATCH", hits: hits.length });
+      if (hits.length !== 1) fail3("source-binding", hits.length ? "Source quote is ambiguous." : "Source quote was not found.", { index, id: e.id, pageIndex: e.pageIndex, code: hits.length ? "AMBIGUOUS_MATCH" : "NO_MATCH", hits: hits.length });
       parts = [];
       for (const r of hits[0]) {
         const last = parts.at(-1);
@@ -3803,11 +4618,11 @@ function bindEdits(document, flow, edits, explicit = []) {
     }
     for (const [i, p] of parts.entries()) {
       const b = blocks.get(p.blockId);
-      if (!b || !b.source.range) fail2("source-binding", "Source block is unavailable.", { index, id: e.id });
+      if (!b || !b.source.range) fail3("source-binding", "Source block is unavailable.", { index, id: e.id });
       const before = b.text.slice(p.start - b.source.range.start, p.end - b.source.range.start);
-      if (!before || before.length !== p.end - p.start) fail2("source-binding", "Source range is invalid.", { index, id: e.id });
+      if (!before || before.length !== p.end - p.start) fail3("source-binding", "Source range is invalid.", { index, id: e.id });
       const prior = used.get(p.blockId) || [];
-      if (prior.some((x) => p.start < x.end && p.end > x.start)) fail2("source-binding", "Selected edits overlap.", { index, id: e.id, code: "OVERLAP" });
+      if (prior.some((x) => p.start < x.end && p.end > x.start)) fail3("source-binding", "Selected edits overlap.", { index, id: e.id, code: "OVERLAP" });
       prior.push(p);
       used.set(p.blockId, prior);
       p.before = before;
@@ -3839,17 +4654,17 @@ async function prepare(request = {}, options = {}) {
   const signal = request.signal;
   abort5(signal);
   const layoutMode = request.layoutMode;
-  if (layoutMode !== void 0 && layoutMode !== "measured-continuous") fail2("invalid", "Unknown layout mode");
+  if (layoutMode !== void 0 && layoutMode !== "measured-continuous") fail3("invalid", "Unknown layout mode");
   const candidates = (options.fonts || []).map((f) => ({ ...f, bytes: f.bytes instanceof Uint8Array ? Uint8Array.from(f.bytes) : f.bytes instanceof ArrayBuffer ? f.bytes.slice(0) : f.bytes }));
   const snapshot = Array.isArray(request.edits) ? { edits: request.edits } : request.edits;
-  if (!snapshot || !Array.isArray(snapshot.edits) || snapshot.schema && snapshot.schema !== "falsify.paper-edits.v1") fail2("invalid", "Expected edit array or paper edit snapshot.");
+  if (!snapshot || !Array.isArray(snapshot.edits) || snapshot.schema && snapshot.schema !== "falsify.paper-edits.v1") fail3("invalid", "Expected edit array or paper edit snapshot.");
   const edits = structuredClone(snapshot.edits), explicit = structuredClone(request.bindings ?? []), revision = snapshot.revision ?? request.revision ?? null;
   const hash2 = request.fileHash || snapshot.fileHash;
-  if (request.fileHash && snapshot.fileHash && request.fileHash.toLowerCase() !== snapshot.fileHash.toLowerCase()) fail2("stale-source", "Request and snapshot hashes differ.");
+  if (request.fileHash && snapshot.fileHash && request.fileHash.toLowerCase() !== snapshot.fileHash.toLowerCase()) fail3("stale-source", "Request and snapshot hashes differ.");
   const input = request.file;
   const bytes = input instanceof Uint8Array ? Uint8Array.from(input) : input?.bytes instanceof Uint8Array ? Uint8Array.from(input.bytes) : typeof input?.arrayBuffer === "function" ? new Uint8Array(await input.arrayBuffer()).slice() : null;
   abort5(signal);
-  if (!bytes?.length) fail2("invalid", "Source PDF is required.");
+  if (!bytes?.length) fail3("invalid", "Source PDF is required.");
   const observed = await readDocument({ file: bytes, fileHash: hash2, signal });
   abort5(signal);
   const spacing = await recoverSourceSpaces({ bytes, document: observed, pdfjs: options.pdfjs, signal });
@@ -3861,6 +4676,13 @@ async function prepare(request = {}, options = {}) {
   abort5(signal);
   const flow = buildPaperFlow(document, { drawings: inventory.drawings, links });
   const { bindings, changes } = bindEdits(document, flow, edits, explicit);
+  const tableModel = await detectSourceTables({ sourceBytes: bytes, sourceSha256: document.sourceSha256, revision: "recomposition", mupdf: mupdf5 });
+  abort5(signal);
+  attachStructuredTables(document, flow, tableModel.tables);
+  for (const edit of edits.filter((e) => e?.enabled !== false && String(e?.segmentId || "").startsWith("table:"))) {
+    const matching = flow.items.filter((i) => i.kind === "table" && i.source.pageIndex === edit.pageIndex && box4(edit.anchor?.bbox) && overlaps4(i.source.bbox, edit.anchor.bbox));
+    if (matching.length !== 1) fail3("table-structure-unavailable", "The selected table cannot be recomposed with verified cell ownership.", { id: edit.id ?? null, pageIndex: edit.pageIndex });
+  }
   const regions = (flow.regions || []).map((r) => structuredClone(r));
   const ids = new Set(regions.map((r) => r.id));
   for (const item of flow.items.filter((i) => i.kind === "asset" && !i.renderAssetId)) {
@@ -3868,12 +4690,12 @@ async function prepare(request = {}, options = {}) {
     if (!p || !box4(b)) continue;
     const clipped = [Math.max(0, b[0]), Math.max(0, b[1]), Math.min(p.width, b[2]), Math.min(p.height, b[3])];
     if (!box4(clipped)) continue;
-    const id2 = `capture-${item.id}`;
-    if (ids.has(id2)) fail2("invalid", "Duplicate capture ID.");
-    ids.add(id2);
+    const id3 = `capture-${item.id}`;
+    if (ids.has(id3)) fail3("invalid", "Duplicate capture ID.");
+    ids.add(id3);
     item.source.bbox = clipped;
-    item.renderAssetId = id2;
-    regions.push({ id: id2, pageIndex: item.source.pageIndex, bbox: clipped, blockIds: [...item.blockIds || []], assetIds: [...item.assetIds || []] });
+    item.renderAssetId = id3;
+    regions.push({ id: id3, pageIndex: item.source.pageIndex, bbox: clipped, blockIds: [...item.blockIds || []], assetIds: [...item.assetIds || []] });
   }
   const captured = await readSourceAssets({ bytes, document: { ...document, blocks: [...document.blocks, ...flow.fragments || []] }, regions, signal });
   abort5(signal);
@@ -3910,7 +4732,7 @@ async function prepare(request = {}, options = {}) {
   }
   const actual = new Uint8Array(await result.file.arrayBuffer());
   abort5(signal);
-  if (hex(actual) !== result.sha256) fail2("output-hash", "Output bytes do not match their hash.");
+  if (hex(actual) !== result.sha256) fail3("output-hash", "Output bytes do not match their hash.");
   return { ...result, repair: { attempts, selectedAttempt }, revision, bindings, sourceLinks: links, sourceBinding: { spacing: spacing.evidence, sourceSha256: document.sourceSha256, editCount: bindings.length, partCount: changes.length }, sourceAssets: { regions: regions.length, diagnostics: captured.diagnostics } };
 }
 
@@ -3985,45 +4807,45 @@ function createTypstCompile({ createTypstCompiler, createTypstFontBuilder, loadF
 
 // app/src/paper-recompose-worker.mjs
 init_paragraph_pdf_crypto();
-import * as mupdf5 from "./browser-pdf-vendor/mupdf.js";
-var fail3 = (code, message) => {
+import * as mupdf6 from "./browser-pdf-vendor/mupdf.js";
+var fail4 = (code, message) => {
   const e = new Error(message);
   e.code = code;
   throw e;
 };
-var digest = async (bytes) => Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)), (x) => x.toString(16).padStart(2, "0")).join("");
+var digest2 = async (bytes) => Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)), (x) => x.toString(16).padStart(2, "0")).join("");
 var hashOK = (x) => typeof x === "string" && /^[a-f0-9]{64}$/i.test(x);
 function resolveAsset(path, manifestURL) {
-  if (typeof path !== "string" || !path || path.includes("\\") || /%2f|%5c|%2e/i.test(path)) fail3("asset-path", "Invalid bundled asset path");
+  if (typeof path !== "string" || !path || path.includes("\\") || /%2f|%5c|%2e/i.test(path)) fail4("asset-path", "Invalid bundled asset path");
   const base = new URL(".", manifestURL), url = new URL(path, base);
-  if (url.origin !== base.origin || !url.pathname.startsWith(base.pathname) || url.search || url.hash || url.username || url.password) fail3("asset-path", "Asset escapes the bundled vendor directory");
+  if (url.origin !== base.origin || !url.pathname.startsWith(base.pathname) || url.search || url.hash || url.username || url.password) fail4("asset-path", "Asset escapes the bundled vendor directory");
   return url.href;
 }
 async function loadAssets(manifestURL, fetcher = fetch) {
   const manifest = new URL(manifestURL), base = new URL("../", manifest);
   const response = await fetcher(manifest.href, { credentials: "omit", redirect: "error" });
-  if (!response.ok) fail3("asset-load", "Cannot load recomposition manifest");
+  if (!response.ok) fail4("asset-load", "Cannot load recomposition manifest");
   const m = await response.json();
-  if (m?.version !== "falsify.recomposition-runtime.v1" || m.compilerModule !== "../recomposition-typst.mjs" || !m.wasm || !Array.isArray(m.fonts)) fail3("asset-manifest", "Invalid recomposition manifest");
+  if (m?.version !== "falsify.recomposition-runtime.v1" || m.compilerModule !== "../recomposition-typst.mjs" || !m.wasm || !Array.isArray(m.fonts)) fail4("asset-manifest", "Invalid recomposition manifest");
   const ids = /* @__PURE__ */ new Set();
   async function asset(x) {
-    if (!hashOK(x?.sha256)) fail3("asset-manifest", "Invalid asset hash");
+    if (!hashOK(x?.sha256)) fail4("asset-manifest", "Invalid asset hash");
     const url = resolveAsset(x.url, manifest.href), r = await fetcher(url, { credentials: "omit", redirect: "error" });
-    if (!r.ok) fail3("asset-load", "Cannot load bundled asset");
+    if (!r.ok) fail4("asset-load", "Cannot load bundled asset");
     const bytes = new Uint8Array(await r.arrayBuffer());
-    if (await digest(bytes) !== x.sha256.toLowerCase()) fail3("asset-hash", "Bundled asset hash mismatch");
+    if (await digest2(bytes) !== x.sha256.toLowerCase()) fail4("asset-hash", "Bundled asset hash mismatch");
     return bytes;
   }
   const wasm = await asset(m.wasm), fonts = [];
   for (const f of m.fonts) {
-    if (typeof f.id !== "string" || !f.id || ids.has(f.id) || typeof f.family !== "string" || !f.family) fail3("asset-manifest", "Invalid font descriptor");
+    if (typeof f.id !== "string" || !f.id || ids.has(f.id) || typeof f.family !== "string" || !f.family) fail4("asset-manifest", "Invalid font descriptor");
     ids.add(f.id);
     fonts.push({ id: f.id, family: f.family, bytes: await asset(f) });
   }
   return { wasm, fonts, compilerURL: new URL("recomposition-typst.mjs", base).href };
 }
 function remapBindings(original, prepared, selections) {
-  const bad = () => fail3("source-binding", "Cannot map the original selection exactly after footer cleanup");
+  const bad = () => fail4("source-binding", "Cannot map the original selection exactly after footer cleanup");
   if (original.pages.length !== prepared.pages.length) bad();
   const out = [];
   for (const selection of selections) {
@@ -4054,23 +4876,23 @@ function remapBindings(original, prepared, selections) {
 }
 async function runRequest(request, deps = {}) {
   const layoutMode = request.layoutMode;
-  if (layoutMode !== void 0 && layoutMode !== "measured-continuous") fail3("invalid", "Unknown layout mode");
+  if (layoutMode !== void 0 && layoutMode !== "measured-continuous") fail4("invalid", "Unknown layout mode");
   const input = request.file instanceof Uint8Array ? request.file : request.file instanceof ArrayBuffer ? new Uint8Array(request.file) : request.file?.bytes instanceof Uint8Array ? request.file.bytes : new Uint8Array(await request.file.arrayBuffer());
-  const original = Uint8Array.from(input), originalHash = await digest(original);
+  const original = Uint8Array.from(input), originalHash = await digest2(original);
   const snapshot = Array.isArray(request.edits) ? { edits: request.edits } : structuredClone(request.edits);
-  if (!snapshot || !Array.isArray(snapshot.edits)) fail3("invalid", "Expected edits");
-  if (request.fileHash == null && snapshot.fileHash == null) fail3("stale-source", "Original source hash is required");
-  for (const h of [request.fileHash, snapshot.fileHash].filter((x) => x !== void 0 && x !== null)) if (!hashOK(h) || h.toLowerCase() !== originalHash) fail3("stale-source", "Original source hash mismatch");
+  if (!snapshot || !Array.isArray(snapshot.edits)) fail4("invalid", "Expected edits");
+  if (request.fileHash == null && snapshot.fileHash == null) fail4("stale-source", "Original source hash is required");
+  for (const h of [request.fileHash, snapshot.fileHash].filter((x) => x !== void 0 && x !== null)) if (!hashOK(h) || h.toLowerCase() !== originalHash) fail4("stale-source", "Original source hash mismatch");
   const clean = deps.clean || (await import("./blind-pdf.mjs")).prepare;
-  const cleaned = await clean({ file: { bytes: original.slice() } }), bytes = cleaned.file?.bytes instanceof Uint8Array ? Uint8Array.from(cleaned.file.bytes) : new Uint8Array(await cleaned.file.arrayBuffer()), preparedHash = await digest(bytes);
-  if (cleaned.sha256 !== preparedHash) fail3("source-binding", "Cleaned source hash mismatch");
+  const cleaned = await clean({ file: { bytes: original.slice() } }), bytes = cleaned.file?.bytes instanceof Uint8Array ? Uint8Array.from(cleaned.file.bytes) : new Uint8Array(await cleaned.file.arrayBuffer()), preparedHash = await digest2(bytes);
+  if (cleaned.sha256 !== preparedHash) fail4("source-binding", "Cleaned source hash mismatch");
   let bindings = structuredClone(request.bindings || []);
   let pdfjs = deps.pdfjs;
   if (cleaned.changed) {
     const read = deps.readDocument || readDocument;
     const old = await read({ file: original, fileHash: originalHash }), now = await read({ file: bytes, fileHash: preparedHash });
     const originalBindings = bindings.filter((b) => b.sourceSha256 === originalHash), cleanedBindings = bindings.filter((b) => b.sourceSha256 === preparedHash);
-    if (originalBindings.length + cleanedBindings.length !== bindings.length) fail3("stale-source", "Explicit selection source hash mismatch");
+    if (originalBindings.length + cleanedBindings.length !== bindings.length) fail4("stale-source", "Explicit selection source hash mismatch");
     const covered = new Set(bindings.map((b) => b.id != null ? `id:${b.id}` : `index:${b.index}`));
     const unbound = snapshot.edits.map((e, i) => ({ e, i })).filter(({ e, i }) => e.enabled !== false && !covered.has(`id:${e.id}`) && !covered.has(`index:${i}`));
     if (unbound.length) {
@@ -4088,7 +4910,7 @@ async function runRequest(request, deps = {}) {
   const compile = deps.compile || createTypstCompile({ ...facade, getModule: () => module });
   pdfjs ||= await import(new URL("./vendor/pdf.mjs", import.meta.url).href);
   if (pdfjs.GlobalWorkerOptions) pdfjs.GlobalWorkerOptions.workerSrc = new URL("./vendor/pdf.worker.mjs", import.meta.url).href;
-  const result = await (deps.recompose || prepare)({ file: bytes, fileHash: preparedHash, edits: { ...snapshot, fileHash: preparedHash, revision: request.revision }, bindings, revision: request.revision, layoutMode }, { compile, fonts: assets.fonts, mupdf: mupdf5, pdfjs, runningFurniture: true });
+  const result = await (deps.recompose || prepare)({ file: bytes, fileHash: preparedHash, edits: { ...snapshot, fileHash: preparedHash, revision: request.revision }, bindings, revision: request.revision, layoutMode }, { compile, fonts: assets.fonts, mupdf: mupdf6, pdfjs, runningFurniture: true });
   return { ...result, sourceBinding: { ...result.sourceBinding, originalSha256: originalHash, preparedSha256: preparedHash, cleanup: cleaned.verification } };
 }
 if (typeof WorkerGlobalScope !== "undefined" && globalThis instanceof WorkerGlobalScope) {

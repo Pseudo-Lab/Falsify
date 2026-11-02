@@ -32,3 +32,19 @@ test('mark planning does not mutate edits or PDF text items',()=>{
   const edit={id:'x',before:'The effect requires\ncontinued Wnt inhibition.',after:'The effect requires inhibition.'};
   const before=JSON.stringify({items,edit});M.ranges(items,[edit],'before');M.ranges(items,[edit],'after');assert.equal(JSON.stringify({items,edit}),before);
 });
+test('opt-in PDF geometry joining retains the existing default separator',()=>{
+  const edit={id:'x',before:'Claim62 continues',after:'Claim63 continues'};
+  const runs=[{str:'Claim'},{str:'62'},{str:' continues'}];
+  assert.deepEqual(M.ranges(runs,[edit],'before').missing,['x']);
+  const joined=M.ranges(runs,[edit],'before',()=> '');
+  assert.deepEqual(joined.found.map(h=>[h.itemIndex,h.start,h.end]),[[1,1,2]]);
+});
+test('DOM range painter uses the measured glyph rectangle and does not mark an ambiguous quote',()=>{
+  const nodes=[];const doc={createElement(){return {dataset:{},style:{},children:[],setAttribute(){},append(x){this.children.push(x);},className:''};},createRange(){return {setStart(n,i){this.start=i;},setEnd(n,i){this.end=i;},getClientRects(){return [{left:120,top:55,right:130,width:10,height:8}];}};}};
+  const container={append(x){nodes.push(x);},getBoundingClientRect(){return {left:100,top:50};}};
+  const divs=[{dataset:{},firstChild:{nodeType:3,textContent:'Claim62 continues'}}];
+  const result=M.paintPage({document:doc,container,items:[{str:'Claim62 continues'}],divs,edits:[{id:'a',before:'Claim62 continues',after:'Claim63 continues'}],side:'before'});
+  assert.equal(result.count,1);assert.equal(result.layer.children[0].style.left,'20px');assert.equal(result.layer.children[0].style.width,'10px');
+  const ambiguous=M.paintPage({document:doc,container,items:[{str:'Claim62 continues Claim62 continues'}],divs,edits:[{id:'a',before:'Claim62 continues',after:'Claim63 continues'}],side:'before'});
+  assert.equal(ambiguous.count,0);assert.deepEqual(ambiguous.missing,['a']);
+});

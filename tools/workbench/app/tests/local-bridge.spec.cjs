@@ -13,6 +13,16 @@ function harness(hostname='shinick-han.github.io',port='',queue=[]){
   return {bridge,calls,states,queue};
 }
 const hosted=()=>harness();
+
+test('agent layout uses the authenticated bridge without widening other paper routes',async()=>{
+  const h=hosted(),action={schema:'falsify.paper-layout-agent-action.v1',action:{tool:'compile_pdf'}};
+  h.queue.push(reply(CAP),reply(action));await h.bridge.pair(TOKEN,'7816');
+  const result=await h.bridge.session().request('/api/paper/layout-agent/step',{consent:true});
+  assert.deepEqual(result,action);assert.equal(h.calls.length,2);
+  assert.equal(h.calls[1].init.method,'POST');assert.equal(h.calls[1].init.headers.Authorization,'Bearer '+TOKEN);
+  await assert.rejects(h.bridge.session().request('/api/paper/layout-agent/shell',{command:'x'}),/허용되지/);
+  assert.equal(h.calls.length,2);assert.equal(leaks(h),false);
+});
 test('known HTTP failure preserves numeric status for receipt classification',async()=>{
   const h=hosted();h.queue.push(reply(CAP),reply({error:'이미 실행 중입니다.'},409));
   await h.bridge.pair(TOKEN,'7816');
@@ -32,6 +42,22 @@ test('authenticated connect verifies capabilities with safe fetch options',async
   assert.deepEqual(Object.keys(c.init.headers),['Authorization']);assert.equal(c.init.headers.Authorization,'Bearer '+TOKEN);
   const s=h.bridge.state();assert.equal(s.status,'paired');assert.equal(s.connected,true);assert.equal(s.cap.red,true);assert.equal(leaks(h),false);assert.ok(Object.isFrozen(h.bridge.capabilities()));});
 test('wrapper capability requires an explicit authenticated boolean',async()=>{for(const [value,expected] of [[undefined,false],['true',false],[true,true]]){const h=hosted();h.queue.push(reply({...CAP,harnessWrapper:value}));await h.bridge.pair(TOKEN,'7816');assert.equal(h.bridge.capabilities().harnessWrapper,expected);}});
+
+test('layout receipt capability reaches the UI gate and authenticated job routes',async()=>{
+  for(const [value,expected] of [[undefined,false],['true',false],[1,false],[false,false],[true,true]]){
+    const h=hosted();h.queue.push(reply({...CAP,paperLayoutJobs:value}),reply({state:'running'},202),reply({state:'completed'}));
+    await h.bridge.pair(TOKEN,'7816');
+    assert.equal(h.bridge.state().cap.paperLayoutJobs,expected);
+    assert.equal(h.bridge.capabilities().paperLayoutJobs,expected);
+    if(expected){
+      const link=h.bridge.session();await link.request('/api/paper/layout-agent/jobs',{runId:'run1',stepId:'step1',request:{}});
+      await link.request('/api/paper/layout-agent/jobs/step1');
+      assert.equal(h.calls[1].init.method,'POST');assert.equal(h.calls[2].init.method,'GET');
+      assert.equal(h.calls[2].init.headers.Authorization,'Bearer '+TOKEN);
+      assert.equal(leaks(h),false);
+    }
+  }
+});
 
 test('POST requests keep JSON body, bearer token and no manual Origin/cookies',async()=>{const h=hosted();h.queue.push(reply(CAP),reply({id:'r1',state:'running'},202));await h.bridge.pair(TOKEN,'7816');const out=await h.bridge.session().request('/api/red/jobs',{requestId:'r1'});assert.equal(out.id,'r1');
   const c=h.calls[1];assert.equal(c.url,'http://127.0.0.1:7816/api/red/jobs');assert.equal(c.init.method,'POST');assert.equal(c.init.body,'{"requestId":"r1"}');assert.deepEqual(Object.keys(c.init.headers).sort(),['Authorization','Content-Type']);assert.equal(c.init.credentials,'omit');assert.equal(c.init.redirect,'error');});

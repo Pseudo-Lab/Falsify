@@ -1,0 +1,25 @@
+--- a/packages/pdfium/build/code/editcore/pdfium_internal.h
++++ b/packages/pdfium/build/code/editcore/pdfium_internal.h
+@@ -13,6 +13,7 @@
+         float x = 0;
+         float y = 0;
+     };
++    float GetWordSpace() const;
+     size_t CountItems() const;
+     uint32_t GetCharCode(size_t index) const;
+     Item GetItemInfo(size_t index) const;
+--- a/packages/pdfium/build/code/editcore/session.cpp
++++ b/packages/pdfium/build/code/editcore/session.cpp
+@@ -497,6 +497,12 @@
+ namespace {
+ 
+ void bakeTextObjectSpacing(Session& s, FPDF_PAGE page, FPDF_PAGEOBJECT o) {
++#ifdef __EMSCRIPTEN__
++    // Explicit positions already encode the spacing once Tw is zero.
++    // Check the current object, not its address or page history: both can
++    // change after undo, re-edit, or a page reload.
++    if (std::abs(reinterpret_cast<const CPDF_TextObject*>(o)->GetWordSpace()) < 1e-6f) return;
++#endif
+     const auto glyphs = ec::readOrigGlyphs(o);
+     if (glyphs.size() < 2) return;
+     bool hasSpace = false;

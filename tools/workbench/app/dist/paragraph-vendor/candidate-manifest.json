@@ -36,16 +36,36 @@
     {
       "name": "native-inline-flanked.patch",
       "sha256": "9dd0fb0e72131f3fb3926eed8bb1d325b4c1d4d7e68fcf722a1df56644d4efeb"
+    },
+    {
+      "name": "native-composite-inline.patch",
+      "sha256": "8f78d98af9d3b5dea07becdcac894290e99e7ccf6e535e51937dc8b117eee515"
+    },
+    {
+      "name": "native-horizontal-scale.patch",
+      "sha256": "088a2d30015707444031ef1bd2030954ce70eb5fc6cc1dbc5bef81cedaf35d6f"
+    },
+    {
+      "name": "native-word-spacing-idempotence.patch",
+      "sha256": "7f1c580b6afd29670f11a0e0945eeaa15ac20982e59c23777f5a8766b74f1e17"
+    },
+    {
+      "name": "native-standard-digit-equivalence.patch",
+      "sha256": "07ea8445415b77d1abec998cac1aab2049d798f83d070b296aa5b08ff0c6f727"
+    },
+    {
+      "name": "native-standard-helvetica-coverage.patch",
+      "sha256": "a2ad02c2c07e1df4f7401b9e3e73d1a30c3240fb74f8ec1d395f261bc9382382"
     }
   ],
   "artifacts": {
     "js": {
       "path": "editcore.js",
-      "sha256": "6e6989a9994715951720e05355111aca7eab898e92b519ebea160167875bb3eb"
+      "sha256": "cbef240d8893fd9624c08eadbb1ffb405a583c96878d6a14d11d8e9816c0832b"
     },
     "wasm": {
       "path": "editcore.wasm",
-      "sha256": "cf9f0e9ec0a68cc5932795e87622b2809ecca5561482a23bc034de3d6410696d"
+      "sha256": "7674fe4cce4a8e15d702b02988610891693ac68f6121b4621e237949736778cb"
     }
   },
   "provenance": {
@@ -54,11 +74,11 @@
     "jsInputName": "pdfium.js",
     "wasmInputName": "pdfium.wasm",
     "verification": "Artifact and patch sha256 recorded from supplied files only; C++/WASM rebuild from the listed sources was not verified by this script.",
-    "note": "reedit-1726cc21-20261019 snapshot (provenance.json b2878492) from same-host build root /home/jcpuk/editor-wasm-build.I80fju out/wasm-resumed-20261019; native 1726cc21, parent 8ba2939, gate native-repair-review.json fea29c69 ACCEPT_SOURCE_SCOPE. Stacked patches applied in order stream-order(pdfium), natural-space, justified-space, reedit-space(engine); only stream-order and reedit-space reverse-check individually, all four bound by engine.diff 6cf69c5f (blob ids 813903c..1726cc21) and pdfium.diff d5225a53. Incremental, not clean-room. Font cmap and inline script patches applied on the same-host incremental cached source build snapshot /home/jcpuk/editor-wasm-build.I80fju/out/font-inline-20261028; not a clean reproducible source build. Final flanked-marker gap merge built and individually reverse-checked in snapshot font-inline-flanked-20261028; nativeSnapshot binds its complete source diffs. Unchanged-column interleaving is handled before general line merging.",
+    "note": "reedit-1726cc21-20261019 snapshot (provenance.json b2878492) from same-host build root /home/jcpuk/editor-wasm-build.I80fju out/wasm-resumed-20261019; native 1726cc21, parent 8ba2939, gate native-repair-review.json fea29c69 ACCEPT_SOURCE_SCOPE. Stacked patches applied in order stream-order(pdfium), natural-space, justified-space, reedit-space(engine); only stream-order and reedit-space reverse-check individually, all four bound by engine.diff 6cf69c5f (blob ids 813903c..1726cc21) and pdfium.diff d5225a53. Incremental, not clean-room. Font cmap and inline script patches applied on the same-host incremental cached source build snapshot /home/jcpuk/editor-wasm-build.I80fju/out/font-inline-20261028; not a clean reproducible source build. Final flanked-marker gap merge built and individually reverse-checked in snapshot font-inline-flanked-20261028; nativeSnapshot binds its complete source diffs. Unchanged-column interleaving is handled before general line merging. Composite inline and horizontal scale patches stacked on alpha.32, snapshot editor-scripts-scale-20261028; original script styles and measured horizontal ratios retained. Incremental build; sourceBuildVerified remains false. Word spacing normalization checks the current text object Tw so explicit-position objects are not repeatedly recreated. Incremental same-host relink, not a clean rebuild. Narrow nonembedded Helvetica digit equivalence avoids renaming source fonts when dictionaries, mappings, widths and outlines prove equivalence; unsupported collision cases retain prior behavior and may remain draft. Incremental relink, not clean build. Plain unembedded standard Helvetica ASCII coverage now requires a standard dictionary, proven Unicode-to-code roundtrip and a nonempty glyph outline; source font remains unchanged. Incremental same-host relink, not a clean build.",
     "nativeSnapshot": {
-      "name": "font-inline-flanked-20261028",
-      "provenanceSha256": "2eef003731b4d0e9b21c7d33aef9c60661ced8e38cf4b2d33fdb561f146bd5ea",
-      "engineDiffSha256": "36e598ff9eadde3bfbf3801a55e164dc78d6c06abb3122e04b26a1dba8b8025a",
+      "name": "helvetica-coverage-20261030",
+      "provenanceSha256": "1cd16e0209ad7b541ccef17357ae459b25502d62cac038a2107543e6e8cd4ff4",
+      "engineDiffSha256": "fd7a79a8ead6b1ee71644670071306a73034cfcfcc68cfc2b14de13ef67bb9d7",
       "pdfiumDiffSha256": "f6059e1c45acc5f8127ce713fb23695cd4685b8a449857b7eea8cf1f9e461c34",
       "incremental": true
     }

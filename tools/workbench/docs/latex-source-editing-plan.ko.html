@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LaTeX 소스 기반 논문 편집 구현계획</title><style>body{margin:0;background:#f3f4f5;color:#18212b;font:16px/1.7 system-ui,-apple-system,sans-serif}main{max-width:1120px;margin:28px auto;padding:30px;background:white;border-top:10px solid #ffcd00}h1{font-size:30px;line-height:1.3}h2{margin-top:36px;border-bottom:2px solid #eee;padding-bottom:8px}h3{margin-top:26px}p,li{max-width:100ch}a{color:#185899}table{width:100%;border-collapse:collapse;font-size:14px;display:block;overflow:auto}th,td{padding:10px 12px;border:1px solid #dce0e4;vertical-align:top;text-align:left}th{background:#f5f6f7}code{font:13px/1.5 ui-monospace,Consolas,monospace;overflow-wrap:anywhere}pre{background:#f5f6f7;border-left:4px solid #999;padding:16px;white-space:pre-wrap;overflow:auto}.lead{background:#fff6c7;padding:18px}.meta{font-size:13px;color:#586573}nav{padding:16px;background:#f6f7f8}nav a{display:inline-block;margin:4px 14px 4px 0}li{margin:6px 0}.tag{font-weight:700;color:#785600}@media(max-width:760px){main{margin:0;padding:18px}h1{font-size:25px}}@media print{main{margin:0;padding:0;border:0}nav{display:none}h2{break-after:avoid}tr{break-inside:avoid}}</style></head><body><main>
+<div class="meta">Falsify Workbench / 구현계획 v1 / 2026-10-30 / 기준 alpha.33, <code>a65617448da7adbf41c2b1bddd9d2b95576ec5c4</code></div>
+<h1>LaTeX 소스 기반 논문 편집 구현계획</h1>
+<p class="lead"><strong>본문·수식·윗첨자·각주를 소스 구조로 편집하고, 같은 조판 환경에서 변경 전·후 PDF를 만든다.</strong><br>사용자는 현재처럼 논문을 넣고, 미리보기에서 수정하고, PDF를 받는다. LaTeX 코드와 컴파일 설정은 고급 기능에 둔다.</p>
+<p>이 문서는 구현 착수 전 작성한 계획이다. 이후 구현·검증 결과와 남은 범위는 <a href="latex-source-editing-status.ko.html">현재 구현 상태</a>에서 확인한다. 아래 작업 ID는 계획서 내부 ID이며 WorkBite Task ID가 아니다.</p>
+<nav><a href="#decision">1. 결정과 범위</a><a href="#evidence">2. 기존 구현과 OSS</a><a href="#flow">3. 사용 흐름</a><a href="#model">4. 데이터와 편집</a><a href="#compile">5. 컴파일</a><a href="#pdf">6. PDF 재구성</a><a href="#evaluation">7. RED/BLUE 실험</a><a href="#tasks">8. 병렬 작업</a><a href="#acceptance">9. 완료 기준</a><a href="#release">10. 적용 순서</a></nav>
+
+<h2 id="decision">1. 결정과 범위</h2>
+<p>원본 LaTeX 프로젝트가 있으면 소스 편집을 우선 사용한다. PDF만 있으면 현재의 원본 보존 편집을 계속 제공하면서, 편집용 LaTeX 재구성 경로를 별도로 추가한다. 원본 PDF의 좌표를 고치는 방식과 문서 전체를 다시 컴파일하는 방식은 세션별로 구분한다.</p>
+<table><thead><tr><th>경로</th><th>입력과 처리</th><th>완료할 결과</th></tr></thead><tbody>
+<tr><td>원본 소스 경로: 먼저 구현</td><td><code>.tex</code> 단일 파일 또는 소스 ZIP. 그림, <code>.bib/.bbl</code>, <code>.cls/.sty</code>, 필요한 글꼴을 프로젝트로 읽고 컴파일</td><td>본문·윗첨자·각주·인용 편집, 자동 미리보기, PDF·소스 ZIP 다운로드, BLUE 전달</td></tr>
+<tr><td>PDF 재구성 경로: 다음 구현</td><td>PDF의 본문·수식·표·그림·각주·참고문헌을 구조화하고 편집용 LaTeX 프로젝트 생성</td><td>무수정 재구성본 확인 후 같은 소스 경로에서 편집. 재구성 차이와 공격 변경을 따로 기록</td></tr>
+<tr><td>기존 PDF 편집 경로</td><td>현재 paragraph/table/image 편집 엔진 사용</td><td>alpha.33의 짧은 수정, 원본 보존, 독립 BLUE 흐름 유지</td></tr>
+</tbody></table>
+<p>첫 버전은 기존 표·그림을 포함한 소스 프로젝트를 보존해서 컴파일한다. 그림 생성·교체 자동화, 모든 출판사 템플릿 지원, 임의 병합 표의 시각적 편집은 이후 확장한다. 소스 경로를 추가하면서 기존 PDF 편집기의 혼합 서식 오류도 작은 별도 수정으로 다룬다. LaTeX 전환 완료를 기다리게 하지 않는다.</p>
+
+<h2 id="evidence">2. 기존 구현과 OSS 재사용</h2>
+<h3>프로젝트에서 확인한 사실</h3>
+<ul>
+<li><code>feat/latex-red-engine</code>의 <code>latex_red_harness.py</code>는 추출 텍스트에서 결정적 변경 후보를 만든다. LaTeX 프로젝트를 파싱하거나 컴파일하는 엔진이 아니다.</li>
+<li>현재 <code>document-import.js</code>는 <code>.tex</code>를 텍스트로 읽는다. 매크로·참조를 해석하고 PDF를 조판하는 단계가 필요하다.</li>
+<li><code>paper-edits.js</code>의 선택·undo/redo, <code>paper-generation.js</code>의 생성 제어, <code>paper-workspace.js</code>의 미리보기·다운로드·BLUE 연결을 재사용한다.</li>
+<li>기존 편집 스냅샷은 허용 필드를 엄격히 검사한다. 새 소스 좌표를 기존 v1 객체에 임의로 넣지 않고, 버전이 있는 별도 source session과 명시적인 호환 어댑터를 둔다.</li>
+</ul>
+<table><thead><tr><th>후보</th><th>재사용할 부분</th><th>확인 상태와 선택</th></tr></thead><tbody>
+<tr><td><a href="https://github.com/TeXlyre/texlyre-busytex">TeXlyre-BusyTeX</a></td><td>브라우저 WASM 컴파일, 다중 파일, pdfLaTeX/XeLaTeX/LuaLaTeX, BibTeX/Biber, SyncTeX, Worker</td><td>README와 공식 문서에서 기능 확인. 우선 PoC 후보. 조사 커밋 <code>61b83cde2836d42cf941f6559d36c9678d52cbf2</code>, 래퍼 라이선스 AGPL-3.0. 실제 Workbench 번들·템플릿·성능은 G0에서 확인</td></tr>
+<tr><td><a href="https://github.com/TeXlyre/texlyre">TeXlyre</a></td><td>SyncTeX 파서, 정방향·역방향 위치 매핑, 컴파일 제어의 필요한 모듈</td><td>공식 릴리스에 관련 구현 확인. 조사 시 최신 릴리스 v0.13.0. 전체 앱을 이식하지 않고 경로·의존성·라이선스를 확인한 모듈만 추출</td></tr>
+<tr><td><a href="https://github.com/SwiftLaTeX/SwiftLaTeX">SwiftLaTeX</a></td><td>별도 브라우저 컴파일 엔진 후보</td><td>WASM·Worker·메모리 파일 API 확인. G0 비교 후보로 보관. 최초부터 두 엔진을 동시에 제품화하지 않음</td></tr>
+<tr><td><a href="https://github.com/siefkenj/unified-latex">unified-latex</a></td><td>LaTeX AST 파싱과 매크로·환경 탐색</td><td>MIT, 조사 커밋 <code>3c1350edbc8f13ccfbbd5d96919391fefa4d268d</code>. 위치 정보와 원본 바이트 보존 적합성을 G0에서 검사. 전체 파일 재포맷 용도로 쓰지 않음</td></tr>
+<tr><td><a href="https://github.com/facebookresearch/nougat">Nougat</a>와 현재 PDF 추출기</td><td>PDF 재구성 단계의 구조 추출 후보</td><td>Nougat은 PDF→마크업 도구이며 원본 TeX·레이아웃 복원기로 간주하지 않음. 모델 라이선스와 실행 비용은 코드 라이선스와 별도로 확인. 초기 제품에 GPU나 외부 API를 필수로 추가하지 않음</td></tr>
+<tr><td>기존 fflate, PDF.js, MuPDF, 글꼴 서비스, 구조화 문서 모델</td><td>ZIP 입출력, 미리보기, 텍스트·좌표·그림 추출, 글꼴 정보와 대체 글꼴 선택</td><td>현재 의존성 재사용. 신규 ZIP·PDF·글꼴 엔진을 중복 구현하지 않음</td></tr>
+</tbody></table>
+<p>G0에서 선택한 upstream 커밋과 필요한 자산 해시를 고정한다. 기존 패키지를 그대로 쓸 수 있으면 고정 의존성으로 사용하고, 수정이 필요한 모듈만 fork해 최소 패치를 유지한다. 컴파일러·TeX 배포 파일·패키지·글꼴의 라이선스를 각각 기록한다. 위 후보들은 문서와 소스를 조사한 상태이며 이 앱에서 실행 검증한 상태는 아니다.</p>
+
+<h2 id="flow">3. 사용 흐름</h2>
+<h3>소스 프로젝트가 있을 때</h3>
+<ol>
+<li>기존 입력 영역에 소스 ZIP 또는 <code>.tex</code>를 넣는다. PDF와 소스를 함께 넣을 수도 있다.</li>
+<li>앱이 루트 문서를 찾아 기준 PDF를 만든다. 후보가 여러 개일 때만 대표 파일 하나를 고르게 한다. 빠진 파일은 파일명과 추가 버튼으로 표시한다.</li>
+<li>기준 PDF 위의 문장·수식·번호를 클릭해 수정한다. 외부 AI의 Before/After 응답을 가져오는 흐름도 유지한다.</li>
+<li>편집은 즉시 반영하고 재컴파일 결과로 미리보기를 갱신한다. 기존 페이지 넘김과 원문·변경본 하이라이트를 사용한다.</li>
+<li>현재 변경이 반영된 PDF를 바로 받거나 BLUE에 전달한다. 소스 ZIP과 상세 컴파일 로그는 펼친 메뉴에서 받는다.</li>
+</ol>
+<h3>PDF만 있을 때</h3>
+<ol>
+<li>PDF를 넣으면 기존 편집기를 바로 사용할 수 있다.</li>
+<li>소스 재조판을 선택하면 편집용 소스를 재구성하고, 원본 PDF와 무수정 재구성본을 나란히 보여준다.</li>
+<li>누락·오인식된 본문, 수식, 표, 그림이 있으면 해당 위치에서 바로 보정한다. 확인한 기준본을 이후 변경의 출발점으로 고정한다.</li>
+<li>그 뒤의 편집·AI 응답·다운로드·BLUE 전달은 소스 프로젝트와 같은 흐름을 쓴다.</li>
+</ol>
+<p>UI는 공항 디자인, RED·BLUE·검수의 독립 진입점을 유지한다. 기본 화면에 AST, 엔진, manifest, 호출 예산 같은 항목을 늘리지 않는다. 소스 코드, 컴파일 엔진 선택, 패키지 로그와 원본 비교 상세만 고급 기능으로 접는다. 새 기능을 쓰기 위해 PC 연결이나 모델 계정을 요구하지 않는다.</p>
+
+<h2 id="model">4. 데이터와 편집 계약</h2>
+<table><thead><tr><th>객체</th><th>필수 의미</th></tr></thead><tbody>
+<tr><td>SourceProject</td><td>불변 원본 파일 묶음, 경로별 바이트 해시, mainFile, engine 설정, 글꼴·패키지 의존성, origin(<code>original-source</code>/<code>reconstructed-pdf</code>), 선택적인 원본 PDF 해시</td></tr>
+<tr><td>SourceNode / SourceAnchor</td><td>본문·수식·각주·인용·그림·표의 노드 ID, source file과 소스 범위, 표시 텍스트와 역매핑, 프로젝트 해시·revision. 파일 바이트와 JS UTF-16 오프셋의 변환 규칙을 계약에서 고정</td></tr>
+<tr><td>SourceChange</td><td>기존 before/after, 응답 출처, 사람/AI 작성 출처, 포함 여부를 보존. source anchor, 편집 종류, 참조 의미·표기 정책을 별도 버전 계약으로 연결</td></tr>
+<tr><td>CompileArtifact</td><td>실제 PDF bytes/hash, 생성 키, 프로젝트 해시, 엔진·패키지·글꼴 고정 정보, SyncTeX, source map, 검사 결과, 컴파일 시간. 마지막 성공본과 현재 편집의 결과를 구분</td></tr>
+<tr><td>BaselineArtifact</td><td>공격을 넣기 전 PDF와 소스 상태, 원본/재구성 출처, 복원 차이, 사용자 보정 기록. RED 변경 이력과 분리</td></tr>
+</tbody></table>
+<p>생성 키에는 <code>projectHash + 활성 변경 + 엔진/패키지/글꼴 manifest + 출력 설정 + baselineId</code>를 포함한다. 숫자 revision만으로 동일 결과를 판단하지 않는다. 원본 파일은 그대로 두고 변경 patch를 적용해 작업본을 만든다. 파일 전체를 AST printer로 다시 쓰지 않아 주석·매크로·사용자 형식을 보존한다.</p>
+<h3>본문·수식·윗첨자</h3>
+<ul>
+<li>LaTeX 매크로 인수와 수식 환경을 구분한다. 일반 텍스트 입력의 <code>% $ &amp; # _ { } </code>는 맥락에 맞춰 escape한다. LaTeX 코드를 직접 넣는 동작은 고급 편집에서 명시적으로 선택한다.</li>
+<li>문장을 통째로 받아도 실제 바뀐 source node와 문자 범위를 계산한다. 그대로인 윗첨자·강조·인용 매크로는 그대로 남긴다.</li>
+<li>본문 안의 <code>\textsuperscript{62}</code>, 수식의 <code>x^{n+1}</code>를 각각 편집한다. 혼합 이탤릭·아래첨자·색상도 구조와 속성을 유지한다.</li>
+<li>SyncTeX로 PDF 위치에서 소스 파일·줄을 찾고, 노드와 표시 텍스트를 대조해 문자 범위를 좁힌다. SyncTeX 결과를 곧바로 정확한 문자 위치라고 간주하지 않는다. 한 소스가 여러 위치에 렌더링되는 매크로는 호출부와 정의부를 구분한다.</li>
+</ul>
+<h3>각주·인용의 두 가지 의미</h3>
+<table><thead><tr><th>사용자 의도</th><th>처리</th><th>유지할 것</th></tr></thead><tbody>
+<tr><td>각주 내용이나 인용 대상 변경</td><td><code>\footnote{…}</code>, <code>\cite{key}</code> 등 해당 소스 노드를 수정하고 정상 참조 계산</td><td>템플릿의 번호 형식, 본문 연결, 참고문헌·각주 위치</td></tr>
+<tr><td>보이는 번호만 의도적으로 변경</td><td>선택한 참조의 표시값만 바꾸는 <code>display-override</code> 편집. 번호 클릭 후 숫자를 고치면 이 의도로 기록</td><td>주변 번호·참고문헌·각주 본문을 자동으로 일괄 수정하지 않음. 자동 재번호 매김이 RED 결함을 없애지 않게 함</td></tr>
+</tbody></table>
+<p>표시값 override는 별도의 템플릿 어댑터로 구현한다. <code>\footnote</code>를 단순한 문자열 치환으로 바꾸지 않는다. G0에서 기본 각주, 재사용 각주 표지, hyperref, natbib/biblatex 예제로 카운터·링크·주변 표기 보존을 증명한 구현을 선택한다. 임의의 사용자 매크로를 같은 규칙으로 처리한다고 가정하지 않는다.</p>
+<h3>외부 AI 응답</h3>
+<p>현재의 <code>{changes:[{before,after,rationale,evidence}]}</code>와 Markdown 응답을 계속 받는다. 사용자가 파일명·AST 경로·해시·LaTeX 문법을 새로 채우게 하지 않는다. 앱이 표시 텍스트에서 source anchor를 찾고, 복수 후보일 때만 해당 위치를 확인받는다. 기존 후보 체크·충돌 선택·원응답 보존 규칙을 유지한다.</p>
+
+<h2 id="compile">5. 브라우저 컴파일과 자동 미리보기</h2>
+<ul>
+<li>LaTeX 컴파일은 전용 Worker에서 실행한다. 엔진과 패키지는 지연 로드하고 검증된 정적 자산을 재사용한다. 문서 본문과 사용자 그림·글꼴을 외부 컴파일 서버에 보내지 않는다.</li>
+<li>프로젝트 지정 엔진과 루트 설정을 먼저 따른다. 엔진 전환으로 글꼴·배치가 달라지는 경우에는 그 결과를 비교해 선택할 수 있게 한다. 동일 소스를 엔진마다 조용히 바꿔 실행하지 않는다.</li>
+<li>BibTeX/Biber와 교차참조는 필요한 pass를 수행한다. unresolved reference, 누락 글꼴, overfull box, 실제 compile failure를 서로 구분한다.</li>
+<li>입력 중에는 편집창·커서·한글 조합을 유지한다. 최신 작업 하나만 남기고 컴파일 결과의 생성 키를 확인한다. 취소를 지원하지 않는 엔진은 Worker를 종료하고 새 프로젝트 상태로 다시 실행한다.</li>
+<li>패키지 캐시와 프로젝트 파일 캐시는 구분한다. 패키지는 고정 해시로 캐시하고, 사용자 파일은 기존 12시간 초안 동의와 보관 규칙을 적용한다.</li>
+<li>브라우저에서 시스템 글꼴을 자동 사용한다고 가정하지 않는다. 프로젝트 글꼴 또는 기존 글꼴 서비스에서 사용자가 제공한 바이트를 검증해 연결한다. 대체 글꼴을 선택했다면 컴파일 조건에 남긴다.</li>
+<li>ZIP은 기존 fflate를 재사용하되 상대 경로·중복 파일·압축 해제량을 확인한다. TeX의 shell escape와 사용자 제공 JS handler는 기본 실행 경로에서 끈다. 프로젝트별 메모리 파일 시스템과 Worker를 분리한다.</li>
+</ul>
+<p>다운로드는 클릭 시점의 편집을 반영한 PDF를 준비한 뒤 바로 실행한다. 생성 실패 시 마지막 성공본과 원본·작업 소스는 계속 받을 수 있고, 이전 PDF를 현재 변경이 적용된 파일로 표시하지 않는다. BLUE 전달도 같은 현재 artifact의 File/hash를 사용한다.</p>
+<p>성능 검증 목표는 입력 반응 p95 100ms 이내다. 컴파일은 6쪽·36쪽 fixture에서 최초 로드와 캐시 후 전체 재컴파일의 시간·메모리를 따로 측정한다. 초기 목표는 캐시 후 6쪽 p95 3초, 36쪽 p95 10초이며 실측 후 문서에 결과를 기록한다. 현재 달성 수치가 아니다. LaTeX 컴파일이 실제로 전체 문서를 처리하면 이를 부분 컴파일로 표시하지 않는다.</p>
+
+<h2 id="pdf">6. PDF에서 편집용 소스 만들기</h2>
+<p>PDF 재구성은 원본 LaTeX 프로젝트 복원과 구분해 <code>reconstructed-pdf</code>로 기록한다. 현재 MuPDF/PDF.js와 구조화 문서 모델에서 텍스트·좌표·선·그림·글꼴 정보를 재사용하고, 인식이 필요한 부분에만 추가 추출기를 비교한다.</p>
+<table><thead><tr><th>요소</th><th>재구성 방법과 확인</th></tr></thead><tbody>
+<tr><td>본문·절·다단·참고문헌</td><td>읽기 순서와 문단 경계를 복원하고 source node에 연결. 머리말·꼬리말을 본문으로 중복 삽입하지 않음</td></tr>
+<tr><td>윗첨자·아래첨자·수식</td><td>크기·baseline·문맥으로 후보를 만들고 원본 crop과 대조. 수식 구조가 불확실하면 보정 가능 상태로 남기고 원본 영역을 보존하는 선택 제공</td></tr>
+<tr><td>그림·복합 패널</td><td>벡터·이미지·clip·alpha·라벨을 함께 보존한 asset으로 가져옴. 기존 figure span/occurrence 처리 재사용. 그림 내부를 모두 본문 텍스트로 풀어버리지 않음</td></tr>
+<tr><td>표</td><td>셀·행·열·병합·각주 구조가 확인되면 LaTeX 표로 생성. 구조가 불명확한 영역은 원본 표현을 유지하며, 편집 가능 셀과 전체 표 이미지를 구분</td></tr>
+<tr><td>각주와 인용</td><td>표지와 실제 각주·참고문헌 항목의 연결을 기록. 표기 번호만으로 의미 연결을 단정하지 않음</td></tr>
+</tbody></table>
+<p>재구성 전후에 텍스트 누락·숫자·수식·그림·표 수와 위치를 대조한다. 차이는 원본 PDF와 나란히 표시하고, 사용자 보정을 소스 노드에 반영한다. 문서 전체를 이미지 한 장씩 넣어 겉모습만 유지한 PDF는 편집용 소스 완료로 세지 않는다. 원본 그림·불확실한 영역을 이미지로 보존한 경우에는 그 영역의 편집 범위를 구분한다.</p>
+<p>소스 재구성은 정답이나 논지를 교정하는 과정이 아니다. 이미 변조된 훈련용 입력의 모순도 유지한다. OCR·LLM이 의학·통계 내용을 정상화하거나 수치를 바꾼 차이는 재구성 오류로 분리한다.</p>
+
+<h2 id="evaluation">7. RED/BLUE 실험과 출력 품질</h2>
+<p>원본 PDF, 기준 PDF, RED 변경 PDF를 별개의 artifact로 보존한다. 실제 소스가 있는 경우도 먼저 공격 없는 기준본을 컴파일해 템플릿·패키지·글꼴 차이를 확인한다. PDF 재구성 경로에서는 무수정 기준본과 공격본을 같은 환경에서 만든다. 원본 PDF와의 비교는 재구성 품질 평가에 사용한다.</p>
+<ul>
+<li>BLUE에는 선택한 평가 조건의 PDF만 전달한다. LaTeX 프로젝트, 원본 비교, RED 계획, source map과 사람 판정은 전달하지 않는다.</li>
+<li>기준본의 무공격 BLUE 실행을 둘 수 있다. 재구성 때 생긴 결함과 RED가 주입한 결함을 별도 집계한다. 기준본을 만들었다고 BLUE가 원본을 함께 볼 수 있게 하지 않는다.</li>
+<li>자동 카운터·참조 처리로 RED가 의도한 불일치가 사라지면 변경 검증 실패로 기록한다. 자연스러운 조판과 과학적 결함의 보존을 각각 확인한다.</li>
+<li>하이라이트는 화면 비교 레이어로만 표시한다. 앱의 공격 표식·정답·변경 주석·소스 첨부를 BLUE용 PDF에 추가하지 않는다. 입력에 이미 있던 표식은 별도 원본 콘텐츠로 취급한다.</li>
+<li>페이지 수만으로 품질을 판정하지 않는다. 짧은 수정 fixture는 페이지·영역 보존을 검사하고, 긴 수정은 읽기 순서·누락·겹침·넘침·그림·표·각주 분리를 확인한다.</li>
+</ul>
+
+<h2 id="tasks">8. 병렬 작업과 파일 소유권</h2>
+<p>조율자 1명과 Codex GPT-6.1-Terra high 작업자 3명을 Stackbite seat로 사용한다. 구현 시작 시 정확한 source SHA와 관련 계약·합성 fixture·수정 가능한 파일을 전달한다. 현재 계획 작성은 worker 실행을 뜻하지 않는다. 각 작업자는 독립 worktree를 쓰며 완료 후 좌석을 정리한다.</p>
+<table><thead><tr><th>담당</th><th>소유 범위: 예정 경로</th><th>재사용과 경계</th></tr></thead><tbody>
+<tr><td>조율자 O</td><td><code>docs/latex-source-editing-contract.md</code>, <code>paper-workspace.js</code>, <code>paper-edits.js</code>, <code>paper-generation.js</code>, index·테스트 등록·package·버전·배포</td><td>기존 핵심 파일의 유일한 작성자. A/B/C는 별도 모듈을 만들고 조율자가 연결</td></tr>
+<tr><td>A: 프로젝트·소스</td><td>신규 <code>app/src/latex-project.mjs</code>, <code>latex-source-model.mjs</code>, <code>latex-source-patches.mjs</code>와 해당 테스트</td><td>ZIP·루트 문서·AST·바이트 범위·불변 원본·소스 patch. 기존 PDF 엔진·UI 파일 수정 없음</td></tr>
+<tr><td>B: 컴파일·매핑</td><td>신규 <code>latex-compiler-adapter.mjs</code>, <code>latex-compile-worker.mjs</code>, <code>latex-synctex-map.mjs</code>, vendor manifest·관련 빌드 파일과 테스트</td><td>WASM·패키지·글꼴·SyncTeX·artifact. 외부 응답 파서와 실험 기록 수정 없음</td></tr>
+<tr><td>C: 참조·입력 어댑터</td><td>신규 <code>latex-semantic-edits.mjs</code>, <code>latex-reference-policy.mjs</code>, <code>latex-source-ui.js/css</code>와 해당 테스트</td><td>윗첨자·각주·인용 정책, 외부 답변 연결·독립 UI 컴포넌트. 작업대 공개 API만 사용</td></tr>
+</tbody></table>
+<table><thead><tr><th>ID</th><th>담당</th><th>작업과 산출물</th><th>선행</th><th>완료 판정</th></tr></thead><tbody>
+<tr><td>S0</td><td>O</td><td>SourceProject/Change/Artifact·API·호환 계약과 최소 합성 프로젝트 고정</td><td>없음</td><td>세 작업자가 같은 입력·출력 fixture로 독립 개발 가능</td></tr>
+<tr><td>G0-B</td><td>B</td><td>BusyTeX/SwiftLaTeX 비교 PoC, package·font·SyncTeX 확인</td><td>S0</td><td>실제 브라우저 PDF, 클릭 위치 매핑, 취소·warm compile 측정. 선택 엔진·SHA·패치 확정</td></tr>
+<tr><td>G0-A</td><td>A</td><td>unified-latex 소스 위치·매크로 fixture 검증</td><td>S0</td><td>대상 범위 밖 파일 바이트 보존. 미확인 매크로를 삭제하지 않음</td></tr>
+<tr><td>G0-C</td><td>C</td><td>본문+윗첨자, 각주·인용 표시 override의 의미와 템플릿 PoC</td><td>S0</td><td>자동 재번호가 의도한 결함을 제거하지 않음. 주변 번호·링크 보존</td></tr>
+<tr><td>A1</td><td>A</td><td>프로젝트 입력·경로·루트 문서·누락 파일 처리</td><td>G0-A</td><td>단일 .tex·ZIP·멀티파일·그림·참고문헌 입력, 원본 ZIP 보존</td></tr>
+<tr><td>A2</td><td>A</td><td>소스 노드·표시 텍스트 역매핑·최소 patch·undo 입력</td><td>A1</td><td>혼합 서식 문장 변경, 매크로·주석·비선택 바이트 보존</td></tr>
+<tr><td>B1</td><td>B</td><td>Worker·파일시스템·패키지 manifest·참조 재컴파일·폰트</td><td>G0-B</td><td>실제 컴파일과 글꼴·패키지 조건 기록, 원본 유지</td></tr>
+<tr><td>B2</td><td>B</td><td>SyncTeX·PDF/source 위치 어댑터·Artifact 반환</td><td>B1</td><td>본문·수식·각주에서 정방향·역방향 이동. 불명확 위치만 후보 확인</td></tr>
+<tr><td>C1</td><td>C</td><td>외부 Before/After를 semantic source change로 연결</td><td>G0-C, S0 API</td><td>기존 JSON·Markdown 그대로 입력, 추가·체크·충돌 규칙 유지</td></tr>
+<tr><td>C2</td><td>C</td><td>번호·수식·각주 편집 컴포넌트와 display override</td><td>C1, A2/B2 계약</td><td>소스 문법을 몰라도 클릭 수정. 기존 fixture mock으로 개발 후 실제 엔진 통합 확인</td></tr>
+<tr><td>I1</td><td>O</td><td>프로젝트 입력, 작업대·생성 키·초안·다운로드·BLUE 연결</td><td>A1/A2/B1/B2/C1/C2 준비분부터</td><td>현재 PDF·소스 입력을 오가도 결과·히스토리·해시 혼선 없음</td></tr>
+<tr><td>I2</td><td>O</td><td>실제 브라우저·기존 엔진·Confluence 기록 회귀</td><td>I1</td><td>완료 기준 표 통과, 기존 사용자 데이터 보존</td></tr>
+<tr><td>P0</td><td>O</td><td>PDF 재구성 요소 계약과 평가 fixture 고정</td><td>원본 소스 경로 I2</td><td>공격 없는 기준본·재구성 차이·변경 이력을 분리 가능</td></tr>
+<tr><td>P1</td><td>A</td><td>PDF 본문·절·다단·참고문헌 구조 추출</td><td>P0</td><td>추출 coverage와 원본 위치 연결</td></tr>
+<tr><td>P2</td><td>B</td><td>그림·표·글꼴·페이지 요소의 LaTeX asset 구성</td><td>P0</td><td>asset 누락·중복·clip·alpha·표 구조 검증</td></tr>
+<tr><td>P3</td><td>C</td><td>수식·첨자·각주 추출 및 보정 화면</td><td>P0</td><td>인식 결과를 원본 crop과 비교하고 직접 교정</td></tr>
+<tr><td>P4</td><td>O</td><td>재구성 프로젝트 생성·무수정 기준본·실험 연결</td><td>P1/P2/P3</td><td>복원 차이와 공격 차이를 분리한 end-to-end 실험</td></tr>
+<tr><td>D1</td><td>O</td><td>버전·캐시 키·릴리스·설치본 적용</td><td>I2 또는 P4 해당 범위</td><td>CI·공개 웹·설치본이 같은 커밋과 엔진 해시</td></tr>
+</tbody></table>
+<p>G0-A/B/C와 이후 A/B/C는 병렬로 진행한다. 구현이 도착한 모듈부터 O가 통합해 끝에 큰 합병을 만들지 않는다. 기존 핵심 파일 변경이 필요하면 O에게 요청하고, 소유권을 넘길 때는 이전 작성자의 쓰기를 끝낸다. 초기 소스 경로가 검증되면 먼저 배포할 수 있고 PDF 재구성 완료까지 묶어서 기다리지 않는다.</p>
+<p>현재 <code>STYLE_AMBIGUOUS</code>의 문장 전체 수정 오탐은 별도 작은 작업으로 분리한다. 동일 단어 안의 본문·첨자 경계에서 실제 변경 문자만 매핑하는 개선과 회귀 fixture를 다루고, LaTeX 신규 모듈과 파일 범위를 겹치지 않게 배정한다.</p>
+
+<h2 id="acceptance">9. 완료 기준과 회귀 검사</h2>
+<table><thead><tr><th>사례</th><th>통과할 결과</th></tr></thead><tbody>
+<tr><td>최우선: 혼합 서식 문장</td><td>문장 전체를 Before/After로 넣고 윗첨자 62→63만 바꿔도 성공. 본문 크기·번호 크기·baseline 유지. 기존 <code>STYLE_AMBIGUOUS</code> 재현 사례 포함</td></tr>
+<tr><td>각주와 인용</td><td>각주 내용 수정, 번호 표시 override, 참조 대상 변경을 따로 검사. 주변 번호와 참고문헌의 의도하지 않은 재번호 없음. 각주가 페이지를 넘어갈 때도 누락 없음</td></tr>
+<tr><td>수식</td><td>위·아래첨자, 분수, 그리스 문자, 혼합 이탤릭 수식. 편집 전후 수식 구조와 실제 렌더링 확인</td></tr>
+<tr><td>소스 보존</td><td>복수 .tex, input/include, UTF-8·한글, 주석, 사용자 매크로, .bib/.bbl, 그림·표·스타일 파일. 바꾸지 않은 소스 범위는 바이트 동일</td></tr>
+<tr><td>정상 기준본</td><td>같은 소스·환경으로 반복 컴파일한 텍스트·쪽수·렌더링 일관성. PDF의 시간·문서 ID 바이트와 시각적 동일성은 구분</td></tr>
+<tr><td>배치</td><td>짧은 변경의 페이지 보존, 긴 변경의 자연스러운 재배치. 단·caption·각주·표·그림·참고문헌 누락 및 겹침 검사. 36→83쪽 같은 증가는 원인과 구조 차이를 추적</td></tr>
+<tr><td>편집 UX</td><td>타이핑·선택·한글 조합·포커스 유지, 빠른 연속 입력·취소·undo/redo·파일 교체·오래된 컴파일 결과 경합. 작업대 재방문 없이 다운로드</td></tr>
+<tr><td>출력 일치</td><td>미리보기·다운로드·BLUE 입력의 artifact 생성 키와 해시 동일. RED 정보·소스·하이라이트의 BLUE 유입 없음</td></tr>
+<tr><td>독립 사용</td><td>PDF 직접 편집, 원본 소스 RED, 외부 응답 RED, BLUE 단독 입력, 검수 단독 기록. LaTeX 사용이 다른 흐름의 선행 조건이 되지 않음</td></tr>
+<tr><td>복구와 팀 기록</td><td>기존 v1 기록 읽기, 새 세션의 project/baseline/patch 관계 복구, 12시간 초안과 명시적 Confluence 공개. 새로운 영구 저장소 추가 없음</td></tr>
+<tr><td>지원 환경</td><td>Windows·macOS의 Chrome/Edge에서 실제 WASM 검사, Safari에서 실제 동작 또는 구체적 미지원 표시. 가짜 컴파일러 mock만으로 브라우저 완료 판정하지 않음</td></tr>
+</tbody></table>
+<p>합성 fixture는 실제 source project에서 생성해 원본 구조를 정답으로 갖는다. 단일 문서·기본 템플릿과 다단·footnote/hyperref·biblatex·math·multifile fixture를 분리한다. 실제 36쪽 논문은 로컬에서 기존 경로 회귀에 쓰며 저장소에 넣지 않는다. 라벨이 있는 source fixture만으로 모든 출판사 PDF의 재구성을 통과했다고 보고하지 않는다.</p>
+
+<h2 id="release">10. 적용 순서와 위험 대응</h2>
+<ol>
+<li><strong>1차:</strong> G0 PoC와 공통 계약. 실제 원본 소스에서 윗첨자·각주·수식 편집과 브라우저 컴파일을 검증하고 사용할 OSS·자산을 확정한다.</li>
+<li><strong>2차:</strong> 원본 소스 프로젝트 입력, 클릭 편집, 외부 응답, 미리보기·다운로드·BLUE를 연결한다. 현재 PDF 경로는 유지하고 소스 프로젝트에만 새 엔진을 선택한다.</li>
+<li><strong>3차:</strong> 통합 회귀와 사용성 검수 후 버전·캐시를 함께 갱신한다. 실제 배포는 해당 실행 지시에 따라 진행한다.</li>
+<li><strong>4차:</strong> PDF→편집용 LaTeX 재구성과 기준본 보정·평가를 병렬 구현한다. 초기에는 재구성 결과를 사용자가 비교해 고르는 경로로 제공한다.</li>
+</ol>
+<table><thead><tr><th>회귀 가능 지점</th><th>구현 계획</th></tr></thead><tbody>
+<tr><td>재컴파일로 원본보다 페이지·그림 배치가 바뀜</td><td>기준본을 먼저 생성해 차이를 보인다. 프로젝트 engine/template/font를 고정하고, 기존 PDF 보존 경로와 별도 세션으로 운영</td></tr>
+<tr><td>매크로 전개·SyncTeX 위치가 여러 곳을 가리킴</td><td>원본 범위와 렌더링 위치를 함께 기록. 호출부 patch를 우선하고 복수 위치는 표시해 선택</td></tr>
+<tr><td>자동 번호 기능이 RED 결함을 정상화</td><td>참조 의미와 표시 override를 별도 계약으로 유지. 주변 번호와 gold 변경의 보존을 테스트</td></tr>
+<tr><td>대규모 엔진·패키지 때문에 첫 로드나 입력이 느려짐</td><td>필요 엔진만 로드, 검증된 캐시·Worker·최신 작업 취소 사용. 최초/캐시 후 시간과 메모리를 분리 측정</td></tr>
+<tr><td>UI·기록 스키마 변경이 기존 사용자 흐름을 깨뜨림</td><td>조율자가 핵심 파일을 통합하고 legacy adapter 제공. 기존 artifact API와 독립 RED/BLUE/검수 회귀 유지</td></tr>
+</tbody></table>
+<p>구현 시작 시 확정할 항목은 G0의 엔진·의존성 고정 SHA, 실제 필요한 TeX 자산 크기, 지원 템플릿 묶음, ZIP 한도와 source range 단위다. 새 데이터 계약과 fixture를 먼저 고정하고, 결과가 확인된 경로부터 제품에 연결한다.</p>
+
+<h2>참고 자료와 조사 범위</h2>
+<ul>
+<li><a href="https://texlyre.github.io/docs/latex-compilation/overview">TeXlyre 공식 컴파일 문서</a>: 브라우저 엔진·파일·글꼴·SyncTeX 지원 조건</li>
+<li><a href="https://github.com/TeXlyre/texlyre-busytex">TeXlyre-BusyTeX README와 API</a>, <a href="https://github.com/TeXlyre/texlyre/releases">TeXlyre 릴리스</a>: 컴파일과 위치 매핑 재사용 후보</li>
+<li><a href="https://github.com/siefkenj/unified-latex">unified-latex</a>: AST 파싱과 조작 후보</li>
+<li><a href="https://github.com/SwiftLaTeX/SwiftLaTeX">SwiftLaTeX</a>: 브라우저 컴파일 비교 후보</li>
+<li><a href="https://github.com/arXiv/arxiv-docs/blob/develop/source/help/submit_tex.md?plain=1">arXiv TeX 프로젝트 안내</a>: 그림·참고문헌·스타일 파일의 소스 의존성</li>
+<li><a href="https://facebookresearch.github.io/nougat/">Nougat 논문 소개</a>: PDF의 의미 정보와 마크업 추출</li>
+</ul>
+<p class="meta">조사 범위: 현재 프로젝트 코드·테스트·의존성, LaTeX 명칭 브랜치, 위 공식 저장소·문서·GitHub API. 엔진을 설치하거나 실제 source project를 컴파일한 결과는 포함하지 않았다. 이 계획은 Falsify Workbench 구현 방향이며 팀의 과학적 판정 기준을 대신하지 않는다.</p>
+</main></body></html>

@@ -8,6 +8,7 @@ const median = xs => { const a=[...xs].sort((x,y)=>x-y); return a.length ? a[Mat
 const reading = (a,b) => (a.pos ?? Infinity)-(b.pos ?? Infinity) || a.index-b.index;
 const geom = (a,b) => a.box[1]-b.box[1] || a.box[0]-b.box[0] || reading(a,b);
 const textKey = b => (b.text || '').trim().replace(/\s+/g,' ');
+const captionText=text=>/^\s*(?:extended\s+data\s+)?(?:fig(?:ure)?\.?|table)\s*\d+[a-z]?\b/i.test(text||'')&&!/^\s*(?:extended\s+data\s+)?(?:fig(?:ure)?\.?|table)\s*\d+[a-z]?\s+(?:shows?|is|are|was|were|illustrates?|presents?|reports?|demonstrates?|depicts?|lists?|contains?|summarizes?|provides?|compares?)\b/i.test(text||'');
 const sameNumbers = (a,b,tolerance=.01) => Array.isArray(a) && Array.isArray(b) && a.length===b.length && a.every((v,i)=>Number.isFinite(v) && Number.isFinite(b[i]) && Math.abs(v-b[i])<tolerance);
 
 // Only whole original blocks, in the verified source frame, can supply link evidence.
@@ -36,15 +37,17 @@ function splitBlock(b, hash, styles) {
   if (!b.text || !Array.isArray(lines) || lines.length<2 || !Array.isArray(characters) || !range || lines.some(l=>!boxOK(l.bbox) || !l.range)) return [b];
   if (lines[0].range.start!==range.start || lines.at(-1).range.end!==range.end || lines.some((l,i)=>l.range.start>=l.range.end || (i && lines[i-1].range.end!==l.range.start))) return [b];
   const groups=[];
+  const widestLine=Math.max(...lines.map(l=>l.bbox[2]-l.bbox[0]));
   for(const line of lines) {
     const group=groups.at(-1), prev=group?.at(-1), h=line.bbox[3]-line.bbox[1];
     const gap=prev ? line.bbox[1]-prev.bbox[3] : 0;
     const sameColumn=prev && Math.min(line.bbox[2],prev.bbox[2])-Math.max(line.bbox[0],prev.bbox[0]) > Math.min(line.bbox[2]-line.bbox[0],prev.bbox[2]-prev.bbox[0])*.3;
+    const samePhysicalLine=prev && Math.abs(line.bbox[1]-prev.bbox[1])<.5 && line.bbox[0]>=prev.bbox[2]-1 && line.bbox[0]-prev.bbox[2]<=h*2 && line.bbox[2]-prev.bbox[0]<=widestLine*1.3;
     const indent=prev && line.bbox[0]-prev.bbox[0]>h;
     const lineSize=l=>median(characters.filter(c=>c.start>=l.range.start && c.end<=l.range.end).map(c=>styles.get(c.styleId)?.size).filter(Number.isFinite));
     const a=prev && lineSize(prev), z=lineSize(line);
     const sizeChange=a && z && Math.max(a,z)>Math.min(a,z)*1.2;
-    if (!prev || !sameColumn || gap < -h*.5 || gap > h*.8 || indent || sizeChange) groups.push([line]); else group.push(line);
+    if (!prev || (!sameColumn&&!samePhysicalLine) || (gap < -h*.5&&!samePhysicalLine) || gap > h*.8 || (indent&&!samePhysicalLine) || sizeChange) groups.push([line]); else group.push(line);
   }
   if(groups.length===1) return [b];
   return groups.map(group=>{
@@ -295,8 +298,9 @@ export function buildPaperFlow(document, {drawings=document?.drawings || [], lin
       owned.add(x.b.id); const b=x.b, box=x.box;
       let kind='paragraph';
       if(b.kind==='figure' || b.kind==='table') kind='asset';
-      else if(b.kind==='caption' || /^\s*(?:extended\s+data\s+)?(?:fig(?:ure)?\.?|table)\s*\d+[\w.:-]*/i.test(b.text || '')) kind='caption';
+      else if(b.kind==='caption' || captionText(b.text)) kind='caption';
       else if(b.kind==='header' || b.kind==='footer') kind=b.kind;
+      else if(/^\s*\d+\s*$/.test(b.text||'') && Number(b.text)===pi+1 && box[1]>page.height*.93 && Math.abs((box[0]+box[2])/2-page.width/2)<page.width*.12 && (sizeOf(b)||0)<bodySize*.9)kind='footer';
       else if(decoratedFooter.has(b.id)) kind='footer';
       else if(inferredEdge(x)) {
         if(box[1]<page.height*.12) kind='header';
@@ -392,15 +396,21 @@ export function buildPaperFlow(document, {drawings=document?.drawings || [], lin
       }
     }
     // Match measured caption direction and distance; retain each caption as text.
-    for(const caption of entries.filter(x=>x.kind==='caption' && boxOK(x.box))) {
-      const text=caption.blockIds.map(id=>flowBlocks.find(b=>b.id===id)?.text || '').join('');
-      const table=/^\s*(?:extended\s+data\s+)?table\s*\d/i.test(text);
-      const near=entries.filter(x=>x.kind==='asset' && boxOK(x.box) && x.box[0]<caption.box[2] && caption.box[0]<x.box[2]).map(x=>{
+    const captionCandidates=caption=>{
+      return entries.filter(x=>x.kind==='asset' && boxOK(x.box) && x.box[0]<caption.box[2] && caption.box[0]<x.box[2]).map(x=>{
         const position=caption.box[3]<=x.box[1]?'above':caption.box[1]>=x.box[3]?'below':null;
         const gap=position==='above'?x.box[1]-caption.box[3]:position==='below'?caption.box[1]-x.box[3]:Infinity;
         const area=(x.box[2]-x.box[0])*(x.box[3]-x.box[1]);
         return {x,position,gap,area};
       }).filter(c=>c.position && c.gap<=Math.max(30,page.height*.05)).sort((a,b)=>a.gap-b.gap || b.area-a.area);
+    };
+    const captionEntries=entries.filter(x=>x.kind==='caption'&&boxOK(x.box));
+    const clear=captionEntries.filter(c=>!/^\s*table\s*\d/i.test(c.blockIds.map(id=>flowBlocks.find(b=>b.id===id)?.text||'').join(''))).map(c=>captionCandidates(c)).filter(xs=>xs.length===1||xs.length>1&&xs[1].gap-xs[0].gap>10).map(xs=>xs[0].position);
+    const below=clear.filter(x=>x==='below').length,above=clear.filter(x=>x==='above').length,preferred=below>=2&&above===0?'below':above>=2&&below===0?'above':null;
+    for(const caption of captionEntries) {
+      const table=/^\s*(?:extended\s+data\s+)?table\s*\d/i.test(caption.blockIds.map(id=>flowBlocks.find(b=>b.id===id)?.text||'').join(''));
+      let near=captionCandidates(caption);
+      if(!table&&preferred&&near.length>1&&near[1].gap-near[0].gap<=10){const consistent=near.filter(x=>x.position===preferred);if(consistent.length===1)near=consistent;}
       const best=near[0];
       if(best && (near.length===1 || near[1].gap-best.gap>10 || (table && best.position==='above' && best.area>near[1].area*2 && best.gap<near[1].gap))) {
         best.x.captionIds.push(...caption.blockIds);

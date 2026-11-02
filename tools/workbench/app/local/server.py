@@ -32,6 +32,8 @@ import image_edit_service
 import harness_adapter
 import harness_profile
 import harness_deployment
+import layout_agent_service
+from layout_agent_jobs import LayoutStepLedger
 import subprocess
 import pairing
 from build_info import WORKBENCH_VERSION
@@ -44,6 +46,9 @@ LOCK = threading.Lock()
 ACTIVE = threading.BoundedSemaphore(1)
 LIFECYCLE_SCHEMA = 'falsify-companion-lifecycle/1'
 RESULT_RETENTION = 3600
+LAYOUT_JOBS = LayoutStepLedger(layout_agent_service.decide, retention_seconds=RESULT_RETENTION, now=time.monotonic)
+LAYOUT_JOBS_ROUTE = '/api/paper/layout-agent/jobs'
+LAYOUT_JOB_PATH = re.compile(r'/api/paper/layout-agent/jobs/([A-Za-z0-9][A-Za-z0-9._-]{0,127})(/cancel)?\Z')
 
 def companion_instance_descriptor(instance_id):
     """Public per-process identity for reload checks. Not the launcher restart secret."""
@@ -117,6 +122,7 @@ CORS_HEADERS = {'authorization', 'content-type'}
 IMAGE_ROUTES = ('/api/paper/images', '/api/paper/images/export')
 PROFILE_ROUTE = '/api/harness/profile/propose'
 DEPLOY_ROUTE = '/api/harness/deploy'
+LAYOUT_AGENT_ROUTE = '/api/paper/layout-agent/step'
 HOST_LABEL = re.compile(r'[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?')
 
 def parse_web_origin(value):
@@ -138,8 +144,9 @@ def cors_route(method, path):
     Pair redeem/status/revoke are included so the approved origin can finish one-time pairing.
     Pair register, /api/session and launcher routes stay off this list.
     """
-    if method == 'GET': return path in ('/api/capabilities', pairing.STATUS_PATH) or re.fullmatch(r'/api/(red|blue)/jobs/.+', path) is not None
-    if method == 'POST': return path in ['/api/red/jobs', '/api/blue/jobs', '/api/export', '/api/paper/inspect', *IMAGE_ROUTES, PROFILE_ROUTE, DEPLOY_ROUTE, pairing.REDEEM_PATH, pairing.REVOKE_PATH] or re.fullmatch(r'/api/(red|blue)/jobs/.+/cancel', path) is not None
+    layout_job=LAYOUT_JOB_PATH.fullmatch(path)
+    if method == 'GET': return path in ('/api/capabilities', pairing.STATUS_PATH) or re.fullmatch(r'/api/(red|blue)/jobs/.+', path) is not None or bool(layout_job and not layout_job[2])
+    if method == 'POST': return path in ['/api/red/jobs', '/api/blue/jobs', '/api/export', '/api/paper/inspect', *IMAGE_ROUTES, PROFILE_ROUTE, DEPLOY_ROUTE, LAYOUT_AGENT_ROUTE, LAYOUT_JOBS_ROUTE, pairing.REDEEM_PATH, pairing.REVOKE_PATH] or re.fullmatch(r'/api/(red|blue)/jobs/.+/cancel', path) is not None or bool(layout_job and layout_job[2])
     return False
 
 def no_duplicates(items):
@@ -306,9 +313,15 @@ class Handler(BaseHTTPRequestHandler):
                     'model': 'gpt-6.1-sol', 'isolation': 'read-only CLI restrictions; not OS-enforced input-only isolation',
                     'cliSelection': True, 'harnessWrapper': True, 'cliAgents': cli_agents(), 'pdfEditor': pdf_editor,
                     'paperAnalysis': paper_analysis_service.capability(), 'imageEditor': image_edit_service.capability(),
-                    'harnessProfileProposal': harness_profile.capability(), 'harnessDeployment': True,
+                    'harnessProfileProposal': harness_profile.capability(), 'harnessDeployment': True, 'paperLayoutJobs': True,
                     'workbenchVersion': WORKBENCH_VERSION,
                     'companionInstance': companion_instance_descriptor(self.server.instance_id)}); return
+            layout_job=LAYOUT_JOB_PATH.fullmatch(path)
+            if layout_job and not layout_job[2]:
+                try:
+                    receipt=LAYOUT_JOBS.get(layout_job[1]);receipt['companionInstance']=companion_instance_descriptor(self.server.instance_id);self.reply(200,receipt)
+                except layout_agent_service.LayoutAgentError as error: self.reply(error.status,error.payload())
+                return
             with LOCK:
                 role = 'blue' if path.startswith('/api/blue/jobs/') else 'red'
                 prefix = '/api/' + role + '/jobs/'
@@ -319,7 +332,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.headers.get('Sec-Fetch-Site') == 'cross-site': self.reply(403, {'error': 'cross_site_denied'}); return
         if path == '/': path = '/index.html'
         target = (DIST / path.lstrip('/')).resolve()
-        if not target.is_relative_to(DIST.resolve()) or not target.is_file() or any(part.startswith('.') for part in Path(path).parts) or target.suffix not in ['.html', '.css', '.js', '.mjs', '.json', '.bcmap', '.pfb', '.ttf', '.otf', '.wasm', '.txt']:
+        if not target.is_relative_to(DIST.resolve()) or not target.is_file() or any(part.startswith('.') for part in Path(path).parts) or target.suffix not in ['.html', '.css', '.js', '.mjs', '.json', '.bcmap', '.pfb', '.ttf', '.otf', '.wasm', '.data', '.txt']:
             self.reply(404, {'error': 'not_found'}); return
         mime = 'application/javascript' if target.suffix in ['.js', '.mjs'] else mimetypes.guess_type(target)[0] or 'application/octet-stream'
         self.reply(200, target.read_bytes(), mime)
@@ -333,18 +346,31 @@ class Handler(BaseHTTPRequestHandler):
         path = unquote(urlsplit(self.path).path)
         role = 'blue' if path.startswith('/api/blue/jobs') else 'red'
         prefix = '/api/' + role + '/jobs'
-        if path not in ['/api/red/jobs', '/api/blue/jobs', '/api/export', '/api/paper/inspect', *IMAGE_ROUTES, PROFILE_ROUTE, DEPLOY_ROUTE] and not (path.startswith(prefix + '/') and path.endswith('/cancel')):
+        layout_job=LAYOUT_JOB_PATH.fullmatch(path)
+        if path not in ['/api/red/jobs', '/api/blue/jobs', '/api/export', '/api/paper/inspect', *IMAGE_ROUTES, PROFILE_ROUTE, DEPLOY_ROUTE, LAYOUT_AGENT_ROUTE, LAYOUT_JOBS_ROUTE] and not (path.startswith(prefix + '/') and path.endswith('/cancel')) and not (layout_job and layout_job[2]):
             self.reply(404, {'error': 'operation_not_allowed'}); return
         try:
             if self.headers.get('Content-Type') != 'application/json': raise ValueError('application/json 필요')
             size = int(self.headers.get('Content-Length', '-1'))
             limit = 40 * 1024 * 1024 if path == '/api/paper/images/export' else 37 * 1024 * 1024 if path in ['/api/export', '/api/paper/inspect', '/api/paper/images'] else 6 * 1024 * 1024
-            if not 1 <= size <= limit: raise ValueError('본문 크기 제한 초과')
+            if not 1 <= size <= limit:
+                if path == LAYOUT_AGENT_ROUTE and size > limit:
+                    error = layout_agent_service.LayoutAgentError('request_limit', 400)
+                    self.reply(error.status, error.payload()); return
+                raise ValueError('본문 크기 제한 초과')
             raw = self.rfile.read(size)
             if len(raw) != size: raise ValueError('본문 수신 중단')
             body_digest = request_bytes_digest(raw) if path in ('/api/red/jobs', '/api/blue/jobs') else None
             data = json.loads(raw.decode('utf-8'), object_pairs_hook=no_duplicates, parse_constant=lambda _: (_ for _ in ()).throw(ValueError('nonfinite JSON')))
             if not isinstance(data, dict): raise ValueError('JSON 객체 필요')
+            if path==LAYOUT_JOBS_ROUTE or layout_job and layout_job[2]:
+                def admit_layout():
+                    with LOCK: return not self.server_closing() and ACTIVE.acquire(blocking=False)
+                try:
+                    receipt=LAYOUT_JOBS.cancel(layout_job[1],run_id=data.get('runId')) if layout_job else LAYOUT_JOBS.submit(data,admit=admit_layout,release=ACTIVE.release)
+                    receipt['companionInstance']=companion_instance_descriptor(self.server.instance_id);self.reply(202 if receipt['state']=='running' else 200,receipt)
+                except layout_agent_service.LayoutAgentError as error: self.reply(error.status,error.payload())
+                return
             if path.endswith('/cancel'):
                 with LOCK:
                     job = JOBS.get(path.split('/')[-2])
@@ -386,6 +412,16 @@ class Handler(BaseHTTPRequestHandler):
                     try: result = harness_deployment.deploy(data)
                     except (ValueError, OSError, subprocess.SubprocessError):
                         self.reply(400, {'error': 'harness_deployment_failed'}); return
+                finally: ACTIVE.release()
+                self.reply(200, result); return
+            if path == LAYOUT_AGENT_ROUTE:
+                try: request = layout_agent_service.validate_request(data)
+                except layout_agent_service.LayoutAgentError as error: self.reply(error.status, error.payload()); return
+                with LOCK: admitted = not self.server_closing() and ACTIVE.acquire(blocking=False)
+                if not admitted: self.reply(409, {'error': 'companion_busy'}); return
+                try:
+                    try: result = layout_agent_service.decide(request)
+                    except layout_agent_service.LayoutAgentError as error: self.reply(error.status, error.payload()); return
                 finally: ACTIVE.release()
                 self.reply(200, result); return
             if path == PROFILE_ROUTE:
