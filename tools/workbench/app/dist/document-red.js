@@ -1,6 +1,7 @@
 /* Full-paper RED review, candidate selection and preservation-gated export. */
 (function(){
   'use strict';const C=FalsifyDocumentRed,H=FalsifyHarness,B=FalsifyLocalBridge,$=s=>document.querySelector(s);
+  let visualBusy=false;
   let generation=0,doc=null,file=null,candidates=[],response=null,job=null,jobLink=null,busy=false,request=null,binding=null;
   // Run records: one key per (response epoch, final snapshot) so unchanged auto/manual saves never duplicate.
   let epoch=0,exported=null,lastSaved=null,failure=null,guard={};const saved=new Map(),pending=new Map(),settings={budget:$('#red-budget').value};let typesDirty=false,manualRequest=null;
@@ -30,9 +31,9 @@
   // The record button is ledger-mounted; bridge changes before that only refresh the connection line.
   document.addEventListener('falsify:local-bridge',()=>{connection();if($('#red-record'))controls();if(helperReady())void recoverRed();});connection();if(helperReady())void recoverRed();
   function controls(){
-    const active=!!doc&&!busy;
+    const active=!!doc&&!busy&&!visualBusy;
     const cap=B.capabilities();$('#red-start').disabled=!active||!cap?.red||!$('#red-consent').checked||!FalsifyLab.allowed('red');
-    $('#red-record').disabled=!active||!response||pending.size>0;FalsifyLab.busy('red',busy||pending.size>0);B.busy('red',busy);
+    $('#red-record').disabled=!active||!response||pending.size>0;FalsifyLab.busy('red',busy||visualBusy||pending.size>0);B.busy('red',busy||visualBusy);
     $('#red-request').disabled=!active;$('#red-import-response').disabled=!active;
     if($('#red-types'))$('#red-types').disabled=busy;if($('#red-level'))$('#red-level').disabled=busy;$('#red-budget').disabled=busy;if($('#red-language'))$('#red-language').disabled=busy;
     $('#red-cancel').hidden=!busy||!job;
@@ -53,6 +54,7 @@
   function cancelCurrent(){const old=job,l=jobLink;job=null;jobLink=null;if(old&&l)void l.request('/api/red/jobs/'+encodeURIComponent(old)+'/cancel',{}).catch(()=>{});}
   function clear(){generation++;cancelCurrent();analysisReset();IMG?.source(null);binding=null;doc=null;file=null;sourceFileRequired=false;candidates=[];response=null;request=null;manualRequest=null;typesDirty=false;busy=false;invalidate();$('#document-red').hidden=true;$('#red-candidates').replaceChildren();$('#red-empty').textContent=EMPTY;$('#red-response').value='';$('#red-record-status').textContent='';$('#red-export').hidden=true;$('#red-consent').checked=false;$('#red-harness-consent').checked=false;statusText('');msg('');controls();}
   document.addEventListener('falsify:document-clear',clear);
+  document.addEventListener('falsify:visual-edit-busy',event=>{visualBusy=!!event.detail?.busy;controls();});
   document.addEventListener('falsify:paper-workspace-source',()=>{if(doc&&typeof globalThis.FalsifyPaperWorkspace?.exportRedBatch==='function')controls();});
   // The shell asks before replacing/closing the source; cancelling the discard confirmation keeps everything.
   document.addEventListener('falsify:before-document-change',e=>{if(e.detail?.role==='red'&&!keepEdits())e.preventDefault();});

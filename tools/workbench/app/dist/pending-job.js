@@ -15,7 +15,7 @@
   const SECRET=/^(token|authorization|bearer|cookie|password|secret|session|sessiontoken|file|bytes|pdf|pdfbytes)$/i;
   const RECEIPTS=['pending','accepted','unknown','rejected'];
   const DISPOSITIONS=['open','running','completed','failed','cancelled','expired','unknown'];
-  const BLUE_KEYS=['schema','revision','requestId','sourceHash','segments','maxCalls','consent','harness','harnessCanonical','executionConsent','visualConsent','visualEvidence','fileHash'];
+  const BLUE_KEYS=['schema','revision','requestId','sourceHash','segments','maxCalls','consent','harness','harnessCanonical','executionConsent','visualConsent','visualEvidence','fileHash','paperEvidence','paperEvidenceConsent'];
   function fail(status,message){const e=new Error(message);e.status=status;throw e;}
   function storageKey(role){return 'falsify.pending-job.'+role+'.v1';}
   function backing(storage){if(storage)return storage;try{return root.localStorage||null;}catch{return null;}}
@@ -133,6 +133,7 @@
       const body=clone(request),text=segments(body.segments);
       if(!text||!REQUEST_ID.test(body.requestId))fail('rejected','요청 ID가 서버 규칙과 달라 실행하지 않았습니다.');
       if(role==='blue'&&Object.keys(body).some(k=>!BLUE_KEYS.includes(k)))fail('rejected','BLUE 대기 기록은 허용된 문서 필드만 보관합니다. RED 정답·파일명은 넣지 않습니다.');
+      if(body.paperEvidence!==undefined&&(body.paperEvidenceConsent!==true||!body.paperEvidence||Object.keys(body.paperEvidence).sort().join(',')!=='fileHash,paperId'||body.paperEvidence.fileHash!==doc.fileHash||body.fileHash!==doc.fileHash||typeof body.paperEvidence.paperId!=='string'||!body.paperEvidence.paperId.length||body.paperEvidence.paperId.length>160))fail('rejected','표·그림 근거와 현재 PDF가 일치하지 않습니다.');
       if(body.visualEvidence!==undefined && (body.visualConsent!==true || body.fileHash!==doc.fileHash || !Array.isArray(body.visualEvidence) || body.visualEvidence.length<1 || body.visualEvidence.length>2 || body.visualEvidence.some(v=>!v || Object.keys(v).sort().join(',')!==['base64','bbox','fileHash','height','mime','page','rotation','sha256','sourceHash','width'].sort().join(',') || v.fileHash!==doc.fileHash || v.sourceHash!==doc.sourceHash)))fail('rejected','시각 증거 동의 또는 문서 식별이 맞지 않습니다.');
       if(body.revision!==doc.revision||body.sourceHash!==doc.sourceHash||!HEX.test(doc.sourceHash)||!HEX.test(doc.fileHash))fail('hash-mismatch','문서 식별이 요청과 달라 실행하지 않았습니다.');
       if(typeof doc.revision!=='string'||doc.revision.length<1||doc.revision.length>160)fail('rejected','문서 리비전이 올바르지 않습니다.');

@@ -84,7 +84,9 @@ test('preview, download, BLUE and new source session use the candidate; stale ac
     const bridge={session:()=>({request:async(_path,body)=>{goalSent=body.instruction;return {schema:'falsify.paper-layout-agent-action.v1',projectId:body.projectId,step:body.step,action};}})};
     const agent=mountPaperLayoutAgent({doc,host,getSession:()=>session,getEpoch:()=>epoch,download:b=>{downloaded=b;},loadCandidate:async f=>{adopted=f;},bridge,compilerFactory:()=>({dispose(){}}),readerFactory:()=>({dispose(){}}),loadPdf:async()=>({getDocument:({data})=>{previewBytes=data;return {promise:Promise.resolve({numPages:1,getPage:async()=>({getViewport:()=>({width:100,height:100}),render:()=>({promise:Promise.resolve()})})}),destroy:async()=>{}};}}),runAgent:async o=>{await o.decide({projectId:project.id,step:0,instruction:'preserve',maxSteps:1,tools:[],observations:[],images:[],sourceFiles:[]});return {project,artifact,status:'unresolved'};}});
     const goal=host.children[0].children.find(n=>n.tag==='label').children[0];goal.value='줄 간격을 조정';
-    await find(host,'AI로 배치 다듬기').onclick();await new Promise(r=>setImmediate(r));
+    await find(host,'AI로 배치 다듬기').onclick();
+    const previewDeadline=Date.now()+2000;
+    while(!previewBytes&&Date.now()<previewDeadline)await new Promise(r=>setTimeout(r,5));
     assert.match(goalSent,/줄 간격을 조정/);assert.deepEqual(previewBytes,bytes);find(host,'후보 PDF 다운로드').onclick();assert.deepEqual(downloaded,bytes);
     find(host,'이 PDF로 BLUE 검토').onclick();assert.equal(event.type,'falsify:blue-file');assert.equal(event.cancelable,true);assert.deepEqual(Object.keys(event.detail),['file']);assert.deepEqual(event.detail.file.parts[0],bytes);assert.equal(event.detail.file.type,'application/pdf');
     await find(host,'후보 소스로 계속 편집').onclick();assert.equal(adopted.name,'layout-candidate-source.zip');assert.equal(adopted.type,'application/zip');

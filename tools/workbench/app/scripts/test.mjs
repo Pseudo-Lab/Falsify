@@ -1,4 +1,10 @@
 import {spawnSync} from 'node:child_process';
+const visual = spawnSync(process.execPath, ['--test','tests/paper-chart-redraw.spec.cjs','tests/paper-chart-correction-ui.spec.cjs','tests/paper-visual-edit-ui.spec.cjs','tests/paper-visual-integration.spec.cjs'], {stdio:'inherit'});
+if(visual.error || visual.status!==0)process.exit(visual.status||1);
+const plottracer = spawnSync(process.execPath, ['--test','tests/plottracer-vendor.spec.mjs','tests/paper-plottracer-ui.spec.cjs'], {stdio:'inherit'});
+if(plottracer.error || plottracer.status!==0)process.exit(plottracer.status||1);
+const paperEvidence = spawnSync(process.execPath, ['--test','tests/paper-evidence-transport.spec.cjs','tests/test_paper_evidence_ui.mjs','tests/paper-enrichment-ui.spec.cjs'], {stdio:'inherit'});
+if(paperEvidence.error || paperEvidence.status!==0)process.exit(paperEvidence.status||1);
 const latex = spawnSync(process.execPath, ['--test','tests/latex-source-project.spec.mjs','tests/latex-compiler.spec.mjs','tests/latex-semantic-edits.spec.mjs','tests/latex-session.spec.mjs','tests/latex-workbench.spec.mjs','tests/latex-session-archive.spec.mjs'], {stdio:'inherit'});
 if(latex.error || latex.status!==0)process.exit(latex.status||1);
 const runtime = spawnSync(process.execPath, ['--test','tests/latex-runtime-catalog.spec.mjs'], {stdio:'inherit'});

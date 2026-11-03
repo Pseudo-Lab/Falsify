@@ -170,7 +170,8 @@
   function mintId(){return 'pmr-'+crypto.randomUUID();}
   function storeLocal(data){
     const record={...data.record, reviews:data.reviews};
-    const sameHash=locals.findIndex(item=>item.sourceFileHash===record.sourceFileHash);
+    const visual=record.id.startsWith('pvr-');
+    const sameHash=locals.findIndex(item=>item.sourceFileHash===record.sourceFileHash&&item.id.startsWith('pvr-')===visual);
     const sameId=locals.findIndex(item=>item.id===record.id);
     if(sameId>=0&&sameHash>=0&&sameId!==sameHash) throw Error('같은 수동 기록 ID가 이미 있어 덮어쓰지 않았습니다.');
     if(sameHash>=0) locals[sameHash]=record;
@@ -189,14 +190,15 @@
     const source=input&&input.source, snapshot=input&&input.snapshot;
     if(!source||typeof source!=='object'||!snapshot||snapshot.schema!=='falsify.paper-edits.v1') throw Object.assign(Error('원문이나 편집 스냅샷이 없어 수동 기록을 만들지 않았습니다.'),{code:'missing'});
     if(source.fileHash!==snapshot.fileHash) throw Object.assign(Error('원문 해시와 편집 스냅샷 해시가 달라 기록하지 않았습니다.'),{code:'mismatch'});
-    const existing=locals.find(item=>item.sourceFileHash===source.fileHash);
+    const requestedId=typeof input.recordId==='string'&&/^pvr-[A-Za-z0-9-]{1,80}$/.test(input.recordId)?input.recordId:null;
+    const existing=requestedId?locals.find(item=>item.id===requestedId):locals.find(item=>item.sourceFileHash===source.fileHash&&!item.id.startsWith('pvr-'));
     const revision=snapshot.revision;
     const incoming=publicOutput(input.output);
     let output=null;
     if(incoming&&incoming.revision===revision&&typeof incoming.sha256==='string'&&HEX.test(incoming.sha256)) output={sha256:incoming.sha256, revision:incoming.revision, verification:incoming.verification};
     else if(existing&&existing.editRevision===revision&&existing.output) output=copy(existing.output);
     const draft={
-      id:existing?existing.id:mintId(),
+      id:existing?existing.id:(requestedId||mintId()),
       createdAt:existing?existing.createdAt:new Date(input.now||Date.now()).toISOString(),
       sourceFileHash:source.fileHash,
       sourceName:typeof source.name==='string'?source.name:(typeof snapshot.name==='string'?snapshot.name:''),
@@ -213,9 +215,9 @@
     setStatus('수동 편집 기록을 이 브라우저 메모리에 남겼습니다. 모델 실행이나 팀 공유는 하지 않았습니다.');
     return copy(record);
   }
-  async function linkOutput(output){
+  async function linkOutput(output, recordId){
     const ticket=++captureEpoch;
-    const current=locals.find(item=>item.id===activeId);
+    const current=locals.find(item=>item.id===(recordId||activeId));
     if(!current) return {linked:false, reason:'no-record'};
     const seenRevision=current.editRevision, seenId=current.id;
     const incoming=publicOutput(output);
@@ -246,7 +248,10 @@
   }
   async function onOutput(event){
     const detail=event&&event.detail?event.detail:readGet('getOutput');
-    const result=await linkOutput(detail);
+    const source=readGet('getSource');
+    const target=locals.find(item=>item.sourceFileHash===source?.fileHash&&!item.id.startsWith('pvr-'));
+    if(!target)return;
+    const result=await linkOutput(detail,target.id);
     if(!result.linked&&result.reason==='superseded') return;
     if(!result.linked&&result.reason==='stale') setStatus('생성 파일 리비전이나 해시가 현재 편집과 달라 다운로드 해시를 바꾸지 않았습니다.', true);
     if(!result.linked&&result.reason==='binary') setStatus('생성 결과에 PDF 바이너리가 섞여 있어 해시만 연결하지 않았습니다.', true);

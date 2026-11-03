@@ -14,6 +14,16 @@ function harness(hostname='shinick-han.github.io',port='',queue=[]){
 }
 const hosted=()=>harness();
 
+test('visual PDF edits reach authenticated export without opening other visual routes',async()=>{
+  const h=hosted();h.queue.push(reply(CAP),reply({schema:'falsify.visual-edit-export.v1'}));
+  await h.bridge.pair(TOKEN,'7816');
+  await h.bridge.session().request('/api/paper/visual/export',{operations:[]});
+  assert.equal(h.calls[1].url,'http://127.0.0.1:7816/api/paper/visual/export');
+  assert.equal(h.calls[1].init.headers.Authorization,'Bearer '+TOKEN);
+  await assert.rejects(h.bridge.session().request('/api/paper/visual/shell',{command:'x'}),/허용되지/);
+  assert.equal(h.calls.length,2);assert.equal(leaks(h),false);
+});
+
 test('agent layout uses the authenticated bridge without widening other paper routes',async()=>{
   const h=hosted(),action={schema:'falsify.paper-layout-agent-action.v1',action:{tool:'compile_pdf'}};
   h.queue.push(reply(CAP),reply(action));await h.bridge.pair(TOKEN,'7816');
@@ -124,7 +134,7 @@ test('platform instructions prepare dependencies and use the selected port witho
   for(const [platform,label] of [['MacIntel','macOS'],['Linux x86_64','Linux'],['Win32','Windows']]){const dom=fakeDom(),h=hosted();for(const id of ['bridge-install','bridge-install-title','bridge-install-note','bridge-launcher','bridge-launch'])dom.els[id]={textContent:'',hidden:false,disabled:false,addEventListener(){}};
     L.mount(h.bridge,dom,{platform});await h.bridge.ready;assert.match(dom.els['bridge-install-title'].textContent,new RegExp(label));assert.equal(dom.els['bridge-install'].textContent,L.installCommand(L.platformKind(platform)));dom.els['bridge-port'].value='8123';dom.els['bridge-port']._l.input();assert.equal(dom.els['bridge-launcher'].textContent,L.launcher(8123,L.platformKind(platform)));dom.fire('falsify:local-bridge',h.bridge.state());assert.equal(h.calls.length,0);}
 });
-test('RED/BLUE route every broker call through the bridge and bind jobs to one link',()=>{for(const f of ['document-red.js','document-blue.js']){const src=read(f);assert.ok(!/\bfetch\(/.test(src),f);assert.ok(!src.includes('/api/session'),f);assert.ok(!/\btoken\b/.test(src),f);assert.ok(src.includes("B.busy('"+(f.includes('red')?'red':'blue')+"',busy)"),f);assert.match(src,/jobLink=l;/);assert.match(src,/const old=job,l=jobLink;job=null;jobLink=null;if\(old&&l\)void l\.request\(/);}});
+test('RED/BLUE route every broker call through the bridge and bind jobs to one link',()=>{for(const f of ['document-red.js','document-blue.js']){const src=read(f);assert.ok(!/\bfetch\(/.test(src),f);assert.ok(!src.includes('/api/session'),f);assert.ok(!/\btoken\b/.test(src),f);assert.ok(src.includes(f.includes('red')?"B.busy('red',busy||visualBusy)":"B.busy('blue',busy||enrichmentBusy)"),f);assert.match(src,/jobLink=l;/);assert.match(src,/const old=job,l=jobLink;job=null;jobLink=null;if\(old&&l\)void l\.request\(/);}});
 
 (async()=>{let passed=0;for(const [name,fn] of tests){try{await fn();passed++;console.log('PASS '+name);}catch(e){console.error('FAIL '+name);console.error(e);process.exitCode=1;}}
   console.log(JSON.stringify({passed,failed:tests.length-passed,skipped:0}));if(passed!==tests.length)process.exit(1);})();

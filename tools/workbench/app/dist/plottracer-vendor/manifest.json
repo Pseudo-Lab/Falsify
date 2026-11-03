@@ -1,0 +1,103 @@
+{
+  "schema": "falsify.plottracer-runtime.v1",
+  "upstream": "https://github.com/katalystnord/plottracer",
+  "commit": "dcc28a5da453ff5c4e7cadd4478523560d15c0dc",
+  "version": "2.6.0",
+  "license": "AGPL-3.0",
+  "esbuild": "0.28.2",
+  "curve": {
+    "repository": "https://github.com/automeris-io/WebPlotDigitizer",
+    "fork": "https://github.com/Shinick-Han/WebPlotDigitizer",
+    "commit": "3a3ecb11606945d0701c8a488777e6861be70056",
+    "license": "AGPL-3.0-or-later",
+    "files": [
+      {
+        "path": "mathFunctions.js",
+        "sha256": "43154c05d279dee631df77e1e0b0df9dd0967e2c19f3056d121e91e2a9ea39e8"
+      },
+      {
+        "path": "averagingWindowWithStepSize.js",
+        "sha256": "45affb5cfd95da147fed9bd506f4d85bee3179df883a0a61e5db59813c1e7584"
+      },
+      {
+        "path": "xStepWithInterpolation.js",
+        "sha256": "b63deed59ed5a34e6fb48e03e6450734206b96995d817edeff54afb83832f67f"
+      },
+      {
+        "path": "LICENSE",
+        "sha256": "8d56b405468aad11f87ab5763f901e276e08d9646ff5c8481b1762b6b789e9ed"
+      }
+    ]
+  },
+  "engine": {
+    "path": "engine.js",
+    "bytes": 61261,
+    "sha256": "6e2110031d2dadc7888dc49b8400584f5bd66aa5102d5a51ceee24168ef4586d"
+  },
+  "sourceFiles": [
+    {
+      "path": "algorithms/colorFilter.ts",
+      "sha256": "d469af6b772abd6893dc289b42877a31d6064466307ecdbe5c869331c19348b5"
+    },
+    {
+      "path": "algorithms/findLines/geom.ts",
+      "sha256": "207791db25fde12abe9acca64ee055896abd8cb82487193c6fe05d22ace9bc8c"
+    },
+    {
+      "path": "algorithms/findLines/graph.ts",
+      "sha256": "6ef8c7c39b5fc75ce2fa06d89ed845e6b8b4a06f21707e19c259c483b21e59d3"
+    },
+    {
+      "path": "algorithms/findLines/ink.ts",
+      "sha256": "ac26b50a43a5fc779c939435542b6e973f8c45de451d3e39370b55aa4d086914"
+    },
+    {
+      "path": "algorithms/findLines/lines.ts",
+      "sha256": "4ffc955b9742a1b2b965162d6432665a4b538941cc4db8ff2deed39f29df65e9"
+    },
+    {
+      "path": "algorithms/findLines/raster.ts",
+      "sha256": "d12f24f40dc221bf514aa27614caccc40dffa9c53f47eeb023b39d6bbe04cab6"
+    },
+    {
+      "path": "algorithms/segmentFill.ts",
+      "sha256": "3707b2bafac31d2ccf6934fa61941ffb83909a9c50bf58a5d5dd53ea45ee564a"
+    },
+    {
+      "path": "core/axes/logScale.ts",
+      "sha256": "19c51ca3a2ac07c0462af48fbf3e97c6ce9b3507051b053a6b63a11f3cc0adb5"
+    },
+    {
+      "path": "core/axes/types.ts",
+      "sha256": "3555d2b42306244bbf6e46ed096ebf121a4a07dc3d1e368a2e86c8870e1bd4c6"
+    },
+    {
+      "path": "core/axes/xy.ts",
+      "sha256": "042be3c455b8dc3532be0a14bdce17b05f717328ac235a0cc9ac3c81437b1ea7"
+    },
+    {
+      "path": "core/calibration.ts",
+      "sha256": "876d5b97cc8c54f7f4cc90acff49cb5bc1fc1f4d53121fe013ac2855e12d4458"
+    },
+    {
+      "path": "core/dateConversion.ts",
+      "sha256": "b2c8483a0a229dd0c4cec905ef973dacc9a797d7a679c4a860d150c774ad0ad9"
+    },
+    {
+      "path": "core/inputParser.ts",
+      "sha256": "a6a516f30c64e07112ea2d452dbe5614a4544f5c3a53d1bc51b1159e0637a125"
+    },
+    {
+      "path": "core/mathFunctions.ts",
+      "sha256": "fa4587408b7991361d6cc33454743e1160c502bea5777cf65df91ed068531959"
+    },
+    {
+      "path": "engine/colorTraceRun.ts",
+      "sha256": "58fef3c34421350eb67677d25b108af66b1b346dbfd282198df84b090cf76baa"
+    },
+    {
+      "path": "LICENSE",
+      "sha256": "6f1e622c82a380075843bb084a7ec3b1f1d12a4a02526d75e78b0924a860aa75"
+    }
+  ]
+}

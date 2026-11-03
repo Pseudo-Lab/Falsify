@@ -28,6 +28,8 @@ from harness import CLI_AGENTS, EFFORTS, resolve
 import cli_backend
 import editor_service
 import paper_analysis_service
+import paper_evidence_http
+import paper_enrichment
 import image_edit_service
 import harness_adapter
 import harness_profile
@@ -48,6 +50,9 @@ LIFECYCLE_SCHEMA = 'falsify-companion-lifecycle/1'
 RESULT_RETENTION = 3600
 LAYOUT_JOBS = LayoutStepLedger(layout_agent_service.decide, retention_seconds=RESULT_RETENTION, now=time.monotonic)
 LAYOUT_JOBS_ROUTE = '/api/paper/layout-agent/jobs'
+PAPER_ANALYSIS_JOBS = paper_enrichment.AnalysisJobs()
+PAPER_ANALYSIS_ROUTE = '/api/paper/evidence/jobs'
+PAPER_ANALYSIS_PATH = re.compile(r'/api/paper/evidence/jobs/([a-f0-9]{32})(/cancel)?\Z')
 LAYOUT_JOB_PATH = re.compile(r'/api/paper/layout-agent/jobs/([A-Za-z0-9][A-Za-z0-9._-]{0,127})(/cancel)?\Z')
 
 def companion_instance_descriptor(instance_id):
@@ -120,6 +125,7 @@ def busy_locked(server):
     return False, True
 CORS_HEADERS = {'authorization', 'content-type'}
 IMAGE_ROUTES = ('/api/paper/images', '/api/paper/images/export')
+VISUAL_EDIT_ROUTE = '/api/paper/visual/export'
 PROFILE_ROUTE = '/api/harness/profile/propose'
 DEPLOY_ROUTE = '/api/harness/deploy'
 LAYOUT_AGENT_ROUTE = '/api/paper/layout-agent/step'
@@ -145,8 +151,10 @@ def cors_route(method, path):
     Pair register, /api/session and launcher routes stay off this list.
     """
     layout_job=LAYOUT_JOB_PATH.fullmatch(path)
-    if method == 'GET': return path in ('/api/capabilities', pairing.STATUS_PATH) or re.fullmatch(r'/api/(red|blue)/jobs/.+', path) is not None or bool(layout_job and not layout_job[2])
-    if method == 'POST': return path in ['/api/red/jobs', '/api/blue/jobs', '/api/export', '/api/paper/inspect', *IMAGE_ROUTES, PROFILE_ROUTE, DEPLOY_ROUTE, LAYOUT_AGENT_ROUTE, LAYOUT_JOBS_ROUTE, pairing.REDEEM_PATH, pairing.REVOKE_PATH] or re.fullmatch(r'/api/(red|blue)/jobs/.+/cancel', path) is not None or bool(layout_job and layout_job[2])
+    analysis_job=PAPER_ANALYSIS_PATH.fullmatch(path)
+    if method == 'GET': return path in ('/api/capabilities', pairing.STATUS_PATH) or re.fullmatch(r'/api/(red|blue)/jobs/.+', path) is not None or bool(layout_job and not layout_job[2]) or bool(analysis_job and not analysis_job[2])
+    if method == 'POST' and (path == PAPER_ANALYSIS_ROUTE or analysis_job and analysis_job[2]): return True
+    if method == 'POST': return path in ['/api/red/jobs', '/api/blue/jobs', '/api/export', '/api/paper/inspect', *paper_evidence_http.ROUTES, *IMAGE_ROUTES, VISUAL_EDIT_ROUTE, PROFILE_ROUTE, DEPLOY_ROUTE, LAYOUT_AGENT_ROUTE, LAYOUT_JOBS_ROUTE, pairing.REDEEM_PATH, pairing.REVOKE_PATH] or re.fullmatch(r'/api/(red|blue)/jobs/.+/cancel', path) is not None or bool(layout_job and layout_job[2])
     return False
 
 def no_duplicates(items):
@@ -313,10 +321,17 @@ class Handler(BaseHTTPRequestHandler):
                     'model': 'gpt-6.1-sol', 'isolation': 'read-only CLI restrictions; not OS-enforced input-only isolation',
                     'cliSelection': True, 'harnessWrapper': True, 'cliAgents': cli_agents(), 'pdfEditor': pdf_editor,
                     'paperAnalysis': paper_analysis_service.capability(), 'imageEditor': image_edit_service.capability(),
+                    'paperEvidence': {'available': paper_analysis_service.capability()['available'], 'schema': 'falsify.paper-evidence.v1', 'ttlSeconds': 43200, 'engine': 'pymupdf'},
+                    'visualEditor': {'supported': paper_analysis_service.capability()['available'], 'schema': 'falsify.visual-edit-request.v1'}, 'paperEnrichment': paper_enrichment.capability(),
                     'harnessProfileProposal': harness_profile.capability(), 'harnessDeployment': True, 'paperLayoutJobs': True,
                     'workbenchVersion': WORKBENCH_VERSION,
                     'companionInstance': companion_instance_descriptor(self.server.instance_id)}); return
             layout_job=LAYOUT_JOB_PATH.fullmatch(path)
+            analysis_job=PAPER_ANALYSIS_PATH.fullmatch(path)
+            if analysis_job and not analysis_job[2]:
+                try: self.reply(200, PAPER_ANALYSIS_JOBS.get(analysis_job[1]))
+                except ValueError as error: self.reply(404, {'error':str(error)})
+                return
             if layout_job and not layout_job[2]:
                 try:
                     receipt=LAYOUT_JOBS.get(layout_job[1]);receipt['companionInstance']=companion_instance_descriptor(self.server.instance_id);self.reply(200,receipt)
@@ -347,12 +362,13 @@ class Handler(BaseHTTPRequestHandler):
         role = 'blue' if path.startswith('/api/blue/jobs') else 'red'
         prefix = '/api/' + role + '/jobs'
         layout_job=LAYOUT_JOB_PATH.fullmatch(path)
-        if path not in ['/api/red/jobs', '/api/blue/jobs', '/api/export', '/api/paper/inspect', *IMAGE_ROUTES, PROFILE_ROUTE, DEPLOY_ROUTE, LAYOUT_AGENT_ROUTE, LAYOUT_JOBS_ROUTE] and not (path.startswith(prefix + '/') and path.endswith('/cancel')) and not (layout_job and layout_job[2]):
+        analysis_job=PAPER_ANALYSIS_PATH.fullmatch(path)
+        if path not in ['/api/red/jobs', '/api/blue/jobs', '/api/export', '/api/paper/inspect', *paper_evidence_http.ROUTES, PAPER_ANALYSIS_ROUTE, *IMAGE_ROUTES, VISUAL_EDIT_ROUTE, PROFILE_ROUTE, DEPLOY_ROUTE, LAYOUT_AGENT_ROUTE, LAYOUT_JOBS_ROUTE] and not (path.startswith(prefix + '/') and path.endswith('/cancel')) and not (layout_job and layout_job[2]) and not (analysis_job and analysis_job[2]):
             self.reply(404, {'error': 'operation_not_allowed'}); return
         try:
             if self.headers.get('Content-Type') != 'application/json': raise ValueError('application/json 필요')
             size = int(self.headers.get('Content-Length', '-1'))
-            limit = 40 * 1024 * 1024 if path == '/api/paper/images/export' else 37 * 1024 * 1024 if path in ['/api/export', '/api/paper/inspect', '/api/paper/images'] else 6 * 1024 * 1024
+            limit = 40 * 1024 * 1024 if path in ('/api/paper/images/export', VISUAL_EDIT_ROUTE) else 37 * 1024 * 1024 if path in ['/api/export', '/api/paper/inspect', '/api/paper/images', paper_evidence_http.ROUTES[0]] else 6 * 1024 * 1024
             if not 1 <= size <= limit:
                 if path == LAYOUT_AGENT_ROUTE and size > limit:
                     error = layout_agent_service.LayoutAgentError('request_limit', 400)
@@ -363,6 +379,21 @@ class Handler(BaseHTTPRequestHandler):
             body_digest = request_bytes_digest(raw) if path in ('/api/red/jobs', '/api/blue/jobs') else None
             data = json.loads(raw.decode('utf-8'), object_pairs_hook=no_duplicates, parse_constant=lambda _: (_ for _ in ()).throw(ValueError('nonfinite JSON')))
             if not isinstance(data, dict): raise ValueError('JSON 객체 필요')
+            if path == PAPER_ANALYSIS_ROUTE or analysis_job and analysis_job[2]:
+                def admit_analysis():
+                    with LOCK: return not self.server_closing() and ACTIVE.acquire(blocking=False)
+                try:
+                    receipt = PAPER_ANALYSIS_JOBS.cancel(analysis_job[1]) if analysis_job else PAPER_ANALYSIS_JOBS.submit(data, admit=admit_analysis, release=ACTIVE.release)
+                    self.reply(202 if receipt['state']=='running' else 200, receipt)
+                except ValueError as error: self.reply(409 if str(error)=='companion_busy' else 400, {'error':str(error)})
+                return
+            if path in paper_evidence_http.ROUTES:
+                with LOCK: admitted = not self.server_closing() and ACTIVE.acquire(blocking=False)
+                if not admitted: self.reply(409, {'error': 'companion_busy'}); return
+                try:
+                    result = (paper_evidence_http.prepare if path.endswith('/prepare') else paper_evidence_http.query)(data)
+                finally: ACTIVE.release()
+                self.reply(200, result); return
             if path==LAYOUT_JOBS_ROUTE or layout_job and layout_job[2]:
                 def admit_layout():
                     with LOCK: return not self.server_closing() and ACTIVE.acquire(blocking=False)
@@ -392,6 +423,14 @@ class Handler(BaseHTTPRequestHandler):
                 with LOCK: admitted = not self.server_closing() and ACTIVE.acquire(blocking=False)
                 if not admitted: self.reply(409, {'error': 'companion_busy'}); return
                 try: result = paper_analysis_service.analyze(request)
+                finally: ACTIVE.release()
+                self.reply(200, result); return
+            if path == VISUAL_EDIT_ROUTE:
+                with LOCK: admitted = not self.server_closing() and ACTIVE.acquire(blocking=False)
+                if not admitted: self.reply(409, {'error': 'companion_busy'}); return
+                try:
+                    from paper_visual_edit import export_visual
+                    result = export_visual(data)
                 finally: ACTIVE.release()
                 self.reply(200, result); return
             if path in IMAGE_ROUTES:
@@ -507,6 +546,7 @@ def main():
             server.closing = True
             jobs = list(JOBS.values())
         for job in jobs: job['cancel'].set()
+        PAPER_ANALYSIS_JOBS.shutdown()
         server.server_close()
 
 if __name__ == '__main__': main()

@@ -2,3 +2,5 @@
 # PyMuPDF is AGPL/commercial licensed. Resolve distribution obligations before bundling.
 jsonschema==4.26.0
 PyMuPDF==1.28.2
+# Embedded JS execution for the pinned PlotTracer core (ISC; bundled V8 BSD).
+mini-racer==0.14.1

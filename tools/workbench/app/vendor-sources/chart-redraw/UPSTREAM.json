@@ -1,0 +1,49 @@
+{
+  "chartJs": {
+    "name": "chart.js",
+    "version": "4.6.1",
+    "license": "MIT",
+    "repository": "https://github.com/chartjs/Chart.js",
+    "npmIntegrity": "sha512-hJyniucsFmq//EvXYvJ6c6mahPoI3kaxdjVH8awTaJ/fDNWeSqqqArixMJWkWNN6fcYvPU3HneSANFNYtRi61g==",
+    "distribution": "dist/chart.umd.js",
+    "bundledDependency": "@kurkle/color ^0.3.0 (MIT, already inside the official UMD; Chart.js declares it)",
+    "files": [
+      {
+        "path": "chart.js/chart.umd.js",
+        "sha256": "338399fb5bafe598d21cfc471b0590b61ceb321a985fade4f68499b151f67fbf"
+      },
+      {
+        "path": "chart.js/LICENSE.md",
+        "sha256": "41a84aa2caba645f966a18d9c2056b73e6d3a81d80bc0046bc0011a2634d4cce"
+      }
+    ]
+  },
+  "errorBars": {
+    "name": "chartjs-chart-error-bars",
+    "version": "4.4.5",
+    "license": "MIT",
+    "repository": "https://github.com/sgratzl/chartjs-chart-error-bars",
+    "npmIntegrity": "sha512-JXdPy0AsgllDgjGUG/Kyz4oIFPPqbaa4zgAN+JqhDq0MaYYSCq17467BYDwdJEeOjmPRhtldf/7DF3p8873eTg==",
+    "peer": "chart.js ^4.1.0",
+    "distribution": "build/index.umd.js",
+    "files": [
+      {
+        "path": "chartjs-chart-error-bars/index.umd.js",
+        "sha256": "df664de87cf395c360dd7f6d819072b0528de25d2ceb58e376f767b20cbef075"
+      },
+      {
+        "path": "chartjs-chart-error-bars/LICENSE",
+        "sha256": "187ae1ff295e4dcaacf8a290e5d1052e38559c01c0ea1d790c9a3dcdaa960a2a"
+      }
+    ]
+  },
+  "font": {
+    "family": "LMRoman7-Regular",
+    "cssFamily": "FalsifyChartText",
+    "path": "dist/font-assets/LMRoman7-Regular.otf",
+    "sha256": "48c4b46ab255eec96588fb992fba1ed6102e53d051da480738a61cc6cdb328c3",
+    "licensePath": "LICENSE-LM",
+    "licenseSha256": "49ea6cb9257bbee0a3979c48a774cd221550ac1c20c95549efe45fc99cc18050",
+    "license": "GUST Font License"
+  }
+}

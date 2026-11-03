@@ -554,3 +554,19 @@ test('manual record stylesheet keeps the airport tokens',()=>{
   assert.match(css,/#246388/);
   assert.equal(/box-shadow|online/i.test(css),false);
 });
+
+
+test('visual asset records stay separate from text records and workspace output',async()=>{
+  const bundle=await bundlePromise;
+  const state={fileHash:SOURCE,name:'synthetic.pdf',segments:sourceText(),revision:1,edits:edits()};
+  const workspace={getSource:()=>copy(state),getEditSnapshot:()=>snapshot(SOURCE,1,state.edits),getOutput:()=>null};
+  const t=boot({bundle,workspace});await t.api.ready;
+  await t.api.capture({source:state,snapshot:snapshot(SOURCE,1,state.edits),output:{sha256:HASH_A,revision:1,verification:{}}});
+  await t.api.capture({recordId:'pvr-synthetic',source:state,snapshot:snapshot(SOURCE,1,[{id:'visual-cell',enabled:true,pageIndex:0,before:'1',after:'2',origin:'human',anchor:{bbox:[10,20,30,40]}}]),output:{sha256:HASH_B,revision:1,verification:{}}});
+  assert.equal(t.api.records().length,2);
+  const textId=t.api.records().find(r=>!r.id.startsWith('pvr-')).id;
+  t.document.dispatchEvent(new CustomEvent('falsify:paper-workspace-output',{detail:{sha256:HASH_C,revision:1,verification:{}}}));
+  await until(()=>t.api.records().find(r=>r.id===textId).output.sha256===HASH_C,'text output');
+  assert.equal(t.api.records().find(r=>r.id==='pvr-synthetic').output.sha256,HASH_B);
+  assert.equal(t.api.records().find(r=>r.id==='pvr-synthetic').edits[0].after,'2');
+});

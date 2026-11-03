@@ -1,0 +1,6 @@
+# Official MCP Python SDK. paper_mcp.py uses this package's FastMCP stdio transport.
+# Do not replace it with a hand-rolled JSON-RPC loop. MIT license. https://modelcontextprotocol.io
+mcp==1.30.0
+
+# PDF extraction/crops and the existing companion dependencies.
+-r requirements.txt

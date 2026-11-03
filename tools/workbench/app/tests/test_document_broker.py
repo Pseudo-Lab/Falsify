@@ -23,6 +23,26 @@ class BrokerTests(unittest.TestCase):
         if body is not None:h['Content-Type']='application/json'
         conn=http.client.HTTPConnection('127.0.0.1',self.port,timeout=5);conn.request(method,path,body=json.dumps(body).encode() if isinstance(body,dict) else body,headers=h);res=conn.getresponse();raw=res.read();conn.close()
         return res.status,json.loads(raw) if res.getheader('Content-Type','').startswith('application/json') else raw
+    def test_visual_export_is_authenticated_and_uses_shared_busy_admission(self):
+        import types
+        called=[]
+        def export(body):
+            called.append(body)
+            return {'schema':'falsify.visual-edit-export.v1','sourceSha256':'a'*64,'outputSha256':'b'*64,'file':'cGRm','changes':[]}
+        route='/api/paper/visual/export'
+        with patch.dict(sys.modules, {'paper_visual_edit':types.SimpleNamespace(export_visual=export)}):
+            self.assertEqual(self.call(route,'POST',{})[0],403)
+            server.ACTIVE.acquire()
+            try:self.assertEqual(self.call(route,'POST',{},auth=True)[0],409)
+            finally:server.ACTIVE.release()
+            self.assertEqual(called,[])
+            status,result=self.call(route,'POST',{'schema':'falsify.visual-edit-request.v1'},auth=True)
+            self.assertEqual(status,200)
+            self.assertEqual(result['schema'],'falsify.visual-edit-export.v1')
+            self.assertEqual(len(called),1)
+            self.assertTrue(server.ACTIVE.acquire(blocking=False))
+            server.ACTIVE.release()
+
     def test_wrong_host(self):self.assertEqual(self.call('/',headers={'Host':'attacker.example'})[0],403)
     def test_bootstrap_sameorigin_browser(self):
         self.assertEqual(self.call('/api/session')[0],403)

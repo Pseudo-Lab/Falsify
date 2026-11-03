@@ -1,0 +1,10 @@
+# Optional OCR/chart runtime; installed in a separate environment by setup-paper-analysis.py.
+rapidocr==3.10.0
+img2table==2.0.0
+# img2table uses cv2.ximgproc; ordinary/headless OpenCV alone is insufficient.
+opencv-contrib-python==5.0.0.93
+onnxruntime==1.30.0
+Pillow==12.3.0
+kiwipiepy==0.24.1
+kiwipiepy_model==0.24.0
+mini-racer==0.14.1

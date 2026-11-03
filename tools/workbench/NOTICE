@@ -32,3 +32,13 @@ Table recognition and geometry:
   Original sources, license and provenance: app/src/table-vendor/.
   Browser notices and license: app/dist/table-vendor/.
   No restricted Stirling engine, proprietary, desktop, cloud, SaaS or processor code is included.
+
+Optional local paper analysis (downloaded separately by setup-paper-analysis.py):
+- RapidOCR 3.10.0, Apache-2.0: https://github.com/RapidAI/RapidOCR
+- img2table 2.0.0, MIT: https://github.com/xavctn/img2table
+- kiwipiepy 0.24.1 and kiwipiepy_model 0.24.0, Apache-2.0:
+  https://github.com/bab2min/kiwipiepy
+- Google DePlot, Apache-2.0, revision 6e76d62430da16986be3426bae32301fb9115397:
+  https://huggingface.co/google/deplot
+Model weights and native Python wheels are not bundled in the Workbench source ZIP.
+Existing bundled Liberation Sans is used for DePlot's prompt header.

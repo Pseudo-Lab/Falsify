@@ -1,0 +1,41 @@
+/* RED visual edit surface. Root links this file; the module does not inject it. */
+.paper-visual-edit{display:grid;gap:14px;min-width:0;color:var(--ink,#111315)}
+.paper-visual-edit h2{font-size:22px;line-height:1.35;letter-spacing:-.02em}
+.paper-visual-edit .visual-edit-lead{color:var(--muted,#5a626a);font-size:13px;max-width:68ch}
+.paper-visual-edit .visual-edit-layout{display:grid;grid-template-columns:minmax(220px,300px) minmax(0,1fr);gap:18px;align-items:start}
+.paper-visual-edit .visual-edit-column{display:grid;gap:8px;min-width:0}
+.paper-visual-edit .visual-edit-column h3{font-size:14px}
+.paper-visual-edit .visual-edit-list,.paper-visual-edit .visual-edit-saved{display:grid;gap:0;max-height:320px;overflow:auto;border:1px solid var(--line,#d9dde0);border-radius:6px;background:var(--paper,#fff)}
+.paper-visual-edit .visual-edit-row{display:flex;align-items:flex-start;gap:10px;padding:8px 10px;border-top:1px solid var(--line,#d9dde0);cursor:pointer}
+.paper-visual-edit .visual-edit-row:first-child{border-top:0}
+.paper-visual-edit .visual-edit-row input{margin-top:3px;accent-color:var(--ink,#111315)}
+.paper-visual-edit .visual-edit-row span{display:flex;flex-direction:column;gap:2px;min-width:0;overflow-wrap:anywhere}
+.paper-visual-edit .visual-edit-row small{color:var(--muted,#5a626a);font-size:12px}
+.paper-visual-edit .visual-edit-pager,.paper-visual-edit .visual-edit-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.paper-visual-edit .visual-edit-work{display:grid;gap:12px;min-width:0}
+.paper-visual-edit .visual-edit-grid{max-height:360px;overflow:auto;border:1px solid var(--line,#d9dde0);border-radius:6px;background:var(--paper,#fff)}
+.paper-visual-edit .visual-edit-grid table{margin:0}
+.paper-visual-edit .visual-edit-grid input{width:100%;min-width:4.5rem;padding:6px 8px;border:1px solid #9aa3aa;border-radius:6px;background:var(--paper,#fff)}
+.paper-visual-edit .visual-edit-points{max-height:280px;overflow:auto;display:grid;gap:6px;padding:8px;border:1px solid var(--line,#d9dde0);border-radius:6px;background:var(--paper,#fff)}
+.paper-visual-edit .visual-edit-point{display:grid;grid-template-columns:repeat(4,minmax(0,1fr)) auto;gap:6px;align-items:end}
+.paper-visual-edit .visual-edit-point input,.paper-visual-edit .visual-edit-fields input,.paper-visual-edit .visual-edit-fields select{width:100%;padding:6px 8px;border:1px solid #9aa3aa;border-radius:6px;background:var(--paper,#fff)}
+.paper-visual-edit .visual-edit-fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px}
+.paper-visual-edit .visual-edit-fields label,.paper-visual-edit .visual-edit-point label{display:grid;gap:2px;font-size:12px;color:var(--muted,#5a626a)}
+.paper-visual-edit .visual-edit-series{display:grid;gap:8px;padding-top:8px;border-top:1px solid var(--line,#d9dde0)}
+.paper-visual-edit .visual-edit-stage{max-height:480px;overflow:auto;background:var(--surface,#f3f4f4);border:1px solid var(--line,#d9dde0);touch-action:none}
+.paper-visual-edit .visual-edit-frame{position:relative;display:inline-block;max-width:100%;vertical-align:top}
+.paper-visual-edit .visual-edit-frame canvas,.paper-visual-edit .visual-edit-frame img{display:block;max-width:100%;height:auto}
+.paper-visual-edit .visual-edit-selection{position:absolute;box-sizing:border-box;border:2px solid #8e302b;background:rgba(142,48,43,.16);pointer-events:none}
+.paper-visual-edit .visual-edit-selection[hidden]{display:none}
+.paper-visual-edit .visual-edit-pair{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}
+.paper-visual-edit .visual-edit-pair figure{margin:0;min-width:0}
+.paper-visual-edit .visual-edit-pair img{max-width:100%;max-height:280px;object-fit:contain;background:var(--surface,#f3f4f4);border:1px solid var(--line,#d9dde0)}
+.paper-visual-edit .visual-edit-compare{white-space:pre-wrap;overflow-wrap:anywhere}
+.paper-visual-edit .form-feedback.error{color:var(--red-ink,#8e302b)}
+.paper-visual-edit details{border-top:1px solid var(--line,#d9dde0);padding-top:8px}
+.paper-visual-edit summary{cursor:pointer;font-weight:600}
+.paper-visual-edit .visual-edit-advanced{display:grid;gap:8px;padding-top:8px}
+@media(max-width:820px){
+.paper-visual-edit .visual-edit-layout{grid-template-columns:1fr}
+.paper-visual-edit .visual-edit-point{grid-template-columns:repeat(2,minmax(0,1fr))}
+}

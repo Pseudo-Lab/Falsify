@@ -1,0 +1,24 @@
+{
+  "repository": "https://github.com/automeris-io/WebPlotDigitizer",
+  "fork": "https://github.com/Shinick-Han/WebPlotDigitizer",
+  "commit": "3a3ecb11606945d0701c8a488777e6861be70056",
+  "license": "AGPL-3.0-or-later",
+  "files": [
+    {
+      "path": "mathFunctions.js",
+      "sha256": "43154c05d279dee631df77e1e0b0df9dd0967e2c19f3056d121e91e2a9ea39e8"
+    },
+    {
+      "path": "averagingWindowWithStepSize.js",
+      "sha256": "45affb5cfd95da147fed9bd506f4d85bee3179df883a0a61e5db59813c1e7584"
+    },
+    {
+      "path": "xStepWithInterpolation.js",
+      "sha256": "b63deed59ed5a34e6fb48e03e6450734206b96995d817edeff54afb83832f67f"
+    },
+    {
+      "path": "LICENSE",
+      "sha256": "8d56b405468aad11f87ab5763f901e276e08d9646ff5c8481b1762b6b789e9ed"
+    }
+  ]
+}

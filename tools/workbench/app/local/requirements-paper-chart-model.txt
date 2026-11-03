@@ -1,0 +1,4 @@
+# Optional legacy DePlot adapter, only installed with --with-deplot.
+transformers==5.16.1
+torch==2.11.0
+safetensors==0.8.0

@@ -140,7 +140,7 @@ test('workflow_dispatch verifies feature branches and deploys only main', () => 
 });
 
 test('macOS jobs run portable connection tests and do not invent a handler-bundle pass', () => {
-  assert.match(workflow, /verify-macos-arm:[\s\S]*runs-on:\s*macos-15\n/);
+  assert.match(workflow, /verify-macos-arm:[\s\S]*runs-on:\s*macos-26\n/);
   assert.match(workflow, /verify-macos-intel:[\s\S]*runs-on:\s*macos-15-intel\n/);
   assert.equal((workflow.match(/bash scripts\/test-posix-connection\.sh/g) || []).length, 2);
   assert.equal((workflow.match(/node-version:\s*'24'/g) || []).length, 4);

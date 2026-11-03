@@ -20,7 +20,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Python dependencies
-        run: python -m pip install -r app/local/requirements.txt -r app/local/requirements-images.txt
+        run: python -m pip install -r app/local/requirements-paper-mcp.txt -r app/local/requirements-images.txt numpy==2.5.2 opencv-contrib-python==5.0.0.93
       - name: Isolated visual workflow browser dependencies
         timeout-minutes: 5
         working-directory: app
@@ -87,6 +87,13 @@ jobs:
           node-version: '24'
       - name: Adapter home and CLI directory propagation (no models)
         run: python -m unittest discover -s app/tests -p test_adapter_environment.py -q
+      - name: Pinned PlotTracer embedded engine (no models)
+        run: |
+          python -m pip install mini-racer==0.14.1 Pillow==12.3.0 opencv-contrib-python==5.0.0.93 PyMuPDF==1.28.2
+          python app/tests/test_paper_plottracer.py
+          python app/tests/test_paper_chart_vectors.py
+          python app/tests/test_paper_chart_correction.py
+          python app/tests/test_paper_visual_edit.py
       - name: Connection launcher dry-run contracts (PowerShell 7)
         shell: pwsh
         run: ./scripts/test-connection.ps1
@@ -106,7 +113,7 @@ jobs:
         shell: powershell
         run: ./scripts/test-companion-lifecycle.ps1
   verify-macos-arm:
-    runs-on: macos-15
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -119,6 +126,13 @@ jobs:
         run: python -m unittest discover -s app/tests -p test_adapter_environment.py -q
       - name: Portable POSIX connection tests
         run: bash scripts/test-posix-connection.sh
+      - name: Pinned PlotTracer embedded engine (no models)
+        run: |
+          python -m pip install mini-racer==0.14.1 Pillow==12.3.0 opencv-contrib-python==5.0.0.93 PyMuPDF==1.28.2
+          python app/tests/test_paper_plottracer.py
+          python app/tests/test_paper_chart_vectors.py
+          python app/tests/test_paper_chart_correction.py
+          python app/tests/test_paper_visual_edit.py
       - name: Run real macOS handler bundle test
         run: bash scripts/test-macos-handler.sh
   verify-macos-intel:
@@ -135,6 +149,13 @@ jobs:
         run: python -m unittest discover -s app/tests -p test_adapter_environment.py -q
       - name: Portable POSIX connection tests
         run: bash scripts/test-posix-connection.sh
+      - name: Pinned PlotTracer embedded engine (no models)
+        run: |
+          python -m pip install mini-racer==0.14.1 Pillow==12.3.0 opencv-contrib-python==5.0.0.93 PyMuPDF==1.28.2
+          python app/tests/test_paper_plottracer.py
+          python app/tests/test_paper_chart_vectors.py
+          python app/tests/test_paper_chart_correction.py
+          python app/tests/test_paper_visual_edit.py
       - name: Run real macOS handler bundle test
         run: bash scripts/test-macos-handler.sh
   deploy:

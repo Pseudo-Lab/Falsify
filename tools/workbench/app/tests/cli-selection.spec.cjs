@@ -123,7 +123,7 @@ test('role busy (run, source binding or record) locks CLI controls and ignores c
   assert.equal(w.get('blue-cli-type').value,'codex');assert.equal(w.get('blue-cli-effort').value,'medium','display restored');
   w.lab.busy('blue',false);assert.equal(w.get('blue-cli-effort').disabled,false);w.change('blue-cli-effort','low');await flush();assert.equal(w.events.length,n+1);
   const red=fs.readFileSync(path.join(dist,'document-red.js'),'utf8'),blue=fs.readFileSync(path.join(dist,'document-blue.js'),'utf8');
-  assert.ok(red.includes("FalsifyLab.busy('red',busy||pending.size>0)"),'RED locks during record');assert.ok(blue.includes("FalsifyLab.busy('blue',busy||saving)"),'BLUE locks during record');
+  assert.ok(red.includes("FalsifyLab.busy('red',busy||visualBusy||pending.size>0)"),'RED locks during record');assert.ok(blue.includes("FalsifyLab.busy('blue',busy||saving)"),'BLUE locks during record');
   assert.ok(/GUARDED=\['red-harness','red-cli-type','red-cli-model','red-cli-effort'\]/.test(red),'RED unrecorded-edit guard covers CLI controls');});
 
 test('custom stdio harness uses its own executor; selection never overrides it',async()=>{

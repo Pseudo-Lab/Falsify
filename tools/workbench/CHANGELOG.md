@@ -1,5 +1,47 @@
 # Changelog
 
+## 0.2.0-alpha.48
+
+- Read original PDF line and cubic paths with PyMuPDF and retain source commands, style and page coordinates.
+- Route raster curves through pinned WebPlotDigitizer Step/XStep and PlotTracer findLines without refitting user values.
+- Preserve short branches, asymmetric error bars, requested/effective ink colors and measured/interpolated provenance.
+- Read visible replacements using PDF paint order and share the point/series budget across vector and raster results.
+- Verify original path provenance in BLUE and cover the new engine paths in Windows/macOS CI.
+
+## 0.2.0-alpha.47
+
+- Mount RED chart reading after its deferred preview and analysis dependencies load.
+- Check the real entry-page script order as well as isolated controller behavior.
+
+## 0.2.0-alpha.46
+
+- Edit extracted table cells and replace selected figure regions in a source-bound PDF copy.
+- Redraw line, scatter and bar charts from editable numeric series using pinned Chart.js and optional explicit error bars.
+- Add page-region selection, PNG/JPEG replacement, image cropping and labels with before/after previews.
+- Record human changes, coordinates and source/output hashes automatically; export a separate JSON record.
+- Send only the generated PDF to BLUE and retain the last output when a later edit fails.
+
+## 0.2.0-alpha.45
+
+- Use pinned PlotTracer code for curve extraction and source-bound axis conversion.
+- Add four-tick and curve-color correction in the chart preview, with the same options available through MCP.
+- Keep missing calibration as a partial result instead of substituting a generated numeric table.
+- Run the same JavaScript core in embedded V8 on Windows, macOS and Linux; make the legacy DePlot setup optional.
+- Retain full pixel coordinates for MCP/export and compact curve summaries for BLUE's text context.
+
+## 0.2.0-alpha.44
+
+- Separate same-color chart curves and preserve peaks between axis ticks.
+- Keep series IDs in tables/CSV and retain complete chart points in BLUE context.
+- Preserve source pixels, gaps, sampling error and ambiguous crossings.
+
+## 0.2.0-alpha.43
+
+- 논문 표·그림 구조와 읽기 전용 MCP, 스캔 PDF OCR·그래프 읽기 도구 추가.
+- 한국어 띄어쓰기와 Windows OCR 응답 인코딩 수정.
+- 원본 눈금 기반 선형·로그·이중 축 곡선 측정과 출처 좌표 제공.
+- JSON·CSV 다운로드, 구형 companion 업데이트 안내와 설치 가이드 추가.
+
 ## 0.2.0-alpha.42
 
 - AI 배치 도구의 잘못된 명령 복구, 취소와 미접수 처리 수정.

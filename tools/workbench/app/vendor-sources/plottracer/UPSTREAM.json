@@ -1,0 +1,71 @@
+{
+  "repository": "https://github.com/katalystnord/plottracer",
+  "commit": "dcc28a5da453ff5c4e7cadd4478523560d15c0dc",
+  "license": "AGPL-3.0",
+  "files": [
+    {
+      "path": "algorithms/colorFilter.ts",
+      "sha256": "d469af6b772abd6893dc289b42877a31d6064466307ecdbe5c869331c19348b5"
+    },
+    {
+      "path": "algorithms/findLines/geom.ts",
+      "sha256": "207791db25fde12abe9acca64ee055896abd8cb82487193c6fe05d22ace9bc8c"
+    },
+    {
+      "path": "algorithms/findLines/graph.ts",
+      "sha256": "6ef8c7c39b5fc75ce2fa06d89ed845e6b8b4a06f21707e19c259c483b21e59d3"
+    },
+    {
+      "path": "algorithms/findLines/ink.ts",
+      "sha256": "ac26b50a43a5fc779c939435542b6e973f8c45de451d3e39370b55aa4d086914"
+    },
+    {
+      "path": "algorithms/findLines/lines.ts",
+      "sha256": "4ffc955b9742a1b2b965162d6432665a4b538941cc4db8ff2deed39f29df65e9"
+    },
+    {
+      "path": "algorithms/findLines/raster.ts",
+      "sha256": "d12f24f40dc221bf514aa27614caccc40dffa9c53f47eeb023b39d6bbe04cab6"
+    },
+    {
+      "path": "algorithms/segmentFill.ts",
+      "sha256": "3707b2bafac31d2ccf6934fa61941ffb83909a9c50bf58a5d5dd53ea45ee564a"
+    },
+    {
+      "path": "core/axes/logScale.ts",
+      "sha256": "19c51ca3a2ac07c0462af48fbf3e97c6ce9b3507051b053a6b63a11f3cc0adb5"
+    },
+    {
+      "path": "core/axes/types.ts",
+      "sha256": "3555d2b42306244bbf6e46ed096ebf121a4a07dc3d1e368a2e86c8870e1bd4c6"
+    },
+    {
+      "path": "core/axes/xy.ts",
+      "sha256": "042be3c455b8dc3532be0a14bdce17b05f717328ac235a0cc9ac3c81437b1ea7"
+    },
+    {
+      "path": "core/calibration.ts",
+      "sha256": "876d5b97cc8c54f7f4cc90acff49cb5bc1fc1f4d53121fe013ac2855e12d4458"
+    },
+    {
+      "path": "core/dateConversion.ts",
+      "sha256": "b2c8483a0a229dd0c4cec905ef973dacc9a797d7a679c4a860d150c774ad0ad9"
+    },
+    {
+      "path": "core/inputParser.ts",
+      "sha256": "a6a516f30c64e07112ea2d452dbe5614a4544f5c3a53d1bc51b1159e0637a125"
+    },
+    {
+      "path": "core/mathFunctions.ts",
+      "sha256": "fa4587408b7991361d6cc33454743e1160c502bea5777cf65df91ed068531959"
+    },
+    {
+      "path": "engine/colorTraceRun.ts",
+      "sha256": "58fef3c34421350eb67677d25b108af66b1b346dbfd282198df84b090cf76baa"
+    },
+    {
+      "path": "LICENSE",
+      "sha256": "6f1e622c82a380075843bb084a7ec3b1f1d12a4a02526d75e78b0924a860aa75"
+    }
+  ]
+}

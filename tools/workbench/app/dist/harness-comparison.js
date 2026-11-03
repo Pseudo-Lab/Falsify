@@ -13,6 +13,7 @@
   const hex=x=>typeof x==='string'&&/^[a-f0-9]{64}$/.test(x);
   // A missing visual field is legacy/unknown, not proof that only text was sent.
   function inputIdentity(r){
+    if(r?.inputMode==='structured'||r?.inputMode==='structured-visual')return null; // Keep structured delivery separate from text and visual runs.
     if(r?.inputMode==='text' && !Object.hasOwn(r,'visualEvidence'))return 'text';
     if(r?.inputMode!=='visual')return null;
     const items=r?.visualEvidence;
