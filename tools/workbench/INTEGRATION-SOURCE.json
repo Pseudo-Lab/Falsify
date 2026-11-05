@@ -1,7 +1,7 @@
 {
   "schema": "falsify.team-workbench-source.v1",
   "upstreamRepository": "https://github.com/Shinick-Han/falsify-workbench",
-  "applicationSourceCommit": "006d010c00a735ca60c7ae7c9591511efaa98204",
+  "applicationSourceCommit": "89d903bea26fef2558487d397759d33bf6ab670b",
   "applicationVersion": "0.2.0-alpha.52",
   "destinationRepository": "https://github.com/Pseudo-Lab/Falsify",
   "destinationBranch": "feat/workbench-html-guide-20261012",

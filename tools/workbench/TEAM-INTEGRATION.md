@@ -2,7 +2,7 @@
 
 `tools/workbench`는 `Shinick-Han/falsify-workbench`의 0.2.0-alpha.52 소스 스냅샷입니다.
 
-- 소스 커밋: `006d010c00a735ca60c7ae7c9591511efaa98204`
+- 소스 커밋: `89d903bea26fef2558487d397759d33bf6ab670b`
 - 공개 웹: https://shinick-han.github.io/falsify-workbench/
 - 설치 ZIP: https://github.com/Shinick-Han/falsify-workbench/releases/tag/v0.2.0-alpha.52
 - 소스 파일 1,254개를 Git blob과 실행 비트까지 동기화합니다.

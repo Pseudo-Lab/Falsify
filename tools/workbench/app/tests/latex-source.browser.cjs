@@ -150,6 +150,7 @@ async function main() {
 
     await page.waitForFunction(h => !FalsifyLatexWorkbench.active && FalsifyPaperWorkspace.getSource()?.fileHash===h, hash(pdfInput), {timeout});
     // A freshly opened PDF has no generated artifact until an edit is made.
+    await page.locator('#paper-workspace').getByText('글꼴 · 변경 표시 · 확대',{exact:true}).click();
     const switchedPdf=await streamBytes(await download(page.locator('#paper-workspace').getByRole('button',{name:'원본 다운로드',exact:true})));
     assert.equal(hash(switchedPdf),hash(pdfInput));
     await page.locator('#paper-before-stage .textLayer span').first().waitFor({state:'visible',timeout});
