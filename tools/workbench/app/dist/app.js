@@ -17,17 +17,21 @@
     if(changed){scrollTo(0,0);$('#main').focus({preventScroll:true});}
   }
   function followLocation(){const next=fromHash(location.hash);if(next&&next!==view)navigate(next,false);}
-  function signSpec(){
-    if(view==='review')return {gate:'H1',title:'실행 결과를 사람이 평가하세요',detail:'기록된 RED / BLUE 실행을 골라 판정과 근거를 남깁니다.',label:'평가할 실행 선택',action:()=>focusTarget($('#evaluation-run'))};
-    if(view==='results')return {gate:'A1',title:'기록을 저장하고 비교하세요',detail:'내 브라우저 기록과 팀 서랍의 기록을 확인합니다.',label:'팀 기록 열기',action:()=>$('#confluence-results-load')?.click()};
-    if(view==='agents')return {gate:'C1',title:'도구를 골라 사용하세요',detail:'내 도구를 사용하거나 팀 서랍에서 가져옵니다.',label:'내 도구 보기',action:()=>$('#harness-library')?.scrollIntoView({block:'start'})};
-    if(view==='blue'){
+  function blueSignSpec(){
       if(blueProgress?.busy)return {gate:'B1',title:blueProgress.phase==='import'?'변경본을 읽고 있습니다':'BLUE 검토 중입니다',detail:blueProgress.name,label:'진행 상태 보기',action:()=>focusTarget($('#doc-blue-progress'))};
       if(blueProgress?.hasResult)return {gate:'B1',title:'BLUE 결과를 확인하세요',detail:blueProgress.name,label:'결과 보기',action:()=>{const external=globalThis.FalsifyDocumentBlueExternal?.getExternalResponses?.();const target=external?.items?.length?$('#external-blue'):$('#doc-blue-findings').closest('.role-step');focusTarget(target);}};
 
       if(blueProgress?.name)return {gate:'B1',title:'논문을 검토할 준비가 됐습니다',detail:blueProgress.name,label:'지시문 작성',action:()=>focusTarget($('#external-blue .prompt-instructions textarea')||$('#external-blue textarea[aria-label="BLUE 외부 응답"]'))};
       return {gate:'B1',title:'BLUE 검토 파일을 입력하세요',detail:'검토할 논문을 직접 고르세요.',label:'BLUE 파일 입력',action:()=>focusTarget($('#doc-blue-file'))};
-    }
+  }
+  function signSpec(){
+    if(view==='review')return {gate:'H1',title:'실행 결과를 사람이 평가하세요',detail:'기록된 RED / BLUE 실행을 골라 판정과 근거를 남깁니다.',label:'평가할 실행 선택',action:()=>focusTarget($('#evaluation-run'))};
+    if(view==='results')return {gate:'A1',title:'기록을 저장하고 비교하세요',detail:'내 브라우저 기록과 팀 서랍의 기록을 확인합니다.',label:'팀 기록 열기',action:()=>$('#confluence-results-load')?.click()};
+    if(view==='agents')return {gate:'C1',title:'도구를 골라 사용하세요',detail:'내 도구를 사용하거나 팀 서랍에서 가져옵니다.',label:'내 도구 보기',action:()=>$('#harness-library')?.scrollIntoView({block:'start'})};
+    if(view==='blue')return blueSignSpec();
+    return redSignSpec();
+  }
+  function redSignSpec(){
     const sourceWorkspace=globalThis.FalsifyLatexWorkbench;
     if(sourceWorkspace?.active){const source=sourceWorkspace.getSource?.(),state=sourceWorkspace.getSession?.()?.snapshot();return {gate:'R1',title:state?.busy?'PDF를 만들고 있습니다':state?.error?'원본 파일을 확인하세요':state?.artifact?'원본을 눌러 수정하세요':source?'PDF 만들기를 눌러 시작하세요':'LaTeX 원본을 읽고 있습니다',detail:state?.error?.message||source?.file?.name||'',label:state?.artifact?'수정본 보기':'편집 화면 보기',action:()=>focusTarget($('#latex-source-workbench'))};}
     if(documentProgress){

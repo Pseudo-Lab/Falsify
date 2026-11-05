@@ -42,32 +42,53 @@ function providerSchema(s){
  if(s.items)next.items=providerSchema(s.items);if(s.anyOf)next.anyOf=s.anyOf.map(providerSchema);return next;
 }
 export const layoutProviderActionSchema=providerSchema(layoutActionSchema);
+function matchesObject(value,s){
+ if(!value||typeof value!=='object'||Array.isArray(value))return false;
+ return (s.required||[]).every(k=>Object.hasOwn(value,k))&&Object.entries(value).every(([k,v])=>s.properties?.[k]&&matches(v,s.properties[k]));
+}
+function matchesArray(value,s){
+ return Array.isArray(value)&&value.length>=(s.minItems||0)&&value.length<=(s.maxItems??5000)&&(!s.uniqueItems||new Set(value).size===value.length)&&value.every(x=>matches(x,s.items));
+}
+function matchesNumber(value,s){
+ return typeof value==='number'&&Number.isFinite(value)&&(s.type!=='integer'||Number.isSafeInteger(value))&&value>=(s.minimum??-Infinity)&&value<=(s.maximum??Infinity);
+}
 function matches(value,s){
  if(s.anyOf)return s.anyOf.some(x=>matches(value,x));
  if(s.const!==undefined&&value!==s.const)return false;
  if(s.enum&&!s.enum.includes(value))return false;
- if(s.type==='object'){if(!value||typeof value!=='object'||Array.isArray(value))return false;return (s.required||[]).every(k=>Object.hasOwn(value,k))&&Object.entries(value).every(([k,v])=>s.properties?.[k]&&matches(v,s.properties[k]));}
- if(s.type==='array')return Array.isArray(value)&&value.length>=(s.minItems||0)&&value.length<=(s.maxItems??5000)&&(!s.uniqueItems||new Set(value).size===value.length)&&value.every(x=>matches(x,s.items));
+ if(s.type==='object')return matchesObject(value,s);
+ if(s.type==='array')return matchesArray(value,s);
  if(s.type==='string')return typeof value==='string'&&!value.includes('\0')&&value.length<=20000;
  if(s.type==='boolean')return typeof value==='boolean';
- return typeof value==='number'&&Number.isFinite(value)&&(s.type!=='integer'||Number.isSafeInteger(value))&&value>=(s.minimum??-Infinity)&&value<=(s.maximum??Infinity);
+ return matchesNumber(value,s);
+}
+function legacyReadSource(value){
+ return {path:value.path,...(value.before?{before:value.before}:{chunk:value.pages[0]||0})};
+}
+function legacyArguments(value){
+ if(!['path','before','after'].every(k=>typeof value[k]==='string'&&value[k].length<=20000)||!matches(value.pages,pages))return null;
+ switch(value.tool){
+  case 'read_source':return legacyReadSource(value);
+  case 'replace_source':return {path:value.path,before:value.before,after:value.after};
+  case 'render_pages':case 'render_reference_pages':return {pages:value.pages};
+  case 'read_reference':return {pages:value.pages,offset:/^\d+$/.test(value.before)?Number(value.before):0};
+  case 'restructure_source':try{return {plan:JSON.parse(value.after)};}catch{return null;}
+  case 'compile_pdf':case 'inspect_pdf':case 'finish':return {};
+  default:return null;
+ }
 }
 export function normalizeLayoutAction(value){
  if(!value||typeof value!=='object'||Array.isArray(value)||!layoutToolNames.includes(value.tool)||typeof value.message!=='string'||value.message.length>4000)return null;
  let args=value.args;
  if(!Object.hasOwn(value,'args')){
-  if(!['path','before','after'].every(k=>typeof value[k]==='string'&&value[k].length<=20000)||!matches(value.pages,pages))return null;
-  switch(value.tool){
-   case 'read_source':args={path:value.path,...(value.before?{before:value.before}:{chunk:value.pages[0]||0})};break;
-   case 'replace_source':args={path:value.path,before:value.before,after:value.after};break;
-   case 'render_pages':case 'render_reference_pages':args={pages:value.pages};break;
-   case 'read_reference':args={pages:value.pages,offset:/^\d+$/.test(value.before)?Number(value.before):0};break;
-   case 'restructure_source':try{args={plan:JSON.parse(value.after)};}catch{return null;}break;
-   case 'compile_pdf':case 'inspect_pdf':case 'finish':args={};break;
-   default:return null;
-  }
+  args=legacyArguments(value);
+  if(args===null)return null;
  }else if(Object.keys(value).some(k=>!['tool','args','message'].includes(k)))return null;
  const definition=layoutToolCatalog.find(t=>t.name===value.tool);if(!matches(args,definition.parameters))return null;
+ return legacyAction(value,args);
+}
+
+function legacyAction(value,args){
  const legacy={path:args.path||'',before:args.before||'',after:args.after||'',pages:args.pages||[],message:value.message,tool:value.tool,args:structuredClone(args)};
  if(value.tool==='read_source'&&args.chunk!==undefined)legacy.pages=[args.chunk];
  if(value.tool==='read_reference')legacy.before=String(args.offset||0);

@@ -89,23 +89,31 @@ def _b64(value, max_bytes, code):
     if base64.b64encode(raw).decode('ascii') != value or not 0 < len(raw) <= max_bytes: raise ValueError(code)
     return raw
 
+def _png_header(data, pos, kind, length, max_side, max_pixels):
+    if kind != b'IHDR' or length != 13: raise ValueError('png')
+    width, height, depth, color, compression, filtering, interlace = struct.unpack('>IIBBBBB', data[pos + 8:pos + 21])
+    if not (1 <= width <= max_side and 1 <= height <= max_side and width * height <= max_pixels) \
+            or depth not in PNG_DEPTHS.get(color, ()) or compression or filtering or interlace not in (0, 1):
+        raise ValueError('png')
+    return width, height
+
+def _png_chunk(data, pos):
+    if pos + 12 > len(data): raise ValueError('png')
+    length, kind = struct.unpack('>I4s', data[pos:pos + 8])
+    end = pos + 12 + length
+    if not _CHUNK.fullmatch(kind) or end > len(data): raise ValueError('png')
+    if zlib.crc32(data[pos + 4:pos + 8 + length]) != struct.unpack('>I', data[end - 4:end])[0]: raise ValueError('png')
+    return length, kind, end
+
 def png_dimensions(data, *, max_side, max_pixels):
     """(width, height) from a structurally valid PNG: signature, IHDR first with a legal depth/color type, every chunk CRC-checked,
     at least one IDAT and IEND last with nothing after it. Header and chunk framing only; pixels are never decoded."""
     if not isinstance(data, bytes) or len(data) < 8 + 25 + 12 or not data.startswith(PNG_SIGNATURE): raise ValueError('png')
     pos, first, idat = 8, True, False
     while True:
-        if pos + 12 > len(data): raise ValueError('png')
-        length, kind = struct.unpack('>I4s', data[pos:pos + 8])
-        end = pos + 12 + length
-        if not _CHUNK.fullmatch(kind) or end > len(data): raise ValueError('png')
-        if zlib.crc32(data[pos + 4:pos + 8 + length]) != struct.unpack('>I', data[end - 4:end])[0]: raise ValueError('png')
+        length, kind, end = _png_chunk(data, pos)
         if first:
-            if kind != b'IHDR' or length != 13: raise ValueError('png')
-            width, height, depth, color, compression, filtering, interlace = struct.unpack('>IIBBBBB', data[pos + 8:pos + 21])
-            if not (1 <= width <= max_side and 1 <= height <= max_side and width * height <= max_pixels) \
-                    or depth not in PNG_DEPTHS.get(color, ()) or compression or filtering or interlace not in (0, 1):
-                raise ValueError('png')
+            width, height = _png_header(data, pos, kind, length, max_side, max_pixels)
             first = False
         elif kind == b'IHDR': raise ValueError('png')
         idat = idat or kind == b'IDAT'
@@ -216,6 +224,25 @@ def _read_capped(path, cap):
 
 FAILED = lambda: ImageEditError(500, 'image_edit_failed')
 
+def _raise_child_error(envelope):
+    if envelope.get('status') == 'error' and set(envelope) == {'schema', 'op', 'sourceSha256', 'status', 'reason'}:
+        reason = envelope['reason']
+        if reason == 'dependency-unavailable': raise ImageEditError(503, 'image_editor_unavailable')
+        raise ImageEditError(422, 'image_edit_rejected', reason if isinstance(reason, str) and reason in EXPORT_REASONS
+            else 'engine-error')
+
+def _child_result(result, op, source_sha256):
+    raw = result.stdout or b''
+    if result.returncode != 0 or not isinstance(raw, bytes) or len(raw) > LIMITS['maxStdoutBytes']: raise FAILED()
+    lines = [l for l in raw.decode('utf-8', 'strict').splitlines() if l.strip()]
+    if len(lines) != 1: raise FAILED()
+    envelope = _json(lines[0].encode('utf-8'))
+    if not isinstance(envelope, dict) or envelope.get('schema') != ENVELOPE_SCHEMA or envelope.get('op') != op \
+            or envelope.get('sourceSha256') != source_sha256: raise FAILED()
+    _raise_child_error(envelope)
+    if envelope.get('status') != 'ok': raise FAILED()
+    return envelope
+
 def _run(op, source, source_sha256, runner, consume, occurrence_id=None, replacement=None):
     """Runs the child for op in a private directory and returns consume(workdir, envelope). Always removes the directory."""
     if not sys.executable: raise ImageEditError(503, 'image_editor_unavailable')
@@ -233,19 +260,7 @@ def _run(op, source, source_sha256, runner, consume, occurrence_id=None, replace
             result = (runner or default_runner)([sys.executable, '-I', str(WORKER), '--worker'], input=stdin, cwd=str(workdir),
                 env=env, timeout=LIMITS['timeoutSeconds'])
         except subprocess.TimeoutExpired: raise ImageEditError(504, 'image_edit_timeout') from None
-        raw = result.stdout or b''
-        if result.returncode != 0 or not isinstance(raw, bytes) or len(raw) > LIMITS['maxStdoutBytes']: raise FAILED()
-        lines = [l for l in raw.decode('utf-8', 'strict').splitlines() if l.strip()]
-        if len(lines) != 1: raise FAILED()
-        envelope = _json(lines[0].encode('utf-8'))
-        if not isinstance(envelope, dict) or envelope.get('schema') != ENVELOPE_SCHEMA or envelope.get('op') != op \
-                or envelope.get('sourceSha256') != source_sha256: raise FAILED()
-        if envelope.get('status') == 'error' and set(envelope) == {'schema', 'op', 'sourceSha256', 'status', 'reason'}:
-            reason = envelope['reason']
-            if reason == 'dependency-unavailable': raise ImageEditError(503, 'image_editor_unavailable')
-            raise ImageEditError(422, 'image_edit_rejected', reason if isinstance(reason, str) and reason in EXPORT_REASONS
-                else 'engine-error')
-        if envelope.get('status') != 'ok': raise FAILED()
+        envelope = _child_result(result, op, source_sha256)
         return consume(workdir, envelope)
     except ImageEditError: raise
     except Exception: raise FAILED() from None   # OS, decode, JSON and shape failures: one fixed code, never their text

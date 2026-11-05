@@ -129,22 +129,21 @@ function lazyAnnotationAdapter(signal) {
 // Return raw source spans for the engine only when a line start proves the
 // U+FFFC/U+00AD pair is a discretionary wrap. All representations are counted
 // together so a conventional match cannot hide a second source target.
-export function reconcileSourceWrap(paragraphs, before) {
-  if (typeof before !== 'string' || !before.trim()) return null;
-  let raw = '', markers = new Map();
-  paragraphs.forEach((p, pi) => {
-    if (pi) raw += '\n';
-    const base = raw.length, text = p.runs.map(r => r.text).join('');
+function markControlWrap(text, i, starts, markers, base) {
+  if (text[i] === '\u0002' && /\p{L}/u.test(text[i - 1] || '') && /\s/.test(text[i + 1] || '') && /\p{L}/u.test(text[i + 2] || '') && starts.has(i + 2)) markers.set(base + i, 'control');
+}
+
+function markSourceWraps(p, base, markers) {
+    const text = p.runs.map(r => r.text).join('');
     const starts = new Set((p.lines || []).map(l => l.off));
     for (let i = 0; i < text.length; i++) {
       if (text.slice(i, i + 2) === '\ufffc\u00ad' && starts.has(i + 2) && /\p{L}/u.test(text[i - 1] || '') && /\p{L}/u.test(text[i + 2] || '')) markers.set(base + i, 'pair');
-      if (text[i] === '\u0002' && /\p{L}/u.test(text[i - 1] || '') && /\s/.test(text[i + 1] || '') && /\p{L}/u.test(text[i + 2] || '') && starts.has(i + 2)) markers.set(base + i, 'control');
+      markControlWrap(text, i, starts, markers, base);
     }
-    raw += text;
-  });
-  if (![...markers.values()].includes('pair')) return null;
-  const needle = before.replace(/\s+/g, ' '), hits = new Map();
-  for (const pairMode of ['raw', 'visible', 'logical']) for (const controlMode of ['visible', 'logical']) {
+    return text;
+}
+
+function normalizedWrapMode(raw, markers, pairMode, controlMode) {
     const chars = [];
     for (let i = 0; i < raw.length; i++) {
       const kind = markers.get(i);
@@ -164,6 +163,31 @@ export function reconcileSourceWrap(paragraphs, before) {
       norm += /\s/.test(chars[i].ch) ? ' ' : chars[i].ch;
       map.push([chars[i].a, chars[end].b]); i = end;
     }
+    return {norm,map};
+}
+
+function hasMixedWraps(raw, markers, needle) {
+  const offsets = [...markers.keys()];
+  for (let i = 0; i < offsets.length; i++) for (let j = i + 1; j < offsets.length; j++) {
+    if (markers.get(offsets[i]) !== 'pair' && markers.get(offsets[j]) !== 'pair') continue;
+    const between = raw.slice(offsets[i] + 2, offsets[j]).replace(/\ufffc\u00ad/g, '').replace(/\u0002\s/g, '').replace(/\s+/g, ' ');
+    if (between.length <= needle.length) return true;
+  }
+  return false;
+}
+
+export function reconcileSourceWrap(paragraphs, before) {
+  if (typeof before !== 'string' || !before.trim()) return null;
+  let raw = '', markers = new Map();
+  paragraphs.forEach((p, pi) => {
+    if (pi) raw += '\n';
+    const text = markSourceWraps(p, raw.length, markers);
+    raw += text;
+  });
+  if (![...markers.values()].includes('pair')) return null;
+  const needle = before.replace(/\s+/g, ' '), hits = new Map();
+  for (const pairMode of ['raw', 'visible', 'logical']) for (const controlMode of ['visible', 'logical']) {
+    const {norm,map} = normalizedWrapMode(raw, markers, pairMode, controlMode);
     for (let at = norm.indexOf(needle); at >= 0; at = norm.indexOf(needle, at + 1)) {
       const a = map[at][0], b = map[at + needle.length - 1][1];
       const hasPair = [...markers].some(([offset, kind]) => kind === 'pair' && offset >= a && offset + 1 <= b);
@@ -176,12 +200,7 @@ export function reconcileSourceWrap(paragraphs, before) {
   if (hits.size !== 1) return {ambiguous: true, hits: hits.size};
   // Different wrap spellings in one selection would require per-marker
   // combinations. Reject rather than overlook a mixed-spelling duplicate.
-  const offsets = [...markers.keys()];
-  for (let i = 0; i < offsets.length; i++) for (let j = i + 1; j < offsets.length; j++) {
-    if (markers.get(offsets[i]) !== 'pair' && markers.get(offsets[j]) !== 'pair') continue;
-    const between = raw.slice(offsets[i] + 2, offsets[j]).replace(/\ufffc\u00ad/g, '').replace(/\u0002\s/g, '').replace(/\s+/g, ' ');
-    if (between.length <= needle.length) return {unsupported: true};
-  }
+  if (hasMixedWraps(raw, markers, needle)) return {unsupported: true};
   const hit = hits.values().next().value;
   return {before: raw.slice(hit.a, hit.b + 1)};
 }
@@ -207,8 +226,7 @@ async function reconcileEdits(bytes, edits, engineFactory, signal) {
   return {edits:output, diagnostics};
 }
 
-export async function prepare(request = {}) {
-  const fontSnapshot = captureFonts(request.fontSnapshot);
+function readEditSnapshot(request) {
   let requestedEdits = request.edits;
   let fileHash = request.fileHash || '';
   if (requestedEdits && !Array.isArray(requestedEdits)) {
@@ -221,6 +239,27 @@ export async function prepare(request = {}) {
     }
     requestedEdits = requestedEdits.edits;
   }
+  return {requestedEdits,fileHash};
+}
+
+function markerResult(marker, request, hash, fontSnapshot) {
+    const sha256 = hex(marker.bytes), warnings = [];
+    const pageMap=Array.from({length:marker.pageCount},(_,i)=>({sourcePageIndex:i,outputPageIndex:i,continuationPageIndices:[]}));
+    const verification = {schema:'falsify.paragraph-pdf.v1', engine:'MuPDF', license:RUNTIME.license,
+      sourceSha256:hash, outputSha256:sha256, fontSnapshotDigest:fontSnapshot?.digest ?? null,
+      fontSelections:marker.reports.map(r=>({id:r.id, font:r.font, reason:'source marker substitution'})),
+      status:'applied', layoutVerified:false, independent:false, coordinateSpace:COORDINATE_SPACE,
+      pageCount:{source:marker.pageCount,output:marker.pageCount}, edits:marker.reports, checks:[], warnings, runtime:null,
+      quality:{independent:false, method:'source-stream glyph origins and localized raster comparison', limitations:'Same-engine verification; independent visual QA is required.'},
+      reconciliation:[], report:{ok:true, method:'source-stream-marker', edits:marker.reports, pagination:{pages:{source:marker.pageCount,output:marker.pageCount},sourcePageMap:pageMap,addedPages:0}} };
+    const name=String(request.file?.name || 'document.pdf').replace(/\.pdf$/i,'')+'-edited.pdf';
+    return {file:new File([marker.bytes],name,{type:'application/pdf'}),sha256,verification,
+      pageMap,warnings};
+}
+
+export async function prepare(request = {}) {
+  const fontSnapshot = captureFonts(request.fontSnapshot);
+  const {requestedEdits, fileHash} = readEditSnapshot(request);
   const {bytes, hash} = await source({...request, fileHash});
   if (!Array.isArray(requestedEdits)) throw new ParagraphPdfError('invalid', 'An edits array or falsify.paper-edits.v1 snapshot is required.');
   const enabled = requestedEdits.filter(edit => edit?.enabled !== false);
@@ -234,18 +273,7 @@ export async function prepare(request = {}) {
   } catch { checkAbort(request.signal); }
   checkAbort(request.signal);
   if (marker) {
-    const sha256 = hex(marker.bytes), warnings = [];
-    const pageMap=Array.from({length:marker.pageCount},(_,i)=>({sourcePageIndex:i,outputPageIndex:i,continuationPageIndices:[]}));
-    const verification = {schema:'falsify.paragraph-pdf.v1', engine:'MuPDF', license:RUNTIME.license,
-      sourceSha256:hash, outputSha256:sha256, fontSnapshotDigest:fontSnapshot?.digest ?? null,
-      fontSelections:marker.reports.map(r=>({id:r.id, font:r.font, reason:'source marker substitution'})),
-      status:'applied', layoutVerified:false, independent:false, coordinateSpace:COORDINATE_SPACE,
-      pageCount:{source:marker.pageCount,output:marker.pageCount}, edits:marker.reports, checks:[], warnings, runtime:null,
-      quality:{independent:false, method:'source-stream glyph origins and localized raster comparison', limitations:'Same-engine verification; independent visual QA is required.'},
-      reconciliation:[], report:{ok:true, method:'source-stream-marker', edits:marker.reports, pagination:{pages:{source:marker.pageCount,output:marker.pageCount},sourcePageMap:pageMap,addedPages:0}} };
-    const name=String(request.file?.name || 'document.pdf').replace(/\.pdf$/i,'')+'-edited.pdf';
-    return {file:new File([marker.bytes],name,{type:'application/pdf'}),sha256,verification,
-      pageMap,warnings};
+    return markerResult(marker, request, hash, fontSnapshot);
   }
   const {engineFactory: createEngine, info} = await loadRuntime();
   let tableProof;

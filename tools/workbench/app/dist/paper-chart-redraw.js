@@ -746,7 +746,7 @@
     })(undefined, undefined, undefined);
     globalThis.__FalsifyChartRedrawVendor = {Chart: globalThis.Chart, ChartErrorBars: globalThis.ChartErrorBars};
     (() => {
-  // app/vendor-sources/chart-redraw/adapter.mjs
+  // vendor-sources/chart-redraw/adapter.mjs
   var Chart = globalThis.__FalsifyChartRedrawVendor.Chart;
   var ChartErrorBars = globalThis.__FalsifyChartRedrawVendor.ChartErrorBars;
   var FONT_BASE64 = globalThis.__FALSIFY_CHART_FONT_BASE64__;

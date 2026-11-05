@@ -79,13 +79,19 @@
   const sameBox=(a,b)=>a.length===4&&a.every((n,i)=>Math.abs(n-b[i])<=1e-6);
   const REPORT_KEYS=['schema','sourceSha256','occurrenceId','outputSha256','pageIndex','bbox','changedOccurrences','check','limits'];
   // Exact export or nothing, bound to the source hash and the selected listed occurrence (page and box). The browser still recomputes the output hash.
-  function exportResult(res,expected){
+  function validateExportReport(r,res){
+    if(!exact(r,REPORT_KEYS)||r.schema!==REPORT||r.sourceSha256!==res.sourceSha256||r.occurrenceId!==res.occurrenceId||r.outputSha256!==res.outputSha256||r.changedOccurrences!==1||r.check!=='passed'
+      ||!Array.isArray(r.limits)||r.limits.length!==REPORT_LIMITS.length||r.limits.some((x,i)=>x!==REPORT_LIMITS[i]))fail(EXPORT_SHAPE);
+  }
+  function validateExportShape(res){
     if(!exact(res,['schema','sourceSha256','occurrenceId','outputSha256','filename','file','report'])||res.schema!==EXPORT||res.filename!==FILENAME||!hex(res.sourceSha256)||!hex(res.occurrenceId)||!hex(res.outputSha256))fail(EXPORT_SHAPE);
+  }
+  function exportResult(res,expected){
+    validateExportShape(res);
     if(res.sourceSha256!==expected.sourceSha256||res.occurrenceId!==expected.occurrence.id)fail('교체 결과가 현재 원본이나 선택한 그림과 맞지 않아 버렸습니다.');
     if(res.outputSha256===res.sourceSha256)fail('출력이 원본과 같아 교체된 사본으로 보지 않습니다.');
     const r=res.report;
-    if(!exact(r,REPORT_KEYS)||r.schema!==REPORT||r.sourceSha256!==res.sourceSha256||r.occurrenceId!==res.occurrenceId||r.outputSha256!==res.outputSha256||r.changedOccurrences!==1||r.check!=='passed'
-      ||!Array.isArray(r.limits)||r.limits.length!==REPORT_LIMITS.length||r.limits.some((x,i)=>x!==REPORT_LIMITS[i]))fail(EXPORT_SHAPE);
+    validateExportReport(r,res);
     const box=bbox(r.bbox);if(!box||r.pageIndex!==expected.occurrence.pageIndex||!sameBox(box,expected.occurrence.bbox))fail('교체 보고서의 쪽·상자가 선택한 그림과 맞지 않아 버렸습니다.');
     if(!canonical(res.file,MAX_OUTPUT_BYTES))fail(EXPORT_SHAPE);
     const bytes=decode(res.file);if(bytes.length<5||String.fromCharCode(...bytes.subarray(0,5))!=='%PDF-')fail(EXPORT_SHAPE);

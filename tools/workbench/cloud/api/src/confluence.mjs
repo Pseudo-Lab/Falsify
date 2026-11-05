@@ -28,6 +28,8 @@ const MEDIA_HOST = 'api.media.atlassian.com';
 const MEDIA_BINARY = /^\/file\/[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}\/binary$/;
 const MAX_DOWNLOAD_REDIRECTS = 3;
 const MAX_ANCESTORS = 32;
+const UPSTREAM_DEADLINE_MS = 10000;
+const LIST_CONCURRENCY = 5;
 const PAGE_ID = /^[0-9]{1,20}$/;
 const ATTACHMENT_ID = /^(?:att)?[0-9]{1,20}$/;
 const HEX = /^[a-f0-9]{64}$/;
@@ -239,21 +241,27 @@ function html(message, origin) {
   });
 }
 
-async function readBounded(response, max) {
+async function readBounded(response, max, signal) {
   if (!response.body) return new Uint8Array();
   const reader = response.body.getReader();
+  const cancel = () => { void reader.cancel().catch(() => {}); };
+  if (signal?.aborted) { cancel(); throw new Error('request deadline'); }
+  signal?.addEventListener('abort', cancel, { once: true });
   const chunks = [];
   let size = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    size += value.byteLength;
-    if (size > max) {
-      await reader.cancel().catch(() => {});
-      return null;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > max) {
+        await reader.cancel().catch(() => {});
+        return null;
+      }
+      chunks.push(value);
     }
-    chunks.push(value);
-  }
+    if (signal?.aborted) throw new Error('request deadline');
+  } finally { signal?.removeEventListener('abort', cancel); }
   const out = new Uint8Array(size);
   let offset = 0;
   for (const chunk of chunks) {
@@ -268,13 +276,13 @@ async function sha256(bytes) {
   return [...new Uint8Array(digest)].map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-async function readRequestJson(request, max) {
+async function readRequestJson(request, max, signal) {
   const type = (request.headers.get('Content-Type') || '').trim();
   if (!/^application\/json(\s*;\s*charset=utf-8)?$/i.test(type)) fail(415, 'unsupported_media_type');
   const declared = request.headers.get('Content-Length');
   if (declared !== null && !(Number(declared) <= max)) fail(413, 'payload_too_large');
   if (!request.body) fail(400, 'invalid_request');
-  const bytes = await readBounded(request, max);
+  const bytes = await readBounded(request, max, signal);
   if (!bytes) fail(413, 'payload_too_large');
   let body;
   try { body = JSON.parse(decoder.decode(bytes)); } catch { fail(400, 'invalid_request'); }
@@ -284,6 +292,61 @@ async function readRequestJson(request, max) {
 
 function allowHost(url) {
   return url.protocol === 'https:' && (url.hostname === 'api.atlassian.com' || url.hostname === 'auth.atlassian.com');
+}
+
+// The deadline covers both response headers and the bounded body, even if a
+// fetch implementation or stream does not itself react to abort.
+async function fetchBounded(fetchImpl, url, init, max) {
+  const controller = new AbortController();
+  let reader;
+  let timer;
+  const budget = fetchImpl.budget;
+  if (budget.signal.aborted || Date.now() >= budget.end) throw new Error('request deadline');
+  const abort = () => {
+    controller.abort();
+    if (reader) void reader.cancel().catch(() => {});
+  };
+  budget.signal.addEventListener('abort', abort, { once: true });
+  const deadline = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      reject(new Error('upstream deadline'));
+      controller.abort();
+      if (reader) void reader.cancel().catch(() => {});
+    }, Math.max(0, Math.min(UPSTREAM_DEADLINE_MS, budget.end - Date.now())));
+  });
+  try {
+    return await Promise.race([deadline, (async () => {
+      const response = await fetchImpl(url, { ...init, signal: controller.signal });
+      if (controller.signal.aborted) {
+        if (response.body) void response.body.cancel().catch(() => {});
+        throw new Error('upstream deadline');
+      }
+      if (response.status < 200 || response.status >= 300 || !response.body) {
+        if (response.body) void response.body.cancel().catch(() => {});
+        return new Response(null, { status: response.status, statusText: response.statusText, headers: response.headers });
+      }
+      reader = response.body.getReader();
+      const chunks = [];
+      let size = 0;
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        size += value.byteLength;
+        if (size > max) {
+          void reader.cancel().catch(() => {});
+          fail(413, 'payload_too_large');
+        }
+        chunks.push(value);
+      }
+      const bytes = new Uint8Array(size);
+      let offset = 0;
+      for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+      return new Response(bytes, { status: response.status, statusText: response.statusText, headers: response.headers });
+    })()]);
+  } finally {
+    clearTimeout(timer);
+    budget.signal.removeEventListener('abort', abort);
+  }
 }
 
 async function callUpstream(fetchImpl, url, init, writeStarted = false) {
@@ -296,12 +359,18 @@ async function callUpstream(fetchImpl, url, init, writeStarted = false) {
   try {
     const parsed = new URL(url);
     if (!allowHost(parsed)) fail(502, 'redirect_refused');
-    response = await fetchImpl(parsed.toString(), { ...init, redirect: 'manual' });
+    response = await fetchBounded(fetchImpl, parsed.toString(), { ...init, redirect: 'manual' }, 1024 * 1024);
   } catch (error) {
-    if (error instanceof GatewayError) throw error;
+    if (error instanceof GatewayError && error.code !== 'payload_too_large') throw error;
     if (writeStarted || mutating) unknown();
+    if (error instanceof GatewayError) fail(502, 'upstream_invalid');
     fail(502, 'upstream_unavailable');
   }
+  checkUpstreamResponse(response, writeStarted, mutating, unknown);
+  return response;
+}
+
+function checkUpstreamResponse(response, writeStarted, mutating, unknown) {
   if (response.status >= 300 && response.status < 400) {
     if (writeStarted || mutating) unknown();
     fail(502, 'redirect_refused');
@@ -316,7 +385,6 @@ async function callUpstream(fetchImpl, url, init, writeStarted = false) {
     if (writeStarted || mutating) unknown();
     fail(502, 'upstream_unavailable');
   }
-  return response;
 }
 
 function promote(error, pageId) {
@@ -409,38 +477,58 @@ async function assertParentReadable(fetchImpl, base, token, parent, cloudId) {
     if (response.status !== 200) fail(403, 'parent_not_allowed');
     const payload = await readUpstreamJson(response);
     const results = payload?.results;
-    if (!Array.isArray(results) || results.length > 25) fail(403, 'parent_not_allowed');
+    const ids = readableAncestorIds(results);
     if (!results.length) return;
-    const ids = [];
-    for (const item of results) {
-      if (!item || item.type !== 'page') fail(403, 'parent_not_allowed');
-      const id = String(item.id);
-      if (!PAGE_ID.test(id)) fail(403, 'parent_not_allowed');
-      ids.push(id);
-    }
-    let added = false;
-    for (const id of ids) {
-      if (seen.has(id)) continue;
-      if (seen.size >= MAX_ANCESTORS) fail(403, 'parent_not_allowed');
-      seen.add(id);
-      added = true;
-      await assertReadOpen(fetchImpl, base, token, id);
-    }
-    const next = payload?._links?.next;
-    if (typeof next === 'string' && next) {
-      let url;
-      try { url = new URL(next); } catch { fail(403, 'parent_not_allowed'); }
-      const match = new RegExp(`^/ex/confluence/${cloudId}/wiki/api/v2/pages/([0-9]{1,20})/ancestors$`).exec(url.pathname);
-      if (url.origin !== 'https://api.atlassian.com' || url.username || url.password || !match || !seen.has(match[1])) fail(403, 'parent_not_allowed');
-      if (results.length < 25 && !added) return;
-      current = match[1];
-      continue;
-    }
-    if (!added || results.length < 25) return;
-    if (ids[0] === current) return;
-    current = ids[0];
+    const added = await readUnseenAncestors(fetchImpl, base, token, seen, ids);
+    const next = nextAncestorPage(payload, results, ids, current, seen, added, cloudId);
+    if (next === null) return;
+    current = next;
   }
   fail(403, 'parent_not_allowed');
+}
+
+function readableAncestorIds(results) {
+  if (!Array.isArray(results) || results.length > 25) fail(403, 'parent_not_allowed');
+  const ids = [];
+  for (const item of results) {
+    if (!item || item.type !== 'page') fail(403, 'parent_not_allowed');
+    const id = String(item.id);
+    if (!PAGE_ID.test(id)) fail(403, 'parent_not_allowed');
+    ids.push(id);
+  }
+  return ids;
+}
+
+async function readUnseenAncestors(fetchImpl, base, token, seen, ids) {
+  let added = false;
+  for (const id of ids) {
+    if (seen.has(id)) continue;
+    if (seen.size >= MAX_ANCESTORS) fail(403, 'parent_not_allowed');
+    seen.add(id);
+    added = true;
+    await assertReadOpen(fetchImpl, base, token, id);
+  }
+  return added;
+}
+
+function ancestorCursorPage(next, cloudId, seen) {
+  let url;
+  try { url = new URL(next); } catch { fail(403, 'parent_not_allowed'); }
+  const match = new RegExp(`^/ex/confluence/${cloudId}/wiki/api/v2/pages/([0-9]{1,20})/ancestors$`).exec(url.pathname);
+  if (url.origin !== 'https://api.atlassian.com' || url.username || url.password || !match || !seen.has(match[1])) fail(403, 'parent_not_allowed');
+  return match[1];
+}
+
+function nextAncestorPage(payload, results, ids, current, seen, added, cloudId) {
+  const next = payload?._links?.next;
+  if (typeof next === 'string' && next) {
+    const pageId = ancestorCursorPage(next, cloudId, seen);
+    if (results.length < 25 && !added) return null;
+    return pageId;
+  }
+  if (!added || results.length < 25) return null;
+  if (ids[0] === current) return null;
+  return ids[0];
 }
 
 function downloadTarget(url, cloudId, pageId, attachmentId) {
@@ -469,37 +557,47 @@ async function downloadAttachment(fetchImpl, start, token, cloudId, pageId, atta
     if (!downloadTarget(parsed, cloudId, pageId, attachmentId)) refused();
     const headers = { Accept: 'application/json' };
     if (sendBearer) headers.Authorization = `Bearer ${token}`;
-    let response;
-    try {
-      response = await fetchImpl(parsed.origin + parsed.pathname + parsed.search, { method: 'GET', headers, redirect: 'manual' });
-    } catch (error) {
-      if (error instanceof GatewayError) throw error;
-      if (writeStarted) fail(409, 'write_unknown', {}, { pageId, readBack: true });
-      fail(502, 'upstream_unavailable');
-    }
+    const response = await fetchAttachment(fetchImpl, parsed, headers, writeStarted, pageId);
     if (response.status >= 300 && response.status < 400) {
-      if (![301, 302, 303, 307, 308].includes(response.status) || hop === MAX_DOWNLOAD_REDIRECTS) refused();
-      const location = response.headers.get('Location');
-      if (!location) refused();
-      let next;
-      try { next = new URL(location, parsed); } catch { refused(); }
+      const next = attachmentRedirect(response, parsed, hop, refused);
       if (next.hostname !== parsed.hostname) sendBearer = false;
       current = next.origin + next.pathname + next.search;
       continue;
     }
-    if (response.status === 429) {
-      const retry = response.headers.get('Retry-After');
-      const retryHeaders = retry && /^\d{1,6}$/.test(retry) ? { 'Retry-After': retry } : {};
-      if (writeStarted) fail(409, 'write_partial', retryHeaders, { pageId, readBack: true });
-      fail(429, 'rate_limited', retryHeaders);
-    }
-    if (response.status >= 500) {
-      if (writeStarted) fail(409, 'write_unknown', {}, { pageId, readBack: true });
-      fail(502, 'upstream_unavailable');
-    }
+    checkAttachmentResponse(response, writeStarted, pageId);
     return response;
   }
   refused();
+}
+
+async function fetchAttachment(fetchImpl, parsed, headers, writeStarted, pageId) {
+  try {
+    return await fetchBounded(fetchImpl, parsed.origin + parsed.pathname + parsed.search, { method: 'GET', headers, redirect: 'manual' }, MAX_ARCHIVE_BYTES);
+  } catch (error) {
+    if (error instanceof GatewayError) throw error;
+    if (writeStarted) fail(409, 'write_unknown', {}, { pageId, readBack: true });
+    fail(502, 'upstream_unavailable');
+  }
+}
+
+function attachmentRedirect(response, parsed, hop, refused) {
+  if (![301, 302, 303, 307, 308].includes(response.status) || hop === MAX_DOWNLOAD_REDIRECTS) refused();
+  const location = response.headers.get('Location');
+  if (!location) refused();
+  try { return new URL(location, parsed); } catch { refused(); }
+}
+
+function checkAttachmentResponse(response, writeStarted, pageId) {
+  if (response.status === 429) {
+    const retry = response.headers.get('Retry-After');
+    const retryHeaders = retry && /^\d{1,6}$/.test(retry) ? { 'Retry-After': retry } : {};
+    if (writeStarted) fail(409, 'write_partial', retryHeaders, { pageId, readBack: true });
+    fail(429, 'rate_limited', retryHeaders);
+  }
+  if (response.status >= 500) {
+    if (writeStarted) fail(409, 'write_unknown', {}, { pageId, readBack: true });
+    fail(502, 'upstream_unavailable');
+  }
 }
 
 function needsRefresh(session, now) {
@@ -599,14 +697,22 @@ async function normalizeArchive(archive) {
     if (error instanceof GatewayError) throw error;
     fail(422, 'invalid_archive');
   }
-  if (!normalized || normalized.schema !== 'falsify.confluence-archive.v1' || !['experiment', 'harness', 'paper-edit', 'attempt', 'external-response'].includes(normalized.kind)) fail(422, 'invalid_archive');
-  if (typeof normalized.id !== 'string' || !normalized.id || normalized.id.length > 200 || /[\u0000-\u001f]/.test(normalized.id)) fail(422, 'invalid_archive');
-  if (typeof normalized.title !== 'string' || !normalized.title.trim() || normalized.title.length > 500 || /[\u0000-\u001f\u007f]/.test(normalized.title)) fail(422, 'invalid_archive');
-  if (!normalized.data || typeof normalized.data !== 'object' || Array.isArray(normalized.data)) fail(422, 'invalid_archive');
+  validateArchiveIdentity(normalized);
+  validateArchiveContent(normalized);
   if (typeof archiveSha256 !== 'string' || !HEX.test(archiveSha256)) fail(422, 'invalid_archive');
   const bytes = encoder.encode(JSON.stringify(normalized));
   if (bytes.byteLength > MAX_ARCHIVE_BYTES) fail(413, 'payload_too_large');
   return { normalized, archiveSha256, bytes };
+}
+
+function validateArchiveIdentity(archive) {
+  if (!archive || archive.schema !== 'falsify.confluence-archive.v1' || !['experiment', 'harness', 'paper-edit', 'attempt', 'external-response'].includes(archive.kind)) fail(422, 'invalid_archive');
+  if (typeof archive.id !== 'string' || !archive.id || archive.id.length > 200 || /[\u0000-\u001f]/.test(archive.id)) fail(422, 'invalid_archive');
+}
+
+function validateArchiveContent(archive) {
+  if (typeof archive.title !== 'string' || !archive.title.trim() || archive.title.length > 500 || /[\u0000-\u001f\u007f]/.test(archive.title)) fail(422, 'invalid_archive');
+  if (!archive.data || typeof archive.data !== 'object' || Array.isArray(archive.data)) fail(422, 'invalid_archive');
 }
 
 async function verifyBytes(bytes, expectedHash) {
@@ -646,35 +752,14 @@ function cursorFromNext(next, pathname) {
 async function publish(ctx, session) {
   await requireReady(ctx);
   const config = confluenceConfig(ctx.env);
-  const body = await readRequestJson(ctx.request, MAX_ARCHIVE_BYTES + 8192);
-  if (Object.keys(body).some(key => key !== 'archive' && key !== 'teamShare') || !Object.hasOwn(body, 'archive') || !Object.hasOwn(body, 'teamShare')) {
-    fail(400, 'invalid_request');
-  }
-  if (body.teamShare !== true) fail(400, 'team_share_required');
-  const { normalized, archiveSha256, bytes } = await normalizeArchive(body.archive);
+  const { normalized, archiveSha256, bytes } = await readPublishInput(ctx);
   const parent = config.parent;
   await confine(ctx.fetchImpl, session.accessToken, session.cloudId, parent);
   const base = cloudBase(session.cloudId);
   const title = pageTitle(normalized.kind, archiveSha256);
-  const lookupUrl = `${base}/wiki/api/v2/pages?space-id=${SPACE_ID}&title=${encodeURIComponent(title)}&limit=5`;
-  const lookup = await callUpstream(ctx.fetchImpl, lookupUrl, { headers: authHeaders(session.accessToken) });
-  const found = await readUpstreamJson(lookup);
-  const results = Array.isArray(found?.results) ? found.results : null;
-  if (!results || results.length > 5) fail(502, 'upstream_invalid');
-  const sameTitle = results.filter(page => page && page.title === title && page.status === 'current');
-  if (sameTitle.length > 1) fail(409, 'archive_conflict');
-  let page = sameTitle[0] ? await getPage(ctx.fetchImpl, base, session.accessToken, String(sameTitle[0].id)) : null;
-  if (page && (String(page.parentId) !== parent || String(page.spaceId) !== SPACE_ID)) fail(409, 'archive_conflict');
-  if (page && readyLabel(page)) {
-    await assertReadOpen(ctx.fetchImpl, base, session.accessToken, String(page.id));
-    const prop = propertyValue(page);
-    if (prop && prop.ready === true && prop.archiveSha256 === archiveSha256 && prop.id === normalized.id && prop.kind === normalized.kind) {
-      const url = webUrl(page);
-      if (!url) fail(502, 'upstream_invalid');
-      return json(200, { pageId: String(page.id), webUrl: url, archiveSha256, stored: true, alreadyExisted: true });
-    }
-    fail(409, 'archive_conflict');
-  }
+  let page = await findPublishPage(ctx, session, base, parent, title);
+  const existing = await alreadyStoredArchive(ctx, session, base, page, normalized, archiveSha256);
+  if (existing) return existing;
   let created = false;
   if (!page) {
     try {
@@ -695,11 +780,7 @@ async function publish(ctx, session) {
       throw error;
     }
   }
-  const pageId = page && PAGE_ID.test(String(page.id)) ? String(page.id) : null;
-  if (!pageId) fail(created ? 409 : 502, created ? 'write_unknown' : 'upstream_invalid', {}, created ? { readBack: true } : null);
-  if (String(page.spaceId || SPACE_ID) !== SPACE_ID || (page.parentId && String(page.parentId) !== parent)) {
-    fail(409, 'archive_conflict');
-  }
+  const pageId = publishPageIdentity(ctx, page, parent, created);
   try {
     await ensureAttachment(ctx, base, session.accessToken, session.cloudId, pageId, archiveSha256, bytes);
     await ensureProperty(ctx, base, session.accessToken, pageId, normalized, archiveSha256);
@@ -715,6 +796,52 @@ async function publish(ctx, session) {
   } catch (error) {
     promote(error, pageId);
   }
+}
+
+async function readPublishInput(ctx) {
+  const body = await readRequestJson(ctx.request, MAX_ARCHIVE_BYTES + 8192, ctx.budget.signal);
+  if (Object.keys(body).some(key => key !== 'archive' && key !== 'teamShare') || !Object.hasOwn(body, 'archive') || !Object.hasOwn(body, 'teamShare')) {
+    fail(400, 'invalid_request');
+  }
+  if (body.teamShare !== true) fail(400, 'team_share_required');
+  return normalizeArchive(body.archive);
+}
+
+async function findPublishPage(ctx, session, base, parent, title) {
+  const lookupUrl = `${base}/wiki/api/v2/pages?space-id=${SPACE_ID}&title=${encodeURIComponent(title)}&limit=5`;
+  const lookup = await callUpstream(ctx.fetchImpl, lookupUrl, { headers: authHeaders(session.accessToken) });
+  const found = await readUpstreamJson(lookup);
+  const results = Array.isArray(found?.results) ? found.results : null;
+  if (!results || results.length > 5) fail(502, 'upstream_invalid');
+  const sameTitle = results.filter(page => page && page.title === title && page.status === 'current');
+  if (sameTitle.length > 1) fail(409, 'archive_conflict');
+  const page = sameTitle[0] ? await getPage(ctx.fetchImpl, base, session.accessToken, String(sameTitle[0].id)) : null;
+  if (page && (String(page.parentId) !== parent || String(page.spaceId) !== SPACE_ID)) fail(409, 'archive_conflict');
+  return page;
+}
+
+async function alreadyStoredArchive(ctx, session, base, page, normalized, archiveSha256) {
+  if (page && readyLabel(page)) {
+    await assertReadOpen(ctx.fetchImpl, base, session.accessToken, String(page.id));
+    const prop = propertyValue(page);
+    if (prop && prop.ready === true && prop.archiveSha256 === archiveSha256 && prop.id === normalized.id && prop.kind === normalized.kind) {
+      const url = webUrl(page);
+      if (!url) fail(502, 'upstream_invalid');
+      return json(200, { pageId: String(page.id), webUrl: url, archiveSha256, stored: true, alreadyExisted: true });
+    }
+    fail(409, 'archive_conflict');
+  }
+  return null;
+}
+
+function publishPageIdentity(ctx, page, parent, created) {
+  const pageId = page && PAGE_ID.test(String(page.id)) ? String(page.id) : null;
+  if (pageId) ctx.budget.pageId = pageId;
+  if (!pageId) fail(created ? 409 : 502, created ? 'write_unknown' : 'upstream_invalid', {}, created ? { readBack: true } : null);
+  if (String(page.spaceId || SPACE_ID) !== SPACE_ID || (page.parentId && String(page.parentId) !== parent)) {
+    fail(409, 'archive_conflict');
+  }
+  return pageId;
 }
 
 async function ensureAttachment(ctx, base, token, cloudId, pageId, archiveSha256, bytes) {
@@ -784,15 +911,7 @@ async function listArchives(ctx, session) {
   const cursor = ctx.url.searchParams.get('cursor');
   if ([...ctx.url.searchParams.keys()].some(key => key !== 'cursor')) fail(400, 'invalid_request');
   const key = await aesKey(ctx.env);
-  let upstreamCursor = null;
-  if (cursor !== null) {
-    if (!CLIENT_CURSOR.test(cursor)) fail(400, 'invalid_cursor');
-    const opened = key ? await open(key, CURSOR_PURPOSE, cursor) : null;
-    if (!opened || opened.cloudId !== session.cloudId || opened.parent !== config.parent || typeof opened.cursor !== 'string' || !CURSOR.test(opened.cursor)) {
-      fail(400, 'invalid_cursor');
-    }
-    upstreamCursor = opened.cursor;
-  }
+  const upstreamCursor = await archiveListCursor(cursor, key, session.cloudId, config.parent);
   await confine(ctx.fetchImpl, session.accessToken, session.cloudId, config.parent);
   const base = cloudBase(session.cloudId);
   const pathname = `/ex/confluence/${session.cloudId}/wiki/api/v2/pages/${config.parent}/children`;
@@ -801,25 +920,59 @@ async function listArchives(ctx, session) {
   const payload = await readUpstreamJson(response);
   const results = Array.isArray(payload?.results) ? payload.results : null;
   if (!results || results.length > 25) fail(502, 'upstream_invalid');
-  const items = [];
-  for (const child of results) {
+  const items = new Array(results.length);
+  let nextIndex = 0;
+  async function listChild() {
+   while (nextIndex < results.length) {
+    const index = nextIndex++;
+    const child = results[index];
     if (!child || !PAGE_ID.test(String(child.id)) || String(child.parentId || config.parent) !== config.parent) continue;
-    const page = await getPage(ctx.fetchImpl, base, session.accessToken, String(child.id));
-    if (!page || String(page.parentId) !== config.parent || String(page.spaceId) !== SPACE_ID || !readyLabel(page)) continue;
-    try { await assertReadOpen(ctx.fetchImpl, base, session.accessToken, String(page.id)); }
-    catch (error) { if (error instanceof GatewayError && error.status === 403) continue; throw error; }
-    const prop = propertyValue(page);
-    if (!prop || prop.ready !== true || typeof prop.archiveSha256 !== 'string' || !HEX.test(prop.archiveSha256)) continue;
-    const updatedAt = page.version?.createdAt || page.createdAt;
-    const url = webUrl(page);
-    if (typeof updatedAt !== 'string' || !url) fail(502, 'upstream_invalid');
-    const displayTitle = typeof prop.title === 'string' && prop.title.trim() && prop.title.length <= 500 && !/[\u0000-\u001f\u007f]/.test(prop.title) ? prop.title : String(page.title || '');
-    items.push({ pageId: String(page.id), title: displayTitle, updatedAt, webUrl: url });
+    items[index] = await readListedArchive(ctx, session, base, config.parent, child);
+   }
   }
+  await Promise.all(Array.from({ length: Math.min(LIST_CONCURRENCY, results.length) }, listChild));
   const nextRaw = cursorFromNext(payload?._links?.next, pathname);
   const nextCursor = nextRaw && key ? await seal(key, CURSOR_PURPOSE, { purpose: CURSOR_PURPOSE, cloudId: session.cloudId, parent: config.parent, cursor: nextRaw }) : null;
   if (nextCursor && !CLIENT_CURSOR.test(nextCursor)) fail(502, 'upstream_invalid');
-  return json(200, { items, nextCursor });
+  return json(200, { items: items.filter(Boolean), nextCursor });
+}
+
+async function archiveListCursor(cursor, key, cloudId, parent) {
+  if (cursor === null) return null;
+  if (!CLIENT_CURSOR.test(cursor)) fail(400, 'invalid_cursor');
+  const opened = key ? await open(key, CURSOR_PURPOSE, cursor) : null;
+  if (!opened || opened.cloudId !== cloudId || opened.parent !== parent || typeof opened.cursor !== 'string' || !CURSOR.test(opened.cursor)) {
+    fail(400, 'invalid_cursor');
+  }
+  return opened.cursor;
+}
+
+function isReadyArchivePage(page, parent) {
+  return !!page && String(page.parentId) === parent && String(page.spaceId) === SPACE_ID && readyLabel(page);
+}
+
+function listedArchiveProperty(page, parent) {
+  if (!isReadyArchivePage(page, parent)) return null;
+  const prop = propertyValue(page);
+  if (!prop || prop.ready !== true || typeof prop.archiveSha256 !== 'string' || !HEX.test(prop.archiveSha256)) return null;
+  return prop;
+}
+
+function archiveListItem(page, prop) {
+  const updatedAt = page.version?.createdAt || page.createdAt;
+  const url = webUrl(page);
+  if (typeof updatedAt !== 'string' || !url) fail(502, 'upstream_invalid');
+  const displayTitle = typeof prop.title === 'string' && prop.title.trim() && prop.title.length <= 500 && !/[\u0000-\u001f\u007f]/.test(prop.title) ? prop.title : String(page.title || '');
+  return { pageId: String(page.id), title: displayTitle, updatedAt, webUrl: url };
+}
+
+async function readListedArchive(ctx, session, base, parent, child) {
+  const page = await getPage(ctx.fetchImpl, base, session.accessToken, String(child.id));
+  const prop = listedArchiveProperty(page, parent);
+  if (!prop) return null;
+  try { await assertReadOpen(ctx.fetchImpl, base, session.accessToken, String(page.id)); }
+  catch (error) { if (error instanceof GatewayError && error.status === 403) return null; throw error; }
+  return archiveListItem(page, prop);
 }
 
 async function readArchive(ctx, session, pageId) {
@@ -829,7 +982,7 @@ async function readArchive(ctx, session, pageId) {
   await confine(ctx.fetchImpl, session.accessToken, session.cloudId, config.parent);
   const base = cloudBase(session.cloudId);
   const page = await getPage(ctx.fetchImpl, base, session.accessToken, pageId);
-  if (!page || String(page.parentId) !== config.parent || String(page.spaceId) !== SPACE_ID || !readyLabel(page)) fail(404, 'not_found');
+  if (!isReadyArchivePage(page, config.parent)) fail(404, 'not_found');
   await assertReadOpen(ctx.fetchImpl, base, session.accessToken, pageId);
   const prop = propertyValue(page);
   if (!prop || prop.ready !== true || !HEX.test(prop.archiveSha256 || '')) fail(404, 'not_found');
@@ -837,10 +990,8 @@ async function readArchive(ctx, session, pageId) {
     headers: authHeaders(session.accessToken),
   });
   const list = await readUpstreamJson(listResponse);
-  const filename = `${prop.archiveSha256}.json`;
-  const attachments = Array.isArray(list?.results) ? list.results.filter(item => item && item.title === filename) : [];
-  if (attachments.length !== 1 || !ATTACHMENT_ID.test(String(attachments[0].id))) fail(422, 'invalid_archive');
-  const download = await downloadAttachment(ctx.fetchImpl, `${base}/wiki/rest/api/content/${pageId}/child/attachment/${attachments[0].id}/download`, session.accessToken, session.cloudId, pageId, String(attachments[0].id), false);
+  const attachmentId = archiveAttachmentId(list, prop.archiveSha256);
+  const download = await downloadAttachment(ctx.fetchImpl, `${base}/wiki/rest/api/content/${pageId}/child/attachment/${attachmentId}/download`, session.accessToken, session.cloudId, pageId, attachmentId, false);
   if (download.status < 200 || download.status >= 300) fail(422, 'invalid_archive');
   const bytes = await readBounded(download, MAX_ARCHIVE_BYTES);
   if (!bytes) fail(413, 'payload_too_large');
@@ -849,6 +1000,13 @@ async function readArchive(ctx, session, pageId) {
   const url = webUrl(page);
   if (!url) fail(502, 'upstream_invalid');
   return json(200, { pageId, webUrl: url, archive: verified.normalized, archiveSha256: prop.archiveSha256 });
+}
+
+function archiveAttachmentId(list, hash) {
+  const filename = `${hash}.json`;
+  const attachments = Array.isArray(list?.results) ? list.results.filter(item => item && item.title === filename) : [];
+  if (attachments.length !== 1 || !ATTACHMENT_ID.test(String(attachments[0].id))) fail(422, 'invalid_archive');
+  return String(attachments[0].id);
 }
 
 async function requireReady(ctx) {
@@ -860,7 +1018,7 @@ async function startAuth(ctx) {
   await requireReady(ctx);
   const origin = ctx.request.headers.get('Origin');
   if (!origin || !origins(ctx.settings).has(origin)) fail(403, 'origin_not_allowed');
-  const body = await readRequestJson(ctx.request, 4096);
+  const body = await readRequestJson(ctx.request, 4096, ctx.budget.signal);
   if (Object.keys(body).sort().join() !== 'nonce,returnOrigin') fail(400, 'invalid_request');
   if (typeof body.nonce !== 'string' || !NONCE.test(body.nonce)) fail(400, 'invalid_request');
   let returnOrigin;
@@ -963,12 +1121,27 @@ export function matchConfluence(pathname) {
 }
 
 export async function handleConfluence(ctx) {
-  const context = {
-    ...ctx,
-    fetchImpl: ctx.fetchImpl || globalThis.fetch.bind(globalThis),
-    now: ctx.now || Date.now,
-    refreshed: null,
+  const controller = new AbortController();
+  const duration = ctx.requestBudgetMs ?? (ctx.request.method === 'POST' && ctx.match.template === '/v1/confluence/archives' ? 80000 : 25000);
+  const budget = { signal: controller.signal, end: Date.now() + duration, mutationStarted: false, pageId: null };
+  const upstream = ctx.fetchImpl || globalThis.fetch.bind(globalThis);
+  const fetchImpl = (url, init) => {
+    if (budget.signal.aborted || Date.now() >= budget.end) throw new Error('request deadline');
+    if (ctx.match.template === '/v1/confluence/archives' && ctx.request.method === 'POST' && /^(POST|PUT)$/.test(init.method || 'GET') && new URL(url).hostname === 'api.atlassian.com') budget.mutationStarted = true;
+    return upstream(url, init);
   };
+  fetchImpl.budget = budget;
+  const context = { ...ctx, fetchImpl, budget, now: ctx.now || Date.now, refreshed: null };
+  const expiry = () => new GatewayError(budget.mutationStarted || budget.pageId ? 409 : 502,
+    budget.mutationStarted || budget.pageId ? 'write_unknown' : 'upstream_unavailable', {},
+    budget.mutationStarted || budget.pageId ? { pageId: budget.pageId, readBack: true } : null);
+  let timer;
+  const deadline = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      controller.abort();
+      reject(expiry());
+    }, duration);
+  });
   try {
     const route = ROUTES[ctx.match.template];
     if (!route) fail(404, 'not_found');
@@ -980,11 +1153,15 @@ export async function handleConfluence(ctx) {
     }
     const handler = route[ctx.request.method];
     if (!handler) fail(405, 'method_not_allowed', { Allow: Object.keys(route).join(', ') });
-    const response = await handler(context);
+    const response = await Promise.race([handler(context), deadline]);
+    if (Date.now() >= budget.end) throw expiry();
     return withSession(response, context);
   } catch (error) {
     const known = error instanceof GatewayError ? error : new GatewayError(500, 'internal_error');
     return withSession(errorResponse(known), context);
+  } finally {
+    clearTimeout(timer);
+    controller.abort();
   }
 }
 

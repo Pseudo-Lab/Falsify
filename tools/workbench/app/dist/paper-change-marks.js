@@ -28,16 +28,7 @@
     (items||[]).forEach((item,i)=>{if(typeof item?.str!=='string')return;const start=text.length;text+=item.str;if(item.str)spans.push({i,start,end:text.length});text+=item.hasEOL?'\n':(typeof separator==='function'?separator(item,(items||[])[i+1],i):' ');});
     return {text,spans};
   }
-  function ranges(items,edits,side,separator){
-    const index=indexItems(items,separator),hay=mapped(index.text),found=[],missing=[];
-    for(const edit of edits||[]){
-      if(edit.enabled===false)continue;
-      const delta=difference(mapped(String(edit.before||'')).value.trim(),mapped(String(edit.after||'')).value.trim());if(!delta.changed)continue;
-      const quote=String(edit[side]||''),needle=mapped(quote),wanted=needle.value.trim();
-      if(!wanted){missing.push(edit.id);continue;}
-      const lead=needle.value.indexOf(wanted),at=hay.value.indexOf(wanted);
-      // Repeated phrases are not guessed. They remain available in the text comparison.
-      if(at<0||hay.value.indexOf(wanted,at+1)>=0){missing.push(edit.id);continue;}
+  function changeBounds(delta,side,wanted,hay,at){
       const change=delta[side],positions=[];
       for(let i=0;i<wanted.length;i++)if(i>=change.start&&i<change.end)positions.push(i);
       let start,end,caret=false;
@@ -47,11 +38,25 @@
         const offset=Math.max(0,Math.min(wanted.length,change.start));
         start=offset<wanted.length?hay.starts[at+offset]:hay.ends[at+wanted.length-1];end=start;caret=true;
       }
+      return {start,end,caret};
+  }
+  function collectRanges(edit,side,index,hay,found,missing){
+      if(edit.enabled===false)return;
+      const delta=difference(mapped(String(edit.before||'')).value.trim(),mapped(String(edit.after||'')).value.trim());if(!delta.changed)return;
+      const quote=String(edit[side]||''),needle=mapped(quote),wanted=needle.value.trim();
+      if(!wanted){missing.push(edit.id);return;}
+      const lead=needle.value.indexOf(wanted),at=hay.value.indexOf(wanted);
+      // Repeated phrases are not guessed. They remain available in the text comparison.
+      if(at<0||hay.value.indexOf(wanted,at+1)>=0){missing.push(edit.id);return;}
+      const {start,end,caret}=changeBounds(delta,side,wanted,hay,at);
       let pieces=index.spans.filter(s=>caret?s.start<=start&&s.end>=start:s.end>start&&s.start<end);
       if(caret)pieces=pieces.slice(-1);
-      if(!pieces.length){missing.push(edit.id);continue;}
+      if(!pieces.length){missing.push(edit.id);return;}
       for(const span of pieces)found.push({id:edit.id,itemIndex:span.i,start:Math.max(0,start-span.start),end:Math.min(span.end-span.start,end-span.start),caret,side});
-    }
+  }
+  function ranges(items,edits,side,separator){
+    const index=indexItems(items,separator),hay=mapped(index.text),found=[],missing=[];
+    for(const edit of edits||[]) collectRanges(edit,side,index,hay,found,missing);
     return {found,missing};
   }
   function paintText(node,before,after,side){
@@ -61,24 +66,27 @@
       if(!value)continue;const el=d.createElement(mark?'mark':'span');el.textContent=value;if(mark)el.className='paper-change-text is-'+side;node.append(el);
     }
   }
-  function paintPage({document:d,container,items,divs,edits,side,separator}){
-    for(let i=0;i<(divs?.length||0);i++)if(divs[i].dataset)divs[i].dataset.i=String(i);
-    const result=ranges(items,edits,side,separator),layer=d.createElement('div');layer.className='paper-change-layer';layer.setAttribute('aria-hidden','true');
-    container.append(layer);const pageBox=container.getBoundingClientRect();let count=0;
-    for(const hit of result.found){
+  function paintHit(d,divs,hit,side,pageBox,layer){
+    let count=0;
       const span=divs?.[hit.itemIndex],text=span?.firstChild;
-      if(!text||text.nodeType!==3||!d.createRange)continue;
+      if(!text||text.nodeType!==3||!d.createRange)return 0;
       const range=d.createRange(),length=text.textContent.length;
       let from=Math.max(0,Math.min(length,hit.start)),to=Math.max(from,Math.min(length,hit.end)),endCaret=false;
       if(hit.caret){endCaret=from===length;from=endCaret?Math.max(0,from-1):from;to=Math.min(length,from+1);}
-      if(from===to)continue;range.setStart(text,from);range.setEnd(text,to);
+      if(from===to)return 0;range.setStart(text,from);range.setEnd(text,to);
       for(const rect of range.getClientRects()){
         if(!(rect.height>0&&rect.width>0))continue;
         const el=d.createElement('span');el.className='paper-change-mark is-'+side+(hit.caret?' is-caret':'');el.dataset.edit=String(hit.id||'');
         el.style.left=((hit.caret&&endCaret?rect.right:rect.left)-pageBox.left)+'px';el.style.top=(rect.top-pageBox.top)+'px';
         el.style.width=(hit.caret?3:rect.width)+'px';el.style.height=rect.height+'px';layer.append(el);count++;
       }
-    }
+    return count;
+  }
+  function paintPage({document:d,container,items,divs,edits,side,separator}){
+    for(let i=0;i<(divs?.length||0);i++)if(divs[i].dataset)divs[i].dataset.i=String(i);
+    const result=ranges(items,edits,side,separator),layer=d.createElement('div');layer.className='paper-change-layer';layer.setAttribute('aria-hidden','true');
+    container.append(layer);const pageBox=container.getBoundingClientRect();let count=0;
+    for(const hit of result.found) count+=paintHit(d,divs,hit,side,pageBox,layer);
     return {...result,layer,count};
   }
   return {difference,mapped,ranges,paintText,paintPage};

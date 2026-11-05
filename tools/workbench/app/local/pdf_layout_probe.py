@@ -86,6 +86,25 @@ def _tokens(text, a, b, adv):
         i = j
     return out
 
+def _layout_paragraph(after, pos, b, adv, open_line, lines, slot):
+    line, pending = None, None
+    for kind, i, j, w in _tokens(after, pos, b, adv):
+        if kind == 'space' and line is not None:
+            pending = (i, j, w); continue
+        gap = pending[2] if pending else 0.0
+        if line is not None and line['cursor'] + gap + w <= line['limit'] + EPS:
+            line['cursor'] += gap + w; line['end'] = j; pending = None; continue
+        if line is not None:   # soft break: the pending space run (or a CJK zero-width break) is consumed, not drawn
+            lines.append(line); slot = line['slot'] + 1
+        line = open_line(i, w, slot)
+        line['cursor'] += w; line['end'] = j; pending = None
+    if line is None: line = open_line(pos, 0.0, slot)   # an empty paragraph still takes one line
+    if pending and line['cursor'] + pending[2] <= line['limit'] + EPS:
+        line['cursor'] += pending[2]; line['end'] = pending[1]
+    lines.append(line); slot = line['slot'] + 1
+    return slot
+
+
 def _layout(after, box, size, pitch, asc, desc, obstacles, adv):
     """Greedy left-aligned lines over fixed slots (slot k: top y0 + k*pitch, baseline top + ascender*size). Raises _Overflow
     for a piece wider than the box; otherwise returns (lines, slots inside the box), continuing below the box if needed."""
@@ -117,21 +136,7 @@ def _layout(after, box, size, pitch, asc, desc, obstacles, adv):
     while True:
         b = pos
         while b < n and after[b] not in '\r\n': b += 1
-        line, pending = None, None
-        for kind, i, j, w in _tokens(after, pos, b, adv):
-            if kind == 'space' and line is not None:
-                pending = (i, j, w); continue
-            gap = pending[2] if pending else 0.0
-            if line is not None and line['cursor'] + gap + w <= line['limit'] + EPS:
-                line['cursor'] += gap + w; line['end'] = j; pending = None; continue
-            if line is not None:   # soft break: the pending space run (or a CJK zero-width break) is consumed, not drawn
-                lines.append(line); slot = line['slot'] + 1
-            line = open_line(i, w, slot)
-            line['cursor'] += w; line['end'] = j; pending = None
-        if line is None: line = open_line(pos, 0.0, slot)   # an empty paragraph still takes one line
-        if pending and line['cursor'] + pending[2] <= line['limit'] + EPS:
-            line['cursor'] += pending[2]; line['end'] = pending[1]
-        lines.append(line); slot = line['slot'] + 1
+        slot = _layout_paragraph(after, pos, b, adv, open_line, lines, slot)
         if b >= n: return lines, inside
         pos = b + (2 if after.startswith('\r\n', b) else 1)
 
@@ -154,38 +159,31 @@ def _builtin(font):
     if isinstance(font, str) and font in BUILTIN: return pymupdf.Font(font), 'pymupdf-builtin:' + font, None
     return None, 'font-unavailable', None
 
-def _propose(after, bbox, resolved, size, pitch, obstacles, region):
-    if not isinstance(after, str): return _result(after, 'unsupported', 'after-not-text')
-    if not after.strip(): return _result(after, 'unsupported', 'after-empty')
-    if len(after) > LIMITS['maxChars']: return _result(after, 'unsupported', 'after-too-long')
+def _validate_proposal(after, bbox, size, pitch, obstacles, region):
+    if not isinstance(after, str): return None, None, _result(after, 'unsupported', 'after-not-text')
+    if not after.strip(): return None, None, _result(after, 'unsupported', 'after-empty')
+    if len(after) > LIMITS['maxChars']: return None, None, _result(after, 'unsupported', 'after-too-long')
     box = _rect(bbox, True)
-    if box is None: return _result(after, 'unsupported', 'invalid-bbox', region=region)
-    if not _number(size) or not 0 < size <= LIMITS['maxFontSize']: return _result(after, 'unsupported', 'invalid-font-size', region=region)
-    if not _number(pitch) or pitch <= 0: return _result(after, 'unsupported', 'invalid-line-height', region=region)
-    if not isinstance(obstacles, (list, tuple)): return _result(after, 'unsupported', 'invalid-obstacles', region=region)
-    if len(obstacles) > LIMITS['maxObstacles']: return _result(after, 'unsupported', 'too-many-obstacles', region=region)
+    if box is None: return None, None, _result(after, 'unsupported', 'invalid-bbox', region=region)
+    if not _number(size) or not 0 < size <= LIMITS['maxFontSize']: return None, None, _result(after, 'unsupported', 'invalid-font-size', region=region)
+    if not _number(pitch) or pitch <= 0: return None, None, _result(after, 'unsupported', 'invalid-line-height', region=region)
+    if not isinstance(obstacles, (list, tuple)): return None, None, _result(after, 'unsupported', 'invalid-obstacles', region=region)
+    if len(obstacles) > LIMITS['maxObstacles']: return None, None, _result(after, 'unsupported', 'too-many-obstacles', region=region)
     rects = [_rect(o, False) for o in obstacles]
-    if any(r is None for r in rects): return _result(after, 'unsupported', 'invalid-obstacles', region=region)
-    font, origin, vertical = resolved
-    if font is None: return _result(after, 'unsupported', origin, region=region)
-    asc, desc = (float(v) for v in vertical or (font.ascender, font.descender))
-    fixed = {'bbox': [_round(v) for v in box], 'fontSize': float(size), 'lineHeight': float(pitch), 'alignment': 'left',
-        'obstacles': len(rects)}
-    if not (math.isfinite(asc) and math.isfinite(desc) and asc > desc):
-        return _result(after, 'unsupported', 'font-metrics-unavailable', fixed=fixed, region=region)
-    import pymupdf
-    metrics = {'kind': 'metrics-only', 'advances': 'pymupdf.Font.char_lengths', 'pymupdf': pymupdf.VersionBind,
-        'fontName': str(font.name)[:128], 'fontOrigin': origin, 'verticalMetrics': 'source-span' if vertical else 'font-program',
-        'ascender': _round(asc), 'descender': _round(desc),
-        'kerning': False, 'shaping': False, 'ligatures': False, 'sourceShapeGuarantee': False}
-    chars = sorted(set(after) - {'\r', '\n'})
-    bad = [c for c in chars if unicodedata.category(c) in BAD_CATEGORIES]
-    missing = [c for c in chars if c not in bad and not font.has_glyph(ord(c))]
-    characters = {'distinct': len(chars), 'unsupported': ['U+%04X' % ord(c) for c in bad][:32],
-        'missingGlyphs': ['U+%04X' % ord(c) for c in missing][:32], 'missingCount': len(missing)}
-    common = {'fixed': fixed, 'metrics': metrics, 'region': region, 'characters': characters}
-    if bad: return _result(after, 'unsupported', 'unsupported-character', **common)
-    if missing: return _result(after, 'unsupported', 'missing-glyphs', **common)
+    if any(r is None for r in rects): return None, None, _result(after, 'unsupported', 'invalid-obstacles', region=region)
+    return box, rects, None
+
+
+def _result_lines(lines, box, pitch, asc, desc, size):
+    out = []
+    for l in lines:
+        top = box[1] + l['slot'] * pitch
+        out.append({'slot': l['slot'], 'start': l['start'], 'end': l['end'], 'x': _round(l['x']), 'top': _round(top),
+            'baseline': _round(top + asc * size), 'bottom': _round(top + (asc - desc) * size), 'width': _round(l['cursor'] - l['x'])})
+    return out
+
+
+def _evaluate_layout(after, box, size, pitch, asc, desc, rects, font, chars, common):
     adv = {c: float(font.char_lengths(c, fontsize=float(size))[0]) for c in chars}
     try: lines, inside = _layout(after, box, float(size), float(pitch), asc, desc, sorted(rects), adv)
     except _Overflow as o:
@@ -200,12 +198,39 @@ def _propose(after, bbox, resolved, size, pitch, obstacles, region):
     if any((b['slot'] - a['slot']) * float(pitch) < glyph for a, b in zip(lines, lines[1:])):
         # every proposed line (an empty paragraph too) owns its full band; adjacent bands may touch but never overlap
         return _result(after, 'unsupported', 'line-bands-overlap', **common)
-    out = []
-    for l in lines:
-        top = box[1] + l['slot'] * pitch
-        out.append({'slot': l['slot'], 'start': l['start'], 'end': l['end'], 'x': _round(l['x']), 'top': _round(top),
-            'baseline': _round(top + asc * size), 'bottom': _round(top + (asc - desc) * size), 'width': _round(l['cursor'] - l['x'])})
+    out = _result_lines(lines, box, pitch, asc, desc, size)
     return _result(after, 'fits', None, lines=out, **common)
+
+def _font_characters(after, font):
+    chars = sorted(set(after) - {'\r', '\n'})
+    bad = [c for c in chars if unicodedata.category(c) in BAD_CATEGORIES]
+    missing = [c for c in chars if c not in bad and not font.has_glyph(ord(c))]
+    characters = {'distinct': len(chars), 'unsupported': ['U+%04X' % ord(c) for c in bad][:32],
+        'missingGlyphs': ['U+%04X' % ord(c) for c in missing][:32], 'missingCount': len(missing)}
+    return chars, bad, missing, characters
+
+
+def _propose(after, bbox, resolved, size, pitch, obstacles, region):
+    box, rects, rejection = _validate_proposal(after, bbox, size, pitch, obstacles, region)
+    if rejection is not None: return rejection
+    font, origin, vertical = resolved
+    if font is None: return _result(after, 'unsupported', origin, region=region)
+    asc, desc = (float(v) for v in vertical or (font.ascender, font.descender))
+    fixed = {'bbox': [_round(v) for v in box], 'fontSize': float(size), 'lineHeight': float(pitch), 'alignment': 'left',
+        'obstacles': len(rects)}
+    if not (math.isfinite(asc) and math.isfinite(desc) and asc > desc):
+        return _result(after, 'unsupported', 'font-metrics-unavailable', fixed=fixed, region=region)
+    import pymupdf
+    metrics = {'kind': 'metrics-only', 'advances': 'pymupdf.Font.char_lengths', 'pymupdf': pymupdf.VersionBind,
+        'fontName': str(font.name)[:128], 'fontOrigin': origin, 'verticalMetrics': 'source-span' if vertical else 'font-program',
+        'ascender': _round(asc), 'descender': _round(desc),
+        'kerning': False, 'shaping': False, 'ligatures': False, 'sourceShapeGuarantee': False}
+    chars, bad, missing, characters = _font_characters(after, font)
+    common = {'fixed': fixed, 'metrics': metrics, 'region': region, 'characters': characters}
+    if bad: return _result(after, 'unsupported', 'unsupported-character', **common)
+    if missing: return _result(after, 'unsupported', 'missing-glyphs', **common)
+    return _evaluate_layout(after, box, size, pitch, asc, desc, rects, font, chars, common)
+
 
 def propose_layout(after, bbox, font, font_size, line_height, obstacles=()):
     """Fixed-area layout proposal for the exact After in a caller-owned box: font is a pymupdf.Font or a built-in name in
@@ -213,6 +238,16 @@ def propose_layout(after, bbox, font, font_size, line_height, obstacles=()):
     try: return _propose(after, bbox, _builtin(font), font_size, line_height, obstacles, {'owner': 'caller', 'editAuthority': False})
     except Exception:
         return _result(after if isinstance(after, str) else None, 'unsupported', 'probe-error')
+
+def _find_source_font(doc, page_index, name):
+    exact, prefix = {}, {}
+    for xref, _ext, kind, basefont, *_rest in doc[page_index].get_fonts(full=True):
+        base = basefont.split('+', 1)[-1]
+        if name in (basefont, base): exact[xref] = kind
+        elif name and base.startswith(name): prefix[xref] = kind
+    found, how = (exact, '') if exact else (prefix, ':name-prefix')
+    return found, how
+
 
 def _source_font(source, page_index, name, size):
     """(pymupdf.Font, origin, vertical) for the one page font named by the plan style font, read only, else (None, reason, None). The base
@@ -224,12 +259,7 @@ def _source_font(source, page_index, name, size):
     import pymupdf
     doc = pymupdf.open(stream=source, filetype='pdf')
     try:
-        exact, prefix = {}, {}
-        for xref, _ext, kind, basefont, *_rest in doc[page_index].get_fonts(full=True):
-            base = basefont.split('+', 1)[-1]
-            if name in (basefont, base): exact[xref] = kind
-            elif name and base.startswith(name): prefix[xref] = kind
-        found, how = (exact, '') if exact else (prefix, ':name-prefix')
+        found, how = _find_source_font(doc, page_index, name)
         if not found: return None, 'source-font-not-found', None
         if len(found) > 1: return None, 'source-font-ambiguous', None
         xref, kind = next(iter(found.items()))
@@ -269,19 +299,25 @@ def propose_from_source(source_bytes, edit, line_height, *, bbox=None, obstacles
     except Exception:
         return _result(after, 'unsupported', 'probe-error')
 
+def _reconstruct_lines(lines, after):
+    pieces, prev = [], 0
+    for k, line in enumerate(lines):
+        s, e = line['start'], line['end']
+        if type(s) is not int or type(e) is not int or not prev <= s <= e <= len(after): return None, None
+        gap = after[prev:s]
+        if (k == 0 and gap) or gap.strip(' \r\n'): return None, None
+        pieces += [gap, after[s:e]]; prev = e
+    return pieces, prev
+
+
 def reconstruct(result, after):
     """The exact After rebuilt only from a 'fits' result: each line's drawn run plus the spaces/line breaks consumed before the
     next line. None unless the result is bound to this After and its offsets are ordered, contiguous and lose no drawn char."""
     try:
         if not isinstance(after, str) or not isinstance(result, dict) or result.get('schema') != SCHEMA or result.get('status') != 'fits' \
                 or result['binding']['afterSha256'] != _sha(after) or not result['lines']: return None
-        pieces, prev = [], 0
-        for k, line in enumerate(result['lines']):
-            s, e = line['start'], line['end']
-            if type(s) is not int or type(e) is not int or not prev <= s <= e <= len(after): return None
-            gap = after[prev:s]
-            if (k == 0 and gap) or gap.strip(' \r\n'): return None
-            pieces += [gap, after[s:e]]; prev = e
+        pieces, prev = _reconstruct_lines(result['lines'], after)
+        if pieces is None: return None
         tail = after[prev:]
         if tail.strip(' '): return None
         text = ''.join(pieces) + tail

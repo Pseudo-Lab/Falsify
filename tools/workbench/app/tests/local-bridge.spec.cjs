@@ -14,6 +14,15 @@ function harness(hostname='shinick-han.github.io',port='',queue=[]){
 }
 const hosted=()=>harness();
 
+test('source-style chart actions share the authenticated bridge',async()=>{
+  const h=hosted();h.queue.push(reply(CAP),reply({sceneId:'s'}),reply({image:'png'}),reply({file:'pdf'}));
+  await h.bridge.pair(TOKEN,'7816');
+  for(const action of ['prepare','preview','export'])await h.bridge.session().request('/api/paper/chart/'+action,{sceneId:'s'});
+  assert.equal(h.calls.length,4);
+  await assert.rejects(h.bridge.session().request('/api/paper/chart/shell',{command:'x'}),/허용되지/);
+  assert.equal(h.calls.length,4);assert.equal(leaks(h),false);
+});
+
 test('visual PDF edits reach authenticated export without opening other visual routes',async()=>{
   const h=hosted();h.queue.push(reply(CAP),reply({schema:'falsify.visual-edit-export.v1'}));
   await h.bridge.pair(TOKEN,'7816');

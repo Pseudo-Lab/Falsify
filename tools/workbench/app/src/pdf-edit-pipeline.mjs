@@ -19,6 +19,13 @@ async function read(file,signal){
   if(!new TextDecoder().decode(bytes.subarray(0,1024)).includes('%PDF-'))fail('invalid-pdf');return bytes;
 }
 function prepareOf(api){if(typeof api?.prepare!=='function')fail('engine-unavailable');return request=>api.prepare(request);}
+function failedClassification(v,report,checks,invalid,allowedEdits,allowedChecks){
+  if(v?.status==='failed'||invalid(v?.edits,allowedEdits)||invalid(report?.edits,allowedEdits)||invalid(v?.checks,allowedChecks)
+    ||report?.ok===false||report?.quality==='failed'||checks.some(c=>c.ok===false||!['passed','warning'].includes(c.status)||Array.isArray(c.failures)&&c.failures.length)
+    ||report?.status!==undefined&&!['self-check-passed','applied','passed','warning','noop'].includes(report.status)
+    ||['removedBefore','presentAfter','untouchedText','figures'].some(k=>v?.quality?.[k]===false))return true;
+  return false;
+}
 function classification(result){
   const v=result.verification;
   if(v?.status==='draft'||v?.report?.draft===true||v?.report?.status==='draft')return 'draft';
@@ -26,10 +33,7 @@ function classification(result){
   const invalid=(rows,allowed)=>rows!==undefined&&(!Array.isArray(rows)||rows.some(row=>!allowed.has(row?.status)));
   const checks=[v?.selfCheck,v?.report?.selfCheck].filter(Boolean);
   const report=v?.report;
-  if(v?.status==='failed'||invalid(v?.edits,allowedEdits)||invalid(report?.edits,allowedEdits)||invalid(v?.checks,allowedChecks)
-    ||report?.ok===false||report?.quality==='failed'||checks.some(c=>c.ok===false||!['passed','warning'].includes(c.status)||Array.isArray(c.failures)&&c.failures.length)
-    ||report?.status!==undefined&&!['self-check-passed','applied','passed','warning','noop'].includes(report.status)
-    ||['removedBefore','presentAfter','untouchedText','figures'].some(k=>v?.quality?.[k]===false))return 'failed';
+  if(failedClassification(v,report,checks,invalid,allowedEdits,allowedChecks))return 'failed';
   return v?.status==='applied'||v?.status==='warning'?v.status:'unverified';
 }
 async function verifyResult(result,inputHash,signal){
@@ -65,6 +69,24 @@ function composite(result,original,stages,pending,status,extra=[]){
   return {...result,originalSourceSha256:original,warnings,verification:{schema:'falsify.pdf-edit-pipeline.v1',engine:'table-first-composition',sourceSha256:original,outputSha256:stages.at(-1).outputSha256,status,independent:false,layoutVerified:false,stages,pendingEditIds:pending.map(e=>e.id??null),bodyPending:pending.length>0,checks:stages.flatMap(s=>s.checks.map(c=>({...c,stage:s.name}))),warnings}};
 }
 
+function validateMixedEdits(enabled,tables,body){
+  if(enabled.length>24||enabled.some(e=>!e||typeof e.before!=='string'||typeof e.after!=='string'))fail('invalid-edits');
+  disjoint(tables,body);
+}
+function validateDeclaredHash(declared,controls,envelope){
+  if(typeof declared!=='string'||!HEX.test(declared)||controls.fileHash&&envelope?.fileHash&&controls.fileHash.toLowerCase()!==envelope.fileHash.toLowerCase())fail('invalid-source-hash');
+}
+function rebindMixedEdits(tableEdits,bodyEdits){
+  for(const e of tableEdits)if(e.anchor)delete e.anchor.occurrence;
+  // Stage A can change the count of a repeated quote on its page. Keep the
+  // recorded original ordinal, but rebind a copied body edit through its exact
+  // source geometry instead of using that stale ordinal against new bytes.
+  const tablePages=new Set(tableEdits.map(e=>e.pageIndex));
+  for(const e of bodyEdits)if(tablePages.has(e.pageIndex)&&validBox(e.anchor?.bbox))delete e.anchor.occurrence;
+}
+function mixedStatus(a,b){
+  return b.status==='unverified'?'failed':b.status==='applied'&&a.status==='warning'?'warning':b.status;
+}
 /** Mixed-only orchestration; callers keep their prior output when this throws.
  * Single-kind requests are delegated without rewriting their request/result. */
 export async function prepare(request={}, {selectionPdf,paragraphPdf}={}){
@@ -77,21 +99,15 @@ export async function prepare(request={}, {selectionPdf,paragraphPdf}={}){
   const {file:capturedFile,signal,...rest}=request;
   const {fontSnapshot,...metadata}=rest;
   const controls={...copy(metadata),...(fontSnapshot?{fontSnapshot:structuredClone(fontSnapshot)}:{}),file:capturedFile,signal};
-  if(enabled.length>24||enabled.some(e=>!e||typeof e.before!=='string'||typeof e.after!=='string'))fail('invalid-edits');
-  disjoint(tables,body);
+  validateMixedEdits(enabled,tables,body);
   const envelope=Array.isArray(request.edits)?null:copy(request.edits);
   const tableEdits=copy(tables),bodyEdits=copy(body);
   const declared=controls.fileHash||envelope?.fileHash;
-  if(typeof declared!=='string'||!HEX.test(declared)||controls.fileHash&&envelope?.fileHash&&controls.fileHash.toLowerCase()!==envelope.fileHash.toLowerCase())fail('invalid-source-hash');
+  validateDeclaredHash(declared,controls,envelope);
   const originalBytes=await read(capturedFile,signal),original=await hash(originalBytes,signal);
   if(original!==declared.toLowerCase())fail('stale-source');
   // Mutable edit metadata was captured before any file/hash/engine await.
-  for(const e of tableEdits)if(e.anchor)delete e.anchor.occurrence;
-  // Stage A can change the count of a repeated quote on its page. Keep the
-  // recorded original ordinal, but rebind a copied body edit through its exact
-  // source geometry instead of using that stale ordinal against new bytes.
-  const tablePages=new Set(tableEdits.map(e=>e.pageIndex));
-  for(const e of bodyEdits)if(tablePages.has(e.pageIndex)&&validBox(e.anchor?.bbox))delete e.anchor.occurrence;
+  rebindMixedEdits(tableEdits,bodyEdits);
   const scoped=(edits,file,fileHash)=>({...controls,...(controls.fontSnapshot?{fontSnapshot:structuredClone(controls.fontSnapshot)}:{}),file,fileHash,signal,edits:envelope?{...copy(envelope),fileHash,edits}:edits});
   const stageA=await prepareOf(selectionPdf)(scoped(tableEdits,originalBytes.slice(),original));abort(signal);
   const a=await verifyResult(stageA,original,signal),first=descriptor('table-selection',original,a.result,a);
@@ -103,7 +119,7 @@ export async function prepare(request={}, {selectionPdf,paragraphPdf}={}){
   if(await hash(aBytes,signal)!==a.actual)fail('stage-one-file-changed');
   const stageB=await prepareOf(paragraphPdf)(scoped(bodyEdits,aBytes,a.actual));abort(signal);
   const b=await verifyResult(stageB,a.actual,signal),second=descriptor('paragraph-flow',a.actual,b.result,b);
-  const status=b.status==='unverified'?'failed':b.status==='applied'&&a.status==='warning'?'warning':b.status;
+  const status=mixedStatus(a,b);
   abort(signal);
   return composite(b.result,original,[first,second],[],status,status==='failed'||status==='draft'?[{code:'mixed-body-stage-not-passed',severity:'warning',draft:status==='draft'}]:[]);
 }

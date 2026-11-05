@@ -1,0 +1,11 @@
+{
+  "name": "falsify-recomposition-vendor-build",
+  "private": true,
+  "version": "1.0.0",
+  "dependencies": {
+    "@myriaddreamin/typst.ts": "0.7.0",
+    "@myriaddreamin/typst-ts-web-compiler": "0.7.0",
+    "esbuild": "0.28.2",
+    "mupdf": "1.28.1"
+  }
+}

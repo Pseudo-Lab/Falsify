@@ -18,44 +18,67 @@
       return view.getUint32(o);
     };
     const tag = (o) => String.fromCharCode(...bytes.subarray(o, o + 4));
-    const sig = u32(0);
-    if (sig === 1953784678) throw error("\uAE00\uAF34 \uCEEC\uB809\uC158(TTC/OTC)\uC740 \uC9C0\uC6D0\uD558\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4. \uB2E8\uC77C TTF \uB610\uB294 OTF\uB97C \uC120\uD0DD\uD574 \uC8FC\uC138\uC694.");
-    if (sig !== 65536 && sig !== 1330926671 && sig !== 1953658213) bad();
-    const count = u16(4), tables = /* @__PURE__ */ new Map();
-    if (!count || 12 + count * 16 > bytes.length) bad();
-    for (let i = 0; i < count; i++) {
-      const p = 12 + i * 16, name = tag(p), offset = u32(p + 8), length = u32(p + 12);
-      if (offset > bytes.length || length > bytes.length - offset || tables.has(name)) bad();
-      tables.set(name, { offset, length });
+    function validateHeader() {
+      const sig = u32(0);
+      if (sig === 1953784678) throw error("\uAE00\uAF34 \uCEEC\uB809\uC158(TTC/OTC)\uC740 \uC9C0\uC6D0\uD558\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4. \uB2E8\uC77C TTF \uB610\uB294 OTF\uB97C \uC120\uD0DD\uD574 \uC8FC\uC138\uC694.");
+      if (sig !== 65536 && sig !== 1330926671 && sig !== 1953658213) bad();
+      const count2 = u16(4), tables2 = /* @__PURE__ */ new Map();
+      if (!count2 || 12 + count2 * 16 > bytes.length) bad();
+      return { count: count2, tables: tables2 };
     }
-    if (tables.has("fvar")) throw error("\uAC00\uBCC0 \uAE00\uAF34\uC740 \uC9C0\uC6D0\uD558\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4. \uACE0\uC815 \uAD75\uAE30\uC758 TTF \uB610\uB294 OTF\uB97C \uC120\uD0DD\uD574 \uC8FC\uC138\uC694.");
-    const names = tables.get("name"), os2 = tables.get("OS/2"), head = tables.get("head");
-    if (!names || names.length < 6 || !os2 || os2.length < 64 || !head || head.length < 46) bad();
+    const { count, tables } = validateHeader();
+    function readTables() {
+      for (let i = 0; i < count; i++) {
+        const p = 12 + i * 16, name = tag(p), offset = u32(p + 8), length = u32(p + 12);
+        if (offset > bytes.length || length > bytes.length - offset || tables.has(name)) bad();
+        tables.set(name, { offset, length });
+      }
+    }
+    readTables();
+    function requiredTables() {
+      if (tables.has("fvar")) throw error("\uAC00\uBCC0 \uAE00\uAF34\uC740 \uC9C0\uC6D0\uD558\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4. \uACE0\uC815 \uAD75\uAE30\uC758 TTF \uB610\uB294 OTF\uB97C \uC120\uD0DD\uD574 \uC8FC\uC138\uC694.");
+      const names2 = tables.get("name"), os22 = tables.get("OS/2"), head2 = tables.get("head");
+      if (!names2 || names2.length < 6 || !os22 || os22.length < 64 || !head2 || head2.length < 46) bad();
+      return { names: names2, os2: os22, head: head2 };
+    }
+    const { names, os2, head } = requiredTables();
     const n = names.offset, entries = u16(n + 2), strings = n + u16(n + 4), end = n + names.length;
     if (n + 6 + entries * 12 > end || strings > end) bad();
     const values = /* @__PURE__ */ new Map();
-    for (let i = 0; i < entries; i++) {
-      const p = n + 6 + i * 12, platform = u16(p), encoding = u16(p + 2), language = u16(p + 4), id = u16(p + 6), length = u16(p + 8), start = strings + u16(p + 10);
-      if (start > end || length > end - start) bad();
-      if (![1, 2, 6, 16, 17].includes(id)) continue;
+    function decodeName(platform, encoding, length, start) {
       let text;
       if (platform === 0 || platform === 3) {
         if (length % 2) bad();
         text = "";
         for (let j = 0; j < length; j += 2) text += String.fromCharCode(u16(start + j));
       } else if (platform === 1 && encoding === 0) text = String.fromCharCode(...bytes.subarray(start, start + length));
-      else continue;
-      text = text.replace(/\0/g, "").trim();
-      const score = (platform === 3 ? 4 : platform === 0 ? 3 : 1) + (language === 1033 ? 2 : 0);
-      if (text && (!values.has(id) || values.get(id).score < score)) values.set(id, { text, score });
+      else return null;
+      return text;
     }
+    function readNames() {
+      for (let i = 0; i < entries; i++) {
+        const p = n + 6 + i * 12, platform = u16(p), encoding = u16(p + 2), language = u16(p + 4), id = u16(p + 6), length = u16(p + 8), start = strings + u16(p + 10);
+        if (start > end || length > end - start) bad();
+        if (![1, 2, 6, 16, 17].includes(id)) continue;
+        let text;
+        text = decodeName(platform, encoding, length, start);
+        if (text === null) continue;
+        text = text.replace(/\0/g, "").trim();
+        const score = (platform === 3 ? 4 : platform === 0 ? 3 : 1) + (language === 1033 ? 2 : 0);
+        if (text && (!values.has(id) || values.get(id).score < score)) values.set(id, { text, score });
+      }
+    }
+    readNames();
     const get = (id) => values.get(id)?.text;
     const family = get(16) || get(1), postscriptName = get(6);
     if (!family) bad();
-    const weight = u16(os2.offset + 4), fsType = u16(os2.offset + 8), selection = u16(os2.offset + 62), macStyle = u16(head.offset + 44);
-    if (weight < 1 || weight > 1e3) bad();
-    if (fsType & 512 || fsType & 2 && !(fsType & 12)) throw error("\uC774 \uAE00\uAF34\uC740 \uC784\uBCA0\uB529 \uC81C\uD55C \uB610\uB294 \uBE44\uD2B8\uB9F5 \uC804\uC6A9 \uC81C\uD55C\uC774 \uC788\uC5B4 PDF\uC5D0 \uC0AC\uC6A9\uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4. \uB2E4\uB978 \uAE00\uAF34\uC744 \uC120\uD0DD\uD574 \uC8FC\uC138\uC694.");
-    return { family, ...postscriptName ? { postscriptName } : {}, weight, italic: Boolean(selection & 1 || macStyle & 2), fsType };
+    function fontMetadata() {
+      const weight = u16(os2.offset + 4), fsType = u16(os2.offset + 8), selection = u16(os2.offset + 62), macStyle = u16(head.offset + 44);
+      if (weight < 1 || weight > 1e3) bad();
+      if (fsType & 512 || fsType & 2 && !(fsType & 12)) throw error("\uC774 \uAE00\uAF34\uC740 \uC784\uBCA0\uB529 \uC81C\uD55C \uB610\uB294 \uBE44\uD2B8\uB9F5 \uC804\uC6A9 \uC81C\uD55C\uC774 \uC788\uC5B4 PDF\uC5D0 \uC0AC\uC6A9\uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4. \uB2E4\uB978 \uAE00\uAF34\uC744 \uC120\uD0DD\uD574 \uC8FC\uC138\uC694.");
+      return { family, ...postscriptName ? { postscriptName } : {}, weight, italic: Boolean(selection & 1 || macStyle & 2), fsType };
+    }
+    return fontMetadata();
   }
   async function sha256(bytes) {
     const digest = await globalThis.crypto.subtle.digest("SHA-256", bytes);
@@ -247,22 +270,26 @@
     const bytes = await cache.get(path);
     return { id: `bundled:${postscriptName}`, family, postscriptName, weight, italic, bytes: bytes.slice(), source: "bundled", sha256: sha2562 };
   }
+  function selectCjkFaces(name, text, selected) {
+    if (cjk.test(text) || name === "noto sans cjk kr" || name === "noto serif cjk kr") {
+      if (!serifNames.has(name)) selected.add(faces[9]);
+      if (!sansNames.has(name)) selected.add(faces[10]);
+    }
+  }
+  function selectFaces(requirement, selected) {
+    const name = String(requirement.family || "").trim().replace(/^[A-Z]{6}\+/, "").toLowerCase();
+    const text = String(requirement.text || "");
+    if ((name === "cmr7" || name === "lmroman7" || name === "lm roman 7") && !requirement.bold && !requirement.italic) selected.add(lm7);
+    const families = serifNames.has(name) ? ["Liberation Serif"] : sansNames.has(name) ? ["Liberation Sans"] : ["Liberation Sans", "Liberation Serif"];
+    for (const family of families) {
+      selected.add(faces.find((f) => f[0] === family && f[2] === (requirement.bold ? 700 : 400) && f[3] === !!requirement.italic));
+    }
+    if (math.test(text) || name === "stix two math") selected.add(faces[8]);
+    selectCjkFaces(name, text, selected);
+  }
   async function getBundledFonts(requirements, { fetch = globalThis.fetch } = {}) {
     const selected = /* @__PURE__ */ new Set();
-    for (const requirement of requirements) {
-      const name = String(requirement.family || "").trim().replace(/^[A-Z]{6}\+/, "").toLowerCase();
-      const text = String(requirement.text || "");
-      if ((name === "cmr7" || name === "lmroman7" || name === "lm roman 7") && !requirement.bold && !requirement.italic) selected.add(lm7);
-      const families = serifNames.has(name) ? ["Liberation Serif"] : sansNames.has(name) ? ["Liberation Sans"] : ["Liberation Sans", "Liberation Serif"];
-      for (const family of families) {
-        selected.add(faces.find((f) => f[0] === family && f[2] === (requirement.bold ? 700 : 400) && f[3] === !!requirement.italic));
-      }
-      if (math.test(text) || name === "stix two math") selected.add(faces[8]);
-      if (cjk.test(text) || name === "noto sans cjk kr" || name === "noto serif cjk kr") {
-        if (!serifNames.has(name)) selected.add(faces[9]);
-        if (!sansNames.has(name)) selected.add(faces[10]);
-      }
-    }
+    for (const requirement of requirements) selectFaces(requirement, selected);
     return Promise.all([...selected].map((face) => load(face, fetch)));
   }
 

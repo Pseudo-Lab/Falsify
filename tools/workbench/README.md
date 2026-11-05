@@ -24,4 +24,4 @@ The optional local companion can replace one opaque raster placement inside supp
 
 Model results and human reviews are not scientific gold, domain approval, or verified performance metrics. Custom harness code must be trusted: the companion is not an OS sandbox.
 
-The guide covers bounded DOCX, HTML and ODT export, PDF visual input for built-in Codex, Web Locks admission and condition-matched Harness comparison. ODT visual rendering is unverified; server restart recovery is not implemented. See the guide for limits.
+The guide covers bounded DOCX, HTML and ODT export, PDF visual input for built-in Codex, Web Locks admission and condition-matched Harness comparison. ODT visual rendering is unverified. Windows has a companion restart and reconnect flow. POSIX port-only links reuse a matching companion; a service from another checkout or an unrelated port occupant is preserved and refused. See the guide for limits.

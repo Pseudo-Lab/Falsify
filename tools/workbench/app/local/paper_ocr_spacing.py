@@ -11,6 +11,26 @@ _lock=threading.Lock()
 def _compact(text):return ''.join(c for c in text if not c.isspace())
 
 
+def _insert_numeric_spaces(text,cuts):
+    out=[];cursor=0
+    for char in text:
+        if not char.isspace():
+            if cursor in cuts and out and not out[-1].isspace():out.append(' ')
+            cursor+=1
+        out.append(char)
+    return ''.join(out)
+
+
+def _numeric_cuts(chars,threshold):
+    cuts=[];offset=0
+    for index,(left,right) in enumerate(zip(chars,chars[1:])):
+        offset+=len(left['text'])
+        if left['text'][-1].isdigit() and right['text'][0].isdigit():
+            gap=right['bbox'][0]-left['bbox'][2]
+            if math.isfinite(gap) and gap>threshold:cuts.append(offset)
+    return cuts
+
+
 def numeric_gaps(text,tokens):
     chars=[t for t in tokens if isinstance(t.get('text'),str) and t['text'] and not t['text'].isspace()]
     if ''.join(t['text'] for t in chars)!=_compact(text):return text,[]
@@ -19,20 +39,10 @@ def numeric_gaps(text,tokens):
     # CTC boxes already include side bearings. A visible inter-number space can
     # occupy only a quarter of that width after PDF rasterization/resampling.
     threshold=max(3,statistics.median(widths)*.2)
-    cuts=[];offset=0
-    for index,(left,right) in enumerate(zip(chars,chars[1:])):
-        offset+=len(left['text'])
-        if left['text'][-1].isdigit() and right['text'][0].isdigit():
-            gap=right['bbox'][0]-left['bbox'][2]
-            if math.isfinite(gap) and gap>threshold:cuts.append(offset)
+    cuts=_numeric_cuts(chars,threshold)
     if not cuts:return text,[]
-    out=[];cursor=0
-    for char in text:
-        if not char.isspace():
-            if cursor in cuts and out and not out[-1].isspace():out.append(' ')
-            cursor+=1
-        out.append(char)
-    return ''.join(out),cuts
+    return _insert_numeric_spaces(text,cuts),cuts
+
 
 
 def _default_spacer(text):

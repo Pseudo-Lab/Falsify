@@ -100,19 +100,26 @@ export function createLayoutTargetRegistry(project,metadata){
   restore(project,metadata);
  } else if(project)bind(project);
 
- function restore(p,raw){
-  validateProject(p);
-  const bad=m=>fail('INVALID_TARGET_METADATA',m);
-  let m=raw;if(typeof m==='string'){try{m=JSON.parse(m);}catch{bad('Metadata is not JSON');}}
+ function validateTargetIdentity(t,next,l,bad){
+   if(!t||typeof t.targetId!=='string'||typeof t.path!=='string'||typeof t.kind!=='string'||!isHash(t.firstSeenProjectId)||!isRange(t.firstRange)||!isHash(t.sourceTextSha256)||!['matched','ambiguous','missing'].includes(t.status))bad('Invalid target');
+   if(next.has(t.targetId)||targetIdOf(l.baselineProjectId,t.firstSeenProjectId,t.path,t.kind,t.firstRange.start,t.firstRange.end)!==t.targetId)bad('Target ID does not match its lineage');
+ }
+ function validateMetadata(m,p,bad){
   if(!m||typeof m!=='object'||m.schema!==LAYOUT_TARGETS_SCHEMA)bad('Unknown metadata schema');
   const l=m.lineage;if(!l||!isHash(l.baselineProjectId)||!isHash(l.currentProjectId)||!Number.isSafeInteger(l.revisions)||l.revisions<0)bad('Invalid lineage');
   if(l.currentProjectId!==p.id)bad('Metadata belongs to a different project');
   if(!sameOrigin({origin:l.origin,engine:l.engine,mainFile:l.mainFile??null,sourcePdfHash:l.sourcePdfHash??null},originOf(p)))bad('Metadata belongs to a different source origin');
   if(!Array.isArray(m.targets)||m.targets.length>MAX_TARGETS)bad('Invalid targets');
+  return l;
+ }
+ function restore(p,raw){
+  validateProject(p);
+  const bad=m=>fail('INVALID_TARGET_METADATA',m);
+  let m=raw;if(typeof m==='string'){try{m=JSON.parse(m);}catch{bad('Metadata is not JSON');}}
+  const l=validateMetadata(m,p,bad);
   const current=model(p),next=new Map();
-  for(const t of m.targets){
-   if(!t||typeof t.targetId!=='string'||typeof t.path!=='string'||typeof t.kind!=='string'||!isHash(t.firstSeenProjectId)||!isRange(t.firstRange)||!isHash(t.sourceTextSha256)||!['matched','ambiguous','missing'].includes(t.status))bad('Invalid target');
-   if(next.has(t.targetId)||targetIdOf(l.baselineProjectId,t.firstSeenProjectId,t.path,t.kind,t.firstRange.start,t.firstRange.end)!==t.targetId)bad('Target ID does not match its lineage');
+  function restoreTarget(t){
+   validateTargetIdentity(t,next,l,bad);
    const candidates=Array.isArray(t.candidates)?t.candidates:bad('Invalid candidates');
    const exists=r=>{const n=isRange(r)&&current.byKey.get(keyOf(t.path,t.kind,r.start,r.end));return n||bad('Target range is not in the current project');};
    let range=null;
@@ -122,6 +129,7 @@ export function createLayoutTargetRegistry(project,metadata){
    if(t.status==='ambiguous'&&!candidates.length)bad('Ambiguous target lacks candidates');
    next.set(t.targetId,{path:t.path,kind:t.kind,firstSeenProjectId:t.firstSeenProjectId,firstRange:{start:t.firstRange.start,end:t.firstRange.end},status:t.status,range,candidates:candidates.map(c=>{const n=exists(c);return {start:n.start,end:n.end};}),sourceTextSha256:t.sourceTextSha256});
   }
+  for(const t of m.targets)restoreTarget(t);
   lineage={baselineProjectId:l.baselineProjectId,currentProjectId:l.currentProjectId,...originOf(p),revisions:l.revisions};
   targets.clear();for(const [k,v] of next)targets.set(k,v);reindex();
  }
@@ -168,7 +176,10 @@ export function createLayoutTargetRegistry(project,metadata){
   for(const path of new Set([...before.texts.keys()])){const x=before.texts.get(path),y=after.texts.get(path);aligns.set(path,y===undefined?null:x===y?[null]:alignments(x,y));}
   // Claims: after nodes reached by exact offset mapping of any outside node.
   const claims=new Map();
+  buildClaims();
+  function buildClaims(){
   for(const [path,list] of aligns){if(!list)continue;list.forEach((a,i)=>{const set=claims.get(path+'\0'+i)||new Set();claims.set(path+'\0'+i,set);if(!a)return;for(const n of before.nodes){if(n.path!==path)continue;const shift=n.end<a.bs?0:n.start>a.be?a.ae-a.be:null;if(shift===null)continue;const hit=after.byKey.get(keyOf(path,n.kind,n.start+shift,n.end+shift));if(hit&&hit.sourceText===n.sourceText)set.add(hit.id);}});}
+  }
   const mapRange=(t,range)=>{
    const list=aligns.get(t.path);if(!list)return {status:'missing',candidates:[]};
    const node=before.byKey.get(keyOf(t.path,t.kind,range.start,range.end));if(!node)return {status:'missing',candidates:[]};
@@ -183,7 +194,7 @@ export function createLayoutTargetRegistry(project,metadata){
    return {status:'ambiguous',candidates:uniq};
   };
   const next=new Map();
-  for(const [id,t] of targets){
+  function rebaseTarget(id,t){
    let r;
    if(t.status==='matched')r=combine(mapRange(t,t.range));
    else if(t.status==='ambiguous'){const all=t.candidates.map(c=>combine(mapRange(t,c)));const c=all.flatMap(x=>x.status==='matched'?[x.range]:x.candidates);const uniq=[...new Map(c.map(x=>[x.start+':'+x.end,x])).values()];r=uniq.length?{status:'ambiguous',candidates:uniq}:{status:'missing',candidates:[]};}
@@ -191,8 +202,12 @@ export function createLayoutTargetRegistry(project,metadata){
    if(r.status==='matched'){const n=after.byKey.get(keyOf(t.path,t.kind,r.range.start,r.range.end));if(!n||n.text.trim()!==before.byKey.get(keyOf(t.path,t.kind,t.range.start,t.range.end)).text.trim())r={status:'missing',candidates:[]};else t.sourceTextSha256=hex(enc.encode(n.sourceText));}
    next.set(id,{...t,status:r.status,range:r.status==='matched'?r.range:null,candidates:r.status==='ambiguous'?r.candidates:[]});
   }
+  for(const [id,t] of targets)rebaseTarget(id,t);
   // Two targets may never claim the same current node.
+  rejectDuplicateClaims();
+  function rejectDuplicateClaims(){
   const seen=new Map();for(const [id,t] of next)if(t.status==='matched'){const k=keyOf(t.path,t.kind,t.range.start,t.range.end);if(seen.has(k)){for(const other of [id,seen.get(k)]){const o=next.get(other);next.set(other,{...o,status:'ambiguous',candidates:[o.range??t.range],range:null});}}else seen.set(k,id);}
+  }
   targets.clear();for(const [k,v] of next)targets.set(k,v);
   lineage={...lineage,currentProjectId:afterProject.id,revisions:lineage.revisions+1};reindex();
   return summary();

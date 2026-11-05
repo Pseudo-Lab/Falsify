@@ -3,7 +3,7 @@
   "inputs": [
     {
       "path": "dist/latex-source-ui.js",
-      "sha256": "0ba4a6a1068a2f2eb677c7aad3a798d3df56468d0fa897f2d371bc5ac1e6388e"
+      "sha256": "c307980bbd708b83bbf1ae489f27454a91f6e1fda92de950f056944f7b25bdbc"
     },
     {
       "path": "latex-compiler-manifest.json",
@@ -11,7 +11,7 @@
     },
     {
       "path": "src/bundled-fonts.mjs",
-      "sha256": "4b78d985b58d66eac614cd9261cc924d80e98f0de3571e0e2406c8fc9ca5d07a"
+      "sha256": "9ef561eea2fa2df199a094268435a1232afcf58186f464e0fbe64b82e1697962"
     },
     {
       "path": "src/latex-compiler-adapter.mjs",
@@ -19,19 +19,23 @@
     },
     {
       "path": "src/latex-draft-store.mjs",
-      "sha256": "d1a8023c7c63080d752f31babf20c92dee335978a41dcdda737594615d0952d9"
+      "sha256": "1b789a70ff1b91e4677b893ce4295415188d6d57097eb6c6a565b33520e3d2ed"
+    },
+    {
+      "path": "src/latex-draft-transactions.mjs",
+      "sha256": "68ab8d38698635eab7155cce411c4ef249f91b9a26c59b4f1f4022e3662ae404"
     },
     {
       "path": "src/latex-layout-audit.mjs",
-      "sha256": "6ba75b25e52586769d500dcfa0cd9c713335a9883b4d2e43a2441c0e4948a8e1"
+      "sha256": "61ca5c8ee745e04af1d4fa85004802ad3f80279e110c0bd23bad1484af3cd66e"
     },
     {
       "path": "src/latex-project.mjs",
-      "sha256": "254330a2f145917bc58dc2e0632e411f7e8425cbcbeed044bd09a97425335a66"
+      "sha256": "0e2bd8bfaac53622aeb91e08af8991ac97de98ba6ecec004b185e329f46c9205"
     },
     {
       "path": "src/latex-reference-policy.mjs",
-      "sha256": "9d792d80da09a5930f341d37fedafa52c93ab24b98ea65be355478faa760f0d0"
+      "sha256": "cc9dd6eb76431661544633cb8aa2c562283cddc6d251406960a89fee380ec125"
     },
     {
       "path": "src/latex-runtime-catalog.mjs",
@@ -39,99 +43,99 @@
     },
     {
       "path": "src/latex-semantic-edits.mjs",
-      "sha256": "2919ac9c914dc2f57b8d1bfc1830cfc9f06792589d991def7ccf9095407a5fec"
+      "sha256": "d82f3fdaa5d97aa70a4f604db2e9ebaa635c9eec238f22abf216d2bdfa58dcbf"
     },
     {
       "path": "src/latex-session-archive.mjs",
-      "sha256": "ab4c9f12a38a0218293cc1f815662b088e29a2d221f232faf63f94fec416f380"
+      "sha256": "ca97060b74a862f9aef291b414108e4768c9a4875bf9594942e5d00cbc7e33d9"
     },
     {
       "path": "src/latex-session.mjs",
-      "sha256": "ed4b3fc1432e1005112d87770fe1b5a7020d8a2f7e3f7aca3fe57987988904ac"
+      "sha256": "d53d474884b15ce30a194cbbd72b984e516c93407103941ed7a16d9883a4e40f"
     },
     {
       "path": "src/latex-source-export.mjs",
-      "sha256": "e7ba3dbddb1e8925b927ceba28fc2dc2835f06db7a7342a158d1b108be2daf61"
+      "sha256": "10844dc0bd3e7092766a2ffa63aa7420a14052cdef7bca48eb85bb3c93e4081e"
     },
     {
       "path": "src/latex-source-model.mjs",
-      "sha256": "e645e34fc03eb84cd991a3bc720941242889c4efc582d0b99375a0370c80e9ce"
+      "sha256": "08393fd9c9a07622b9815d9728402b91fcaf3aef3fbc8d4f8ea7fa25fa35d7de"
     },
     {
       "path": "src/latex-source-patches.mjs",
-      "sha256": "561b0a8aff8d564cf58f4a38defe295b6373d9629c4021b29dbbcfe1362348f7"
+      "sha256": "46b9625eb4809ccea5b172f5c00e84242f8ebde0347db86a9eb99532b4b8571a"
     },
     {
       "path": "src/latex-synctex-map.mjs",
-      "sha256": "7aadd169fbd8e14be16a86573171054f8cafde79fa9589b8fd037427cd89ba35"
+      "sha256": "af03df03953a69af5b0cee7de1411d73cae3308d81f98acea874adf76b798064"
     },
     {
       "path": "src/latex-workbench.mjs",
-      "sha256": "459c8cd14917bdf451ba075957d42396c502655f3f4cad35ac19e267dee5d55c"
+      "sha256": "c4642672b6ff557af829eedf7435f6fa522291093fbd3f0f385357a7c316b482"
     },
     {
       "path": "src/paper-document.mjs",
-      "sha256": "259707b830e6bd6cfb8f382db3004aa84e8ed78f9c89a5d42244a08443d4eedf"
+      "sha256": "e2eb03ef93265dd43312f2aa59d2b3614ddbf025ea0b2b12cc2cb4aac10c7c24"
     },
     {
       "path": "src/paper-flow.mjs",
-      "sha256": "8cdc529eca04b2d768db525148531fa0e7fc5b48e0b60d217d1574dd737e075d"
+      "sha256": "22ccfa81d106bda4710511a2a0aa41df247c610ac140a4607d3c30b125d33c8a"
     },
     {
       "path": "src/paper-fonts.mjs",
-      "sha256": "12bc71a5cc278cac9b702557e6d6cf6729ac13b0c2aad6cb55bb989054ecf5ea"
+      "sha256": "1e9c459e60234987329e96c19fadeabb28f1a16c3f156b56fdbd0bc148360393"
     },
     {
       "path": "src/paper-layout-agent-ui.mjs",
-      "sha256": "7b831db0fbc59e484e67a70c88ad0d31b48729e09c3bdd387b754a7d57bf4692"
+      "sha256": "9fe1cf23ee78067e408ef7246a74dc41c2a185746c669b12233aeb994a6fcff2"
     },
     {
       "path": "src/paper-layout-agent.mjs",
-      "sha256": "3d87212f8fe9ae0d53c3b33ebea50cc5185dc823f970db7a74979977e4f985c5"
+      "sha256": "4493ab0240e6f92a4d96c3fb73a297a25c5c77db6ffbf81576a8059a4ed3bbc6"
     },
     {
       "path": "src/paper-layout-asset-tools.mjs",
-      "sha256": "0f99af9a4bdde4dd43014b4888ffcd11fd3b3075fa39891c8eab12e5855d90f0"
+      "sha256": "8ad999fd9764119b79a859d54813ee707da9da2bf886fe7df183c5b377a9faa8"
     },
     {
       "path": "src/paper-layout-document-tools.mjs",
-      "sha256": "53abed824f37ed99db70655f26b43d3b2ea7a635bb9908e6c3b9bf0d43baafce"
+      "sha256": "6b8009e8c1f227886b47d01b603d9f5f9bf4ff9335ea48389892a16887d3ecc6"
     },
     {
       "path": "src/paper-layout-edit-tools.mjs",
-      "sha256": "32df0730538d45fb96e65c317dff577a12eaf6ade1374cdf6de04a22a5f9606b"
+      "sha256": "ed1948fb2162b4a84780bb4b12734f1938e8c0fbebe962a50d8e882f38575912"
     },
     {
       "path": "src/paper-layout-outcome.mjs",
-      "sha256": "3018ac062c8323da2d36f145a912a8c7d5944816d51b1c51127acb706a8c0eb5"
+      "sha256": "574f42271170cb61d064cd4dd6cc2d1464756c25aed9c5c878f4d1423dfc8373"
     },
     {
       "path": "src/paper-layout-preview.mjs",
-      "sha256": "439be9813f43c6372a4f6ae32266bcd03e2d6d7aeed498029d264f7e0424bc38"
+      "sha256": "c1bbaaec7e6ad6a24c2659d8cb6eeffc504b4894849b1a6b1e83b2b1a3b60d2b"
     },
     {
       "path": "src/paper-layout-quality.mjs",
-      "sha256": "4df5bae301cfa9d77f38ea530d95ad54415fa3ba3caf11abb6c77da6f7826d40"
+      "sha256": "8b50ee064d15eb005b2e0245bb29e746b82ea80a04c1d9300ebbc66aca9b6c07"
     },
     {
       "path": "src/paper-layout-reference.mjs",
-      "sha256": "fcb3c99186824112607ec2d6f0a883446714945b94ede9a1499e2437bbf807b4"
+      "sha256": "33a5c29a0e031534fbf835a5fa3fe196b84426d81ed72e094da4be5a34618aae"
     },
     {
       "path": "src/paper-layout-run-store.mjs",
-      "sha256": "b82d9035b578dd26e567bdb9e7e6ac25c1bdb0c57891913db90a9909c315c6cf"
+      "sha256": "1c9f7140ce82d0cb1d18cf15a8d4b943d89f05c1995e65f67012fb9345d51e9b"
     },
     {
       "path": "src/paper-layout-structure.mjs",
-      "sha256": "ada1ac5bdb6a0b7621e40ba474349fc82b0124cf782d26c5897f35972340ff27"
+      "sha256": "78a3e543d6c9e69c0993c5dc05f16cda76d22a122c37e85b0207ed16acc4d059"
     },
     {
       "path": "src/paper-layout-targets.mjs",
-      "sha256": "d012077f5c9ab140613ad92a7421a6ea2f41582ec2e26d0689b571207127ab06"
+      "sha256": "6416b659abe9bfa1bc0d5ab3672e4e033fce9ce697daa0deff566cdc474b5e9a"
     },
     {
       "path": "src/paper-layout-tool-catalog.mjs",
-      "sha256": "e26ad8c00b1a0f409135f6aea86e4bba5768b75ea39bd97802f839eddeff3ab4"
+      "sha256": "d6d0d6e54d5a60c400162e48d8de4ce57633ce6c2fe445ccc17426cd59b11021"
     },
     {
       "path": "src/paper-layout-toolbox.mjs",
@@ -139,23 +143,23 @@
     },
     {
       "path": "src/paper-layout-transport.mjs",
-      "sha256": "844fe402f6cc25e28a09d0a8024c6bdaffed1b76bd0d848038543da108a8af1c"
+      "sha256": "05f67ec5cc932e44dd36aa3d6ce50126b183b0bce7b2c36557d26199e9887fba"
     },
     {
       "path": "src/paper-publication-semantics.mjs",
-      "sha256": "d4aa46e82d403b5d7d96a9dd2145bf5c9a4503e66fd0515ae4986e388b36adab"
+      "sha256": "9013f0ced752b896d4740a6d9d66cbaea998efa4d3f0d0ddbfe9a52d4cddc15f"
     },
     {
       "path": "src/paper-publication-tables.mjs",
-      "sha256": "05585bc6a71d9d2ec165e294de619ea3308ebfb71f07d26fd49a8651a4eda5ed"
+      "sha256": "7ea3065602e7bedce8361738826e15bde00bb6cb37a4a14ad7c06ebf40ae25af"
     },
     {
       "path": "src/paper-source-assets.mjs",
-      "sha256": "ccc30138fae3ef8f5dcb259f6be51a561fd6fa8bd6a8465ab4888d1679b4e49c"
+      "sha256": "b3d54cfa7fc423553e7b6fffe4daf5d48e16b9fe925cd61320a002b8f21fd85f"
     },
     {
       "path": "src/paper-source-links.mjs",
-      "sha256": "70438c684bcc5e2fb9b36a00d5007f51e28a0459c7f976202fb8d2ec28b43819"
+      "sha256": "e9d091cc0cb7e4b173b0a52f4c9cc40d676af14f7fbaae5049a1b16691db853b"
     },
     {
       "path": "src/paper-typography-profile.mjs",
@@ -167,15 +171,15 @@
     },
     {
       "path": "src/pdf-latex-baseline.mjs",
-      "sha256": "c95ac173cbb7798e968b92b74802942c868d4f30b999ba23c86af97cacefd607"
+      "sha256": "072ed8aa2a4be68395acd8b1f7fb70896f8b070bc05dd8ae2a3d5d5e4d268b24"
     },
     {
       "path": "src/pdf-latex-evidence.mjs",
-      "sha256": "def576d156618bff3fe28a6f2d457ea0070014241b9127e3d3dff21af81d73d8"
+      "sha256": "0df5d2bdb9a000a08f0a76b772b71a0c44e37d6f0f1df8ceecdada336aba0b95"
     },
     {
       "path": "src/pdf-latex-flow-serialize.mjs",
-      "sha256": "a9d5a69f31b4446e355f1e13fde83acad74ac417052e64ac2bcb0302ff018ae6"
+      "sha256": "3a6b9cab789206a93e31a5d3855116b0ef7b782298390790b517c990efbc1a3c"
     },
     {
       "path": "src/pdf-latex-fonts.mjs",
@@ -183,7 +187,7 @@
     },
     {
       "path": "src/pdf-latex-layout.mjs",
-      "sha256": "a8e42f5390261a9550f57e7180df98f55940cd79baa35bc79b9cde38a6fe8d8f"
+      "sha256": "1b851586934f3bc681e80f1bbc1ebf5fbd50c87657b6305ae9fc9814ca2afa58"
     },
     {
       "path": "src/pdf-latex-reader-worker.mjs",
@@ -191,19 +195,19 @@
     },
     {
       "path": "src/pdf-latex-reader.mjs",
-      "sha256": "f9d757cfd8e8f2bf6c96912041907930cfff28b9ee112b4da5ded391318e2ece"
+      "sha256": "2d9744428683de76a67d0ae75efd7bbb07178674517c8f155e5cc7173ebc1f03"
     },
     {
       "path": "src/pdf-latex-regions.mjs",
-      "sha256": "213fb1e48f40f37325a9679dd52423d42798acbb9772dbc236e67a79194238cb"
+      "sha256": "c9f73ff12a04da6b1a62a66e52a981c22415a62e6242b52611a3cf525106b4d8"
     },
     {
       "path": "src/pdf-latex-serialize.mjs",
-      "sha256": "ee8dda840856069237baa8e3ddded019524c069989bc6449955b7d292b3c0965"
+      "sha256": "3b90d7f0e0c271c7bc5ab8b721e0f41e937605ed5dd332993e4d7a91d8bbf4ea"
     },
     {
       "path": "src/pdf-latex-structure-audit.mjs",
-      "sha256": "050ad643352acc07bcce852c7885690c38bf93f1c94010a6522d53b805fde235"
+      "sha256": "22da5a482de525ee635950b0c8bb067880ed00d39a30be71aaf12cfbc7e2ba20"
     },
     {
       "path": "src/pdf-latex-unicode.mjs",
@@ -211,11 +215,11 @@
     },
     {
       "path": "src/pdf-latex-workbench.mjs",
-      "sha256": "62b2bdf515f6fc548019800c64dce3130f8eb7ac0ec60ae72a335dc01b1de84f"
+      "sha256": "17d4a458893cd9670cf41532e358788956b8de87e0d09286b296159a589e55ab"
     },
     {
       "path": "src/table-adapter.mjs",
-      "sha256": "41536d1d7ca96ffdccc2a1f4d1ff3c90cb79bd86933b5a9b19a0326ca4095046"
+      "sha256": "250a8535e71ffeb1caaa10a390ab5070182b4adc15bae5e5f289da88c7d31adc"
     },
     {
       "path": "src/table-vendor/detection.mjs",
@@ -232,10 +236,10 @@
   ],
   "output": {
     "path": "latex-workbench.mjs",
-    "sha256": "490593bd3d2213ba54d8d2846df58aa5c7a46447c7df7675722c1781d004eac5"
+    "sha256": "6b48dc45518c35ed498f87452d44981c67973766f85a27a8fdc368705f41f5f6"
   },
   "worker": {
     "path": "pdf-latex-reader-worker.mjs",
-    "sha256": "090901c00851eee933da714b5d23ac85a44e7440f8fa86fd7126da488b015268"
+    "sha256": "264d6a4869920cff06f687154997d080323c6733cb007ac5c39bf90dc6465f24"
   }
 }

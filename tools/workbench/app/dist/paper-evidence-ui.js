@@ -211,26 +211,26 @@
     function validateSummary(data, fileHash){
       if(!data||typeof data!=='object'||Array.isArray(data)||data.schema!==SCHEMA||!paperIdOk(data.paperId)||data.fileHash!==fileHash)fail('failed');
       if(data.status!=='ready'&&data.status!=='partial')fail('failed');
-      if(!countOk(data.pageCount)||data.pageCount>20000||!data.counts||typeof data.counts!=='object'||!countOk(data.counts.tables)||!countOk(data.counts.figures))fail('failed');
-      if(typeof data.engine!=='string'||!data.engine.trim()||data.engine.length>80||/[\u0000-\u001f]/.test(data.engine))fail('failed');
-      if(!Array.isArray(data.limitations)||data.limitations.length>10000||data.limitations.some(x=>typeof x!=='string'||x.length>500||/[\u0000-\u001f]/.test(x)))fail('failed');
+      validateSummaryMetadata(data);
       const expiresAt=typeof data.expiresAt==='string'?Date.parse(data.expiresAt):NaN;
       if(!Number.isFinite(expiresAt))fail('failed');
       if(expiresAt<=Date.now())fail('expired');
       return {paperId:data.paperId,fileHash,status:data.status,pageCount:data.pageCount,counts:{tables:data.counts.tables,figures:data.counts.figures},engine:data.engine.trim(),limitations:data.limitations.slice(0,16).map(x=>clip(x,200)).concat(data.limitations.length>16?['추가 항목 '+(data.limitations.length-16)+'개']:[]),expiresAt};
     }
+    function validateSummaryMetadata(data){
+      if(!countOk(data.pageCount)||data.pageCount>20000||!data.counts||typeof data.counts!=='object'||!countOk(data.counts.tables)||!countOk(data.counts.figures))fail('failed');
+      if(typeof data.engine!=='string'||!data.engine.trim()||data.engine.length>80||/[\u0000-\u001f]/.test(data.engine))fail('failed');
+      if(!Array.isArray(data.limitations)||data.limitations.length>10000||data.limitations.some(x=>typeof x!=='string'||x.length>500||/[\u0000-\u001f]/.test(x)))fail('failed');
+    }
     function validateList(data, parsed, offset){
-      if(!data||typeof data!=='object'||data.paperId!==parsed.paperId||data.fileHash!==parsed.fileHash||!Array.isArray(data.items)||!countOk(data.total))return null;
+      if(!listHeaderValid(data,parsed))return null;
       if(data.total<offset)return null;
       const seen=new Set(items.map(x=>x.id)), out=[];
       let skipped=0;
       for(const raw of data.items){
-        const id=raw&&raw.id;
-        const caption=raw&&raw.caption!=null?raw.caption:null;
-        const provenance=raw&&raw.provenance!=null?raw.provenance:null;
-        if(!raw||typeof raw!=='object'||typeof id!=='string'||id.length<1||id.length>160||seen.has(id)||/[\u0000-\u001f]/.test(id)||(raw.type!=='table'&&raw.type!=='figure')||!Number.isSafeInteger(raw.pageIndex)||raw.pageIndex<0||raw.pageIndex>20000||!bboxOk(raw.bbox)||(caption!=null&&(typeof caption!=='string'||caption.length>2000))||(provenance!=null&&typeof provenance!=='string'&&(typeof provenance!=='object'||Array.isArray(provenance)))){skipped++;continue;}
-        seen.add(id);
-        out.push({id,type:raw.type,pageIndex:raw.pageIndex,bbox:[raw.bbox[0],raw.bbox[1],raw.bbox[2],raw.bbox[3]],caption,provenance:typeof provenance==='object'&&provenance!==null?[provenance.engine,provenance.method].filter(v=>typeof v==='string').join(' · '):provenance});
+        const item=readEvidenceItem(raw,seen);
+        if(!item){skipped++;continue;}
+        out.push(item);
       }
       if(data.total<offset+out.length)return null;
       let next=null;
@@ -240,14 +240,32 @@
       }
       return {items:out,total:data.total,nextOffset:next,skipped};
     }
+    function listHeaderValid(data,parsed){return !!data&&typeof data==='object'&&data.paperId===parsed.paperId&&data.fileHash===parsed.fileHash&&Array.isArray(data.items)&&countOk(data.total);}
+    function readEvidenceItem(raw,seen){
+        const id=raw&&raw.id;
+        const caption=raw&&raw.caption!=null?raw.caption:null;
+        const provenance=raw&&raw.provenance!=null?raw.provenance:null;
+        if(invalidEvidenceIdentity(raw,id,seen)||invalidEvidenceGeometry(raw)||invalidEvidenceMetadata(caption,provenance))return null;
+        seen.add(id);
+        return {id,type:raw.type,pageIndex:raw.pageIndex,bbox:[raw.bbox[0],raw.bbox[1],raw.bbox[2],raw.bbox[3]],caption,provenance:typeof provenance==='object'&&provenance!==null?[provenance.engine,provenance.method].filter(v=>typeof v==='string').join(' · '):provenance};
+    }
+    function invalidEvidenceIdentity(raw,id,seen){return !raw||typeof raw!=='object'||typeof id!=='string'||id.length<1||id.length>160||seen.has(id)||/[\u0000-\u001f]/.test(id);}
+    function invalidEvidenceGeometry(raw){return (raw.type!=='table'&&raw.type!=='figure')||!Number.isSafeInteger(raw.pageIndex)||raw.pageIndex<0||raw.pageIndex>20000||!bboxOk(raw.bbox);}
+    function invalidEvidenceMetadata(caption,provenance){return (caption!=null&&(typeof caption!=='string'||caption.length>2000))||(provenance!=null&&typeof provenance!=='string'&&(typeof provenance!=='object'||Array.isArray(provenance)));}
     function validateRender(data, parsed, item){
-      if(!data||typeof data!=='object'||data.paperId!==parsed.paperId||data.fileHash!==parsed.fileHash||data.pageIndex!==item.pageIndex||data.mimeType!=='image/png'||!bboxOk(data.bbox))return null;
+      if(!renderHeaderValid(data,parsed,item))return null;
       if(!Number.isSafeInteger(data.width)||!Number.isSafeInteger(data.height)||data.width<1||data.height<1||data.width*data.height>MAX_PIXELS)return null;
       if(data.bbox.some((n,i)=>Math.abs(n-item.bbox[i])>1e-6))return null;
       if(typeof data.sha256!=='string'||!HEX.test(data.sha256))return null;
-      const bytes=decode(data.data);
-      if(!bytes||bytes.length<8||bytes[0]!==137||bytes[1]!==80||bytes[2]!==78||bytes[3]!==71||bytes[4]!==13||bytes[5]!==10||bytes[6]!==26||bytes[7]!==10)return null;
+      const bytes=decodePng(data.data);
+      if(!bytes)return null;
       return {bytes,width:data.width,height:data.height,sha256:data.sha256};
+    }
+    function renderHeaderValid(data,parsed,item){return !!data&&typeof data==='object'&&data.paperId===parsed.paperId&&data.fileHash===parsed.fileHash&&data.pageIndex===item.pageIndex&&data.mimeType==='image/png'&&bboxOk(data.bbox);}
+    function decodePng(data){
+      const bytes=decode(data);
+      if(!bytes||bytes.length<8||bytes[0]!==137||bytes[1]!==80||bytes[2]!==78||bytes[3]!==71||bytes[4]!==13||bytes[5]!==10||bytes[6]!==26||bytes[7]!==10)return null;
+      return bytes;
     }
     function paintRows(pageItems){
       for(const item of pageItems){
@@ -268,6 +286,7 @@
       }
       syncDisabled();
     }
+    function requireSession(){const session=getSession();if(!session||typeof session.request!=='function')fail('unavailable');return session;}
     async function showCrop(item){
       const token=epoch, parsed=cache, id=item.id, mine=++cropSerial;
       if(!parsed||parsed.paperId!==listPaperId)return;
@@ -277,27 +296,33 @@
       revoke();
       say(cropNote, TEXT.cropWait);
       try{
-        const session=getSession();
-        if(!session||typeof session.request!=='function')fail('unavailable');
+        const session=requireSession();
         const area=(item.bbox[2]-item.bbox[0])*(item.bbox[3]-item.bbox[1]);
         const dpi=Math.max(1,Math.min(120,Math.floor(72*Math.sqrt(1800000/area))));
         const res=await session.request(QUERY,{paperId:parsed.paperId,operation:'render',pageIndex:item.pageIndex,bbox:[...item.bbox],dpi},{signal:cropCtl.signal});
-        if(mine!==cropSerial||token!==epoch||selectedId!==id||!included)return;
+        if(!cropCurrent(mine,token,id))return;
         const png=validateRender(res, parsed, item);
         if(!png){say(cropNote, TEXT.cropFailed, true);return;}
         const actual=await digest(png.bytes);
-        if(mine!==cropSerial||token!==epoch||selectedId!==id||!included)return;
+        if(!cropCurrent(mine,token,id))return;
         if(actual!==png.sha256){say(cropNote, TEXT.cropFailed, true);return;}
+        paintCrop(item,png);
+      }catch(e){
+        if(e?.name==='AbortError'||mine!==cropSerial||!included)return;
+        say(cropNote, codeOf(e)==='unavailable'?TEXT.unavailable:TEXT.cropFailed, true);
+      }
+    }
+    function cropCurrent(mine,token,id){return mine===cropSerial&&token===epoch&&selectedId===id&&!!included;}
+    function paintCrop(item,png){
         objectUrl=root.URL.createObjectURL(new root.Blob([png.bytes],{type:'image/png'}));
         img.src=objectUrl;
         img.alt=(item.type==='table'?'표':'그림')+' · '+(item.pageIndex+1)+'쪽 영역';
         img.hidden=false;
         figcaption.textContent=(item.type==='table'?'표':'그림')+' · '+(item.pageIndex+1)+'쪽'+(item.caption?' · '+clip(item.caption,400):'');
         say(cropNote, png.width+'×'+png.height+' px');
-      }catch(e){
-        if(e?.name==='AbortError'||mine!==cropSerial||!included)return;
-        say(cropNote, codeOf(e)==='unavailable'?TEXT.unavailable:TEXT.cropFailed, true);
-      }
+    }
+    function resetList(){
+      items=[];radios=[];selectedId=null;rows.replaceChildren();revoke();figure.hidden=true;say(cropNote,'');say(listNote, TEXT.listLoading);
     }
     async function loadList(token, parsed, offset){
       if(!parsed||token!==epoch||!included||listing)return;
@@ -308,14 +333,26 @@
       listCtl=new AbortController();
       const signal=listCtl.signal;
       syncDisabled();
-      if(offset===0){items=[];radios=[];selectedId=null;rows.replaceChildren();revoke();figure.hidden=true;say(cropNote,'');say(listNote, TEXT.listLoading);}
+      if(offset===0)resetList();
       try{
-        const session=getSession();
-        if(!session||typeof session.request!=='function')fail('unavailable');
+        const session=requireSession();
         const res=await session.request(QUERY,{paperId:parsed.paperId,operation:'list',offset,limit:50},{signal});
         if(token!==epoch||!included||signal.aborted)return;
         const page=validateList(res, parsed, offset);
         if(!page){say(listNote, TEXT.listFailed, true);return;}
+        paintListPage(page,parsed);
+      }catch(e){
+        reportListFailure(e,token);
+      }finally{
+        if(mine===listGen)listing=false;
+        syncDisabled();
+      }
+    }
+    function reportListFailure(e,token){
+      if(e?.name==='AbortError'||token!==epoch||!included)return;
+      say(listNote, TEXT.listFailed, true);
+    }
+    function paintListPage(page,parsed){
         items.push(...page.items);
         paintRows(page.items);
         listPaperId=parsed.paperId;
@@ -325,13 +362,6 @@
         if(!items.length)rows.append(el('p','muted', TEXT.noItems));
         say(listNote, page.skipped?TEXT.listSkip:'');
         listDetails.hidden=false;
-      }catch(e){
-        if(e?.name==='AbortError'||token!==epoch||!included)return;
-        say(listNote, TEXT.listFailed, true);
-      }finally{
-        if(mine===listGen)listing=false;
-        syncDisabled();
-      }
     }
     function follow(token, fileHash, companionInstance){
       if(token!==epoch||!included)return null;
@@ -348,13 +378,11 @@
         const raw=await file.arrayBuffer();
         if(!follow(token, fileHash, companionInstance))return null;
         const bytes=raw instanceof Uint8Array?new Uint8Array(raw):new Uint8Array(raw);
-        if(bytes.length>MAX_PDF)fail('limit');
-        if(!isPdf(bytes))fail('notPdf');
+        validatePdfBytes(bytes);
         const actual=await digest(bytes);
         if(!follow(token, fileHash, companionInstance))return null;
         if(actual!==fileHash)fail('hash');
-        const session=getSession();
-        if(!session||typeof session.request!=='function')fail('unavailable');
+        const session=requireSession();
         const summary=await session.request(PREPARE,{fileHash,file:encode(bytes)},{signal:prepareCtl.signal});
         if(!follow(token, fileHash, companionInstance))return null;
         const parsed=validateSummary(summary, fileHash);
@@ -366,6 +394,11 @@
         return parsed;
       }catch(e){
         if(e?.name==='AbortError'||!follow(token, fileHash, companionInstance))return null;
+        reportRunFailure(e,fileHash);
+      }
+    }
+    function validatePdfBytes(bytes){if(bytes.length>MAX_PDF)fail('limit');if(!isPdf(bytes))fail('notPdf');}
+    function reportRunFailure(e,fileHash){
         const code=codeOf(e);
         failedHash=fileHash;
         errorCode=code;
@@ -373,7 +406,6 @@
         showRetry(true);
         listDetails.hidden=true;
         throw Object.assign(new Error(TEXT[code]||TEXT.failed),{code});
-      }
     }
     function begin(){
       if(!included)return Promise.resolve(null);

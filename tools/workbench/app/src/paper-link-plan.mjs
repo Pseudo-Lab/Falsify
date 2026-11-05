@@ -11,13 +11,17 @@ export function buildLinkPlan({document, flow, links, edits=[]}={}) {
   const blocks=new Map([...(document.blocks||[]),...(flow.fragments||[])].map(b=>[b.id,b]));
   const parents=new Map((document.blocks||[]).map(b=>[b.id,b]));
   const owned=[];
+  function collectOwnedBlocks() {
   for (const item of flow.items) for (const id of item.blockIds||[]) {
     const block=blocks.get(id);
     if (block?.source?.range) owned.push({item,block,parentId:block.parentBlockId||id});
   }
+  }
+  collectOwnedBlocks();
   const assetItem=id=>flow.items.find(i=>i.kind==='asset' && (i.assetIds||[]).includes(id));
   const diagnostics=[], targets=[], targetMap=new Map(), raw=[], sourceAssets=[];
   const nativeEdits=[];
+  function collectNativeEdits() {
   for (const e of edits) {
     if (e.enabled===false) continue;
     const p=parents.get(e.blockId), r=p?.source?.range;
@@ -25,6 +29,22 @@ export function buildLinkPlan({document, flow, links, edits=[]}={}) {
       diagnostics.push({code:'edit-unmapped',editId:e.id ?? null}); continue;
     }
     nativeEdits.push(e);
+  }
+  }
+  collectNativeEdits();
+  function pageAnchor(page) {
+      // Page destinations follow the first surviving body character or asset.
+      for(const i of flow.items) {
+        if(i.source?.pageIndex!==page || i.kind==='header' || i.kind==='footer') continue;
+        if(i.kind==='asset') {return {assetItemId:i.id};}
+        for(const id of i.blockIds||[]) {
+          const b=blocks.get(id), r=b?.source?.range; if(!r) continue;
+          let at=r.start;
+          while(at<r.end) {const edit=nativeEdits.find(e=>e.blockId===(b.parentBlockId||b.id) && e.start<=at && at<e.end); if(!edit) break; at=edit.end;}
+          if(at<r.end) {return {blockId:b.id,start:at,end:at};}
+        }
+
+      }
   }
   function target(link) {
     const t=link.target, rel=t?.relation;
@@ -44,27 +64,14 @@ export function buildLinkPlan({document, flow, links, edits=[]}={}) {
     } else if (rel.status==='asset') {
       const i=assetItem(rel.assetId); if(i && i.source?.pageIndex===page) loc={assetItemId:i.id};
     } else if (rel.status==='page-anchor') {
-      // Page destinations follow the first surviving body character or asset.
-      for(const i of flow.items) {
-        if(i.source?.pageIndex!==page || i.kind==='header' || i.kind==='footer') continue;
-        if(i.kind==='asset') {loc={assetItemId:i.id};break;}
-        for(const id of i.blockIds||[]) {
-          const b=blocks.get(id), r=b?.source?.range; if(!r) continue;
-          let at=r.start;
-          while(at<r.end) {const edit=nativeEdits.find(e=>e.blockId===(b.parentBlockId||b.id) && e.start<=at && at<e.end); if(!edit) break; at=edit.end;}
-          if(at<r.end) {loc={blockId:b.id,start:at,end:at};break;}
-        }
-        if(loc) break;
-      }
+      loc=pageAnchor(page);
     }
     if(!loc) { diagnostics.push({code:'target-unmapped',linkId:link.id,sourcePage:page}); return null; }
     const key=[document.sourceSha256,page,loc], label=labelFor(key);
     if(!targetMap.has(label)) { const x={label,sourcePage:page,...loc}; targetMap.set(label,x); targets.push(x); }
     return label;
   }
-  for (const link of links.links) {
-    const destinationLabel=link.external ? null : target(link);
-    const dest=link.external ? {uri:link.uri} : destinationLabel ? {destinationLabel,uri:link.uri} : {uri:link.uri,destinationStatus:targets.find(t=>t.linkIds?.includes(link.id))?.status || 'unresolved'};
+  function projectRanges(link,dest) {
     for(const range of link.relation?.ranges||[]) {
       if(!validRange(range)) {diagnostics.push({code:'source-range-invalid',linkId:link.id});continue;}
       let found=false;
@@ -75,11 +82,20 @@ export function buildLinkPlan({document, flow, links, edits=[]}={}) {
       }
       if(!found && !owned.some(o=>o.parentId===range.blockId && o.item.kind==='asset' && overlaps(o.block.source.range,range))) diagnostics.push({code:'source-unmapped',linkId:link.id,blockId:range.blockId});
     }
+  }
+  function projectLinkSources() {
+  for (const link of links.links) {
+    const destinationLabel=link.external ? null : target(link);
+    const dest=link.external ? {uri:link.uri} : destinationLabel ? {destinationLabel,uri:link.uri} : {uri:link.uri,destinationStatus:targets.find(t=>t.linkIds?.includes(link.id))?.status || 'unresolved'};
+    projectRanges(link,dest);
     for(const id of link.relation?.assetIds||[]) {const item=assetItem(id); if(item) sourceAssets.push({assetItemId:item.id,assetId:id,...dest,linkIds:[link.id]}); else diagnostics.push({code:'source-asset-unmapped',linkId:link.id,assetId:id});}
   }
+  }
+  projectLinkSources();
   const key = r => JSON.stringify([r.blockId,r.uri,r.destinationLabel,r.destinationStatus]);
   raw.sort((a,b)=>a.blockId.localeCompare(b.blockId)||a.start-b.start||a.end-b.end||key(a).localeCompare(key(b)));
   const sourceRuns=[];
+  function mergeSourceRuns() {
   for(const r of raw) {
     const prior=sourceRuns.find(x=>key(x)===key(r) && r.start<x.end && x.start<r.end);
     if(prior) {prior.start=Math.min(prior.start,r.start); prior.end=Math.max(prior.end,r.end); prior.linkIds=[...new Set([...prior.linkIds,...r.linkIds])];}
@@ -93,6 +109,8 @@ export function buildLinkPlan({document, flow, links, edits=[]}={}) {
   for(let i=0;i<sourceRuns.length;i++) for(let j=i+1;j<sourceRuns.length;j++) {
     const a=sourceRuns[i], b=sourceRuns[j]; if(a.blockId===b.blockId && key(a)!==key(b) && overlaps(a,b)) {a.conflicted=true;b.conflicted=true;diagnostics.push({code:'source-link-conflict',blockId:a.blockId,start:Math.max(a.start,b.start),end:Math.min(a.end,b.end),linkIds:[...new Set([...a.linkIds,...b.linkIds])]});}
   }
+  }
+  mergeSourceRuns();
   const changes=nativeEdits.map(e=>{
     const portions=sourceRuns.filter(r=>r.parentBlockId===e.blockId && overlaps(r,e)).map(r=>({blockId:r.blockId,start:Math.max(r.start,e.start),end:Math.min(r.end,e.end),linkIds:[...r.linkIds],...(r.destinationLabel?{destinationLabel:r.destinationLabel,uri:r.uri}:{uri:r.uri}),conflicted:!!r.conflicted}));
     // A union across adjacent flow fragments may represent one original annotation.

@@ -43,14 +43,18 @@ export function attachStructuredTables(document, flow, tables) {
   return flow;
 }
 
+function needsWrapSpace(boundaries,i,b,visibleWrap) {
+  return boundaries.has(i) && i>0 && !/\s/u.test(b.text[i-1]) && !/\s/u.test(b.text[i]) && (visibleWrap || b.text[i-1]!=='-') && !(b.text[i-1]==='−' && /[0-9]/u.test(b.text[i]));
+}
+
 // Keep one map entry per UTF-16 unit. Generated separators have no source.
 function pageStreams(document, flow, visibleWrap=false) {
   const lookup=new Map([...document.blocks,...(flow.fragments||[])].map(b=>[b.id,b]));
   const streams=new Map();
-  for(const item of flow.items) {
-    if(item.kind==='asset') continue;
+  function appendItem(item) {
+    if(item.kind==='asset') return;
     const blocks=(item.blockIds||[]).map(id=>lookup.get(id)).filter(b=>b?.text);
-    for(const [index,b] of blocks.entries()) {
+    function appendBlock(index,b) {
       const p=b.source.pageIndex, s=streams.get(p)||{chars:[]}; streams.set(p,s);
       if(s.chars.length) {
         const sep=index && item.inline ? item.joiners[index-1] : ' ';
@@ -58,16 +62,19 @@ function pageStreams(document, flow, visibleWrap=false) {
       }
       const boundaries=new Set((b.source.lines||[]).slice(1).map(l=>l.range.start-b.source.range.start));
       const spaces=new Set(b.source.wordSpaceOffsets||[]);
-      for(let i=0;i<b.text.length;i++) {
-        if(boundaries.has(i) && i>0 && !/\s/u.test(b.text[i-1]) && !/\s/u.test(b.text[i]) && (visibleWrap || b.text[i-1]!=='-') && !(b.text[i-1]==='−' && /[0-9]/u.test(b.text[i]))) s.chars.push({ch:' ',source:null});
+      function appendCharacter(i) {
+        if(needsWrapSpace(boundaries,i,b,visibleWrap)) s.chars.push({ch:' ',source:null});
         const offset=b.source.range.start+i;
         const parent=lookup.get(b.parentBlockId||b.id), parentIndex=offset-(parent?.source?.range?.start??offset);
         if(spaces.has(offset) && parentIndex>0 && !/\s/u.test(parent.text[parentIndex-1]) && !/\s/u.test(b.text[i])) s.chars.push({ch:' ',source:null});
         const character=(b.source.characters||[]).find(c=>c.start<=offset && c.end>offset);
         s.chars.push({ch:b.text[i],source:{blockId:b.parentBlockId||b.id,start:offset,end:offset+1,bbox:character?.bbox||null,fragmentId:b.id}});
       }
+      for(let i=0;i<b.text.length;i++) appendCharacter(i);
     }
+    for(const [index,b] of blocks.entries()) appendBlock(index,b);
   }
+  for(const item of flow.items) appendItem(item);
   for(const s of streams.values()) {
     s.text=''; s.map=[];
     for(const entry of s.chars) {
@@ -79,13 +86,7 @@ function pageStreams(document, flow, visibleWrap=false) {
   }
   return streams;
 }
-// Resolve selected native UTF-16 units against the ordered flow, including asset barriers.
-function explicitParts(document, flow, edit, selection, index) {
-  const bad=(message,code='INVALID_EXPLICIT')=>fail('source-binding',message,{index,id:edit.id,code});
-  if(typeof selection.sourceSha256!=='string' || selection.sourceSha256!==document.sourceSha256) fail('stale-source','Explicit selection source hash mismatch.',{index,id:edit.id});
-  if(!Array.isArray(selection.parts) || !selection.parts.length) bad('Explicit selection requires parts.');
-  const blocks=new Map(document.blocks.map(b=>[b.id,b]));
-  const lookup=new Map([...document.blocks,...(flow.fragments||[])].map(b=>[b.id,b]));
+function explicitInventory(flow,lookup) {
   const units=[], assetRanges=[];
   for(const item of flow.items) {
     if(item.kind==='asset') {
@@ -97,14 +98,11 @@ function explicitParts(document, flow, edit, selection, index) {
       for(let offset=b.source.range.start;offset<b.source.range.end;offset++) units.push({blockId:b.parentBlockId||b.id,pageIndex:b.source.pageIndex,offset});
     }
   }
-  const parts=selection.parts.map(p=>{
-    const b=blocks.get(p?.blockId), r=b?.source?.range;
-    if(!b || !r || p.pageIndex!==edit.pageIndex || b.source.pageIndex!==p.pageIndex || !Number.isInteger(p.start) || !Number.isInteger(p.end) || p.start<r.start || p.end>r.end || p.start>=p.end || typeof p.before!=='string' || b.text.slice(p.start-r.start,p.end-r.start)!==p.before) bad('Explicit part does not match its native source.');
-    const splitsScalar=offset=>offset>0 && offset<b.text.length && /[\uD800-\uDBFF]/u.test(b.text[offset-1]) && /[\uDC00-\uDFFF]/u.test(b.text[offset]);
-    if(splitsScalar(p.start-r.start) || splitsScalar(p.end-r.start)) bad('Explicit part splits a Unicode scalar.');
-    if(assetRanges.some(a=>a.blockId===p.blockId && p.start<a.end && p.end>a.start)) bad('Explicit selection includes asset-owned text.');
-    return {blockId:p.blockId,pageIndex:p.pageIndex,start:p.start,end:p.end,before:p.before};
-  });
+  return {units,assetRanges};
+}
+
+// Resolve selected native UTF-16 units against the ordered flow, including asset barriers.
+function validateExplicitOwnership(parts,units,bad) {
   const selected=parts.flatMap(p=>Array.from({length:p.end-p.start},(_,i)=>({blockId:p.blockId,pageIndex:p.pageIndex,offset:p.start+i})));
   const same=(a,b)=>a && a.blockId===b.blockId && a.pageIndex===b.pageIndex && a.offset===b.offset;
   const counts=new Map();
@@ -113,7 +111,30 @@ function explicitParts(document, flow, edit, selection, index) {
   let hits=0;
   for(let i=0;i<=units.length-selected.length;i++) if(selected.every((u,j)=>same(units[i+j],u))) hits++;
   if(hits!==1) bad('Explicit parts must select one contiguous, uniquely owned text range in flow order.',hits?'AMBIGUOUS_EXPLICIT':'INVALID_EXPLICIT');
+}
+
+function explicitParts(document, flow, edit, selection, index) {
+  const bad=(message,code='INVALID_EXPLICIT')=>fail('source-binding',message,{index,id:edit.id,code});
+  if(typeof selection.sourceSha256!=='string' || selection.sourceSha256!==document.sourceSha256) fail('stale-source','Explicit selection source hash mismatch.',{index,id:edit.id});
+  if(!Array.isArray(selection.parts) || !selection.parts.length) bad('Explicit selection requires parts.');
+  const blocks=new Map(document.blocks.map(b=>[b.id,b]));
+  const lookup=new Map([...document.blocks,...(flow.fragments||[])].map(b=>[b.id,b]));
+  const {units,assetRanges}=explicitInventory(flow,lookup);
+  function validatePart(p) {
+    const b=blocks.get(p?.blockId), r=b?.source?.range;
+    if(!b || !r || p.pageIndex!==edit.pageIndex || b.source.pageIndex!==p.pageIndex || !Number.isInteger(p.start) || !Number.isInteger(p.end) || p.start<r.start || p.end>r.end || p.start>=p.end || typeof p.before!=='string' || b.text.slice(p.start-r.start,p.end-r.start)!==p.before) bad('Explicit part does not match its native source.');
+    const splitsScalar=offset=>offset>0 && offset<b.text.length && /[\uD800-\uDBFF]/u.test(b.text[offset-1]) && /[\uDC00-\uDFFF]/u.test(b.text[offset]);
+    if(splitsScalar(p.start-r.start) || splitsScalar(p.end-r.start)) bad('Explicit part splits a Unicode scalar.');
+    if(assetRanges.some(a=>a.blockId===p.blockId && p.start<a.end && p.end>a.start)) bad('Explicit selection includes asset-owned text.');
+    return {blockId:p.blockId,pageIndex:p.pageIndex,start:p.start,end:p.end,before:p.before};
+  }
+  const parts=selection.parts.map(validatePart);
+  validateExplicitOwnership(parts,units,bad);
   return parts;
+}
+
+function invalidSelectionIdentity(selection,byId,byIndex,length) {
+  return (selection.id!=null && byId===undefined) || (byIndex!=null && (!Number.isInteger(byIndex) || byIndex<0 || byIndex>=length)) || (byId!=null && byIndex!=null && byId!==byIndex);
 }
 
 export function bindEdits(document, flow, edits, explicit=[]) {
@@ -123,48 +144,58 @@ export function bindEdits(document, flow, edits, explicit=[]) {
     if(typeof e.id!=='string' || !e.id || ids.has(e.id)) fail('invalid-edit','Edit IDs must be unique nonempty strings.',{index,id:e.id});
     ids.set(e.id,index);
   }
-  if(!Array.isArray(explicit)) fail('source-binding','Explicit bindings must be an array.',{code:'INVALID_EXPLICIT'});
-  for(const selection of explicit) {
-    if(!selection || (selection.id==null && selection.index==null)) fail('source-binding','Explicit binding requires an edit id or index.',{code:'INVALID_EXPLICIT'});
-    const byId=selection.id==null?null:ids.get(selection.id), byIndex=selection.index==null?null:selection.index;
-    if((selection.id!=null && byId===undefined) || (byIndex!=null && (!Number.isInteger(byIndex) || byIndex<0 || byIndex>=edits.length)) || (byId!=null && byIndex!=null && byId!==byIndex)) fail('source-binding','Explicit binding identifies an unknown or inconsistent edit.',{code:'INVALID_EXPLICIT'});
-    const target=byId??byIndex;
-    if(selections.has(target)) fail('source-binding','Duplicate explicit binding.',{index:target,code:'INVALID_EXPLICIT'});
-    selections.set(target,selection);
+  indexExplicitSelections();
+  function indexExplicitSelections() {
+    if(!Array.isArray(explicit)) fail('source-binding','Explicit bindings must be an array.',{code:'INVALID_EXPLICIT'});
+    for(const selection of explicit) {
+      if(!selection || (selection.id==null && selection.index==null)) fail('source-binding','Explicit binding requires an edit id or index.',{code:'INVALID_EXPLICIT'});
+      const byId=selection.id==null?null:ids.get(selection.id), byIndex=selection.index==null?null:selection.index;
+      if(invalidSelectionIdentity(selection,byId,byIndex,edits.length)) fail('source-binding','Explicit binding identifies an unknown or inconsistent edit.',{code:'INVALID_EXPLICIT'});
+      const target=byId??byIndex;
+      if(selections.has(target)) fail('source-binding','Duplicate explicit binding.',{index:target,code:'INVALID_EXPLICIT'});
+      selections.set(target,selection);
+    }
   }
-  for(const [index,e] of edits.entries()) {
-    if(e?.enabled===false) continue;
-    if(!Number.isInteger(e.pageIndex) || typeof e.before!=='string' || !e.before.trim() || typeof e.after!=='string') fail('invalid-edit','Edit requires pageIndex, Before and After.',{index,id:e.id});
-    const selection=selections.get(index);
-    let parts;
-    if(selection) parts=explicitParts(document,flow,e,selection,index);
-    else {
+  function matchQuote(e,index) {
     const needle=e.before.replace(/\s+/gu,' '), hits=[];
     const variants=/-[^\S\r\n]*[\r\n]/u.test(e.before)?[streams,wrapped]:[streams];
-    for(const variant of variants) { const stream=variant.get(e.pageIndex);
-    if(stream) for(let at=stream.text.indexOf(needle);at>=0;at=stream.text.indexOf(needle,at+1)) {
+    function inspectHit(stream,at) {
       const refs=[];
       for(let pos=at;pos<at+needle.length;pos++) {
         refs.push(...stream.map[pos]);
       }
       const selected=refs.filter(Boolean);
       refs.splice(0,refs.length,...selected);
-      if(!refs.length) continue;
+      if(!refs.length) return;
       const segmentKnown=blocks.has(e.segmentId) || (flow.fragments||[]).some(f=>f.id===e.segmentId);
-      if(segmentKnown && !refs.some(r=>r.blockId===e.segmentId || r.fragmentId===e.segmentId)) continue;
+      if(segmentKnown && !refs.some(r=>r.blockId===e.segmentId || r.fragmentId===e.segmentId)) return;
       const geometry=e.anchor?.bbox;
-      if(box(geometry) && !refs.some(r=>box(r.bbox) && overlaps(geometry,r.bbox))) continue;
+      if(box(geometry) && !refs.some(r=>box(r.bbox) && overlaps(geometry,r.bbox))) return;
       if(!hits.some(hit=>JSON.stringify(hit.map(r=>[r.blockId,r.start,r.end]))===JSON.stringify(refs.map(r=>[r.blockId,r.start,r.end])))) hits.push(refs);
+    }
+    for(const variant of variants) { const stream=variant.get(e.pageIndex);
+    if(stream) for(let at=stream.text.indexOf(needle);at>=0;at=stream.text.indexOf(needle,at+1)) {
+      inspectHit(stream,at);
     }}
     if(hits.length!==1) fail('source-binding',hits.length?'Source quote is ambiguous.':'Source quote was not found.',{index,id:e.id,pageIndex:e.pageIndex,code:hits.length?'AMBIGUOUS_MATCH':'NO_MATCH',hits:hits.length});
-    parts=[];
+    const parts=[];
     for(const r of hits[0]) {
       const last=parts.at(-1);
       if(last && last.blockId===r.blockId && last.end===r.start) last.end=r.end;
       else if(!last || last.blockId!==r.blockId || last.end!==r.end) parts.push({blockId:r.blockId,pageIndex:e.pageIndex,start:r.start,end:r.end});
     }
+    return parts;
+  }
+  function bindEdit(index,e) {
+    if(e?.enabled===false) return;
+    if(!Number.isInteger(e.pageIndex) || typeof e.before!=='string' || !e.before.trim() || typeof e.after!=='string') fail('invalid-edit','Edit requires pageIndex, Before and After.',{index,id:e.id});
+    const selection=selections.get(index);
+    let parts;
+    if(selection) parts=explicitParts(document,flow,e,selection,index);
+    else {
+      parts=matchQuote(e,index);
     }
-    for(const [i,p] of parts.entries()) {
+    function bindPart(i,p) {
       const b=blocks.get(p.blockId); if(!b || !b.source.range) fail('source-binding','Source block is unavailable.',{index,id:e.id});
       const before=b.text.slice(p.start-b.source.range.start,p.end-b.source.range.start);
       if(!before || before.length!==p.end-p.start) fail('source-binding','Source range is invalid.',{index,id:e.id});
@@ -172,8 +203,10 @@ export function bindEdits(document, flow, edits, explicit=[]) {
       prior.push(p); used.set(p.blockId,prior);
       p.before=before; changes.push({...p,after:i===0?e.after:''});
     }
+    for(const [i,p] of parts.entries()) bindPart(i,p);
     bindings.push({id:e.id||`edit-${index}`,matchMethod:selection?'explicit-source':'quote',pageIndex:e.pageIndex,segmentId:e.segmentId??null,before:e.before,after:e.after,request:structuredClone(e),sourceBefore:parts.map(p=>p.before).join(''),parts});
   }
+  for(const [index,e] of edits.entries()) bindEdit(index,e);
   return {bindings,changes};
 }
 
@@ -185,43 +218,30 @@ const issueCounts = result => {
   return counts;
 };
 const attemptSummary = result => ({placement:result.enginePlan.figurePlacement,content:result.verification.outputTextCheck,layout:result.verification.checkReport?.layoutQuality?.status || 'unavailable',issues:issueCounts(result)});
-function repairIsBetter(first, candidate) {
-  const a=first.verification, b=candidate.verification, report=b.checkReport;
+function candidateIsEligible(candidate,b,report) {
   if(!['pass','normalized'].includes(b.outputTextCheck) || report?.readable!==true || report.checks?.independent?.status!=='declared') return false;
   if(b.coverage?.status!=='covered' || b.sourceGlyphs?.unavailable?.length || b.assetFindings?.length) return false;
   if(report.checks?.furniture?.status==='finding' || (b.furniture?.templates?.length && report.checks?.furniture?.status!=='checked')) return false;
   if(candidate.warnings.some(w=>w.startsWith('Source assets and non-text'))) return false;
   if(report.checks?.bounds?.status!=='checked' || report.layoutQuality?.status==='unavailable' || !report.layoutQuality) return false;
+  return true;
+}
+function repairIsBetter(first, candidate) {
+  const a=first.verification, b=candidate.verification, report=b.checkReport;
+  if(!candidateIsEligible(candidate,b,report)) return false;
   const before=issueCounts(first), after=issueCounts(candidate);
   if(Object.keys(after).some(type=>after[type]>(before[type]||0))) return false;
   return !['pass','normalized'].includes(a.outputTextCheck) || Object.keys(before).some(type=>(after[type]||0)<before[type]);
 }
 
-export async function prepare(request={}, options={}) {
-  const signal=request.signal; abort(signal);
-  const layoutMode=request.layoutMode;
-  if(layoutMode !== undefined && layoutMode !== 'measured-continuous') fail('invalid','Unknown layout mode');
-  const candidates=(options.fonts||[]).map(f=>({...f,bytes:f.bytes instanceof Uint8Array?Uint8Array.from(f.bytes):f.bytes instanceof ArrayBuffer?f.bytes.slice(0):f.bytes}));
-  const snapshot=Array.isArray(request.edits)?{edits:request.edits}:request.edits;
-  if(!snapshot || !Array.isArray(snapshot.edits) || (snapshot.schema && snapshot.schema!=='falsify.paper-edits.v1')) fail('invalid','Expected edit array or paper edit snapshot.');
-  const edits=structuredClone(snapshot.edits), explicit=structuredClone(request.bindings??[]), revision=snapshot.revision??request.revision??null;
-  const hash=request.fileHash||snapshot.fileHash;
-  if(request.fileHash && snapshot.fileHash && request.fileHash.toLowerCase()!==snapshot.fileHash.toLowerCase()) fail('stale-source','Request and snapshot hashes differ.');
-  const input=request.file;
-  const bytes=input instanceof Uint8Array?Uint8Array.from(input):input?.bytes instanceof Uint8Array?Uint8Array.from(input.bytes):typeof input?.arrayBuffer==='function'?new Uint8Array(await input.arrayBuffer()).slice():null;
-  abort(signal); if(!bytes?.length) fail('invalid','Source PDF is required.');
-  const observed=await readDocument({file:bytes,fileHash:hash,signal}); abort(signal);
-  const spacing=await recoverSourceSpaces({bytes,document:observed,pdfjs:options.pdfjs,signal}); const document=spacing.document; abort(signal);
-  const inventory=await readSourceAssets({bytes,document,signal}); abort(signal);
-  const links=await readSourceLinks({bytes,document,signal}); abort(signal);
-  const flow=buildPaperFlow(document,{drawings:inventory.drawings,links});
-  const {bindings,changes}=bindEdits(document,flow,edits,explicit);
-  const tableModel=await detectSourceTables({sourceBytes:bytes,sourceSha256:document.sourceSha256,revision:'recomposition',mupdf}); abort(signal);
-  attachStructuredTables(document,flow,tableModel.tables);
+function validateSelectedTables(edits,flow) {
   for(const edit of edits.filter(e=>e?.enabled!==false && String(e?.segmentId||'').startsWith('table:'))) {
     const matching=flow.items.filter(i=>i.kind==='table' && i.source.pageIndex===edit.pageIndex && box(edit.anchor?.bbox) && overlaps(i.source.bbox,edit.anchor.bbox));
     if(matching.length!==1) fail('table-structure-unavailable','The selected table cannot be recomposed with verified cell ownership.',{id:edit.id??null,pageIndex:edit.pageIndex});
   }
+}
+
+function collectCaptureRegions(flow,document) {
   const regions=(flow.regions||[]).map(r=>structuredClone(r));
   const ids=new Set(regions.map(r=>r.id));
   for(const item of flow.items.filter(i=>i.kind==='asset' && !i.renderAssetId)) {
@@ -233,6 +253,41 @@ export async function prepare(request={}, options={}) {
     item.source.bbox=clipped; item.renderAssetId=id;
     regions.push({id,pageIndex:item.source.pageIndex,bbox:clipped,blockIds:[...(item.blockIds||[])],assetIds:[...(item.assetIds||[])]});
   }
+  return regions;
+}
+
+function validateEditSnapshot(snapshot) {
+  if(!snapshot || !Array.isArray(snapshot.edits) || (snapshot.schema && snapshot.schema!=='falsify.paper-edits.v1')) fail('invalid','Expected edit array or paper edit snapshot.');
+}
+
+function prepareInput(request,options) {
+  const layoutMode=request.layoutMode;
+  if(layoutMode !== undefined && layoutMode !== 'measured-continuous') fail('invalid','Unknown layout mode');
+  const candidates=(options.fonts||[]).map(f=>({...f,bytes:f.bytes instanceof Uint8Array?Uint8Array.from(f.bytes):f.bytes instanceof ArrayBuffer?f.bytes.slice(0):f.bytes}));
+  const snapshot=Array.isArray(request.edits)?{edits:request.edits}:request.edits;
+  validateEditSnapshot(snapshot);
+  const edits=structuredClone(snapshot.edits), explicit=structuredClone(request.bindings??[]), revision=snapshot.revision??request.revision??null;
+  const hash=request.fileHash||snapshot.fileHash;
+  if(request.fileHash && snapshot.fileHash && request.fileHash.toLowerCase()!==snapshot.fileHash.toLowerCase()) fail('stale-source','Request and snapshot hashes differ.');
+  return {layoutMode,candidates,edits,explicit,revision,hash};
+}
+
+export async function prepare(request={}, options={}) {
+  const signal=request.signal; abort(signal);
+  const {layoutMode,candidates,edits,explicit,revision,hash}=prepareInput(request,options);
+  const input=request.file;
+  const bytes=input instanceof Uint8Array?Uint8Array.from(input):input?.bytes instanceof Uint8Array?Uint8Array.from(input.bytes):typeof input?.arrayBuffer==='function'?new Uint8Array(await input.arrayBuffer()).slice():null;
+  abort(signal); if(!bytes?.length) fail('invalid','Source PDF is required.');
+  const observed=await readDocument({file:bytes,fileHash:hash,signal}); abort(signal);
+  const spacing=await recoverSourceSpaces({bytes,document:observed,pdfjs:options.pdfjs,signal}); const document=spacing.document; abort(signal);
+  const inventory=await readSourceAssets({bytes,document,signal}); abort(signal);
+  const links=await readSourceLinks({bytes,document,signal}); abort(signal);
+  const flow=buildPaperFlow(document,{drawings:inventory.drawings,links});
+  const {bindings,changes}=bindEdits(document,flow,edits,explicit);
+  const tableModel=await detectSourceTables({sourceBytes:bytes,sourceSha256:document.sourceSha256,revision:'recomposition',mupdf}); abort(signal);
+  attachStructuredTables(document,flow,tableModel.tables);
+  validateSelectedTables(edits,flow);
+  const regions=collectCaptureRegions(flow,document);
   const captured=await readSourceAssets({bytes,document:{...document,blocks:[...document.blocks,...(flow.fragments||[])]},regions,signal}); abort(signal);
   const fontPlan=await createFontPlan({text:document.blocks.map(b=>b.text||'').join('\n')+edits.filter(e=>e?.enabled!==false).map(e=>e.after).join('\n'),fonts:candidates},{mupdf:options.mupdf}); abort(signal);
   const composeOptions={compile:options.compile,fonts:fontPlan,outputCheck:async args=>{

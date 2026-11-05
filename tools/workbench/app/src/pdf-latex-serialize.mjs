@@ -39,32 +39,54 @@ function evidenceValid(ref, hash, pages) {
 }
 function validRefs(refs, hash, pages) { return Array.isArray(refs) && refs.length > 0 && refs.every(r=>evidenceValid(r,hash,pages)); }
 
-// Decisions are explicit baseline transcriptions: {itemId, sourceSha256, tex, evidence}.
-// The caller binds the resulting project ID after createLatexProject().
-export function serializeReconstruction({model, decisions=[], engine='pdflatex'}={}) {
-  if (engine !== 'pdflatex') fail('UNSUPPORTED_ENGINE');
-  if (!model || model.schema !== 'falsify.pdf-latex-reconstruction.v1' || !hashPattern.test(model.sourceSha256) || !Array.isArray(model.pages) || !model.pages.length || !Array.isArray(model.items) || !Array.isArray(model.assets) || !Array.isArray(model.diagnostics) || !Array.isArray(model.relations) || !Array.isArray(decisions)) fail('INVALID_MODEL');
-  const hash=model.sourceSha256, pages=new Map();
+function validatePages(model) {
+  const pages=new Map();
   for (const p of model.pages) {
     if (!p || !Number.isInteger(p.pageIndex) || p.pageIndex !== pages.size || !finite(p.width) || !finite(p.height) || p.width < .01 || p.height < .01 || p.width > 14400 || p.height > 14400 || p.frame !== 'mupdf-display' || !Array.isArray(p.transform) || p.transform.length !== 6 || !p.transform.every(finite)) fail('INVALID_PAGE');
     pages.set(p.pageIndex,p);
   }
+  return pages;
+}
+
+function validateItems(model,hash,pages) {
   const items=new Map();
   for (const item of model.items) {
     if (!item || typeof item.id !== 'string' || !item.id || !['observed','proposed','confirmed','unsupported'].includes(item.status) || items.has(item.id) || !validRefs(item.evidence,hash,pages) || item.evidence.some(r=>r.pageIndex!==item.evidence[0].pageIndex)) fail('INVALID_ITEM');
     items.set(item.id,item);
   }
+  return items;
+}
+
+function validateChoices(decisions,items,hash,pages) {
   const choices=new Map();
   for (const d of decisions) {
     const item=items.get(d?.itemId);
     if (!item || choices.has(d.itemId) || d.sourceSha256!==hash || typeof d.tex!=='string' || !d.tex.trim() || !validRefs(d.evidence,hash,pages) || JSON.stringify(d.evidence)!==JSON.stringify(item.evidence)) fail('INVALID_DECISION');
     choices.set(d.itemId,d);
   }
+  return choices;
+}
+
+function validateAssets(model,hash,pages) {
   const assets=new Map();
   for (const a of model.assets) {
     if (!a || typeof a.id !== 'string' || !a.id || assets.has(a.id) || !(a.bytes instanceof Uint8Array) || a.mediaType!=='image/png' || !['region-raster','image'].includes(a.representation) || a.editable!==false || !validRefs(a.evidence,hash,pages) || !hashPattern.test(a.sha256) || hex(a.bytes)!==a.sha256 || !png.every((v,i)=>a.bytes[i]===v)) fail('INVALID_ASSET');
     assets.set(a.id,a);
   }
+  return assets;
+}
+
+function invalidModel(model,decisions) { return !model || model.schema !== 'falsify.pdf-latex-reconstruction.v1' || !hashPattern.test(model.sourceSha256) || !Array.isArray(model.pages) || !model.pages.length || !Array.isArray(model.items) || !Array.isArray(model.assets) || !Array.isArray(model.diagnostics) || !Array.isArray(model.relations) || !Array.isArray(decisions); }
+
+// Decisions are explicit baseline transcriptions: {itemId, sourceSha256, tex, evidence}.
+// The caller binds the resulting project ID after createLatexProject().
+export function serializeReconstruction({model, decisions=[], engine='pdflatex'}={}) {
+  if (engine !== 'pdflatex') fail('UNSUPPORTED_ENGINE');
+  if (invalidModel(model,decisions)) fail('INVALID_MODEL');
+  const hash=model.sourceSha256, pages=validatePages(model);
+  const items=validateItems(model,hash,pages);
+  const choices=validateChoices(decisions,items,hash,pages);
+  const assets=validateAssets(model,hash,pages);
   const diagnostics=model.diagnostics.map(d=>({...d})), bindings=[], files=[];
   let status = diagnostics.some(d=>d.severity==='error') ? 'unsupported' : diagnostics.some(d=>d.severity==='warning') ? 'needs-review' : 'ready';
   const issue=(code,item,severity='warning')=>{diagnostics.push({code,severity,...(item?{itemId:item.id,pageIndex:item.evidence[0].pageIndex}:{})}); if(severity==='error') status='unsupported'; else if(status==='ready') status='needs-review';};
@@ -78,11 +100,7 @@ export function serializeReconstruction({model, decisions=[], engine='pdflatex'}
   const layout=planReconstructionLayout(model);
   for(const d of layout.diagnostics) {diagnostics.push(d); if(d.severity==='error') status='unsupported'; else if(d.severity==='warning'&&status==='ready') status='needs-review';}
   let assetNumber=0;
-  function emitItem(item,p,availableWidth) {
-    const index=p.pageIndex;
-      const decision=choices.get(item.id);
-      if (decision) {append(item,decision.tex,'reviewed'); return;}
-      if (item.extensions?.columns > 1) issue('MULTICOLUMN_REVIEW',item);
+  function emitTable(item,index) {
       if (item.kind==='table' && item.table) {
         const rows=item.table.rows;
         const width=Array.isArray(rows)&&rows[0]?.length;
@@ -93,10 +111,13 @@ export function serializeReconstruction({model, decisions=[], engine='pdflatex'}
           if(cells.flat().some(c=>c.mapped)) issue('UNICODE_RENDER_REVIEW',item);
           const original=cells.flat().some(c=>c.unsupported) ? rows.flat().map(c=>'% Original UTF-8 cell: '+c.text.replace(/[\r\n]/g,' ')).join('\n')+'\n' : '';
           append(item,original+'\\begin{tabular}{'+('l'.repeat(width))+'}\n'+cells.map(row=>row.map(c=>c.output).join(' & ')+' \\\\').join('\n')+'\n\\end{tabular}',cells.flat().some(c=>c.mapped||c.unsupported)?'review-required':'reviewed');
-          return;
+          return true;
         }
         issue('TABLE_STRUCTURE_REVIEW',item);
       }
+    return false;
+  }
+  function emitAsset(item,index,p,availableWidth) {
       if (item.assetId) {
         const a=assets.get(item.assetId);
         if (!a || a.evidence.some(r=>r.pageIndex!==index)) fail('INVALID_ASSET_REFERENCE');
@@ -108,9 +129,41 @@ export function serializeReconstruction({model, decisions=[], engine='pdflatex'}
         if (!(w*scale>=.00001 && h*scale>=.00001)) fail('INVALID_ASSET_REFERENCE');
         if (scale<1) issue('REGION_SCALED_DOWN',item);
         append(item,`\\includegraphics[width=${dimension(w*scale)}bp,height=${dimension(h*scale)}bp,keepaspectratio]{${path}}`,'noneditable');
-        issue('NONEDITABLE_REGION',item); return;
+        issue('NONEDITABLE_REGION',item); return true;
       }
-      const semantic = ['math','footnote','citation'].includes(item.kind) || item.reason==='inline-script-candidate' || !!item.extensions?.candidates?.length;
+    return false;
+  }
+  function invalidStyleCount(style,entry) { return !style || !finite(style.size) || !Number.isSafeInteger(entry.count) || entry.count<=0; }
+  function observedFontSize(typography,styles) {
+        const counts=typography?.styleCounts, weights=new Map();
+        let countValid=Array.isArray(counts) && counts.length>0;
+        if (countValid) for (const entry of counts) {
+          const style=styles?.find(s=>s.id===entry.styleId);
+          if (invalidStyleCount(style,entry)) {countValid=false;break;}
+          weights.set(style.size,(weights.get(style.size)||0)+entry.count);
+        }
+        const ranked=[...weights.entries()].sort((a,b)=>b[1]-a[1]);
+        return countValid && ranked.length && (!ranked[1]||ranked[0][1]>ranked[1][1]) && ranked[0][0]===typography.fontSizeBp && typography.fontSizeBp>=6 && typography.fontSizeBp<=36 ? typography.fontSizeBp : null;
+  }
+  function resolveLeading(typography,size,index) { return typography && finite(typography.leadingBp) && typography.leadingBp>=size*.75 && typography.leadingBp<=size*3 && typography.leadingEvidence?.length>=2 && validRefs(typography.leadingEvidence,hash,pages) && typography.leadingEvidence.every(e=>e.pageIndex===index) ? typography.leadingBp : size*1.2; }
+  function applyTypography(item,index,content) {
+        const styles=item.extensions?.styles, sizes=Array.isArray(styles) ? styles.map(style=>style.size) : [];
+        const segments=item.extensions?.segments;
+        const covered=Array.isArray(segments) && segments.length && segments.map(s=>s.text).join('')===item.text && segments.every(s=>Array.isArray(s.styleIds) && s.styleIds.length && s.styleIds.every(id=>styles?.some(style=>style.id===id)));
+        const typography=item.extensions?.typography;
+        const observedSize=observedFontSize(typography,styles);
+        const uniformSize=covered && sizes.length && sizes.every(size=>finite(size)&&size>=6&&size<=36&&size===sizes[0]) ? sizes[0] : null;
+        const size=observedSize ?? uniformSize;
+        if (size) {
+          const leading=resolveLeading(typography,size,index);
+          issue('LEADING_UNVERIFIED',item);
+          content=`\\fontsize{${dimension(size)}bp}{${dimension(leading)}bp}\\selectfont ${content}\\par\\normalsize`;
+        }
+    return content;
+  }
+  function needsTranscriptionReview(item) { return ['math','footnote','citation'].includes(item.kind) || item.reason==='inline-script-candidate' || !!item.extensions?.candidates?.length; }
+  function emitText(item,index) {
+      const semantic = needsTranscriptionReview(item);
       if (typeof item.text==='string' && item.text.length) {
         const text=plain(item.text);
         if (text.unsupported) issue('UNICODE_REVIEW',item);
@@ -121,26 +174,7 @@ export function serializeReconstruction({model, decisions=[], engine='pdflatex'}
         if (item.status==='unsupported') issue('UNSUPPORTED_ITEM',item);
         const original=text.unsupported ? '% Original UTF-8 text: '+item.text.replace(/[\r\n]/g,' ')+'\n' : '';
         let content=item.kind==='heading' ? `\\textbf{${text.output}}` : text.output;
-        const styles=item.extensions?.styles, sizes=Array.isArray(styles) ? styles.map(style=>style.size) : [];
-        const segments=item.extensions?.segments;
-        const covered=Array.isArray(segments) && segments.length && segments.map(s=>s.text).join('')===item.text && segments.every(s=>Array.isArray(s.styleIds) && s.styleIds.length && s.styleIds.every(id=>styles?.some(style=>style.id===id)));
-        const typography=item.extensions?.typography;
-        const counts=typography?.styleCounts, weights=new Map();
-        let countValid=Array.isArray(counts) && counts.length>0;
-        if (countValid) for (const entry of counts) {
-          const style=styles?.find(s=>s.id===entry.styleId);
-          if (!style || !finite(style.size) || !Number.isSafeInteger(entry.count) || entry.count<=0) {countValid=false;break;}
-          weights.set(style.size,(weights.get(style.size)||0)+entry.count);
-        }
-        const ranked=[...weights.entries()].sort((a,b)=>b[1]-a[1]);
-        const observedSize=countValid && ranked.length && (!ranked[1]||ranked[0][1]>ranked[1][1]) && ranked[0][0]===typography.fontSizeBp && typography.fontSizeBp>=6 && typography.fontSizeBp<=36 ? typography.fontSizeBp : null;
-        const uniformSize=covered && sizes.length && sizes.every(size=>finite(size)&&size>=6&&size<=36&&size===sizes[0]) ? sizes[0] : null;
-        const size=observedSize ?? uniformSize;
-        if (size) {
-          const leading=typography && finite(typography.leadingBp) && typography.leadingBp>=size*.75 && typography.leadingBp<=size*3 && typography.leadingEvidence?.length>=2 && validRefs(typography.leadingEvidence,hash,pages) && typography.leadingEvidence.every(e=>e.pageIndex===index) ? typography.leadingBp : size*1.2;
-          issue('LEADING_UNVERIFIED',item);
-          content=`\\fontsize{${dimension(size)}bp}{${dimension(leading)}bp}\\selectfont ${content}\\par\\normalsize`;
-        }
+        content=applyTypography(item,index,content);
         const body=original+content;
         append(item,body,text.unsupported||text.mapped?'review-required':'exact-text');
       } else {
@@ -148,6 +182,16 @@ export function serializeReconstruction({model, decisions=[], engine='pdflatex'}
         source+=`% Content missing for item ${index + 1}; review source evidence.\n`;
       }
   }
+  function emitItem(item,p,availableWidth) {
+    const index=p.pageIndex;
+      const decision=choices.get(item.id);
+      if (decision) {append(item,decision.tex,'reviewed'); return;}
+      if (item.extensions?.columns > 1) issue('MULTICOLUMN_REVIEW',item);
+      if (emitTable(item,index)) return;
+      if (emitAsset(item,index,p,availableWidth)) return;
+      emitText(item,index);
+  }
+  function emitPages() {
   for (const page of layout.pages) {
     const p=pages.get(page.pageIndex), index=p.pageIndex;
     if(index) source+='\\newpage\n';
@@ -189,6 +233,8 @@ export function serializeReconstruction({model, decisions=[], engine='pdflatex'}
       source+='\\end{minipage}\\par\n';
     }
   }
+  }
+  emitPages();
   source+='\\end{document}\n';
   files.unshift({path:'main.tex',bytes:enc.encode(source)});
   return {status,files,mainFile:'main.tex',bindings,diagnostics};

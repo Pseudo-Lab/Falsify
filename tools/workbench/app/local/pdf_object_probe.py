@@ -114,6 +114,23 @@ def _occurrence_id(source_sha256, page_index, kind, ordinal, xref, bbox, transfo
     key = json.dumps([source_sha256, page_index, kind, ordinal, xref, bbox, transform], separators=(',', ':'))
     return 'occ-' + _sha(key.encode('utf-8'))[:24]
 
+def _listing_reasons(reasons, xref, listing):
+    entries = [e for e in listing if e[0] == xref]
+    if not entries: reasons.append('resource-unresolved')
+    if any(e[9] != 0 for e in entries): reasons.append('via-form')
+    if len({e[7] for e in entries}) > 1: reasons.append('multiple-resource-names')
+    if any(e[1] != 0 for e in entries): reasons.append('soft-mask')
+
+
+def _image_resource_reasons(reasons, xref, listing, uses, uses_complete, refs, refs_complete, clips, bbox, repeated):
+    use = uses.get(xref, {'placements': 0})
+    if use['placements'] != 1 or refs.get(xref, 0) > 1: reasons.append('shared-xref')
+    if not uses_complete or not refs_complete: reasons.append('shared-use-incomplete')
+    _listing_reasons(reasons, xref, listing)
+    if any(not (rect_path and scissor.contains(bbox)) for scissor, rect_path in clips): reasons.append('clip-uncertain')
+    if repeated: reasons.append('repeated-bbox')
+
+
 def _image_reasons(mupdf, info, xref, listing, uses, uses_complete, refs, refs_complete, clips, repeated, geometry, truncated):
     reasons = []
     if not geometry: reasons.append('page-geometry')
@@ -124,17 +141,24 @@ def _image_reasons(mupdf, info, xref, listing, uses, uses_complete, refs, refs_c
     if abs(b) > AXIS_TOLERANCE or abs(c) > AXIS_TOLERANCE or a <= 0 or d <= 0: reasons.append('transform-not-axis-aligned')
     if xref == 0:
         return ['inline-image'] + reasons
-    use = uses.get(xref, {'placements': 0})
-    if use['placements'] != 1 or refs.get(xref, 0) > 1: reasons.append('shared-xref')
-    if not uses_complete or not refs_complete: reasons.append('shared-use-incomplete')
-    entries = [e for e in listing if e[0] == xref]
-    if not entries: reasons.append('resource-unresolved')
-    if any(e[9] != 0 for e in entries): reasons.append('via-form')
-    if len({e[7] for e in entries}) > 1: reasons.append('multiple-resource-names')
-    if any(e[1] != 0 for e in entries): reasons.append('soft-mask')
-    if any(not (rect_path and scissor.contains(bbox)) for scissor, rect_path in clips): reasons.append('clip-uncertain')
-    if repeated: reasons.append('repeated-bbox')
+    _image_resource_reasons(reasons, xref, listing, uses, uses_complete, refs, refs_complete, clips, bbox, repeated)
     return reasons
+
+def _add_images(infos, boxes, out, cap, mupdf, listing, uses, uses_complete, refs, refs_complete, clips, geometry, truncated, add):
+    for info, box in zip(infos, boxes):
+        if len(out) > cap: break
+        xref = info.get('xref') or 0
+        reasons = _image_reasons(mupdf, info, xref, listing, uses, uses_complete, refs, refs_complete, clips,
+            boxes.count(box) > 1, geometry, truncated)
+        shared = None
+        if xref:
+            use = uses.get(xref, {'placements': 0, 'pages': []})
+            shared = {'placements': use['placements'], 'pageCount': len(use['pages']), 'objectReferences': refs.get(xref, 0),
+                'complete': uses_complete and refs_complete}
+        capability = 'unsupported' if 'inline-image' in reasons else 'ambiguous' if reasons else 'inspected'
+        add('image' if xref else 'inline-image', xref, list(box), _round(info.get('transform') or ()),
+            sorted({e[7] for e in listing if e[0] == xref}) if xref else [], shared, capability, reasons)
+
 
 def _page_occurrences(mupdf, page, page_index, source_sha256, uses, uses_complete, refs, refs_complete):
     """(occurrences, truncated) for one page; images in content order, then vector paths, then shadings. When placements,
@@ -153,19 +177,7 @@ def _page_occurrences(mupdf, page, page_index, source_sha256, uses, uses_complet
         out.append({'id': _occurrence_id(source_sha256, page_index, kind, ordinal, xref, bbox, transform),
             'pageIndex': page_index, 'kind': kind, 'ordinal': ordinal, 'xref': xref, 'resourceNames': names, 'bbox': bbox,
             'transform': transform, 'sharedUse': shared, 'capability': capability, 'reasons': reasons})
-    for info, box in zip(infos, boxes):
-        if len(out) > cap: break
-        xref = info.get('xref') or 0
-        reasons = _image_reasons(mupdf, info, xref, listing, uses, uses_complete, refs, refs_complete, clips,
-            boxes.count(box) > 1, geometry, truncated)
-        shared = None
-        if xref:
-            use = uses.get(xref, {'placements': 0, 'pages': []})
-            shared = {'placements': use['placements'], 'pageCount': len(use['pages']), 'objectReferences': refs.get(xref, 0),
-                'complete': uses_complete and refs_complete}
-        capability = 'unsupported' if 'inline-image' in reasons else 'ambiguous' if reasons else 'inspected'
-        add('image' if xref else 'inline-image', xref, list(box), _round(info.get('transform') or ()),
-            sorted({e[7] for e in listing if e[0] == xref}) if xref else [], shared, capability, reasons)
+    _add_images(infos, boxes, out, cap, mupdf, listing, uses, uses_complete, refs, refs_complete, clips, geometry, truncated, add)
     for d in drawings:
         if len(out) > cap: break
         if d.get('type') in ('f', 's', 'fs') and d.get('rect') is not None:
@@ -174,6 +186,22 @@ def _page_occurrences(mupdf, page, page_index, source_sha256, uses, uses_complet
         if len(out) > cap: break
         if kind == 'fill-shade': add('shading', 0, _round(rect), None, [], None, 'unsupported', ['shading-no-object-identity'])
     return out[:cap], truncated or len(out) > cap
+
+def _collect_probe_pages(probe, mupdf, doc, indices, uses, uses_complete, refs, refs_complete, truncated):
+    seen = []
+    for i in indices:
+        occurrences, page_truncated = _page_occurrences(mupdf, doc[i], i, probe['sourceSha256'], uses, uses_complete,
+            refs, refs_complete)
+        room = LIMITS['maxOccurrences'] - len(probe['occurrences'])
+        page_truncated = page_truncated or len(occurrences) > room
+        occurrences = occurrences[:max(room, 0)]
+        truncated = truncated or page_truncated
+        probe['occurrences'] += occurrences
+        probe['pages'].append({'pageIndex': i, 'rotation': doc[i].rotation % 360, 'supportedGeometry': _page_supported(doc[i]),
+            'occurrences': len(occurrences), 'truncated': page_truncated})
+        seen += [x for x in dict.fromkeys(o['xref'] for o in occurrences if o['xref']) if x not in seen]
+    return seen, truncated
+
 
 def build_object_probe(source_bytes, page_indices=None):
     """Private bounded occurrence probe of the exact source bytes. Unreadable input gives status 'unavailable'."""
@@ -192,18 +220,7 @@ def build_object_probe(source_bytes, page_indices=None):
         wanted = set(uses)
         for i in indices: wanted.update(e[0] for e in doc[i].get_images(full=True)[:LIMITS['maxPagePlacements']])
         refs, refs_complete = _references(doc, wanted)
-        seen = []
-        for i in indices:
-            occurrences, page_truncated = _page_occurrences(mupdf, doc[i], i, probe['sourceSha256'], uses, uses_complete,
-                refs, refs_complete)
-            room = LIMITS['maxOccurrences'] - len(probe['occurrences'])
-            page_truncated = page_truncated or len(occurrences) > room
-            occurrences = occurrences[:max(room, 0)]
-            truncated = truncated or page_truncated
-            probe['occurrences'] += occurrences
-            probe['pages'].append({'pageIndex': i, 'rotation': doc[i].rotation % 360, 'supportedGeometry': _page_supported(doc[i]),
-                'occurrences': len(occurrences), 'truncated': page_truncated})
-            seen += [x for x in dict.fromkeys(o['xref'] for o in occurrences if o['xref']) if x not in seen]
+        seen, truncated = _collect_probe_pages(probe, mupdf, doc, indices, uses, uses_complete, refs, refs_complete, truncated)
         probe['resources'] = [{'xref': x, 'placements': uses.get(x, {}).get('placements', 0),
             'pageCount': len(uses.get(x, {}).get('pages', [])), 'pages': uses.get(x, {}).get('pages', [])[:LIMITS['maxProbePages']],
             'objectReferences': refs.get(x, 0), 'complete': uses_complete and refs_complete} for x in seen]
@@ -268,53 +285,25 @@ def _stable(probe, skip_id):
     return [(o['pageIndex'], o['kind'], o['xref'], o['bbox'], o['transform'], o['capability'])
         for o in probe['occurrences'] if o['id'] != skip_id]
 
-def synthetic_replace_unique_image(source_bytes, source_sha256, occurrence_id, replacement_png):
-    """SYNTHETIC-ONLY prototype: replace the samples of one image XObject that is used exactly once in the whole source.
-    Refuses unless the source hashes to source_sha256, carries the synthetic fixture keyword, probes completely, and the
-    occurrence is an 'inspected' image whose xref has one placement and one object reference. Shared xrefs are refused
-    (per-occurrence isolation is unsupported). The replacement PNG header and every source/output page size are checked
-    before any decode or raster. The output is returned only with a passing rendered proof; the source bytes are never
-    modified. Not a public operation and not for real papers."""
-    source = _bytes(source_bytes)
-    replacement = _bytes(replacement_png)
-    result = {'schema': REPLACE_SCHEMA, 'status': 'refused', 'reason': None, 'sourceSha256': _sha(source),
-        'occurrenceId': occurrence_id if isinstance(occurrence_id, str) else None, 'occurrenceReasons': [], 'output': None,
-        'outputSha256': None, 'proof': None}
-    if not isinstance(source_sha256, str) or source_sha256 != result['sourceSha256']: return _refuse(result, 'source-identity')
-    png_refusal, size = _png_header(replacement)
-    if png_refusal: return _refuse(result, png_refusal)
-    opened = _open(source)
-    if opened is None: return _refuse(result, 'source-unreadable')
-    mupdf, doc = opened
-    try:
-        if (doc.metadata or {}).get('keywords') != SYNTHETIC_KEYWORD: return _refuse(result, 'not-synthetic')
-        if doc.page_count > LIMITS['maxProofPages']: return _refuse(result, 'over-budget')
-        over = _raster_refusal(doc)
-        if over: return _refuse(result, over)
-        probe = build_object_probe(source)
-        if probe['status'] != 'available' or not probe['complete']: return _refuse(result, 'probe-incomplete')
-        target = next((o for o in probe['occurrences'] if o['id'] == occurrence_id), None)
-        if target is None: return _refuse(result, 'occurrence-not-found')
-        result['occurrenceReasons'] = list(target['reasons'])
-        if target['kind'] != 'image': return _refuse(result, 'unsupported-kind')
-        if 'shared-xref' in target['reasons']: return _refuse(result, 'shared-xref-requires-occurrence-isolation')
-        shared = target['sharedUse']
-        if target['capability'] != 'inspected' or shared['placements'] != 1 or shared['objectReferences'] != 1:
-            return _refuse(result, 'occurrence-not-inspected')
-        try: pix = mupdf.Pixmap(replacement)
-        except Exception: return _refuse(result, 'replacement-invalid')
-        if pix.alpha or pix.n != 3 or (pix.width, pix.height) != size \
-                or not 0 < pix.width * pix.height <= LIMITS['maxReplacementPixels']:
-            return _refuse(result, 'replacement-invalid')
-        xref = target['xref']
-        doc.update_object(xref, f'<</Type/XObject/Subtype/Image/Width {pix.width}/Height {pix.height}'
-            '/ColorSpace/DeviceRGB/BitsPerComponent 8>>')
-        doc.update_stream(xref, pix.samples, compress=True)
-        output = doc.tobytes(no_new_id=True)
-    except Exception:
-        return _refuse(result, 'prototype-error')
-    finally:
-        doc.close()
+def _synthetic_target(doc, source, occurrence_id, result):
+    if (doc.metadata or {}).get('keywords') != SYNTHETIC_KEYWORD: return None, None, 'not-synthetic'
+    if doc.page_count > LIMITS['maxProofPages']: return None, None, 'over-budget'
+    over = _raster_refusal(doc)
+    if over: return None, None, over
+    probe = build_object_probe(source)
+    if probe['status'] != 'available' or not probe['complete']: return None, None, 'probe-incomplete'
+    target = next((o for o in probe['occurrences'] if o['id'] == occurrence_id), None)
+    if target is None: return None, None, 'occurrence-not-found'
+    result['occurrenceReasons'] = list(target['reasons'])
+    if target['kind'] != 'image': return None, None, 'unsupported-kind'
+    if 'shared-xref' in target['reasons']: return None, None, 'shared-xref-requires-occurrence-isolation'
+    shared = target['sharedUse']
+    if target['capability'] != 'inspected' or shared['placements'] != 1 or shared['objectReferences'] != 1:
+        return None, None, 'occurrence-not-inspected'
+    return probe, target, None
+
+
+def _prove_synthetic_replacement(mupdf, source, output, target, probe, result):
     try:
         check = mupdf.open(stream=output, filetype='pdf')
         try: over = _raster_refusal(check)
@@ -338,3 +327,41 @@ def synthetic_replace_unique_image(source_bytes, source_sha256, occurrence_id, r
         return _refuse(result, 'proof-failed')
     result.update(status='replaced', output=output, outputSha256=_sha(output))
     return result
+
+
+def synthetic_replace_unique_image(source_bytes, source_sha256, occurrence_id, replacement_png):
+    """SYNTHETIC-ONLY prototype: replace the samples of one image XObject that is used exactly once in the whole source.
+    Refuses unless the source hashes to source_sha256, carries the synthetic fixture keyword, probes completely, and the
+    occurrence is an 'inspected' image whose xref has one placement and one object reference. Shared xrefs are refused
+    (per-occurrence isolation is unsupported). The replacement PNG header and every source/output page size are checked
+    before any decode or raster. The output is returned only with a passing rendered proof; the source bytes are never
+    modified. Not a public operation and not for real papers."""
+    source = _bytes(source_bytes)
+    replacement = _bytes(replacement_png)
+    result = {'schema': REPLACE_SCHEMA, 'status': 'refused', 'reason': None, 'sourceSha256': _sha(source),
+        'occurrenceId': occurrence_id if isinstance(occurrence_id, str) else None, 'occurrenceReasons': [], 'output': None,
+        'outputSha256': None, 'proof': None}
+    if not isinstance(source_sha256, str) or source_sha256 != result['sourceSha256']: return _refuse(result, 'source-identity')
+    png_refusal, size = _png_header(replacement)
+    if png_refusal: return _refuse(result, png_refusal)
+    opened = _open(source)
+    if opened is None: return _refuse(result, 'source-unreadable')
+    mupdf, doc = opened
+    try:
+        probe, target, refusal = _synthetic_target(doc, source, occurrence_id, result)
+        if refusal: return _refuse(result, refusal)
+        try: pix = mupdf.Pixmap(replacement)
+        except Exception: return _refuse(result, 'replacement-invalid')
+        if pix.alpha or pix.n != 3 or (pix.width, pix.height) != size \
+                or not 0 < pix.width * pix.height <= LIMITS['maxReplacementPixels']:
+            return _refuse(result, 'replacement-invalid')
+        xref = target['xref']
+        doc.update_object(xref, f'<</Type/XObject/Subtype/Image/Width {pix.width}/Height {pix.height}'
+            '/ColorSpace/DeviceRGB/BitsPerComponent 8>>')
+        doc.update_stream(xref, pix.samples, compress=True)
+        output = doc.tobytes(no_new_id=True)
+    except Exception:
+        return _refuse(result, 'prototype-error')
+    finally:
+        doc.close()
+    return _prove_synthetic_replacement(mupdf, source, output, target, probe, result)

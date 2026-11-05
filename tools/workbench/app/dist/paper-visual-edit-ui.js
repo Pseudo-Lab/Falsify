@@ -71,12 +71,6 @@
     visual_not_pdf:'notPdf',
     visual_selection_invalid:'previewFailed'
   };
-  const ZIGZAG=[
-    0,1,8,16,9,2,3,10,17,24,32,25,18,11,4,5,12,19,26,33,40,48,41,34,27,20,13,6,7,14,21,28,
-    35,42,49,56,57,50,43,36,29,22,15,23,30,37,44,51,58,59,52,45,38,31,39,46,53,60,61,54,47,55,62,63
-  ];
-  const COS=new Float64Array(64);
-  for(let u=0;u<8;u++)for(let x=0;x<8;x++)COS[u*8+x]=Math.cos(((2*x+1)*u*Math.PI)/16);
   const CRC_TABLE=(()=>{const table=new Uint32Array(256);for(let n=0;n<256;n++){let c=n;for(let k=0;k<8;k++)c=(c&1)?(0xEDB88320^(c>>>1)):(c>>>1);table[n]=c>>>0;}return table;})();
   const FONT={
     ' ':[0,0,0,0,0,0,0],'?':[14,17,1,2,4,0,4],'-':[0,0,0,31,0,0,0],'.':[0,0,0,0,0,12,12],'+':[0,4,4,31,4,4,0],'%':[19,19,2,4,8,25,25],
@@ -172,6 +166,16 @@
     return out;
   }
   async function decodeNative(bytes){
+    validateNativeImage(bytes);
+    const bitmap=await root.createImageBitmap(new root.Blob([bytes],{type:isPng(bytes)?'image/png':'image/jpeg'}));
+    const canvas=root.document.createElement('canvas');
+    try{
+      if(bitmap.width*bitmap.height>MAX_PIXELS)throw err('imageLimit');
+      canvas.width=bitmap.width;canvas.height=bitmap.height;const ctx=canvas.getContext('2d',{willReadFrequently:true});ctx.drawImage(bitmap,0,0);
+      return {width:canvas.width,height:canvas.height,rgba:new Uint8Array(ctx.getImageData(0,0,canvas.width,canvas.height).data)};
+    }finally{bitmap.close?.();canvas.width=canvas.height=0;}
+  }
+  function validateNativeImage(bytes){
     if(isPng(bytes)){
       if(bytes.length<24||readU32(bytes,16)*readU32(bytes,20)>MAX_PIXELS)throw err('png');
     }else if(isJpeg(bytes)){
@@ -185,39 +189,15 @@
         }pos+=n;
       }
     }
-    const bitmap=await root.createImageBitmap(new root.Blob([bytes],{type:isPng(bytes)?'image/png':'image/jpeg'}));
-    const canvas=root.document.createElement('canvas');
-    try{
-      if(bitmap.width*bitmap.height>MAX_PIXELS)throw err('imageLimit');
-      canvas.width=bitmap.width;canvas.height=bitmap.height;const ctx=canvas.getContext('2d',{willReadFrequently:true});ctx.drawImage(bitmap,0,0);
-      return {width:canvas.width,height:canvas.height,rgba:new Uint8Array(ctx.getImageData(0,0,canvas.width,canvas.height).data)};
-    }finally{bitmap.close?.();canvas.width=canvas.height=0;}
   }
   async function decodePng(bytes){
     if(typeof root.createImageBitmap==='function'&&root.document)return decodeNative(bytes);
     if(!isPng(bytes))throw err('png');
-    let offset=8,width=0,height=0,color=0,depth=0,interlace=1,header=false,end=false;
-    const idat=[];
-    while(offset+8<=bytes.length){
-      const length=readU32(bytes,offset);
-      if(offset+12+length>bytes.length)throw err('png');
-      const type=String.fromCharCode(bytes[offset+4],bytes[offset+5],bytes[offset+6],bytes[offset+7]);
-      const data=bytes.subarray(offset+8,offset+8+length);
-      const crc=readU32(bytes,offset+8+length);
-      if(crc!==crc32(bytes.subarray(offset+4,offset+8+length)))throw err('png');
-      offset+=12+length;
-      if(type==='IHDR'){
-        if(data.length!==13)throw err('png');
-        width=readU32(data,0);height=readU32(data,4);depth=data[8];color=data[9];interlace=data[12];
-        if(data[10]!==0||data[11]!==0)throw err('png');
-        header=true;
-      }else if(type==='IDAT')idat.push(data);
-      else if(type==='IEND'){end=true;break;}
-    }
-    if(!header||!end||depth!==8||interlace!==0||width<1||height<1||width*height>MAX_PIXELS)throw err('png');
-    const channels=color===0?1:color===2?3:color===4?2:color===6?4:0;
-    if(!channels)throw err('png');
+    const {width,height,channels,idat}=readPngChunks(bytes);
     const raw=await inflateZlib(concat(idat));
+    return unpackPng(raw,width,height,channels);
+  }
+  function unpackPng(raw,width,height,channels){
     const stride=width*channels;
     if(raw.length!==height*(stride+1))throw err('png');
     const out=new Uint8Array(width*height*4);
@@ -249,6 +229,33 @@
     }
     return {width,height,rgba:out};
   }
+  function readPngChunks(bytes){
+    let offset=8,width=0,height=0,color=0,depth=0,interlace=1,header=false,end=false;
+    const idat=[];
+    while(offset+8<=bytes.length){
+      const length=readU32(bytes,offset);
+      if(offset+12+length>bytes.length)throw err('png');
+      const type=String.fromCharCode(bytes[offset+4],bytes[offset+5],bytes[offset+6],bytes[offset+7]);
+      const data=bytes.subarray(offset+8,offset+8+length);
+      const crc=readU32(bytes,offset+8+length);
+      if(crc!==crc32(bytes.subarray(offset+4,offset+8+length)))throw err('png');
+      offset+=12+length;
+      if(type==='IHDR'){
+        if(data.length!==13)throw err('png');
+        width=readU32(data,0);height=readU32(data,4);depth=data[8];color=data[9];interlace=data[12];
+        if(data[10]!==0||data[11]!==0)throw err('png');
+        header=true;
+      }else if(type==='IDAT')idat.push(data);
+      else if(type==='IEND'){end=true;break;}
+    }
+    validatePngHeader(header,end,depth,interlace,width,height);
+    const channels=color===0?1:color===2?3:color===4?2:color===6?4:0;
+    if(!channels)throw err('png');
+    return {width,height,channels,idat};
+  }
+  function validatePngHeader(header,end,depth,interlace,width,height){
+    if(!header||!end||depth!==8||interlace!==0||width<1||height<1||width*height>MAX_PIXELS)throw err('png');
+  }
   function paeth(a,b,c){const p=a+b-c,pa=Math.abs(p-a),pb=Math.abs(p-b),pc=Math.abs(p-c);return pa<=pb&&pa<=pc?a:pb<=pc?b:c;}
   function cropRgba(image,crop){
     const x=crop.x,y=crop.y,w=crop.w,h=crop.h;
@@ -276,11 +283,8 @@
   function fillAll(image,color){for(let i=0;i<image.rgba.length;i+=4)image.rgba.set(color,i);}
   async function canvasLabel(image,text,at,mode,doc){
     if(!doc||typeof doc.createElement!=='function'||typeof root.ImageData!=='function')return null;
-    let canvas,ctx;
-    try{canvas=doc.createElement('canvas');ctx=canvas&&canvas.getContext&&canvas.getContext('2d');}catch{return null;}
-    if(!ctx||typeof ctx.putImageData!=='function'||typeof ctx.fillText!=='function')return null;
-    const blobber=canvas.convertToBlob||canvas.toBlob;
-    if(typeof blobber!=='function')return null;
+    const setup=labelCanvas(doc);if(!setup)return null;
+    const {canvas,ctx,blobber}=setup;
     canvas.width=image.width;canvas.height=image.height;
     try{
       ctx.putImageData(new root.ImageData(new Uint8ClampedArray(image.rgba),image.width,image.height),0,0);
@@ -305,215 +309,11 @@
     blitText(copy,text,at.x,at.y,mode==='label');
     return encodePng(copy);
   }
-  function extendBits(raw,length){if(!length)return 0;const vt=1<<(length-1);return raw<vt?raw-(1<<length)+1:raw;}
-  function buildHuff(counts,symbols){
-    const map=new Map();
-    let code=0,index=0;
-    for(let length=1;length<=16;length++){
-      for(let i=0;i<counts[length-1];i++){
-        if(index>=symbols.length||map.has(length+':'+code))throw err('jpeg');
-        map.set(length+':'+code,symbols[index++]);
-        code++;
-      }
-      code<<=1;
-    }
-    if(index!==symbols.length)throw err('jpeg');
-    return map;
-  }
-  function BitReader(bytes,offset){this.bytes=bytes;this.pos=offset;this.bit=0;this.cur=0;this.marker=-1;}
-  BitReader.prototype.nextByte=function(){
-    if(this.pos>=this.bytes.length)return -1;
-    const value=this.bytes[this.pos++];
-    if(value!==0xFF)return value;
-    if(this.pos>=this.bytes.length)return -1;
-    let next=this.bytes[this.pos++];
-    while(next===0xFF&&this.pos<this.bytes.length)next=this.bytes[this.pos++];
-    if(next===0x00)return 0xFF;
-    this.marker=next;
-    return -2;
-  };
-  BitReader.prototype.bits=function(n){
-    let value=0;
-    for(let i=0;i<n;i++){
-      if(this.bit===0){
-        const next=this.nextByte();
-        if(next<0)return -1;
-        this.cur=next;this.bit=8;
-      }
-      this.bit--;
-      value=(value<<1)|((this.cur>>this.bit)&1);
-    }
-    return value;
-  };
-  BitReader.prototype.huff=function(table){
-    let code=0;
-    for(let length=1;length<=16;length++){
-      const bit=this.bits(1);
-      if(bit<0)return -1;
-      code=(code<<1)|bit;
-      if(table.has(length+':'+code))return table.get(length+':'+code);
-    }
-    return -1;
-  };
-  function idct(coeff){
-    const out=new Float64Array(64);
-    for(let y=0;y<8;y++)for(let x=0;x<8;x++){
-      let sum=0;
-      for(let v=0;v<8;v++)for(let u=0;u<8;u++){
-        const cu=u===0?0.7071067811865476:1;
-        const cv=v===0?0.7071067811865476:1;
-        sum+=cu*cv*coeff[v*8+u]*COS[u*8+x]*COS[v*8+y];
-      }
-      out[y*8+x]=sum/4+128;
-    }
-    return out;
-  }
-  function decodeBlock(reader,dcTable,acTable,quant,pred){
-    const coeff=new Float64Array(64);
-    const size=reader.huff(dcTable);
-    if(size<0||size>11)throw err('jpeg');
-    let diff=0;
-    if(size){const raw=reader.bits(size);if(raw<0)throw err('jpeg');diff=extendBits(raw,size);}
-    const dc=pred+diff;
-    coeff[0]=dc*quant[0];
-    let k=1;
-    while(k<64){
-      const rs=reader.huff(acTable);
-      if(rs<0)throw err('jpeg');
-      if(rs===0)break;
-      if(rs===0xF0){if(k+16>64)throw err('jpeg');k+=16;continue;}
-      const run=rs>>4,bits=rs&15;
-      k+=run;
-      if(!bits||k>63)throw err('jpeg');
-      const raw=reader.bits(bits);
-      if(raw<0)throw err('jpeg');
-      coeff[ZIGZAG[k]]=extendBits(raw,bits)*quant[ZIGZAG[k]];
-      k++;
-    }
-    return {sample:idct(coeff),dc};
-  }
-  function sampleBlock(blocks,h,px,py,maxH,maxV){
-    const sx=Math.min(h*8-1,Math.floor(px*h/maxH));
-    const sy=Math.min(blocks.v*8-1,Math.floor(py*blocks.v/maxV));
-    const block=blocks.data[(sy>>3)*h+(sx>>3)];
-    return block[(sy&7)*8+(sx&7)];
-  }
   async function decodeJpeg(bytes){
     if(typeof root.createImageBitmap==='function'&&root.document)return decodeNative(bytes);
-    if(!isJpeg(bytes))throw err('jpeg');
-    let offset=2;
-    const quant=[null,null,null,null];
-    const huff={dc:[null,null,null,null],ac:[null,null,null,null]};
-    let frame=null,restart=0;
-    const marker=()=>{if(bytes[offset]!==0xFF)throw err('jpeg');while(bytes[offset]===0xFF)offset++;return bytes[offset-1]===0xFF?bytes[offset++]:(offset++,bytes[offset-1]);};
-    while(offset<bytes.length){
-      if(bytes[offset]!==0xFF)throw err('jpeg');
-      while(bytes[offset]===0xFF)offset++;
-      const mark=bytes[offset++];
-      if(mark===0xD9)break;
-      if(mark===0xDA){
-        const length=readU16();
-        const start=offset;
-        const count=bytes[offset++];
-        const scan=[];
-        for(let i=0;i<count;i++){const id=bytes[offset++],table=bytes[offset++];scan.push({id,dc:table>>4,ac:table&15});}
-        const ss=bytes[offset++],se=bytes[offset++],ah=bytes[offset++];
-        if(ss!==0||se!==63||ah!==0||offset!==start+length-2)throw err('jpeg');
-        return decodeScan(bytes,offset,frame,quant,huff,scan,restart);
-      }
-      const length=readU16();
-      const end=offset+length-2;
-      if(end>bytes.length)throw err('jpeg');
-      if(mark===0xC0){
-        const precision=bytes[offset++],height=readU16(),width=readU16(),count=bytes[offset++];
-        if(precision!==8||width<1||height<1||width*height>MAX_PIXELS||(count!==1&&count!==3))throw err('jpeg');
-        const comps=[];let maxH=1,maxV=1;
-        for(let i=0;i<count;i++){
-          const id=bytes[offset++],hv=bytes[offset++],q=bytes[offset++];
-          const h=hv>>4,v=hv&15;
-          if(h<1||h>4||v<1||v>4||q>3)throw err('jpeg');
-          maxH=Math.max(maxH,h);maxV=Math.max(maxV,v);
-          comps.push({id,h,v,q});
-        }
-        frame={width,height,comps,maxH,maxV};
-      }else if(mark===0xC2||mark===0xC1||mark===0xC3)throw err('jpeg');
-      else if(mark===0xDB){
-        while(offset<end){
-          const id=bytes[offset++];
-          if((id>>4)!==0||(id&15)>3)throw err('jpeg');
-          const table=new Float64Array(64);
-          for(let i=0;i<64;i++)table[ZIGZAG[i]]=bytes[offset++];
-          quant[id&15]=table;
-        }
-      }else if(mark===0xC4){
-        while(offset<end){
-          const id=bytes[offset++];
-          const counts=[];let total=0;
-          for(let i=0;i<16;i++){counts.push(bytes[offset++]);total+=counts[i];}
-          const symbols=[];
-          for(let i=0;i<total;i++)symbols.push(bytes[offset++]);
-          const table=buildHuff(counts,symbols);
-          ((id>>4)?huff.ac:huff.dc)[id&15]=table;
-        }
-      }else if(mark===0xDD)restart=(bytes[offset]<<8)|bytes[offset+1];
-      offset=end;
-    }
-    throw err('jpeg');
-    function readU16(){const value=(bytes[offset]<<8)|bytes[offset+1];offset+=2;return value;}
+    const codec=await import('./paper-visual-codec.mjs');
+    return codec.decodeJpeg(bytes);
   }
-  function decodeScan(bytes,offset,frame,quant,huff,scan,restart){
-    if(!frame)throw err('jpeg');
-    const byId=new Map(frame.comps.map(comp=>[comp.id,comp]));
-    const reader=new BitReader(bytes,offset);
-    const pred=new Map();
-    const mcuW=8*frame.maxH,mcuH=8*frame.maxV;
-    const mcusX=Math.ceil(frame.width/mcuW),mcusY=Math.ceil(frame.height/mcuH);
-    const rgba=new Uint8Array(frame.width*frame.height*4);
-    let index=0,rst=0;
-    for(let my=0;my<mcusY;my++)for(let mx=0;mx<mcusX;mx++){
-      if(restart&&index&&index%restart===0){
-        reader.bit=0;
-        const found=reader.nextByte();
-        if(found!==-2||reader.marker!==(0xD0+(rst&7)))throw err('jpeg');
-        reader.marker=-1;rst++;pred.clear();
-      }
-      index++;
-      const planes=[];
-      for(const part of scan){
-        const comp=byId.get(part.id);
-        const q=comp&&quant[comp.q];
-        const dc=huff.dc[part.dc],ac=huff.ac[part.ac];
-        if(!comp||!q||!dc||!ac)throw err('jpeg');
-        const data=[];
-        let previous=pred.get(comp.id)||0;
-        for(let vy=0;vy<comp.v;vy++)for(let vx=0;vx<comp.h;vx++){
-          const block=decodeBlock(reader,dc,ac,q,previous);
-          previous=block.dc;
-          data.push(block.sample);
-        }
-        pred.set(comp.id,previous);
-        planes.push({comp,data,v:comp.v});
-      }
-      for(let py=0;py<mcuH;py++)for(let px=0;px<mcuW;px++){
-        const x=mx*mcuW+px,y=my*mcuH+py;
-        if(x>=frame.width||y>=frame.height)continue;
-        let r,g,b;
-        if(planes.length===1){const yValue=sampleBlock(planes[0],planes[0].comp.h,px,py,frame.maxH,frame.maxV);r=g=b=yValue;}
-        else{
-          const yValue=sampleBlock(planes[0],planes[0].comp.h,px,py,frame.maxH,frame.maxV);
-          const cb=sampleBlock(planes[1],planes[1].comp.h,px,py,frame.maxH,frame.maxV);
-          const cr=sampleBlock(planes[2],planes[2].comp.h,px,py,frame.maxH,frame.maxV);
-          r=yValue+1.402*(cr-128);
-          g=yValue-0.344136*(cb-128)-0.714136*(cr-128);
-          b=yValue+1.772*(cb-128);
-        }
-        const d=(y*frame.width+x)*4;
-        rgba[d]=clamp8(r);rgba[d+1]=clamp8(g);rgba[d+2]=clamp8(b);rgba[d+3]=255;
-      }
-    }
-    return {width:frame.width,height:frame.height,rgba};
-  }
-  function clamp8(n){n=Math.round(n);return n<0?0:n>255?255:n;}
   function encodeB64(bytes){
     let bin='';
     for(let i=0;i<bytes.length;i+=8192){
@@ -561,21 +361,44 @@
     }
     return out;
   }
+  function labelCanvas(doc){
+    let canvas,ctx;
+    try{canvas=doc.createElement('canvas');ctx=canvas&&canvas.getContext&&canvas.getContext('2d');}catch{return null;}
+    if(!ctx||typeof ctx.putImageData!=='function'||typeof ctx.fillText!=='function')return null;
+    const blobber=canvas.convertToBlob||canvas.toBlob;
+    if(typeof blobber!=='function')return null;
+    return {canvas,ctx,blobber};
+  }
   function normalizeChart(chart){
-    if(!chart||typeof chart!=='object'||Array.isArray(chart))return null;
-    if(chart.kind!=='line'&&chart.kind!=='scatter'&&chart.kind!=='bar')return null;
-    if(typeof chart.title!=='string'||chart.title.length>200)return null;
+    if(!chartHeader(chart))return null;
     const xAxis=optionalAxis(chart.xAxis),yAxis=optionalAxis(chart.yAxis);
     if(!xAxis||!yAxis||!Array.isArray(chart.series)||chart.series.length<1||chart.series.length>12)return null;
     const series=[];
     for(let i=0;i<chart.series.length;i++){
-      const entry=chart.series[i];
+      const entry=normalizeSeries(chart.series[i],i);if(!entry)return null;
+      series.push(entry);
+    }
+    return {kind:chart.kind,title:chart.title,xAxis,yAxis,series};
+  }
+  function chartHeader(chart){
+    if(!chart||typeof chart!=='object'||Array.isArray(chart))return false;
+    if(chart.kind!=='line'&&chart.kind!=='scatter'&&chart.kind!=='bar')return false;
+    if(typeof chart.title!=='string'||chart.title.length>200)return false;
+    return true;
+  }
+  function normalizeSeries(entry,i){
       if(!entry||typeof entry!=='object'||!Array.isArray(entry.points)||entry.points.length>MAX_POINTS)return null;
       const id=typeof entry.id==='string'&&idOk(entry.id)?entry.id:'s'+(i+1);
       const name=typeof entry.name==='string'?entry.name.slice(0,120):'';
       const color=/^#[0-9a-fA-F]{6}$/.test(entry.color)?entry.color.toLowerCase():['#246388','#8e302b','#111315','#9a6b00'][i%4];
       const points=[];
       for(const point of entry.points){
+        const next=normalizePoint(point);if(!next)return null;
+        points.push(next);
+      }
+      return {id,name,color,points};
+  }
+  function normalizePoint(point){
         if(!point||typeof point!=='object'||!finite(point.x)||!finite(point.y))return null;
         const next={x:point.x,y:point.y};
         for(const key of ['yLow','yHigh']){
@@ -583,11 +406,7 @@
           if(!finite(point[key]))return null;
           next[key]=point[key];
         }
-        points.push(next);
-      }
-      series.push({id,name,color,points});
-    }
-    return {kind:chart.kind,title:chart.title,xAxis,yAxis,series};
+    return next;
   }
   function editorFromChart(chart){
     const axis=source=>({scale:source.scale,min:source.min==null?'':String(source.min),max:source.max==null?'':String(source.max),label:source.label||''});
@@ -616,8 +435,7 @@
       if(min===null||max===null)return null;
       if(min!=null)out.min=min;
       if(max!=null)out.max=max;
-      if(out.min!=null&&out.max!=null&&out.min>=out.max)return null;
-      if(out.scale==='log'&&((out.min!=null&&out.min<=0)||(out.max!=null&&out.max<=0)))return null;
+      if(!axisDomain(out))return null;
       out.vertical=vertical;
       return out;
     };
@@ -626,8 +444,26 @@
     delete xAxis.vertical;delete yAxis.vertical;
     const series=[];
     for(const entry of editor.series){
+      const value=compileSeries(entry,xAxis,yAxis);if(!value)return null;
+      series.push(value);
+    }
+    return {kind:editor.kind,title:editor.title.trim().slice(0,200),xAxis,yAxis,series};
+  }
+  function axisDomain(out){
+      if(out.min!=null&&out.max!=null&&out.min>=out.max)return false;
+      if(out.scale==='log'&&((out.min!=null&&out.min<=0)||(out.max!=null&&out.max<=0)))return false;
+    return true;
+  }
+  function compileSeries(entry,xAxis,yAxis){
       const points=[];
       for(const point of entry.points){
+        const next=compilePoint(point,xAxis,yAxis);if(!next)return null;
+        points.push(next);
+      }
+      if(!points.length)return null;
+      return {id:entry.id,name:entry.name,color:entry.color,points};
+  }
+  function compilePoint(point,xAxis,yAxis){
         const x=parseNum(point.x,true),y=parseNum(point.y,true);
         const yLow=parseNum(point.yLow,false),yHigh=parseNum(point.yHigh,false);
         if(x===null||y===null||yLow===null||yHigh===null)return null;
@@ -636,12 +472,7 @@
         const next={x,y};
         if(yLow!=null)next.yLow=yLow;
         if(yHigh!=null)next.yHigh=yHigh;
-        points.push(next);
-      }
-      if(!points.length)return null;
-      series.push({id:entry.id,name:entry.name,color:entry.color,points});
-    }
-    return {kind:editor.kind,title:editor.title.trim().slice(0,200),xAxis,yAxis,series};
+    return next;
   }
   function sameJson(a,b){return JSON.stringify(a)===JSON.stringify(b);}
   function validateSummary(data,fileHash){
@@ -656,8 +487,7 @@
     if(!data||data.paperId!==paperId||data.fileHash!==fileHash||!Array.isArray(data.items)||!countOk(data.total)||data.total<offset)return null;
     const items=[];
     for(const raw of data.items){
-      if(!raw||!idOk(raw.id)||(raw.type!=='table'&&raw.type!=='figure')||!Number.isSafeInteger(raw.pageIndex)||raw.pageIndex<0||!bboxOk(raw.bbox))continue;
-      items.push({id:raw.id,type:raw.type,pageIndex:raw.pageIndex,bbox:raw.bbox.slice(),caption:typeof raw.caption==='string'?raw.caption:''});
+      const item=listItem(raw);if(item)items.push(item);
     }
     let next=null;
     if(data.nextOffset!=null){
@@ -666,21 +496,28 @@
     }
     return {items,total:data.total,nextOffset:next};
   }
+  function listItem(raw){
+      if(!raw||!idOk(raw.id)||(raw.type!=='table'&&raw.type!=='figure')||!Number.isSafeInteger(raw.pageIndex)||raw.pageIndex<0||!bboxOk(raw.bbox))return null;
+      return {id:raw.id,type:raw.type,pageIndex:raw.pageIndex,bbox:raw.bbox.slice(),caption:typeof raw.caption==='string'?raw.caption:''};
+  }
   function validateItem(data,paperId,fileHash,itemId){
     if(!data||(data.paperId!=null&&data.paperId!==paperId)||(data.fileHash!=null&&data.fileHash!==fileHash)||data.id!==itemId||(data.type!=='table'&&data.type!=='figure'))return null;
     if(!Number.isSafeInteger(data.pageIndex)||data.pageIndex<0||!bboxOk(data.bbox))return null;
     const item={id:data.id,type:data.type,pageIndex:data.pageIndex,bbox:data.bbox.slice(),caption:typeof data.caption==='string'?data.caption:''};
     if(data.type==='table'){
-      const table=data.table;
+      const table=validateTable(data.table);if(!table)return null;
+      item.table=table;
+    }
+    return item;
+  }
+  function validateTable(table){
       if(!table||!Array.isArray(table.cells))return null;
       const cells=[];
       for(const cell of table.cells){
         if(!cell||!Number.isSafeInteger(cell.row)||!Number.isSafeInteger(cell.column)||cell.row<0||cell.column<0||typeof cell.text!=='string')continue;
         cells.push({row:cell.row,column:cell.column,rowSpan:Number.isSafeInteger(cell.rowSpan)&&cell.rowSpan>0?cell.rowSpan:1,columnSpan:Number.isSafeInteger(cell.columnSpan)&&cell.columnSpan>0?cell.columnSpan:1,text:cell.text,bbox:bboxOk(cell.bbox)?cell.bbox.slice():null});
       }
-      item.table={rows:table.rows,columns:table.columns,cells};
-    }
-    return item;
+      return {rows:table.rows,columns:table.columns,cells};
   }
   function validateRender(data,paperId,fileHash,pageIndex,bbox){
     if(!data||data.paperId!==paperId||data.fileHash!==fileHash||data.pageIndex!==pageIndex||data.mimeType!=='image/png'||!closeBox(bbox,data.bbox))return null;
@@ -785,21 +622,22 @@
     actions.append(applyBtn,download,blueBtn);
     host.append(heading,lead,status,retry,layout,actions,outputNote);
 
-    let generation=0,selectSerial=0,chartSerial=0,parentBusy=false,applying=false,errorCode=null;
-    let paperId=null,boundHash=null,boundRevision=null,pageCount=0,flight=null;
+    let generation=0,selectSerial=0,chartSerial=0,listSerial=0,parentBusy=false,applying=false,errorCode=null;
+    let paperId=null,boundHash=null,boundRevision=null,pageCount=0,flight=null,applyOwner=null;
     let listItems=[],listTotal=0,listPage=0,savedItems=[],savedPage=0,selectedKey=null;
     const controllers=[];
     const cellOps=new Map();
     const regionOps=new Map();
     const itemCache=new Map();
     const analysisCache=new Map();
+    const shapeViews=new Map();
     let chartState=null,figureState=null,chartBlocked=false,output=null,downloadUrl=null,previewUrls=[],imageTask=Promise.resolve(),figureSerial=0;
     let dynamic=[];
 
     function track(){const controller=new root.AbortController();controllers.push(controller);return controller.signal;}
     function abortAll(){for(const controller of controllers)controller.abort();controllers.length=0;}
     function bump(){generation++;selectSerial++;chartSerial++;abortAll();return generation;}
-    function live(token,src){return token===generation&&!!src&&src.fileHash===boundHash&&src.revision===boundRevision;}
+    function live(token,src){const current=currentSource();return token===generation&&!!src&&!!current&&src.fileHash===boundHash&&src.revision===boundRevision&&current.fileHash===src.fileHash&&current.revision===src.revision&&current.file===src.file;}
     function currentSource(){
       let value;
       try{value=getSource();}catch{return null;}
@@ -827,6 +665,9 @@
       img.hidden=false;
     }
     function resetDrafts(){
+      imageTask=Promise.resolve();
+      for(const view of shapeViews.values())view.widget?.destroy?.();
+      shapeViews.clear();
       cellOps.clear();regionOps.clear();itemCache.clear();analysisCache.clear();
       chartState=null;figureState=null;chartBlocked=false;selectedKey=null;
       revokePreviews();
@@ -844,6 +685,7 @@
     }
     function syncDisabled(){
       const lock=parentBusy||applying;
+      for(const view of shapeViews.values())view.panel.inert=lock;
       applyBtn.disabled=lock||pendingCount()===0||!paperId;
       blueBtn.disabled=lock||!outputReady();
       blueBtn.hidden=!outputReady();
@@ -915,18 +757,29 @@
       else for(const item of slice)saved.append(radioRow({id:item.analysisId,kind:item.kind,pageIndex:item.pageIndex},'analysis'));
       sourceTitle.textContent='원본 · '+listTotal;
       savedTitle.textContent='저장된 그래프·스캔 · '+savedItems.length;
+      listPager.hidden=listTotal<=LIST_PAGE;
+      savedTitle.hidden=saved.hidden=savedItems.length===0;
+      savedPager.hidden=savedItems.length<=LIST_PAGE;
       syncDisabled();
     }
     async function loadList(token,src,page){
-      const signal=track();
-      const data=await session().request(QUERY,{paperId,operation:'list',offset:page*LIST_PAGE,limit:LIST_PAGE},{signal});
-      if(!live(token,src))return;
-      const parsed=validateList(data,paperId,src.fileHash,page*LIST_PAGE);
-      if(!parsed){say(status,TEXT.listFailed,true);errorCode='failed';return;}
-      listItems=parsed.items;
-      listTotal=parsed.total;
-      listPage=page;
-      paintLists();
+      const mine=++listSerial;
+      try{
+        const signal=track();
+        const data=await session().request(QUERY,{paperId,operation:'list',offset:page*LIST_PAGE,limit:LIST_PAGE},{signal});
+        if(!live(token,src)||mine!==listSerial)return;
+        const parsed=validateList(data,paperId,src.fileHash,page*LIST_PAGE);
+        if(!parsed)throw err('listFailed');
+        listItems=parsed.items;
+        listTotal=parsed.total;
+        listPage=page;
+        paintLists();
+        errorCode=null;
+      }catch(error){
+        if(error?.name==='AbortError'||!live(token,src)||mine!==listSerial)return;
+        say(status,TEXT.listFailed,true);
+        errorCode='failed';
+      }
     }
     async function renderRegion(pageIndex,bbox){
       const signal=track();
@@ -943,8 +796,10 @@
       showPng(afterImg,after);
       pair.hidden=!before&&!after;
     }
+    function selectionCurrent(token,mine){return token===generation&&mine===selectSerial;}
+    function selectAllowed(){if(parentBusy||applying){paintLists();return false;}return true;}
     async function select(value){
-      if(parentBusy||applying){paintLists();return;}
+      if(!selectAllowed())return;
       const token=generation;
       const mine=++selectSerial;
       selectedKey=value;
@@ -959,12 +814,12 @@
           if(!item){
             const signal=track();
             const data=await session().request(QUERY,{paperId,operation:'item',itemId:id},{signal});
-            if(token!==generation||mine!==selectSerial)return;
+            if(!selectionCurrent(token,mine))return;
             item=validateItem(data,paperId,boundHash,id);
             if(!item){say(status,TEXT.failed,true);return;}
             itemCache.set(id,item);
           }
-          if(token!==generation||mine!==selectSerial)return;
+          if(!selectionCurrent(token,mine))return;
           if(item.type==='table')paintTable(item);
           else await paintFigure(item,token,mine);
         }else{
@@ -972,22 +827,27 @@
           if(!analysis){
             const signal=track();
             const data=await session().request(QUERY,{paperId,operation:'analysis',analysisId:id},{signal});
-            if(token!==generation||mine!==selectSerial)return;
-            if(!data||data.paperId!==paperId||data.fileHash!==boundHash||data.analysisId!==id){say(status,TEXT.failed,true);return;}
+            if(!selectionCurrent(token,mine))return;
+            if(!validAnalysisResponse(data,id)){say(status,TEXT.failed,true);return;}
             analysis=data;
             analysisCache.set(id,analysis);
           }
-          if(token!==generation||mine!==selectSerial)return;
+          if(!selectionCurrent(token,mine))return;
           if(analysis.kind==='chart')await paintChart(analysis,token,mine);
           else paintOcr(analysis);
         }
       }catch(error){
-        if(error?.name==='AbortError'||token!==generation||mine!==selectSerial)return;
-        say(status,TEXT[codeOf(error)]||TEXT.failed,true);
-        errorCode=codeOf(error);
+        if(!reportSelectionFailure(error,token,mine))return;
       }
       syncDisabled();
     }
+    function reportSelectionFailure(error,token,mine){
+        if(error?.name==='AbortError'||!selectionCurrent(token,mine))return false;
+        say(status,TEXT[codeOf(error)]||TEXT.failed,true);
+        errorCode=codeOf(error);
+      return true;
+    }
+    function validAnalysisResponse(data,id){return !!data&&data.paperId===paperId&&data.fileHash===boundHash&&data.analysisId===id;}
     function paintTable(item){
       figureState=null;chartState=null;
       let page=0;
@@ -1062,13 +922,61 @@
       paintChanged();
       setImages(null,null);
     }
-    async function paintChart(analysis,token,mine){
+    async function paintShape(analysis,token,mine){
+      if(!root.FalsifyChartShapeEditor?.create||!root.FalsifyChartShape||!bboxOk(analysis.bbox))return false;
+      const key='shape:'+analysis.analysisId;
+      let view=shapeViews.get(key);
+      if(view){chartState=null;figureState=null;workBody.replaceChildren(view.panel);setImages(null,null);return true;}
+      const src=currentSource();
+      const panel=el('div','visual-edit-column');
+      panel.append(el('h3',null,'그래프 · '+(analysis.pageIndex+1)+'쪽'));
+      const shapeHost=el('div');panel.append(shapeHost);
+      workBody.replaceChildren(panel);setImages(null,null);
+      say(status,'곡선을 준비하고 있습니다.');
+      const scene=await session().request('/api/paper/chart/prepare',{paperId,fileHash:src.fileHash,pageIndex:analysis.pageIndex,bbox:analysis.bbox.slice()},{signal:track()});
+      if(!live(token,src)||mine!==selectSerial)return true;
+      if(!scene||!Array.isArray(scene.series)||!scene.series.length)throw err('chart-bad');
+      const tool=scene.mode==='marks'?root.FalsifyChartMarkEditor:root.FalsifyChartShapeEditor;
+      if(!tool?.create)throw err('chart-missing');
+      view={panel,scene,widget:null};shapeViews.set(key,view);
+      const recordScene=value=>({series:value.series});
+      view.widget=tool.create({host:shapeHost,scene,core:root.FalsifyChartShape,
+        onChange:value=>{
+          if(!live(token,src)||parentBusy||applying)return;
+          const operations=value.operations||[];
+          if(!operations.length)regionOps.delete(key);
+          else regionOps.set(key,{wire:{id:'shape-'+scene.sceneId,kind:'chart-shape',plan:{schema:'falsify.chart-edit-plan.v1',paperId,fileHash:src.fileHash,sceneId:scene.sceneId,revision:value.revision||0,operations}},
+            record:{id:'chart-'+scene.sceneId,kind:'chart-shape',assetKind:'graph',pageIndex:scene.pageIndex,bbox:scene.bbox.slice(),before:recordScene(scene),after:recordScene(value.scene),author:'human'}});
+          emit();syncDisabled();
+        },
+        onCommit:()=>{},
+        onRequestExport:async()=>{
+          if(parentBusy||applying)return;
+          if(pendingCount()===0){
+            const current=currentSource();if(!current||!live(token,current))return;
+            const url=root.URL.createObjectURL(current.file),link=el('a');
+            link.href=url;link.download=current.file.name||'paper.pdf';link.click();
+            setTimeout(()=>root.URL.revokeObjectURL(url),1000);return;
+          }
+          await apply();if(outputReady())download.click();
+        }
+      });
+      chartState=null;figureState=null;chartBlocked=false;
+      say(status,scene.mode==='marks'?'점이나 막대의 끝을 끌어 바꾸세요.':'곡선을 끌어 모양을 바꾸세요.');syncDisabled();return true;
+    }
+    function canPaintShape(analysis,legacy){return !legacy&&root.FalsifyChartShapeEditor&&bboxOk(analysis.bbox);}
+    async function paintChart(analysis,token,mine,legacy=false){
       figureState=null;
+      if(canPaintShape(analysis,legacy)){
+        try{if(await paintShape(analysis,token,mine))return;}
+        catch(error){
+          if(!selectionCurrent(token,mine))return;
+          paintChartFallback(analysis,token,mine);return;
+        }
+      }
       const api=root.FalsifyChartRedraw;
-      if(!api||typeof api.fromAnalysis!=='function'||typeof api.render!=='function'){say(status,TEXT.chartMissing,true);errorCode='chart-missing';return;}
-      let raw=null;
-      try{raw=normalizeChart(api.fromAnalysis(analysis));}catch{raw=null;}
-      if(!raw&&analysis.data){try{raw=normalizeChart(api.fromAnalysis(analysis.data));}catch{raw=null;}}
+      if(!chartApiReady(api))return;
+      const raw=readChartAnalysis(api,analysis);
       if(!raw){say(status,TEXT.chartBad,true);errorCode='chart-bad';return;}
       const bbox=bboxOk(analysis.bbox)?analysis.bbox.slice():null;
       chartState={analysis,original:raw,editor:editorFromChart(raw),bbox,pageIndex:analysis.pageIndex,key:'graph:'+analysis.analysisId,opId:'graph-'+analysis.analysisId};
@@ -1107,7 +1015,7 @@
       paintSeries();
       let before=null;
       if(bbox)before=await renderRegion(analysis.pageIndex,bbox);
-      if(token!==generation||mine!==selectSerial)return;
+      if(!selectionCurrent(token,mine))return;
       chartState.before=before;
       setImages(before&&before.bytes,null);
       await flushChart(token);
@@ -1184,6 +1092,22 @@
         return row;
       }
     }
+    function chartApiReady(api){
+      if(!api||typeof api.fromAnalysis!=='function'||typeof api.render!=='function'){say(status,TEXT.chartMissing,true);errorCode='chart-missing';return false;}
+      return true;
+    }
+    function readChartAnalysis(api,analysis){
+      let raw=null;
+      try{raw=normalizeChart(api.fromAnalysis(analysis));}catch{raw=null;}
+      if(!raw&&analysis.data){try{raw=normalizeChart(api.fromAnalysis(analysis.data));}catch{raw=null;}}
+      return raw;
+    }
+    function paintChartFallback(analysis,token,mine){
+          const panel=el('div','visual-edit-column');
+          panel.append(el('p','form-feedback','곡선 편집을 준비하지 못했습니다.'));
+          const advanced=el('button','button secondary','고급 · 새 서식으로 그리기');advanced.type='button';
+          advanced.addEventListener('click',()=>{void paintChart(analysis,token,mine,true);});panel.append(advanced);workBody.replaceChildren(panel);
+    }
     let chartQueued=false;
     function queueChart(){
       chartBlocked=false;
@@ -1191,6 +1115,7 @@
       chartQueued=true;
       queueMicrotask(()=>{chartQueued=false;void flushChart(generation);});
     }
+    function chartCurrent(token,mine){return token===generation&&mine===chartSerial&&!!chartState;}
     async function flushChart(token){
       if(!chartState)return;
       const mine=++chartSerial;
@@ -1207,13 +1132,13 @@
         const api=root.FalsifyChartRedraw;
         const ratio=chartState.bbox?(chartState.bbox[3]-chartState.bbox[1])/(chartState.bbox[2]-chartState.bbox[0]):.625;
         const rendered=await api.render({chart:compiled,width:640,height:Math.max(64,Math.min(1600,Math.round(640*ratio))),document:doc});
-        if(token!==generation||mine!==chartSerial||!chartState)return;
+        if(!chartCurrent(token,mine))return;
         const png=rendered&&rendered.png instanceof Uint8Array?rendered.png:null;
         if(!isPng(png))throw err('plotFailed');
         let before=chartState.before;
         if(chartState.bbox){
           before=await renderRegion(chartState.pageIndex,chartState.bbox);
-          if(token!==generation||mine!==chartSerial||!chartState)return;
+          if(!chartCurrent(token,mine))return;
           if(!before)throw err('region');
           chartState.before=before;
         }
@@ -1230,10 +1155,13 @@
         emit();
         syncDisabled();
       }catch(error){
+        reportChartFailure(error,token,mine);
+      }
+    }
+    function reportChartFailure(error,token,mine){
         if(error?.name==='AbortError'||token!==generation||mine!==chartSerial)return;
         say(status,TEXT.plotFailed,true);
         errorCode='plot';
-      }
     }
     function editorDirty(state){
       const current=compileEditor(state.editor);
@@ -1255,7 +1183,7 @@
     async function paintFigure(item,token,mine){
       chartState=null;
       const rendered=await renderRegion(item.pageIndex,item.bbox);
-      if(token!==generation||mine!==selectSerial)return;
+      if(!selectionCurrent(token,mine))return;
       if(!rendered){say(status,TEXT.previewFailed,true);errorCode='preview';return;}
       figureState={key:'figure:'+item.id,opId:'figure-'+item.id,itemId:item.id,pageIndex:item.pageIndex,bbox:item.bbox.slice(),beforeSha:rendered.sha256,beforePng:rendered.bytes,uploaded:null,crop:null,label:null,afterPng:null,page:item.pageIndex+1};
       paintFigureControls();
@@ -1312,7 +1240,17 @@
       useCrop.addEventListener('click',()=>{imageTask=applyCrop(nums);});
       box.append(useRegion,useCrop);
       advanced.append(box);
-      panel.append(title,nav,stage,fileLabel,labelInput,labelBtn,advanced);
+      const shapeButton=el('button','button secondary','그래프 고치기');shapeButton.type='button';
+      shapeButton.hidden=!root.FalsifyChartShapeEditor;
+      shapeButton.addEventListener('click',async()=>{
+        if(parentBusy||applying)return;
+        const chosen=figureState;if(!chosen)return;
+        const pageIndex=chosen.page-1;
+        const bbox=pageIndex===chosen.pageIndex?chosen.bbox.slice():[0,0,chosen.view.width,chosen.view.height];
+        try{await paintShape({analysisId:'region-'+chosen.key+'-p'+pageIndex+'-'+bbox.join(','),pageIndex,bbox},generation,selectSerial);}
+        catch{if(figureState===chosen){paintFigureControls();say(status,'곡선을 읽지 못했습니다. 그래프 전체가 들어오도록 영역을 선택하세요.',true);}}
+      });dynamic.push(shapeButton);
+      panel.append(title,shapeButton,nav,stage,fileLabel,labelInput,labelBtn,advanced);
       workBody.replaceChildren(panel);
       dynamic.push(prev,next,file,labelBtn,useRegion,useCrop);
       prev.addEventListener('click',()=>{if(fig.page>1)void setPage(fig.page-1);});
@@ -1349,6 +1287,7 @@
         imageTask=updateFigureBbox(box);
       });
       stage.addEventListener('pointercancel',()=>{drag=null;paintOverlay(fig.bbox);});
+      fig.title=title;
       fig.stage=stage;
       fig.pageLabel=pageLabel;
       fig.prev=prev;
@@ -1371,10 +1310,11 @@
       if(!src)return;
       try{
         const view=await preview({file:src.file,fileHash:src.fileHash,page:fig.page});
-        if(token!==generation||mine!==selectSerial||figureState!==fig)return;
-        if(!view||!view.canvas||!finite(view.width)||!finite(view.height)||view.width<=0||view.height<=0){say(status,TEXT.previewFailed,true);return;}
+        if(!selectionCurrent(token,mine)||figureState!==fig)return;
+        if(!validPreview(view)){say(status,TEXT.previewFailed,true);return;}
         fig.view={canvas:view.canvas,width:view.width,height:view.height,page:view.page,pages:view.pages};
         fig.pages=view.pages;
+        if(fig.title)fig.title.textContent='그림 · '+view.page+'쪽';
         fig.pageLabel.textContent=view.page+' / '+view.pages+'쪽';
         const frame=el('div','visual-edit-frame');
         const overlay=el('div','visual-edit-selection');
@@ -1385,10 +1325,11 @@
         paintOverlay(fig.page===fig.pageIndex+1?fig.bbox:null);
         syncDisabled();
       }catch(error){
-        if(token!==generation||mine!==selectSerial)return;
+        if(!selectionCurrent(token,mine))return;
         say(status,TEXT[codeOf(error)]||TEXT.previewFailed,true);
       }
     }
+    function validPreview(view){return !!view&&!!view.canvas&&finite(view.width)&&finite(view.height)&&view.width>0&&view.height>0;}
     function paintOverlay(box){
       const fig=figureState;
       if(!fig||!fig.overlay||!fig.view)return;
@@ -1410,7 +1351,7 @@
       const fig=figureState;
       const token=generation,mine=selectSerial;
       const rendered=await renderRegion(fig.page-1,bbox);
-      if(token!==generation||mine!==selectSerial||figureState!==fig)return;
+      if(!selectionCurrent(token,mine)||figureState!==fig)return;
       if(!rendered){say(status,TEXT.region,true);return;}
       fig.pageIndex=fig.page-1;
       fig.bbox=bbox.slice();
@@ -1588,6 +1529,7 @@
     async function refreshRegionHashes(token,src){
       for(const entry of [...regionOps.values()]){
         const wire=entry.wire;
+        if(wire.kind==='chart-shape')continue;
         const rendered=await renderRegion(wire.pageIndex,wire.bbox);
         if(!live(token,src))throw err('stale');
         if(!rendered||rendered.sha256!==wire.beforeImageSha256)throw err('stale');
@@ -1599,58 +1541,101 @@
       if(!isPdf(bytes))return null;
       const hash=await digest(bytes);
       if(hash!==data.outputSha256)return null;
-      if(!Number.isSafeInteger(data.pageCount)||data.pageCount<1||data.pageCount>20000)return null;
-      const verification=data.verification;
-      if(!verification||(verification.status!=='passed'&&verification.status!=='warning')||!Array.isArray(verification.issues)||verification.issues.some(item=>typeof item!=='string'&&!(item&&typeof item.code==='string')))return null;
+      const verification=exportVerification(data);if(!verification)return null;
       if(!Array.isArray(data.changes))return null;
       let changes;
       try{changes=root.structuredClone(data.changes);}catch{return null;}
       return {bytes,hash,source:fileHash,revision,changes,verification:root.structuredClone(verification),pageCount:data.pageCount};
     }
-    async function apply(){
-      if(parentBusy||applying)return;
-      const src=currentSource();
-      if(!src||src.fileHash!==boundHash||src.revision!==boundRevision||!paperId){say(status,TEXT.stale,true);errorCode='stale';return;}
-      await imageTask;
-      if(figureState)await composeFigure();
-      if(chartState&&editorDirty(chartState))await flushChart(generation);
-      if(chartBlocked){say(status,TEXT.chartInvalid,true);errorCode='invalid';return;}
-      const ops=wires();
-      if(!ops.length){say(status,TEXT.applyNone,true);errorCode='none';return;}
-      if(ops.length>MAX_OPS){say(status,TEXT.applyMax,true);errorCode='max';return;}
-      applying=true;
-      syncDisabled();
-      const token=generation;
-      let locked=false;
-      try{
-        if(typeof hold==='function'){
-          locked=true;
-          const ok=await hold({active:true,phase:'apply'});
-          if(ok===false){say(status,TEXT.hold,true);errorCode='hold';return;}
-        }
-        if(!live(token,src)){say(status,TEXT.stale,true);errorCode='stale';return;}
-        await refreshRegionHashes(token,src);
-        const signal=track();
-        const response=await session().request(EXPORT,{schema:REQUEST_SCHEMA,paperId,fileHash:src.fileHash,revision:src.revision,operations:wires()},{signal});
-        if(!live(token,src)){say(status,TEXT.stale,true);errorCode='stale';return;}
-        const verified=await verifyExport(response,src.fileHash,src.revision);
-        if(!verified){say(status,TEXT.applyFail,true);errorCode='failed';return;}
+    function exportVerification(data){
+      if(!Number.isSafeInteger(data.pageCount)||data.pageCount<1||data.pageCount>20000)return null;
+      const verification=data.verification;
+      if(!verification||(verification.status!=='passed'&&verification.status!=='warning')||!Array.isArray(verification.issues)||verification.issues.some(item=>typeof item!=='string'&&!(item&&typeof item.code==='string')))return null;
+      return verification;
+    }
+    function prepareOperations(){
+        if(chartBlocked){say(status,TEXT.chartInvalid,true);errorCode='invalid';return null;}
+        const ops=wires();
+        if(!ops.length){say(status,TEXT.applyNone,true);errorCode='none';return null;}
+        if(ops.length>MAX_OPS){say(status,TEXT.applyMax,true);errorCode='max';return null;}
+      return ops;
+    }
+    function installOutput(verified,draftKey){
         output=verified;
-        output.draftKey=JSON.stringify(records());
+        output.draftKey=draftKey;
         paintOutput();
         say(status,TEXT.applyOk);
         errorCode=null;
+    }
+    function applySourceReady(src){
+      if(!src||src.fileHash!==boundHash||src.revision!==boundRevision||!paperId){say(status,TEXT.stale,true);errorCode='stale';return false;}
+      return true;
+    }
+    function draftCurrent(token,src,draftKey){return live(token,src)&&draftKey===JSON.stringify(records());}
+    const APPLY_STALE=Symbol('apply-stale');
+    function requireApplyLive(token,src){if(!live(token,src))throw APPLY_STALE;}
+    function requireDraftCurrent(token,src,draftKey){if(!draftCurrent(token,src,draftKey))throw APPLY_STALE;}
+    function applyBusy(){return parentBusy||applying;}
+    function chartNeedsFlush(){return chartState&&editorDirty(chartState);}
+    function canReleaseApply(owner){return owner.locked&&typeof hold==='function';}
+    function requireUnchangedDraft(draftKey){if(draftKey!==JSON.stringify(records()))throw APPLY_STALE;}
+    async function apply(){
+      if(applyBusy())return;
+      const src=currentSource();
+      if(!applySourceReady(src))return;
+      applying=true;
+      const owner={locked:false};
+      applyOwner=owner;
+      syncDisabled();
+      const token=generation;
+      try{
+        await imageTask;
+        requireApplyLive(token,src);
+        if(figureState)await composeFigure();
+        requireApplyLive(token,src);
+        if(chartNeedsFlush())await flushChart(token);
+        requireApplyLive(token,src);
+        const ops=prepareOperations();if(!ops)return;
+        const draftKey=JSON.stringify(records());
+        if(typeof hold==='function'){
+          owner.locked=true;
+          const ok=await hold({active:true,phase:'apply'});
+          requireApplyLive(token,src);
+          if(ok===false){say(status,TEXT.hold,true);errorCode='hold';return;}
+        }
+        requireUnchangedDraft(draftKey);
+        await refreshRegionHashes(token,src);
+        requireDraftCurrent(token,src,draftKey);
+        const signal=track();
+        const response=await session().request(EXPORT,{schema:REQUEST_SCHEMA,paperId,fileHash:src.fileHash,revision:src.revision,operations:ops},{signal});
+        requireDraftCurrent(token,src,draftKey);
+        const verified=await verifyExport(response,src.fileHash,src.revision);
+        requireDraftCurrent(token,src,draftKey);
+        if(!verified){say(status,TEXT.applyFail,true);errorCode='failed';return;}
+        installOutput(verified,draftKey);
         try{await deliver();}
-        catch{say(status,TEXT.handoff,true);errorCode='handoff';}
+        catch{reportHandoffFailure(token,src);}
       }catch(error){
-        if(error?.name==='AbortError'||!live(token,src)){say(status,TEXT.stale,true);errorCode='stale';return;}
+        if(error===APPLY_STALE)return;
+        reportApplyFailure(error,token,src);
+      }finally{
+        if(applyOwner===owner){
+          if(canReleaseApply(owner)){owner.locked=false;try{await hold({active:false,phase:'apply'});}catch{}}
+          finishApplyOwner(owner);
+        }
+      }
+    }
+    function reportApplyFailure(error,token,src){
+        if(error?.name==='AbortError'||!live(token,src))return;
         say(status,TEXT.applyFail,true);
         errorCode=codeOf(error)==='stale'?'stale':'failed';
-      }finally{
-        applying=false;
-        if(locked&&typeof hold==='function'){try{await hold({active:false,phase:'apply'});}catch{}}
-        syncDisabled();
-      }
+    }
+    function reportHandoffFailure(token,src){if(live(token,src)){say(status,TEXT.handoff,true);errorCode='handoff';}}
+    function finishApplyOwner(owner){if(applyOwner===owner){applyOwner=null;applying=false;syncDisabled();}}
+    function validateSourceBytes(src,bytes){
+        if(bytes.length>MAX_PDF)throw err('limit');
+        if(typeof src.file.size==='number'&&src.file.size!==bytes.length)throw err('hash');
+        if(!isPdf(bytes))throw err('notPdf');
     }
     async function loadSource(token,src,signal){
       try{
@@ -1660,9 +1645,7 @@
         const raw=await src.file.arrayBuffer();
         if(!liveReady(token))return;
         const bytes=raw instanceof Uint8Array?new Uint8Array(raw):new Uint8Array(raw);
-        if(bytes.length>MAX_PDF)throw err('limit');
-        if(typeof src.file.size==='number'&&src.file.size!==bytes.length)throw err('hash');
-        if(!isPdf(bytes))throw err('notPdf');
+        validateSourceBytes(src,bytes);
         const actual=await digest(bytes);
         if(!liveReady(token))return;
         if(actual!==src.fileHash)throw err('hash');
@@ -1680,6 +1663,20 @@
         const page=validateList(listed,paperId,src.fileHash,0);
         const savedPageItems=validateAnalyses(analyses,paperId,src.fileHash);
         if(!page||!savedPageItems)throw err('listFailed');
+        installSourceList(page,savedPageItems);
+      }catch(error){
+        reportSourceFailure(error,token);
+      }finally{syncDisabled();}
+      function liveReady(current){return current===generation;}
+    }
+    function reportSourceFailure(error,token){
+        if(error?.name==='AbortError'||token!==generation)return;
+        const code=codeOf(error);
+        errorCode=code;
+        say(status,TEXT[code]||TEXT.failed,true);
+        retry.hidden=false;
+    }
+    function installSourceList(page,savedPageItems){
         listItems=page.items;
         listTotal=page.total;
         listPage=0;
@@ -1688,14 +1685,6 @@
         paintLists();
         say(status,'표와 그림 '+listTotal+'개 · 저장된 항목 '+savedItems.length+'개');
         errorCode=null;
-      }catch(error){
-        if(error?.name==='AbortError'||token!==generation)return;
-        const code=codeOf(error);
-        errorCode=code;
-        say(status,TEXT[code]||TEXT.failed,true);
-        retry.hidden=false;
-      }finally{syncDisabled();}
-      function liveReady(current){return current===generation;}
     }
     function refresh(){
       const src=currentSource();
@@ -1731,7 +1720,12 @@
       bump();
       flight=null;
       parentBusy=false;
-      applying=false;
+      const owner=applyOwner;
+      applying=false;applyOwner=null;
+      if(owner?.locked&&typeof hold==='function'){
+        owner.locked=false;
+        try{Promise.resolve(hold({active:false,phase:'apply'})).catch(()=>{});}catch{}
+      }
       paperId=null;boundHash=null;boundRevision=null;
       resetDrafts();
       listItems=[];listTotal=0;listPage=0;savedItems=[];savedPage=0;

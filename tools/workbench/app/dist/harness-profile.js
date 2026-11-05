@@ -70,22 +70,28 @@
     if(!keysAre(p,['target','input','output'])||!keysAre(p.target,['type','executable','args'])||p.target.type!=='stdio'||!str(p.target.executable,2000)||!Array.isArray(p.target.args))return false;
     const o=p.output;if(!plain(o)||!['json','json-fence','unstructured'].includes(o.format))return false;
     try{H.validateWrapper({type:'wrapper',target:{type:'stdio',executable:'C:/draft',args:p.target.args},input:p.input,output:{...o,format:o.format==='unstructured'?'json':o.format}});}catch{return false;}
+    return draftMaps(p,o);}
+  function draftMaps(p,o){
     if(Object.hasOwn(o,'stageMaps')&&!Object.values(o.stageMaps).every(copyOnly))return false;if(p.input.mode==='template'&&!copyOnly(p.input.template))return false;
     return !Object.hasOwn(o,'map')&&(!Object.hasOwn(o,'path')||o.path!=='');}
   // The companion's answer is data: every field is re-checked, every evidence quote and offset is recomputed from what this page
   // sent, and both hashes are recomputed here, so the provenance never carries a value this page did not verify.
   function readProposal(data,body){const sent=sentOf(body);
     const keys=['schema','role','inputHash','cli','status','downgrades','summary','proposal','evidence','unknowns','warnings','executed','boundary','proposalHash'];
-    const ok=keysAre(data,keys)&&data.schema===SCHEMA&&data.role===sent.role&&HEX.test(data.inputHash)&&HEX.test(data.proposalHash)&&keysAre(data.cli,['provider','model','effort'])&&
-      data.cli.provider===body.cli.provider&&data.cli.model===body.cli.model&&data.cli.effort===body.cli.effort&&STATUSES.includes(data.status)&&
-      Array.isArray(data.downgrades)&&data.downgrades.every(d=>Object.hasOwn(DOWNGRADES,d))&&str(data.summary,600)&&draftShape(data.proposal)&&
-      Array.isArray(data.evidence)&&data.evidence.length<=24&&data.evidence.every(e=>keysAre(e,['field','source','quote','start','end','occurrences','offsetUnit'])&&FIELDS.includes(e.field)&&SOURCES.includes(e.source)&&str(e.quote,300)&&e.quote.trim()&&e.offsetUnit==='codepoint'&&
-        (s=>s&&s.start===e.start&&s.end===e.end&&s.occurrences===e.occurrences)(spanOf(sent[e.source],e.quote)))&&
-      Array.isArray(data.unknowns)&&data.unknowns.length<=12&&data.unknowns.every(u=>str(u,300))&&Array.isArray(data.warnings)&&data.warnings.every(w=>Object.hasOwn(WARNINGS,w))&&data.executed===false&&typeof data.boundary==='string'&&
-      (data.status!=='proposed'||data.downgrades.length===0&&data.proposal.output.format!=='unstructured');
+    const ok=proposalHeader(data,body,sent,keys)&&proposalEvidence(data,sent);
     if(!ok)throw fixed(MSG.response);
     const {proposalHash,...hashed}=data;if(sha256(canonical(hashed))!==proposalHash||sha256(canonical(Object.fromEntries(INPUTS.map(k=>[k,sent[k]]))))!==data.inputHash)throw fixed(MSG.response);
     return Object.freeze({data:JSON.parse(JSON.stringify(data)),sent});}
+  function proposalHeader(data,body,sent,keys){
+    return keysAre(data,keys)&&data.schema===SCHEMA&&data.role===sent.role&&HEX.test(data.inputHash)&&HEX.test(data.proposalHash)&&keysAre(data.cli,['provider','model','effort'])&&
+      data.cli.provider===body.cli.provider&&data.cli.model===body.cli.model&&data.cli.effort===body.cli.effort&&STATUSES.includes(data.status)&&
+      Array.isArray(data.downgrades)&&data.downgrades.every(d=>Object.hasOwn(DOWNGRADES,d))&&str(data.summary,600)&&draftShape(data.proposal);
+  }
+  function proposalEvidence(data,sent){
+    return Array.isArray(data.evidence)&&data.evidence.length<=24&&data.evidence.every(e=>keysAre(e,['field','source','quote','start','end','occurrences','offsetUnit'])&&FIELDS.includes(e.field)&&SOURCES.includes(e.source)&&str(e.quote,300)&&e.quote.trim()&&e.offsetUnit==='codepoint'&&
+        (s=>s&&s.start===e.start&&s.end===e.end&&s.occurrences===e.occurrences)(spanOf(sent[e.source],e.quote)))&&
+      Array.isArray(data.unknowns)&&data.unknowns.length<=12&&data.unknowns.every(u=>str(u,300))&&Array.isArray(data.warnings)&&data.warnings.every(w=>Object.hasOwn(WARNINGS,w))&&data.executed===false&&typeof data.boundary==='string'&&
+      (data.status!=='proposed'||data.downgrades.length===0&&data.proposal.output.format!=='unstructured');  }
   const stale=(state,current)=>!state||INPUTS.some(k=>state.sent[k]!==inputs(current)[k]);
   const pretty=v=>v===undefined?'':JSON.stringify(v,null,2);
   // Approval: explicit, only for a current 'proposed' draft; yields builder fields plus a provenance record for settings.
@@ -143,18 +149,27 @@
     if(!plain(a)||!Array.isArray(a.history)||!a.history.length||!plain(a.history[0])||Object.hasOwn(a,'exportedAt')!==Object.hasOwn(a,'result'))fail();
     const {exportedAt,result,...record}=a;if(exportedAt!==undefined&&exportedAt!==null&&typeof exportedAt!=='string')fail();
     const at=h=>()=>h.at===null?new Date(NaN):new Date(h.at),h0=a.history[0];let b;
-    try{const prev=h0.op==='restart'?{rawSha256:h0.previousRawSha256,stage:h0.previousStage,entries:{length:h0.previousEntries}}:h0.op==='start'?null:fail();
-      if(prev&&(!HEX.test(prev.rawSha256)||!Object.hasOwn(LEAVES,prev.stage)||!Number.isSafeInteger(prev.entries.length)||prev.entries.length<0))fail();
-      b=startConversion(record.raw,record.stage,at(h0),prev);
+    try{b=startReplay(record,h0,at,fail);
+      b=replayHistory(a,b,at,fail);}
+
+    catch{fail();}
+    if(canonical(b)!==canonical(record))fail();
+    if(result!==undefined)verifyConvertedResult(b,result,fail);
+    return true;}
+  function startReplay(record,h0,at,fail){
+    const prev=h0.op==='restart'?{rawSha256:h0.previousRawSha256,stage:h0.previousStage,entries:{length:h0.previousEntries}}:h0.op==='start'?null:fail();
+    if(prev&&(!HEX.test(prev.rawSha256)||!Object.hasOwn(LEAVES,prev.stage)||!Number.isSafeInteger(prev.entries.length)||prev.entries.length<0))fail();
+    return startConversion(record.raw,record.stage,at(h0),prev);
+  }
+  function replayHistory(a,b,at,fail){
       for(const h of a.history.slice(1)){if(!plain(h))fail();const clock=at(h),n=b.history.length;
         if(h.op==='unmap')b=unmap(b,h.path,clock);
         else if(['map','label','replace'].includes(h.op))b=h.origin==='manual-label'?labelStatus(b,h.value,h.start,h.end,clock):h.origin==='span'?mapSpan(b,h.path,h.start,h.end,clock):fail();
         else fail();
-        if(b.history.length!==n+1)fail();}}
-    catch{fail();}
-    if(canonical(b)!==canonical(record))fail();
-    if(result!==undefined){let r;try{r=converted(b);}catch(e){r={error:message(e)};}if(canonical(r)!==canonical(result))fail();}
-    return true;}
+        if(b.history.length!==n+1)fail();}
+    return b;
+  }
+  function verifyConvertedResult(b,result,fail){let r;try{r=converted(b);}catch(e){r={error:message(e)};}if(canonical(r)!==canonical(result))fail();}
   function exportConversion(a,clock){verifyConversion(a);let result;try{result=converted(a);}catch(e){result={error:message(e)};}
     return JSON.stringify({...a,exportedAt:now(clock),result},null,2)+'\n';}
 
@@ -216,10 +231,13 @@
       evidence.replaceChildren(...d.evidence.map(e=>x('li',{},x('span',{text:e.field+' ← '+e.source+' · '}),x('q',{text:e.quote}))));evidence.hidden=!d.evidence.length;
       approveButton.disabled=!approvable;testButton.disabled=d.proposal.output.format==='unstructured';testResult.hidden=true;
       say(reviewStatus,approvable?'초안을 검토한 뒤 승인하세요. 승인은 빌더 칸만 채웁니다.':'이 초안은 승인할 수 없습니다. 근거를 보강해 다시 요청하거나 아래 수동 매핑을 쓰세요.');}
+    function proposalRequestBlock(s,cap,link,body){
+      if(!s?.connected||!link)return MSG.link;const offer=cap?.harnessProfileProposal;if(!offer?.available||!offer.providers?.includes(body.cli.provider))return MSG.old;if(s.frozen)return MSG.frozen;return null;
+    }
     ask.addEventListener('click',async()=>{const my=++seq;state=null;renderReview();
       let body;try{body=requestBody(current(),{provider:c.provider.value,model:c.model.value,effort:c.effort.value});}catch(e){return say(askStatus,message(e),true);}
       const s=bridge?.state?.(),cap=bridge?.capabilities?.()||s?.cap,link=bridge?.session?.();
-      if(!s?.connected||!link)return say(askStatus,MSG.link,true);const offer=cap?.harnessProfileProposal;if(!offer?.available||!offer.providers?.includes(body.cli.provider))return say(askStatus,MSG.old,true);if(s.frozen)return say(askStatus,MSG.frozen,true);
+      const blocked=proposalRequestBlock(s,cap,link,body);if(blocked)return say(askStatus,blocked,true);
       ask.disabled=true;say(askStatus,'초안을 요청했습니다. 모델 응답을 기다리는 중입니다(최대 약 2분).');
       const controller=typeof AbortController==='function'?new AbortController():null,timer=controller?setTimeout(()=>controller.abort(),150000):null;
       try{const data=await link.request(ROUTE,body,controller?{signal:controller.signal}:undefined);if(my!==seq)return;state=readProposal(data,body);renderReview();freshness();

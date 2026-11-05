@@ -50,23 +50,43 @@ export async function createReconstructionProject(draft,decisions=[],dependencie
   return {...result,project,bindings:result.bindings.map(b=>({...b,projectId:project.id}))};
 }
 
-/** Record a verified no-attack artifact and its reconstructed project lineage. */
-export function createReconstructionLineage({project,artifact,comparison,bindings,decisions}={}){
-  if(project?.schema!=='falsify.latex-project.v1'||project.origin!=='reconstructed-pdf'||!HASH.test(project.id)||!HASH.test(project.sourcePdfHash)||!Array.isArray(project.files)||!project.files.length)invalid('INVALID_PROJECT');
+function validateLineageFiles(files){
   const paths=new Set();
-  for(const f of project.files){if(!f||typeof f.path!=='string'||!f.path||paths.has(f.path)||!(f.bytes instanceof Uint8Array)||!HASH.test(f.sha256)||hex(f.bytes)!==f.sha256)invalid('STALE_PROJECT');paths.add(f.path);}
+  for(const f of files){if(!f||typeof f.path!=='string'||!f.path||paths.has(f.path)||!(f.bytes instanceof Uint8Array)||!HASH.test(f.sha256)||hex(f.bytes)!==f.sha256)invalid('STALE_PROJECT');paths.add(f.path);}
+}
+
+function validateLineageProject(project){
+  if(project?.schema!=='falsify.latex-project.v1'||project.origin!=='reconstructed-pdf'||!HASH.test(project.id)||!HASH.test(project.sourcePdfHash)||!Array.isArray(project.files)||!project.files.length)invalid('INVALID_PROJECT');
+  validateLineageFiles(project.files);
   const files=project.files.map(({path,sha256})=>[path,sha256]).sort((a,b)=>a[0]<b[0]?-1:a[0]>b[0]?1:0);
   if(hex(encoder.encode(JSON.stringify({files,mainFile:project.mainFile,engine:project.engine,origin:project.origin})))!==project.id)invalid('STALE_PROJECT');
+}
+
+function validateLineageArtifact(artifact,project){
   if(artifact?.schema!=='falsify.latex-artifact.v1'||artifact.success!==true||artifact.projectId!==project.id||artifact.engine!==project.engine||!(artifact.pdfBytes instanceof Uint8Array)||!artifact.pdfBytes.length||!HASH.test(artifact.pdfHash)||hex(artifact.pdfBytes)!==artifact.pdfHash||!artifact.engineManifest||typeof artifact.engineManifest!=='object'||Array.isArray(artifact.engineManifest))invalid('INVALID_ARTIFACT');
+}
+
+function validateLineageComparison(comparison,project,artifact){
   if(comparison?.schema!=='falsify.reconstruction-comparison.v1'||comparison.sourcePdfHash!==project.sourcePdfHash||comparison.baselinePdfHash!==artifact.pdfHash||comparison.method!=='extracted-token-multiset'||comparison.readingOrderVerified!==false||comparison.visualLayoutVerified!==false||!Number.isSafeInteger(comparison.sourcePages)||comparison.sourcePages<1||!Number.isSafeInteger(comparison.baselinePages)||comparison.baselinePages<1||![comparison.text?.missing,comparison.text?.added,comparison.numbers?.missing,comparison.numbers?.added].every(a=>Array.isArray(a)&&a.every(x=>typeof x==='string')))invalid('INVALID_COMPARISON');
-  if(!Array.isArray(bindings)||!Array.isArray(decisions))invalid('INVALID_BINDINGS');
-  let recorded;try{const f=project.files.find(x=>x.path==='falsify-reconstruction.json');recorded=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(f.bytes));}catch{invalid('INVALID_METADATA');}
-  if(recorded.schema!=='falsify.reconstruction-baseline.v1'||recorded.sourcePdfHash!==project.sourcePdfHash||!Array.isArray(recorded.bindings)||JSON.stringify(recorded.decisions)!==JSON.stringify(decisions)||recorded.bindings.length!==bindings.length)invalid('INVALID_METADATA');
+}
+
+function validateLineageBindings(bindings,recorded,project){
   for(let i=0;i<bindings.length;i++){
     const b=bindings[i], saved=recorded.bindings[i], file=project.files.find(f=>f.path===b?.path);
     if(!b||b.projectId!==project.id||!file||!Number.isSafeInteger(b.start)||!Number.isSafeInteger(b.end)||b.start<0||b.end<b.start||b.end>new TextDecoder('utf-8',{fatal:true}).decode(file.bytes).length||!Array.isArray(b.evidence)||b.evidence.some(e=>e.sourceSha256!==project.sourcePdfHash))invalid('INVALID_BINDINGS');
     const {projectId,...rest}=b;
     if(saved?.bindingScope!=='containing-project'||Object.hasOwn(saved,'projectId')||JSON.stringify({...rest,bindingScope:'containing-project'})!==JSON.stringify(saved))invalid('INVALID_BINDINGS');
   }
+}
+
+/** Record a verified no-attack artifact and its reconstructed project lineage. */
+export function createReconstructionLineage({project,artifact,comparison,bindings,decisions}={}){
+  validateLineageProject(project);
+  validateLineageArtifact(artifact,project);
+  validateLineageComparison(comparison,project,artifact);
+  if(!Array.isArray(bindings)||!Array.isArray(decisions))invalid('INVALID_BINDINGS');
+  let recorded;try{const f=project.files.find(x=>x.path==='falsify-reconstruction.json');recorded=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(f.bytes));}catch{invalid('INVALID_METADATA');}
+  if(recorded.schema!=='falsify.reconstruction-baseline.v1'||recorded.sourcePdfHash!==project.sourcePdfHash||!Array.isArray(recorded.bindings)||JSON.stringify(recorded.decisions)!==JSON.stringify(decisions)||recorded.bindings.length!==bindings.length)invalid('INVALID_METADATA');
+  validateLineageBindings(bindings,recorded,project);
   return freeze({schema:'falsify.reconstruction-lineage.v1',projectId:project.id,sourcePdfHash:project.sourcePdfHash,baselinePdfHash:artifact.pdfHash,engine:project.engine,engineManifest:structuredClone(artifact.engineManifest),comparison:structuredClone(comparison),bindingProjectIds:bindings.map(()=>project.id),bindings:structuredClone(bindings),decisions:structuredClone(decisions)});
 }

@@ -90,33 +90,47 @@
       if(deriving[role]!==job)return;deriving[role]=null;effective[role]=next;details(role);renderCli(role);document.dispatchEvent(new CustomEvent('falsify:harness-consent',{detail:{role}}));})();
     deriving[role]=job;renderCli(role);return job;}
   function clearConsent(role){for(const id of [role+'-harness-consent',role==='red'?'red-consent':'doc-blue-consent']){const e=$('#'+id);if(e)e.checked=false;}}
+  function validateCliSelection(next){if(next){H.cliSelection(next);const efforts=agentInfo(next.type)?.efforts;if(efforts?.length&&!efforts.includes(next.effort))throw Error('이 broker의 '+H.CLI[next.type].name+'는 effort '+next.effort+'를 지원하지 않습니다.');}}
+  function chooseCliType(role,value,prev){if(!agentOk(value)){renderCli(role);return {rejected:true};}const efforts=agentInfo(value)?.efforts?.length?agentInfo(value).efforts:H.EFFORTS;
+      const next={type:value,model:prev?.type===value?prev.model:agentInfo(value)?.defaultModel||H.CLI[value].defaultModel,effort:efforts.includes(prev?.effort)?prev.effort:efforts.includes(H.DEFAULT_EFFORT)?H.DEFAULT_EFFORT:efforts[0]};return {next};}
   function chooseCli(role,field,value){
     const base=selected[role],prev=cli[role];if(locked[role]||deriving[role]||!base||!H.cliCapable(base.config)){renderCli(role);return;}
     let next;
-    if(field==='type'){if(!value)next=null;else{if(!agentOk(value)){renderCli(role);return;}const efforts=agentInfo(value)?.efforts?.length?agentInfo(value).efforts:H.EFFORTS;
-      next={type:value,model:prev?.type===value?prev.model:agentInfo(value)?.defaultModel||H.CLI[value].defaultModel,effort:efforts.includes(prev?.effort)?prev.effort:efforts.includes(H.DEFAULT_EFFORT)?H.DEFAULT_EFFORT:efforts[0]};}}
+    if(field==='type'){if(!value)next=null;else{const selection=chooseCliType(role,value,prev);if(selection.rejected)return;next=selection.next;}}
     else{if(!prev||!agentOk(prev.type)){renderCli(role);return;}next={...prev,[field]:value};}
-    try{if(next){H.cliSelection(next);const efforts=agentInfo(next.type)?.efforts;if(efforts?.length&&!efforts.includes(next.effort))throw Error('이 broker의 '+H.CLI[next.type].name+'는 effort '+next.effort+'를 지원하지 않습니다.');}}
+    try{validateCliSelection(next);}
     catch(e){cliError[role]=field==='model'?'모델 ID 형식 오류: 영문·숫자로 시작하는 ASCII(._:- 포함 최대 120자)만 허용합니다. 이전 값을 유지했습니다.':e.message;renderCli(role);return;}
     cliError[role]='';if(JSON.stringify(prev)===JSON.stringify(next)){renderCli(role);return;}
     // Like a Harness switch: consent is cleared, the bound hash re-derived, and role pages invalidate their responses.
     cli[role]=next;clearConsent(role);rebind(role);document.dispatchEvent(new CustomEvent('falsify:harness-change',{detail:{role,cli:true}}));
   }
-  function renderCli(role){
-    const e=cliEls[role];if(!e)return;const base=selected[role]?.config,sel=cli[role],cap=bridgeCap(),capable=!!base&&H.cliCapable(base),applied=capable&&!!sel,frozen=locked[role]||!!deriving[role];
-    e.opts[''].textContent='Harness 지정값'+(base?' · '+executor(base):'');e.opts.codex.disabled=!agentOk('codex',cap);e.opts.claude.disabled=!agentOk('claude',cap);
-    const fromBase=capable?base.adapter||{}:{};e.type.value=applied?sel.type:'';e.model.value=applied?sel.model:fromBase.model||'';e.model.placeholder=applied?'':'harness 지정값 사용';e.effort.value=applied?sel.effort:fromBase.effort||H.DEFAULT_EFFORT;
-    const editable=applied&&agentOk(sel.type,cap),info=applied?agentInfo(sel.type,cap):null;
-    e.type.disabled=frozen||!capable;e.model.disabled=frozen||!editable;e.effort.disabled=frozen||!editable;
-    for(const [v,o] of Object.entries(e.effortOpts))o.disabled=!!info?.efforts?.length&&!info.efforts.includes(v);
-    e.list.replaceChildren(...(applied?(info?.models?.length?info.models:H.CLI[sel.type].models):[]).map(m=>{const o=document.createElement('option');o.value=m;return o;}));
+  function cliLockMessage(role,msg){if(deriving[role])return '선택을 harness 내용 해시에 고정하는 중 · 완료 전에는 실행이 잠깁니다.';if(locked[role])return msg+' 실행·기록 중이라 변경이 잠겼습니다.';return msg;}
+  function cliMessage(role,base,cap,capable,applied,editable,sel){
     const now=effective[role]?.config;let msg;
     if(!base)msg='Harness 준비 중';
     else if(!capable)msg='이 harness는 자체 실행기('+executor(base)+')를 씁니다. CLI·모델·effort 선택을 적용하지 않으며 harness 설정을 덮어쓰지 않습니다.'+(base.adapter?.type==='wrapper'&&!cap?.harnessWrapper?' 연결된 companion이 wrapper 실행을 지원하지 않습니다. 최신 companion으로 업데이트한 뒤 다시 연결하세요. 등록·샘플 미리보기는 가능합니다.':'');
     else if(!cap?.cliSelection)msg=(bridgeOn()?'연결된 companion이 CLI·모델 선택을 지원하지 않는 구버전입니다. 최신 앱 ZIP으로 업데이트한 뒤 다시 연결하세요. 지금은 broker 기본 Codex CLI로만 실행합니다.':'로컬 broker에 연결하면 그 broker가 지원하는 CLI·모델·effort를 고를 수 있습니다. 연결 전 수동 요청은 현재 harness 값을 그대로 씁니다.')+(now&&H.needsCliCaps(now)?' 현재 값('+executor(now)+')은 CLI 선택을 지원하는 companion에서만 실행됩니다. 「Harness 지정값」으로 되돌리거나 최신 companion에 연결하세요.':'');
     else if(applied&&!editable)msg=H.CLI[sel.type].name+'는 이 broker에서 쓸 수 없습니다(미설치 또는 미지원). 다른 CLI를 고르거나 「Harness 지정값」으로 되돌리세요.';
     else msg=(applied?'적용: '+executor(now||H.withCli(base,sel)):'Harness 지정값 사용')+' · 모델 목록은 입력 제안일 뿐 계정에서 쓸 수 있는지 확인하지 않습니다. 목록에 없는 모델 ID도 입력할 수 있습니다.'+(agentInfo('claude',cap)?.installed===false?' Claude Code CLI는 이 PC에 설치되지 않은 것으로 보고되었습니다.':'');
-    if(deriving[role])msg='선택을 harness 내용 해시에 고정하는 중 · 완료 전에는 실행이 잠깁니다.';else if(locked[role])msg+=' 실행·기록 중이라 변경이 잠겼습니다.';
+    msg=cliLockMessage(role,msg);
+    return msg;
+  }
+  function renderCliOptions(e,applied,info,sel){
+    for(const [v,o] of Object.entries(e.effortOpts))o.disabled=!!info?.efforts?.length&&!info.efforts.includes(v);
+    e.list.replaceChildren(...(applied?(info?.models?.length?info.models:H.CLI[sel.type].models):[]).map(m=>{const o=document.createElement('option');o.value=m;return o;}));
+  }
+  function renderCliControls(e,base,sel,cap,capable,applied,frozen){
+    const fromBase=capable?base.adapter||{}:{};e.type.value=applied?sel.type:'';e.model.value=applied?sel.model:fromBase.model||'';e.model.placeholder=applied?'':'harness 지정값 사용';e.effort.value=applied?sel.effort:fromBase.effort||H.DEFAULT_EFFORT;
+    const editable=applied&&agentOk(sel.type,cap),info=applied?agentInfo(sel.type,cap):null;
+    e.type.disabled=frozen||!capable;e.model.disabled=frozen||!editable;e.effort.disabled=frozen||!editable;
+    renderCliOptions(e,applied,info,sel);
+    return editable;
+  }
+  function renderCli(role){
+    const e=cliEls[role];if(!e)return;const base=selected[role]?.config,sel=cli[role],cap=bridgeCap(),capable=!!base&&H.cliCapable(base),applied=capable&&!!sel,frozen=locked[role]||!!deriving[role];
+    e.opts[''].textContent='Harness 지정값'+(base?' · '+executor(base):'');e.opts.codex.disabled=!agentOk('codex',cap);e.opts.claude.disabled=!agentOk('claude',cap);
+    const editable=renderCliControls(e,base,sel,cap,capable,applied,frozen);
+    const msg=cliMessage(role,base,cap,capable,applied,editable,sel);
     e.note.textContent=(cliError[role]?cliError[role]+' ':'')+msg;e.note.classList.toggle('error',!!cliError[role]);
   }
   function details(role){const h=selected[role],b=bound(role);if(!h||!b)return;$('#'+role+'-harness-detail').textContent=b.config.name+' · v'+b.config.version+' · '+b.hash.slice(0,12)+' · '+executor(b.config)+' · 상한 '+b.config.maxCalls+'회'+(b.hash!==h.hash?' · 선택 반영본 (기반 '+h.hash.slice(0,8)+' · 기록할 때 새 내용 해시로 추가 등록하며 기존 버전은 그대로)':'');$('#'+role+'-harness-consent').closest('label').hidden=!external(role);}
@@ -153,13 +167,16 @@
   function showComparison(r,patches,sourceRunId){comparison={outputFileHash:r.fileHash,selected:patches,assessments:patches.map(p=>({id:p.id,verdict:'pending',note:'',quoteOverlapFindingIds:FalsifyDocumentBlue.overlaps(p,r.response.findings)})),...(sourceRunId?{sourceRunId}:{})};$('#evaluation-comparison').replaceChildren();renderReviewBoard(r);}
   // Human review only: a BLUE run may be matched to a recorded RED final output by file hash. Nothing here reaches a model request.
   function autoComparison(r){const reds=reviewSource().runs.filter(x=>x.role==='red'&&x.finalState?.outputFileHash===r.fileHash),src=reds.find(x=>x.id===r.sourceRunId)||reds.at(-1);if(!src){status('#evaluation-plan-status','출력 파일 해시가 일치하는 RED 최종 기록이 없습니다. 변경 계획 JSON 대조는 선택 사항입니다.');return;}try{const patches=FalsifyDocumentBlue.validatePlan({fileHash:r.fileHash,segments:r.segments},{schema:'falsify.document-edit-plan.v1',outputFileHash:src.finalState.outputFileHash,selected:src.finalState.selected.map(p=>({id:p.id,label:p.label,before:p.before,after:p.after}))});showComparison(r,patches,src.id);status('#evaluation-plan-status','RED 기록 '+sourceLabel(src)+' · '+when(src.createdAt)+'의 최종 출력과 파일 SHA-256 일치'+(reds.length>1?' (일치 기록 '+reds.length+'건 중 '+(src.id===r.sourceRunId?'인계 기록':'최신')+')':'')+'. 변경별 판정은 사람이 정하며 자동 결론은 없습니다.');}catch(e){status('#evaluation-plan-status','RED 기록과 해시는 일치하지만 자동 대조 불가: '+e.message+' 변경 계획 JSON을 직접 선택할 수 있습니다.',true);}}
+  function renderEvaluationItems(r,items,output){
+    for(const item of items){const section=document.createElement('section');section.className='red-proposal';section.append(text('h4',item.id+' · '+(r.segments.find(s=>s.id===item.segmentId)?.label||item.segmentId)));if(r.role==='red'){section.append(text('p','Before: '+item.before),text('p','After: '+item.after));}else section.append(text('blockquote',item.quote));section.append(text('p',item.rationale),text('p','한계: '+item.uncertainty));const evidence=document.createElement('details');evidence.append(text('summary','근거 인용 '+item.evidence.length+'개'));for(const e of item.evidence)evidence.append(text('p',e.relation),text('blockquote',e.quote));section.append(evidence);output.append(section);}
+  }
   function renderEvaluation(){viewGen++;planEpoch++;comparison=null;$('#evaluation-plan').value='';$('#evaluation-plan-status').textContent='';$('#evaluation-comparison').replaceChildren();$('#evaluation-output').replaceChildren();$('#evaluation-form').reset();const r=current();shown=r?.id||null;renderHistory();$('#evaluation-save').disabled=!r;$('#evaluation-plan-section').hidden=!r||r.role!=='blue';$('#evaluation-binding').textContent=r?r.role.toUpperCase()+' '+kind(r)+' · '+sourceLabel(r)+(r.format?' ('+r.format+')':'')+' · '+harnessLabel(r)+' · 모델 '+modelLabel(r.model,H.attestation(r))+' · '+ORIGIN[r.provenance]+' · '+when(r.createdAt):'RED / BLUE에서 결과를 먼저 기록하세요.';if(!r)return;
     $('#evaluation-case').value=sourceLabel(r).slice(0,120)+' / '+r.role.toUpperCase()+(r.role==='red'?' / '+conditionLabel(r):'');
     if(r.role==='blue'){$('#evaluation-binding').textContent='BLUE · '+sourceLabel(r)+' · Harness v'+r.harness.version+' · '+ORIGIN[r.provenance];findingAssessments=r.response.findings.map(f=>({id:f.id,verdict:'pending',note:''}));renderReviewBoard(r);autoComparison(r);return;}
     const output=$('#evaluation-output');output.append(meta(r),text('h3','고정된 응답'),text('p',H.outcomeText(r.role,r.response,r.provenance)));
     const items=r.role==='blue'?r.response.findings:r.response.candidates;
     if(!items.length)output.append(text('p','제안/지적 없음. 유보·거절·무지적은 그대로 평가하며 성공/실패로 자동 변환하지 않습니다.'));
-    for(const item of items){const section=document.createElement('section');section.className='red-proposal';section.append(text('h4',item.id+' · '+(r.segments.find(s=>s.id===item.segmentId)?.label||item.segmentId)));if(r.role==='red'){section.append(text('p','Before: '+item.before),text('p','After: '+item.after));}else section.append(text('blockquote',item.quote));section.append(text('p',item.rationale),text('p','한계: '+item.uncertainty));const evidence=document.createElement('details');evidence.append(text('summary','근거 인용 '+item.evidence.length+'개'));for(const e of item.evidence)evidence.append(text('p',e.relation),text('blockquote',e.quote));section.append(evidence);output.append(section);}
+    renderEvaluationItems(r,items,output);
     const details=document.createElement('details');details.append(text('summary','실행 원본 JSON / 메타데이터'),text('pre',JSON.stringify(r.response,null,2)));output.append(details);
     const source=document.createElement('details');source.append(text('summary','실행 당시 논문 추출문 (이미지·수식 검증 아님)'),text('pre',r.segments.map(s=>s.label+'\n'+s.text).join('\n\n')));$('#evaluation-output').append(source);
     if(r.finalState)output.append(finalView(r));
@@ -169,6 +186,9 @@
   function family(runs,reviews){const root=new Map(runs.map(r=>[r.id,r.snapshotOf||r.id]));return {runs:runs.filter(r=>!r.snapshotOf),reviews:reviews.map(v=>({...v,runId:root.get(v.runId)||v.runId}))};}
   // Loaded locally; the separate module is also usable without the UI. No remote publication or model call.
   let comparisonApi=globalThis.FalsifyComparison||null,comparisonLoad=null,comparisonEpoch=0;
+  function renderAttemptObservations(observations,body){
+    if(observations){const summary=$('#harness-comparison-summary');summary.textContent+=' 입력·예산과 요청 모델 표기가 일치하는 시도 '+observations.matched+'건 (그 외 '+observations.unmatched+'건). 시도의 입력 방식·rubric은 기록되지 않아 비교 가능으로 세지 않습니다.';for(const g of observations.groups){const tr=document.createElement('tr');tr.append(text('td',(g.name||'이름 미상')+' v'+(g.version||'?')+' · '+g.harnessHash.slice(0,12)+' · effort '+(g.effort||'미상')),text('td','관찰: 완료 '+g.counts.completed+' · 실패 '+g.counts.failed+' · 취소 '+g.counts.cancelled+' · 미상 '+g.counts.unknown+' · 관찰 간격 합 '+g.observedMs+'ms'),text('td',(g.callsUnknown===Object.values(g.counts).reduce((a,b)=>a+b,0)?'호출 수 미보고 '+g.callsUnknown+'건':'호출 '+g.calls+'회'+(g.callsUnknown?' 이상 · 미보고 '+g.callsUnknown+'건':''))+' · 비용 미상'));body.append(tr);}}
+  }
   function renderHarnessComparison(){
     const board=$('#ledger-board');let section=$('#harness-comparison');
     if(!section){section=document.createElement('section');section.id='harness-comparison';section.className='ledger-section';section.innerHTML='<h3>Harness 비교</h3><p>기준 기록과 입력 파일·텍스트 해시, 입력 방식·시각 증거·역할·모델 표기·예산·선언된 사람 rubric·출처가 같은 관찰만 비교합니다. 수동 및 가져온 기록과 입력 방식이 없는 기존 기록은 제외합니다. 전략과 rubric은 요청에 담긴 선언이며 실제 소스·실행·검수 방식의 인증이 아닙니다. 기록되지 않은 시도 수와 비용은 미상입니다.</p><label for="harness-comparison-reference">기준 기록</label><select id="harness-comparison-reference"></select><p id="harness-comparison-summary" role="status"></p><div class="ledger-table-wrap"><table class="ledger-table"><caption>관찰 기록 및 비교 제외 이유</caption><thead><tr><th>Harness / 전략</th><th>조건</th><th>검수</th></tr></thead><tbody id="harness-comparison-body"></tbody></table></div>';board.insertBefore(section,$('#ledger-tools'));$('#harness-comparison-reference').addEventListener('change',renderHarnessComparison);}
@@ -176,12 +196,13 @@
     const epoch=++comparisonEpoch,sel=$('#harness-comparison-reference'),old=sel.value,runs=db.runs.filter(r=>!r.snapshotOf);sel.replaceChildren(text('option','기준 기록 선택'));sel.firstChild.value='';for(const r of runs){const o=text('option',runLabel(r));o.value=r.id;sel.append(o);}sel.value=runs.some(r=>r.id===old)?old:'';const body=$('#harness-comparison-body');body.replaceChildren();const reference=runs.find(r=>r.id===sel.value);if(!reference){$('#harness-comparison-summary').textContent='기록을 선택하세요.';return;}
     let observations=null;try{observations=comparisonApi.observedAttempts(globalThis.FalsifyAttemptLedger?.read()||[],reference);}catch{}
     const result=comparisonApi.compare(db.runs,db.reviews,reference);$('#harness-comparison-summary').textContent='비교 가능 관찰 '+result.observed+'건 · 제외 '+result.excluded+'건 · 미검수 '+result.unreviewed+'건 · 판단 불가 '+result.uncertain+'건 · 누락 시도 수 / 비용 미상. 정확도나 성공률을 계산하지 않습니다.';
-    if(observations){const summary=$('#harness-comparison-summary');summary.textContent+=' 입력·예산과 요청 모델 표기가 일치하는 시도 '+observations.matched+'건 (그 외 '+observations.unmatched+'건). 시도의 입력 방식·rubric은 기록되지 않아 비교 가능으로 세지 않습니다.';for(const g of observations.groups){const tr=document.createElement('tr');tr.append(text('td',(g.name||'이름 미상')+' v'+(g.version||'?')+' · '+g.harnessHash.slice(0,12)+' · effort '+(g.effort||'미상')),text('td','관찰: 완료 '+g.counts.completed+' · 실패 '+g.counts.failed+' · 취소 '+g.counts.cancelled+' · 미상 '+g.counts.unknown+' · 관찰 간격 합 '+g.observedMs+'ms'),text('td',(g.callsUnknown===Object.values(g.counts).reduce((a,b)=>a+b,0)?'호출 수 미보고 '+g.callsUnknown+'건':'호출 '+g.calls+'회'+(g.callsUnknown?' 이상 · 미보고 '+g.callsUnknown+'건':''))+' · 비용 미상'));body.append(tr);}}
+    renderAttemptObservations(observations,body);
     for(const group of result.groups){const r=group.runs[0],tr=document.createElement('tr'),first=text('td',r.harness.name+' v'+r.harness.version);const hashes=[...new Set(group.runs.map(x=>x.harnessHash))];first.append(text('small','전체 설정 '+hashes.map(x=>x.slice(0,12)).join(', ')+' · 전략 해시 계산 중'));tr.append(first,text('td','비교 가능 · 관찰 '+group.runs.length+'건'),text('td','미검수 '+group.unreviewed+' · 판단 불가 '+group.uncertain+' · 매개변수 차이: '+(result.rows.find(x=>x.run.id===r.id)?.parameterValues.map(d=>d.key+': '+JSON.stringify(d.reference)+' → '+JSON.stringify(d.observed)).join(', ')||'없음')+' · 사람 메모: '+(result.rows.filter(x=>group.runs.some(run=>run.id===x.run.id)&&x.reviewNote).map(x=>x.reviewNote).join(' / ')||'없음')));body.append(tr);comparisonApi.strategyHash(r.harness).then(hash=>{if(epoch===comparisonEpoch)first.lastChild.textContent='전체 설정 '+hashes.map(x=>x.slice(0,12)).join(', ')+' · 선언 전략 '+hash.slice(0,12);});}
     for(const row of result.rows.filter(x=>!x.comparable)){const r=row.run,tr=document.createElement('tr');tr.append(text('td',r.harness.name+' v'+r.harness.version+' · '+r.harnessHash.slice(0,12)),text('td','제외: '+row.reasons.join(', ')),text('td',(row.review==='unreviewed'?'미검수':row.review)+(row.reviewNote?' · '+row.reviewNote:'')));body.append(tr);}
   }
   let remoteAttempt=null,remoteAttemptTimer=0;
   function clearRemoteAttempt(){if(remoteAttemptTimer)clearTimeout(remoteAttemptTimer);remoteAttemptTimer=0;remoteAttempt=null;}
+  function renderAttemptRow(a,list){const names={completed:'완료',failed:'실패',cancelled:'취소',unknown:'상태 미확인'},li=text('li',`${a.role.toUpperCase()} · ${names[a.status]||a.status} · ${a.harnessName||'이름 미상'} v${a.harnessVersion||'?'}`),details=document.createElement('details');details.append(text('summary','실행 정보'),text('p',`${a.role.toUpperCase()} · ${a.status} · ${a.harnessName||'이름 미상'} v${a.harnessVersion||'?'} · ${a.harnessHash.slice(0,12)} · 요청 모델 ${a.model||'미상'} / effort ${a.effort||'미상'} / 예산 ${a.budget} · 파일 ${a.fileHash.slice(0,12)} / 텍스트 ${a.sourceHash.slice(0,12)} · 관찰 ${a.durationMs}ms · 호출 ${a.calls===null?'미상':a.calls} · 비용 미상`),text('p','관찰 시간은 요청 보관부터 상태를 확인할 때까지입니다.'));li.append(details);const publish=text('button','팀에 공개');publish.type='button';publish.addEventListener('click',async()=>{publish.disabled=true;try{const store=await globalThis.FalsifyConfluenceStore.ready;await store.publishAttempt(a,{teamShare:true});status('#ledger-status','시도 메타데이터를 팀에 공개했습니다.');}catch(e){status('#ledger-status',e.message||'공개하지 못했습니다.',true);}finally{publish.disabled=false;}});li.append(publish);list.append(li);}
   function renderAttempts(){
     const board=$('#ledger-board');let section=$('#attempt-history');
     if(!section){section=document.createElement('section');section.id='attempt-history';section.className='ledger-section';section.append(text('h3','실행 시도'),text('p','성공·실패·취소와 사용한 하네스를 기록합니다.'));board.insertBefore(section,$('#ledger-tools'));}
@@ -190,19 +211,25 @@
     if(remoteAttempt&&Date.now()>=remoteAttempt.expiresAt)clearRemoteAttempt();
     if(remoteAttempt)section.append(text('p','팀 임시 열람 · '+remoteAttempt.row.role.toUpperCase()+' · '+remoteAttempt.row.status+' · '+(remoteAttempt.row.harnessName||'이름 미상')+' · '+remoteAttempt.row.harnessHash.slice(0,12)+' · 입력 '+remoteAttempt.row.fileHash.slice(0,12)+' / '+remoteAttempt.row.sourceHash.slice(0,12)+' · 요청 모델 '+(remoteAttempt.row.model||'미상')+' · 예산 '+remoteAttempt.row.budget+' · 비용 미상'));
     if(!attempts.length){section.append(text('p','관찰한 시도가 없습니다. 기존 성공 기록은 위에 유지됩니다.'));return;}
-    const list=document.createElement('ul');for(const a of attempts.slice().reverse()){const names={completed:'완료',failed:'실패',cancelled:'취소',unknown:'상태 미확인'},li=text('li',`${a.role.toUpperCase()} · ${names[a.status]||a.status} · ${a.harnessName||'이름 미상'} v${a.harnessVersion||'?'}`),details=document.createElement('details');details.append(text('summary','실행 정보'),text('p',`${a.role.toUpperCase()} · ${a.status} · ${a.harnessName||'이름 미상'} v${a.harnessVersion||'?'} · ${a.harnessHash.slice(0,12)} · 요청 모델 ${a.model||'미상'} / effort ${a.effort||'미상'} / 예산 ${a.budget} · 파일 ${a.fileHash.slice(0,12)} / 텍스트 ${a.sourceHash.slice(0,12)} · 관찰 ${a.durationMs}ms · 호출 ${a.calls===null?'미상':a.calls} · 비용 미상`),text('p','관찰 시간은 요청 보관부터 상태를 확인할 때까지입니다.'));li.append(details);const publish=text('button','팀에 공개');publish.type='button';publish.addEventListener('click',async()=>{publish.disabled=true;try{const store=await globalThis.FalsifyConfluenceStore.ready;await store.publishAttempt(a,{teamShare:true});status('#ledger-status','시도 메타데이터를 팀에 공개했습니다.');}catch(e){status('#ledger-status',e.message||'공개하지 못했습니다.',true);}finally{publish.disabled=false;}});li.append(publish);list.append(li);}section.append(list);
+    const list=document.createElement('ul');for(const a of attempts.slice().reverse())renderAttemptRow(a,list);section.append(list);
   }
   let remoteExternal=null,remoteExternalTimer=null;
   function clearRemoteExternal(){if(remoteExternalTimer)clearTimeout(remoteExternalTimer);remoteExternalTimer=null;if(remoteExternal)externalReviewId=null;remoteExternal=null;}
   let externalReviewId=null;
+  function renderExternalRaw(r,reviews,review){
+    const raw=document.createElement('details');raw.append(text('summary','원응답과 출처 보기'));for(const b of r.snapshot.batches){if(b.report)review.append(text('p',b.report));raw.append(text('p',(b.model||'모델 미상')+' · '+(b.importedAt||'')),text('pre',b.raw));}review.append(raw);for(const v of reviews)review.append(text('p',v.reviewer+' · '+v.note));
+  }
+  function renderExternalEvidence(card,item){ for(const [label,values] of [['근거',item.evidence],['참고',item.references]])for(const v of values||[]){const row=document.createElement('p'),value=typeof v==='string'?v:[v?.title,v?.quote,v?.relation,v?.doi,v?.url].filter(Boolean).join(' · ')||JSON.stringify(v);row.append(text('span',label+': '+value));const url=typeof v==='string'?v:v?.url;if(typeof url==='string'&&/^https?:\/\//i.test(url)){const link=text('a',' 열기');link.href=url;link.target='_blank';link.rel='noopener noreferrer';row.append(link);}card.append(row);}}
+  function renderExternalRefs(card,item,r){for(const ref of item.sourceRefs||[]){const b=r.snapshot.batches.find(x=>x.id===ref.batchId);if(b)card.append(text('p','출처: '+(b.model||'외부 응답')+' · '+(b.importedAt||'')));}}
+  function renderExternalItem(item,r,review){const card=document.createElement('article');card.append(text('h3',(item.enabled?'선택됨':'선택하지 않음')+' · '+(item.segmentId||'위치 미지정')));if(item.before)card.append(text('p','원문: '+item.before));if(item.after!==undefined)card.append(text('p','변경: '+(item.after||'(삭제)')));if(item.quote)card.append(text('p','인용: '+item.quote));if(item.rationale)card.append(text('p','설명: '+item.rationale));for(const [key,label] of [['reportNumber','번호'],['locationLabel','위치'],['findingType','유형'],['severity','심각도'],['confidence','확신']])if(item[key])card.append(text('p',label+': '+item[key]));if(r.snapshot.sourceSession)card.append(text('p','원본 소스: '+(item.segmentId||'위치 미지정')));else if(Number.isInteger(item.pageIndex))card.append(text('p','쪽: '+(item.pageIndex+1))); renderExternalEvidence(card,item);renderExternalRefs(card,item,r);review.append(card);}
   function renderExternal(){
     const box=$('#ledger-external-responses');if(!box)return;box.replaceChildren(text('h3','외부 응답 기록'));const records=remoteExternal?[remoteExternal.record]:(db.externalResponses||[]);
     let review=document.querySelector('#external-case-review');if(!review){review=document.createElement('section');review.id='external-case-review';review.className='document-red';$('#view-review').prepend(review);}
     review.replaceChildren();const selected=records.find(r=>r.id===externalReviewId);
     for(const r of records){const row=document.createElement('article'),open=text('button','이 응답 검수');open.type='button';open.className='button secondary';open.addEventListener('click',()=>{externalReviewId=r.id;renderExternal();document.querySelector('[data-view="review"]')?.click();});row.append(text('p',(r.sourceName||'입력')+' · '+when(r.createdAt)+' · '+r.snapshot.role.toUpperCase()+' · 선택 '+r.snapshot.items.filter(i=>i.enabled).length+'건'),open);box.append(row);}
     if(!selected){review.hidden=true;return;}review.hidden=false;const r=selected,reviews=remoteExternal?remoteExternal.reviews:(r.reviews||[]);review.append(text('h2','외부 '+r.snapshot.role.toUpperCase()+' 응답 검수'),text('p',(r.sourceName||'입력')+' · 외부 응답 · 파일 '+r.fileHash));
-    for(const item of r.snapshot.items){const card=document.createElement('article');card.append(text('h3',(item.enabled?'선택됨':'선택하지 않음')+' · '+(item.segmentId||'위치 미지정')));if(item.before)card.append(text('p','원문: '+item.before));if(item.after!==undefined)card.append(text('p','변경: '+(item.after||'(삭제)')));if(item.quote)card.append(text('p','인용: '+item.quote));if(item.rationale)card.append(text('p','설명: '+item.rationale));for(const [key,label] of [['reportNumber','번호'],['locationLabel','위치'],['findingType','유형'],['severity','심각도'],['confidence','확신']])if(item[key])card.append(text('p',label+': '+item[key]));if(r.snapshot.sourceSession)card.append(text('p','원본 소스: '+(item.segmentId||'위치 미지정')));else if(Number.isInteger(item.pageIndex))card.append(text('p','쪽: '+(item.pageIndex+1))); for(const [label,values] of [['근거',item.evidence],['참고',item.references]])for(const v of values||[]){const row=document.createElement('p'),value=typeof v==='string'?v:[v?.title,v?.quote,v?.relation,v?.doi,v?.url].filter(Boolean).join(' · ')||JSON.stringify(v);row.append(text('span',label+': '+value));const url=typeof v==='string'?v:v?.url;if(typeof url==='string'&&/^https?:\/\//i.test(url)){const link=text('a',' 열기');link.href=url;link.target='_blank';link.rel='noopener noreferrer';row.append(link);}card.append(row);}for(const ref of item.sourceRefs||[]){const b=r.snapshot.batches.find(x=>x.id===ref.batchId);if(b)card.append(text('p','출처: '+(b.model||'외부 응답')+' · '+(b.importedAt||'')));}review.append(card);}
-    const raw=document.createElement('details');raw.append(text('summary','원응답과 출처 보기'));for(const b of r.snapshot.batches){if(b.report)review.append(text('p',b.report));raw.append(text('p',(b.model||'모델 미상')+' · '+(b.importedAt||'')),text('pre',b.raw));}review.append(raw);for(const v of reviews)review.append(text('p',v.reviewer+' · '+v.note));
+    for(const item of r.snapshot.items)renderExternalItem(item,r,review);
+    renderExternalRaw(r,reviews,review);
     const who=document.createElement('input');who.placeholder='검수자';const note=document.createElement('textarea');note.placeholder='검수 의견';const save=text('button','검수 추가');save.type='button';save.addEventListener('click',()=>{try{const reviewer=who.value.trim(),comment=note.value.trim();if(!reviewer||reviewer.length>120||!comment||comment.length>3000)throw Error('검수자와 의견을 입력하세요.');if(reviews.length>=100)throw Error('외부 검수는 최대 100건입니다.');const v={id:crypto.randomUUID(),createdAt:new Date().toISOString(),reviewer,note:comment};if(remoteExternal){if(remoteExternal.record.id!==r.id||Date.now()>=remoteExternal.expiresAt)throw Error('임시 열람이 만료됐습니다.');remoteExternal.reviews.push(v);}else{const records=clone(db.externalResponses),target=records.find(x=>x.id===r.id);target.reviews=[...(target.reviews||[]),v];persist({...db,externalResponses:records});}renderExternal();status('#ledger-status','검수 의견을 추가했습니다.');}catch(e){status('#ledger-status',e.message,true);}});const publish=text('button','팀에 공개');publish.type='button';publish.addEventListener('click',async()=>{publish.disabled=true;try{if(!confirm('추출 원문과 외부 응답 및 검수 의견을 팀에 공개할까요?'))return;const store=await globalThis.FalsifyConfluenceStore.ready;const {reviews:ignored,...record}=r;const result=await store.publishExternalResponse(record,reviews,{teamShare:true});if(!result?.stored)throw Error('팀 저장을 확인하지 못했습니다.');status('#ledger-status','외부 응답을 팀에 공개했습니다.');}catch(e){status('#ledger-status',e.message,true);}finally{publish.disabled=false;}});review.append(who,note,save,publish);
   }
   function renderBoard(){renderHarnessComparison();renderAttempts();renderExternal();const body=$('#ledger-table-body');body.replaceChildren();const f=family(db.runs,db.reviews),c=H.counts(db.runs);$('#ledger-summary').textContent=db.harnesses.length+'개 harness 버전 · 로컬 broker 실행 '+c.executed+'건 ('+H.callsText(c.calls,c.callsUnknown,c.executed)+') · 수동 응답 '+c.manual+'건 · 가져온 기록 '+c.imported+'건 · 최종 스냅샷 '+c.snapshots+'건 · 검수 이력 '+db.reviews.length+'건';
@@ -222,56 +249,104 @@
   // requestId is the per-execution identity: identical responses from separate executions stay separate runs.
   const validRequestId=v=>typeof v==='string'&&!!v.trim()&&v.length<=200;
   // Only client-declared metadata survives; image bytes are never archived here.
+  function checkVisualIdentity(v,r){if(!plain(v)||Object.keys(v).sort().join(',')!==['fileHash','sourceHash','page','bbox','rotation','width','height','mime','sha256','provenance','artifact'].sort().join(',')||v.fileHash!==r.fileHash||v.sourceHash!==r.sourceHash||!HEX.test(v.sha256)||v.mime!=='image/png'||v.provenance!=='client-declared-pdf-association'||v.artifact!=='unavailable'||!Number.isSafeInteger(v.page)||v.page<1||![0,90,180,270].includes(v.rotation))fail('시각 증거 참조 오류');}
+  function checkVisualGeometry(v){if(!Array.isArray(v.bbox)||v.bbox.length!==4||!v.bbox.every(Number.isFinite)||v.bbox[0]<0||v.bbox[1]<0||v.bbox[2]<=0||v.bbox[3]<=0||!Number.isInteger(v.width)||!Number.isInteger(v.height)||v.width!==Math.ceil(v.bbox[2]*2)||v.height!==Math.ceil(v.bbox[3]*2)||v.width>4096||v.height>4096||v.width*v.height>8000000)fail('시각 증거 참조 오류');}
   function visualRefs(items,r){
     if(r.role!=='blue'||!Array.isArray(items)||items.length<1||items.length>2)fail('시각 증거 형식 오류');
     const hasGold=x=>x&&typeof x==='object'&&(Object.hasOwn(x,'gold')||Object.values(x).some(hasGold));if(hasGold(r.response))fail('BLUE 응답에 RED gold를 넣을 수 없습니다.');
     for(const v of items){
-      if(!plain(v)||Object.keys(v).sort().join(',')!==['fileHash','sourceHash','page','bbox','rotation','width','height','mime','sha256','provenance','artifact'].sort().join(',')||v.fileHash!==r.fileHash||v.sourceHash!==r.sourceHash||!HEX.test(v.sha256)||v.mime!=='image/png'||v.provenance!=='client-declared-pdf-association'||v.artifact!=='unavailable'||!Number.isSafeInteger(v.page)||v.page<1||![0,90,180,270].includes(v.rotation)||!Array.isArray(v.bbox)||v.bbox.length!==4||!v.bbox.every(Number.isFinite)||v.bbox[0]<0||v.bbox[1]<0||v.bbox[2]<=0||v.bbox[3]<=0||!Number.isInteger(v.width)||!Number.isInteger(v.height)||v.width!==Math.ceil(v.bbox[2]*2)||v.height!==Math.ceil(v.bbox[3]*2)||v.width>4096||v.height>4096||v.width*v.height>8000000)fail('시각 증거 참조 오류');
+      checkVisualIdentity(v,r);
+      checkVisualGeometry(v);
     }
     return items;
   }
   // One run check shared by live recording and backup import, so storage never holds what a reload would reject.
-  async function checkRun(r,harnesses,prior,imported){
-    if(!plain(r)||Object.keys(r).some(k=>!RUN_KEYS.includes(k)))fail('실행 기록에 알 수 없는 항목이 있습니다.');
-    if(typeof r.id!=='string'||!r.id||r.id.length>160||prior.some(x=>x.id===r.id)||!['red','blue'].includes(r.role)||typeof r.revision!=='string'||!r.revision||r.revision.length>160||!['local-codex','manual-unverified','imported-unverified'].includes(r.provenance)||!Number.isInteger(r.maxCalls)||r.maxCalls<1||r.maxCalls>32||!HEX.test(r.fileHash)||typeof r.model!=='string'||!r.model||r.model.length>120||typeof r.createdAt!=='string'||!Number.isFinite(Date.parse(r.createdAt)))fail('실행 식별/조건 오류');
+  function checkRunConditions(r){
+    if(!['local-codex','manual-unverified','imported-unverified'].includes(r.provenance)||!Number.isInteger(r.maxCalls)||r.maxCalls<1||r.maxCalls>32)fail('실행 식별/조건 오류');
+    if(!HEX.test(r.fileHash)||typeof r.model!=='string'||!r.model||r.model.length>120||typeof r.createdAt!=='string'||!Number.isFinite(Date.parse(r.createdAt)))fail('실행 식별/조건 오류');
+  }
+  function checkRunOptional(r){
     if('sourceName' in r&&(typeof r.sourceName!=='string'||!r.sourceName.trim()||r.sourceName.length>200)||'format' in r&&(typeof r.format!=='string'||!r.format.trim()||r.format.length>40))fail('입력 이름/형식 오류');
     if('requestId' in r&&!validRequestId(r.requestId))fail('실행 요청 ID 형식 오류');
-    const harness=H.validate(r.harness,r.role);if(await H.hash(harness)!==r.harnessHash||!harnesses.some(h=>h.hash===r.harnessHash))fail('실행 harness 해시 불일치');
+  }
+  function checkRunIdentity(r,prior){
+    if(typeof r.id!=='string'||!r.id||r.id.length>160||prior.some(x=>x.id===r.id)||!['red','blue'].includes(r.role)||typeof r.revision!=='string'||!r.revision||r.revision.length>160)fail('실행 식별/조건 오류');
+    checkRunConditions(r);
+    checkRunOptional(r);
+  }
+  function checkRunSegments(r){
     if(!Array.isArray(r.segments)||!r.segments.length||r.segments.length>10000||r.segments.some(s=>!s||typeof s.id!=='string'||s.id.length>80||typeof s.label!=='string'||s.label.length>200||typeof s.text!=='string'||!s.text.trim())||new Set(r.segments.map(s=>s.id)).size!==r.segments.length)fail('실행 논문 입력 오류');
-    const source=r.segments.map(s=>s.text).join('\n\n');if(source.length>1000000||await sha(source)!==r.sourceHash)fail('실행 논문 해시 불일치');
+  }
+  function validateRedRun(r,doc){if(r.level!==undefined&&![1,2,3].includes(r.level))fail('RED 난이도 오류');if(r.attackTypes!==undefined){FalsifyDocumentRed.types(r.attackTypes);if(r.level!==undefined&&(r.attackTypes.length!==1||r.attackTypes[0]!==FalsifyDocumentRed.types(r.level)[0]))fail('RED 난이도와 공격 유형이 다릅니다.');}else if(r.level===undefined)fail('RED 공격 유형 오류');const candidates=FalsifyDocumentRed.validateResponse(doc,r.response);if(r.attackTypes&&candidates.some(c=>c.attackTypes.some(t=>!r.attackTypes.includes(t))))fail('선택하지 않은 RED 공격 유형입니다.');}
+  function checkRunInputMode(r){
     if('inputMode' in r&&(!['text','visual','structured','structured-visual'].includes(r.inputMode)||(['visual','structured-visual'].includes(r.inputMode))!==('visualEvidence' in r)))fail('입력 방식과 시각 증거가 일치하지 않습니다.');
-    const doc={revision:r.revision,sourceHash:r.sourceHash,segments:r.segments};if('visualEvidence' in r)visualRefs(r.visualEvidence,r);if(r.role==='blue')FalsifyDocumentBlue.validateResponse(doc,r.response,'visualEvidence' in r?{visualEvidence:r.visualEvidence}:undefined);else{if(r.level!==undefined&&![1,2,3].includes(r.level))fail('RED 난이도 오류');if(r.attackTypes!==undefined){FalsifyDocumentRed.types(r.attackTypes);if(r.level!==undefined&&(r.attackTypes.length!==1||r.attackTypes[0]!==FalsifyDocumentRed.types(r.level)[0]))fail('RED 난이도와 공격 유형이 다릅니다.');}else if(r.level===undefined)fail('RED 공격 유형 오류');const candidates=FalsifyDocumentRed.validateResponse(doc,r.response);if(r.attackTypes&&candidates.some(c=>c.attackTypes.some(t=>!r.attackTypes.includes(t))))fail('선택하지 않은 RED 공격 유형입니다.');}
+  }
+  async function checkRun(r,harnesses,prior,imported){
+    if(!plain(r)||Object.keys(r).some(k=>!RUN_KEYS.includes(k)))fail('실행 기록에 알 수 없는 항목이 있습니다.');
+    checkRunIdentity(r,prior);
+    const harness=H.validate(r.harness,r.role);if(await H.hash(harness)!==r.harnessHash||!harnesses.some(h=>h.hash===r.harnessHash))fail('실행 harness 해시 불일치');
+    checkRunSegments(r);
+    const source=r.segments.map(s=>s.text).join('\n\n');if(source.length>1000000||await sha(source)!==r.sourceHash)fail('실행 논문 해시 불일치');
+    checkRunInputMode(r);
+    const doc={revision:r.revision,sourceHash:r.sourceHash,segments:r.segments};if('visualEvidence' in r)visualRefs(r.visualEvidence,r);if(r.role==='blue')FalsifyDocumentBlue.validateResponse(doc,r.response,'visualEvidence' in r?{visualEvidence:r.visualEvidence}:undefined);else validateRedRun(r,doc);
     if('finalState' in r&&(r.role!=='red'||stable(finalState(r,r.finalState))!==stable(r.finalState)))fail('RED 최종 상태가 원래 후보 검증과 일치하지 않습니다.');
     return {...clone(r),harness,provenance:imported?'imported-unverified':r.provenance};
   }
   // Links are checked once every run is known, so backup order never matters. Snapshots point only at roots: no chains or cycles.
   // An imported-unverified snapshot may cite a validated root that keeps its own provenance when file, harness, model, revision, budget, request id and raw response match. Any other provenance mismatch still fails. The root record is not rewritten.
+  function checkSnapshotContents(root,r){if(root.sourceHash!==r.sourceHash||root.fileHash!==r.fileHash||root.model!==r.model||(root.provenance!==r.provenance&&r.provenance!=='imported-unverified')||root.revision!==r.revision||root.harnessHash!==r.harnessHash||'requestId' in root&&root.requestId!==r.requestId||root.level!==r.level||typeIdentity(root)!==typeIdentity(r)||root.maxCalls!==r.maxCalls||stable(root.response)!==stable(r.response))fail('최종 스냅샷의 원 모델 실행 기록이 없거나 입력 파일·Harness·모델·출처·응답이 다릅니다.');}
+  function checkSnapshotLink(r,all){
+    if('snapshotOf' in r){const root=typeof r.snapshotOf==='string'&&all.find(x=>x.id===r.snapshotOf);if(r.role!=='red'||!r.finalState||!root||root.id===r.id||'snapshotOf' in root||root.role!=='red')fail('최종 스냅샷의 원 모델 실행 기록이 없거나 입력 파일·Harness·모델·출처·응답이 다릅니다.');checkSnapshotContents(root,r);}
+  }
   function checkLinks(r,all){
-    if('snapshotOf' in r){const root=typeof r.snapshotOf==='string'&&all.find(x=>x.id===r.snapshotOf);if(r.role!=='red'||!r.finalState||!root||root.id===r.id||'snapshotOf' in root||root.role!=='red'||root.sourceHash!==r.sourceHash||root.fileHash!==r.fileHash||root.model!==r.model||(root.provenance!==r.provenance&&r.provenance!=='imported-unverified')||root.revision!==r.revision||root.harnessHash!==r.harnessHash||'requestId' in root&&root.requestId!==r.requestId||root.level!==r.level||typeIdentity(root)!==typeIdentity(r)||root.maxCalls!==r.maxCalls||stable(root.response)!==stable(r.response))fail('최종 스냅샷의 원 모델 실행 기록이 없거나 입력 파일·Harness·모델·출처·응답이 다릅니다.');}
+    checkSnapshotLink(r,all);
     if('sourceRunId' in r){const red=typeof r.sourceRunId==='string'&&all.find(x=>x.id===r.sourceRunId);if(r.role!=='blue'||red?.role!=='red'||red.finalState?.outputFileHash!==r.fileHash)fail('인계한 RED 기록이 없거나 출력 파일 해시가 다릅니다.');}
   }
-  async function validateDatabase(value,imported=false,known=[]){
+  function checkExternalIdentity(r,out){if(!plain(r)||typeof r.id!=='string'||!r.id||out.externalResponses.some(x=>x.id===r.id)||!HEX.test(r.fileHash)||!HEX.test(r.sourceHash)||typeof r.revision!=='string'||!Array.isArray(r.segments)||!r.segments.length||r.segments.some(s=>!s||typeof s.id!=='string'||typeof s.text!=='string'))throw Error('외부 응답 기록 오류');}
+  function checkExternalReviews(r){if(r.reviews!==undefined&&(!Array.isArray(r.reviews)||r.reviews.length>100||r.reviews.some(v=>!v||typeof v.id!=='string'||!v.id||typeof v.reviewer!=='string'||!v.reviewer.trim()||v.reviewer.length>120||typeof v.note!=='string'||!v.note.trim()||v.note.length>3000||!Number.isFinite(Date.parse(v.createdAt)))||new Set(r.reviews.map(v=>v.id)).size!==r.reviews.length))throw Error('외부 검수 오류');}
+  function checkExternalAnchors(r){for(const item of r.snapshot.items){if(item.anchor){const segment=r.segments.find(s=>s.id===item.segmentId),a=item.anchor;if(!segment||!Number.isInteger(a.start)||!Number.isInteger(a.end)||a.start<0||a.end<=a.start||a.end>segment.text.length||segment.text.slice(a.start,a.end)!==(item.before||item.sourceQuote||item.quote))throw Error('외부 응답 위치 오류');}}}
+  function checkExternalAfterHash(r){if(r.provenance!=='external-ai-import'||(r.outputFileHash!==undefined&&(!HEX.test(r.outputFileHash)||r.snapshot?.role!=='red'))||!Number.isFinite(Date.parse(r.createdAt))||!globalThis.FalsifyExternalProposals){throw Error('외부 응답 기록 오류');}checkExternalReviews(r);const store=FalsifyExternalProposals.create({fileHash:r.fileHash,role:r.snapshot?.role,segments:r.segments});store.restore(r.snapshot);for(const b of r.snapshot.batches)if(b.schema!=='falsify.external-batch.v1'||b.fileHash!==r.fileHash||b.role!==r.snapshot.role||typeof b.raw!=='string')throw Error('외부 응답 출처 오류');checkExternalAnchors(r);}
+
+  function validateStoredComparisonSource(c,out,known){if('sourceRunId' in c){const red=[...out.runs,...known].find(x=>x.id===c.sourceRunId);if(red?.role!=='red'||red.finalState?.outputFileHash!==c.outputFileHash||stable(red.finalState.selected.map(p=>({id:p.id,before:p.before,after:p.after,label:p.label})))!==stable(c.selected.map(p=>({id:p.id,before:p.before,after:p.after,label:p.label}))))throw Error('대조한 RED 기록이 없거나 최종 변경과 다릅니다.');}}
+  function validateStoredComparison(v,out,known){
+      if(v.comparison!==null){const r=out.runs.find(r=>r.id===v.runId),c=v.comparison;if(r.role!=='blue'||!plain(c)||Object.keys(c).some(k=>!['outputFileHash','selected','assessments','sourceRunId'].includes(k)))throw Error('BLUE 대조 기록 형식 오류');validateStoredComparisonSource(c,out,known);const patches=FalsifyDocumentBlue.validatePlan(r,{schema:'falsify.document-edit-plan.v1',outputFileHash:c.outputFileHash,selected:c.selected});if(!Array.isArray(c.assessments)||c.assessments.length!==patches.length)throw Error('변경별 검수 기록 형식 오류');for(let i=0;i<patches.length;i++){const a=c.assessments[i],p=patches[i];if(!a||a.id!==p.id||!['pending','detected','missed','uncertain'].includes(a.verdict)||typeof a.note!=='string'||a.note.length>3000||JSON.stringify(a.quoteOverlapFindingIds)!==JSON.stringify(FalsifyDocumentBlue.overlaps(p,r.response.findings)))throw Error('변경별 검수 연결 오류');}}
+  }
+  function checkStoredReviewIdentity(v,out,ids){if(!v||typeof v.id!=='string'||!v.id||v.id.length>160||out.reviews.some(x=>x.id===v.id)||!ids.has(v.runId))throw Error('검수 기록 형식 오류');}
+  function checkStoredReviewer(v){if(typeof v.reviewer!=='string'||!v.reviewer.trim()||v.reviewer.length>120||typeof v.caseLabel!=='string'||!v.caseLabel.trim()||v.caseLabel.length>160||typeof v.note!=='string'||!v.note.trim()||v.note.length>3000||typeof v.createdAt!=='string'||!Number.isFinite(Date.parse(v.createdAt)))throw Error('검수 기록 형식 오류');}
+  function checkStoredReviewJudgment(v){if(!['uncertain','supported','unsupported','mixed'].includes(v.verdict)||v.verdict==='uncertain'&&v.score!==null||v.score!==null&&(!Number.isInteger(v.score)||v.score<1||v.score>5))throw Error('검수 기록 형식 오류');checkStoredReviewer(v);}
+
+  function validateStoredReview(v,out,known,ids){checkStoredReviewIdentity(v,out,ids);checkStoredReviewJudgment(v);
+      validateStoredComparison(v,out,known);
+      FalsifyReview.validateExtras(v,out.runs.find(r=>r.id===v.runId));
+  }
+  function checkDatabaseEnvelope(value){
     if(!value||value.schema!==KEY||!Array.isArray(value.harnesses)||!Array.isArray(value.runs)||!Array.isArray(value.reviews)||value.harnesses.length>100||value.runs.length>100||value.reviews.length>1000)throw Error('기록 형식/수량 제한 초과');
+  }
+  async function validateDatabase(value,imported=false,known=[]){
+    checkDatabaseEnvelope(value);
     const out={schema:KEY,harnesses:[],runs:[],reviews:[],externalResponses:[]},ids=new Set();
     if(value.externalResponses!==undefined&&(!Array.isArray(value.externalResponses)||value.externalResponses.length>100))throw Error('외부 응답 기록 형식 오류');
-    for(const r of value.externalResponses||[]){if(!plain(r)||typeof r.id!=='string'||!r.id||out.externalResponses.some(x=>x.id===r.id)||!HEX.test(r.fileHash)||!HEX.test(r.sourceHash)||typeof r.revision!=='string'||!Array.isArray(r.segments)||!r.segments.length||r.segments.some(s=>!s||typeof s.id!=='string'||typeof s.text!=='string')||await sha(r.segments.map(s=>s.text).join('\n\n'))!==r.sourceHash||r.provenance!=='external-ai-import'||(r.outputFileHash!==undefined&&(!HEX.test(r.outputFileHash)||r.snapshot?.role!=='red'))||!Number.isFinite(Date.parse(r.createdAt))||!globalThis.FalsifyExternalProposals)throw Error('외부 응답 기록 오류');if(r.reviews!==undefined&&(!Array.isArray(r.reviews)||r.reviews.length>100||r.reviews.some(v=>!v||typeof v.id!=='string'||!v.id||typeof v.reviewer!=='string'||!v.reviewer.trim()||v.reviewer.length>120||typeof v.note!=='string'||!v.note.trim()||v.note.length>3000||!Number.isFinite(Date.parse(v.createdAt)))||new Set(r.reviews.map(v=>v.id)).size!==r.reviews.length))throw Error('외부 검수 오류');const store=FalsifyExternalProposals.create({fileHash:r.fileHash,role:r.snapshot?.role,segments:r.segments});store.restore(r.snapshot);for(const b of r.snapshot.batches)if(b.schema!=='falsify.external-batch.v1'||b.fileHash!==r.fileHash||b.role!==r.snapshot.role||typeof b.raw!=='string')throw Error('외부 응답 출처 오류');for(const item of r.snapshot.items){if(item.anchor){const segment=r.segments.find(s=>s.id===item.segmentId),a=item.anchor;if(!segment||!Number.isInteger(a.start)||!Number.isInteger(a.end)||a.start<0||a.end<=a.start||a.end>segment.text.length||segment.text.slice(a.start,a.end)!==(item.before||item.sourceQuote||item.quote))throw Error('외부 응답 위치 오류');}}out.externalResponses.push(clone(r));}
+    for(const r of value.externalResponses||[]){checkExternalIdentity(r,out);if(await sha(r.segments.map(s=>s.text).join('\n\n'))!==r.sourceHash)throw Error('외부 응답 기록 오류');checkExternalAfterHash(r);out.externalResponses.push(clone(r));}
     for(const h of value.harnesses){const config=H.validate(h.config);const hash=await H.hash(config);if(hash!==h.hash||out.harnesses.some(x=>x.hash===hash))throw Error('harness 해시/중복 오류');out.harnesses.push({config,hash});}
     for(const r of value.runs){const run=await checkRun(r,out.harnesses,out.runs,imported);ids.add(run.id);out.runs.push(run);}
     for(const r of out.runs)checkLinks(r,[...out.runs,...known.filter(k=>!ids.has(k.id))]);
-    for(const v of value.reviews){if(!v||typeof v.id!=='string'||!v.id||v.id.length>160||out.reviews.some(x=>x.id===v.id)||!ids.has(v.runId)||!['uncertain','supported','unsupported','mixed'].includes(v.verdict)||v.verdict==='uncertain'&&v.score!==null||v.score!==null&&(!Number.isInteger(v.score)||v.score<1||v.score>5)||typeof v.reviewer!=='string'||!v.reviewer.trim()||v.reviewer.length>120||typeof v.caseLabel!=='string'||!v.caseLabel.trim()||v.caseLabel.length>160||typeof v.note!=='string'||!v.note.trim()||v.note.length>3000||typeof v.createdAt!=='string'||!Number.isFinite(Date.parse(v.createdAt)))throw Error('검수 기록 형식 오류');
-      if(v.comparison!==null){const r=out.runs.find(r=>r.id===v.runId),c=v.comparison;if(r.role!=='blue'||!plain(c)||Object.keys(c).some(k=>!['outputFileHash','selected','assessments','sourceRunId'].includes(k)))throw Error('BLUE 대조 기록 형식 오류');if('sourceRunId' in c){const red=[...out.runs,...known].find(x=>x.id===c.sourceRunId);if(red?.role!=='red'||red.finalState?.outputFileHash!==c.outputFileHash||stable(red.finalState.selected.map(p=>({id:p.id,before:p.before,after:p.after,label:p.label})))!==stable(c.selected.map(p=>({id:p.id,before:p.before,after:p.after,label:p.label}))))throw Error('대조한 RED 기록이 없거나 최종 변경과 다릅니다.');}const patches=FalsifyDocumentBlue.validatePlan(r,{schema:'falsify.document-edit-plan.v1',outputFileHash:c.outputFileHash,selected:c.selected});if(!Array.isArray(c.assessments)||c.assessments.length!==patches.length)throw Error('변경별 검수 기록 형식 오류');for(let i=0;i<patches.length;i++){const a=c.assessments[i],p=patches[i];if(!a||a.id!==p.id||!['pending','detected','missed','uncertain'].includes(a.verdict)||typeof a.note!=='string'||a.note.length>3000||JSON.stringify(a.quoteOverlapFindingIds)!==JSON.stringify(FalsifyDocumentBlue.overlaps(p,r.response.findings)))throw Error('변경별 검수 연결 오류');}}
-      FalsifyReview.validateExtras(v,out.runs.find(r=>r.id===v.runId));
-      out.reviews.push(clone(v));}
+    for(const v of value.reviews){validateStoredReview(v,out,known,ids);out.reviews.push(clone(v));}
     return out;
   }
   // Same collision rule as backup import. Existing records keep their provenance; only content is compared.
-  function mergedCopy(imported){
-    const next=clone(db);
+  function mergeExternalRecords(next,imported){
     for(const r of imported.externalResponses||[]){const old=(next.externalResponses||[]).find(x=>x.id===r.id);if(old&&stable(old)!==stable(r))fail('같은 외부 응답 ID의 내용이 다릅니다.');if(!old)(next.externalResponses||(next.externalResponses=[])).push(r);}
     if((next.externalResponses||[]).length>100)fail('외부 응답 기록은 최대 100건입니다.');
-    for(const h of imported.harnesses)if(!next.harnesses.some(x=>x.hash===h.hash))next.harnesses.push(h);
+  }
+  function mergeRunAndReviews(next,imported){
     for(const r of imported.runs){const old=next.runs.find(x=>x.id===r.id);if(old&&stable({...old,provenance:r.provenance})!==stable(r))fail('같은 실행 ID의 내용이 달라 병합을 차단했습니다.');if(!old)next.runs.push(r);}
     for(const v of imported.reviews){const old=next.reviews.find(x=>x.id===v.id);if(old&&stable(old)!==stable(v))fail('같은 검수 ID의 내용이 달라 병합을 차단했습니다.');if(!old)next.reviews.push(v);}
+  }
+  function mergedCopy(imported){
+    const next=clone(db);
+    mergeExternalRecords(next,imported);
+    for(const h of imported.harnesses)if(!next.harnesses.some(x=>x.hash===h.hash))next.harnesses.push(h);
+    mergeRunAndReviews(next,imported);
     if(next.runs.length>100||next.harnesses.length>100||next.reviews.length>1000)fail('병합 후 수량 한도 초과');
     return next;
   }
@@ -283,6 +358,47 @@
   })();ready.catch(()=>{});
   async function openReview(id){await ready;if(sweep())return false;if(!reviewSource().runs.some(r=>r.id===id))return false;$('#evaluation-run').value=id;renderEvaluation();return true;}
   function armRemoteTimer(){if(remoteTimer)clearTimeout(remoteTimer);if(!remote)return;remoteTimer=setTimeout(()=>{remoteTimer=0;expireRemote(true);},Math.max(0,remote.expiresAt-Date.now()));if(remoteTimer&&typeof remoteTimer.unref==='function')remoteTimer.unref();}
+  function openExternalArchive(normalized){clearRemoteExternal();remoteExternal={...clone(normalized.data),expiresAt:Date.now()+ARCHIVE_TTL};externalReviewId=normalized.id;remoteExternalTimer=setTimeout(()=>{clearRemoteExternal();renderExternal();},ARCHIVE_TTL);if(remoteExternalTimer&&typeof remoteExternalTimer.unref==='function')remoteExternalTimer.unref();renderExternal();return {kind:'external-response',id:normalized.id};}
+  function openAttemptArchive(normalized){clearRemoteAttempt();remoteAttempt={row:normalized.data,expiresAt:Date.now()+ARCHIVE_TTL};remoteAttemptTimer=setTimeout(()=>{clearRemoteAttempt();renderAttempts();},ARCHIVE_TTL);if(remoteAttemptTimer&&typeof remoteAttemptTimer.unref==='function')remoteAttemptTimer.unref();renderAttempts();return {kind:'attempt',id:normalized.id};}
+  function installHarnessLease(prior,hash){if(harnessTimer)clearTimeout(harnessTimer);harnessLease={priorEditor:prior.editor,priorHidden:prior.hidden,priorNodes:prior.nodes,hash,shownEditor:$('#harness-editor').value,pinned:false,expiresAt:Date.now()+ARCHIVE_TTL};harnessTimer=setTimeout(()=>{harnessTimer=0;if(harnessLease&&Date.now()>=harnessLease.expiresAt)releaseHarnessLease('expire');},Math.max(0,harnessLease.expiresAt-Date.now()));if(harnessTimer&&typeof harnessTimer.unref==='function')harnessTimer.unref();}
+  function attachRunMetadata(r,doc,role,request,final,sourceRunId,snapshotOf){
+      if(typeof doc.name==='string'&&doc.name.trim())r.sourceName=doc.name.trim().slice(0,200);if(typeof doc.format==='string'&&doc.format.trim())r.format=doc.format.trim().slice(0,40);
+      if(final!==null){if(role!=='red')throw Error('최종 상태는 RED 기록에만 둘 수 있습니다.');r.finalState=finalState(r,final);}
+      if(sourceRunId!==null){if(role!=='blue')throw Error('인계 관계는 BLUE 기록에만 둘 수 있습니다.');r.sourceRunId=sourceRunId;}
+      if(snapshotOf!==null)r.snapshotOf=snapshotOf;
+      if(request.requestId!==undefined&&request.requestId!==null){if(!validRequestId(request.requestId))throw Error('실행 요청 ID 형식 오류');r.requestId=request.requestId;}
+  }
+  function decodeVisualRequest(v){if(!plain(v)||Object.keys(v).sort().join(',')!==['base64','bbox','fileHash','height','mime','page','rotation','sha256','sourceHash','width'].sort().join(',')||typeof v.base64!=='string'||v.base64.length>699052)throw Error('시각 요청 형식 오류');let bytes;try{bytes=Uint8Array.from(atob(v.base64),c=>c.charCodeAt(0));}catch{throw Error('시각 이미지 인코딩 오류');}return bytes;}
+  function ensureOpenLive(live){if(!live())throw staleOpen();}
+  function requireManualArchive(){const manual=globalThis.FalsifyPaperManualRecords;if(!manual||typeof manual.openImported!=='function'){const e=Error('수동 편집 아카이브 열람을 열지 못했습니다. 로컬 기록은 그대로입니다.');status('#ledger-status',e.message,true);throw e;}return manual;}
+  function checkManualArchive(opened,normalized){if(!opened||opened.kind!=='paper-edit'||opened.id!==normalized.id){const e=Error('수동 편집 임시 열람 결과가 아닙니다. 로컬 기록은 그대로입니다.');status('#ledger-status',e.message,true);throw e;}}
+  function priorHarnessView(){const box=$('#harness-preview'),prior=harnessLease&&$('#harness-editor').value===harnessLease.shownEditor&&!harnessLease.pinned?{editor:harnessLease.priorEditor,hidden:harnessLease.priorHidden,nodes:harnessLease.priorNodes}:{editor:$('#harness-editor').value,hidden:box.hidden,nodes:[...box.children]};return prior;}
+  function validateRecordExtras(extras){const isCurrent=extras?.isCurrent;if(!plain(extras??{})||Object.keys(extras??{}).some(k=>!['finalState','sourceRunId','snapshotOf','isCurrent'].includes(k))||isCurrent!==undefined&&typeof isCurrent!=='function')throw Error('기록 추가 정보 형식 오류');return isCurrent;}
+  function makeRunRecord(role,doc,request,response,provenance,harness,harnessHash){
+      return {id:crypto.randomUUID(),createdAt:new Date().toISOString(),role,revision:doc.revision,fileHash:doc.fileHash,sourceHash:doc.sourceHash,segments:clone(doc.segments),harness,harnessHash,maxCalls:request.maxCalls,...(role==='red'?{...(request.level===undefined?{}:{level:request.level}),...(request.attackTypes===undefined?{}:{attackTypes:clone(request.attackTypes)})}:{level:null}),model:provenance==='local-codex'?response.model:'manual-model-unverified',provenance,response:clone(response),inputMode:request.paperEvidence?(request.visualEvidence===undefined?'structured':'structured-visual'):(request.visualEvidence===undefined?'text':'visual')};
+  }
+  function persistRun(run,harness,harnessHash){
+      const add=!db.harnesses.some(h=>h.hash===harnessHash),next={...db,harnesses:add?[...db.harnesses,{config:harness,hash:harnessHash}]:db.harnesses,runs:[...db.runs,run]};if(next.runs.length>100)throw Error('실행 기록은 최대 100건입니다. 먼저 백업하세요.');if(next.harnesses.length>100)throw Error('harness는 최대 100개입니다. 먼저 백업하세요.');persist(next);if(add)refreshHarness();refreshRuns(remote?undefined:(shown?undefined:run.id));return run.id;
+  }
+  function requireArchiveRun(imported,id){if(!imported.runs.some(r=>r.id===id))throw Error('아카이브에 선택한 실행 기록이 없습니다.');}
+  function validateRecordHarness(role,harness,harnessHash,provenance,response){
+      let derived=false;if(!db.harnesses.some(h=>h.hash===harnessHash)){if(!db.harnesses.some(h=>h.config.role===role&&H.derivedFrom(harness,h.config)))throw Error('등록되지 않은 harness로 만든 요청입니다. 기록 차단');derived=true;}
+      if(provenance==='local-codex'&&(response.harnessHash!==harnessHash||H.canonical(response.harness)!==H.canonical(harness)))throw Error('실행 harness가 요청과 일치하지 않습니다. 기록 차단');
+      return derived;
+  }
+  function checkVisualConsent(role,request,doc){if(role!=='blue'||request.visualConsent!==true||request.fileHash!==doc.fileHash||!Array.isArray(request.visualEvidence))throw Error('시각 증거 동의 또는 문서 식별 오류');}
+  function ensureHarnessLease(lease){if(harnessLease!==lease||Date.now()>=lease.expiresAt||$('#harness-editor').value!==lease.shownEditor)throw staleOpen();}
+  function selectSharedHarness(current,chosenHash){
+        const role=current.role;
+        if(locked[role])throw Error('해당 역할의 실행이 끝난 뒤 선택하세요.');
+        if(!db.harnesses.some(h=>h.hash===chosenHash)){if(db.harnesses.length>=100)throw Error('harness는 최대 100개');persist({...db,harnesses:[...db.harnesses,{config:current,hash:chosenHash}]});}
+        saveLibrary({...library,hidden:library.hidden.filter(h=>h!==chosenHash),preferred:{...library.preferred,[role]:chosenHash}});
+        selected[role]=db.harnesses.find(h=>h.hash===chosenHash);cli[role]=null;clearConsent(role);rebind(role);refreshHarness();harnessLease.pinned=true;
+        document.dispatchEvent(new CustomEvent('falsify:harness-change',{detail:{role}}));
+        document.querySelector('[data-view="'+(role==='red'?'workbench':role)+'"]')?.click();
+        status('#harness-status',role.toUpperCase()+' Harness를 선택했습니다. 실행 동의는 해당 화면에서 따로 선택하세요.');
+  }
+  function requirePreviewLease(hash){if(!harnessLease||harnessLease.hash!==hash||Date.now()>=harnessLease.expiresAt||$('#harness-editor').value!==harnessLease.shownEditor)throw Error('미리보기가 변경되거나 만료되었습니다. 다시 열어주세요.');return harnessLease;}
   globalThis.FalsifyLab={ready,external,async promptInstructions(role){await ready;const rows=visibleHarnesses().filter(h=>h.config.role===role).map(h=>({id:h.config.id,name:h.config.name,version:h.config.version,instructions:h.config.instructions,role:h.config.role,hash:h.hash}));const lease=harnessLease;if(lease&&Date.now()<lease.expiresAt&&$('#harness-editor').value===lease.shownEditor){try{const config=H.validate(JSON.parse(lease.shownEditor));if(config.role===role&&await H.hash(config)===lease.hash&&harnessLease===lease&&Date.now()<lease.expiresAt&&$('#harness-editor').value===lease.shownEditor&&!rows.some(h=>h.hash===lease.hash))rows.push({id:config.id,name:config.name,version:config.version,instructions:config.instructions,role:config.role,hash:lease.hash});}catch{}}return clone(rows);},async listHarnessInstructions(role){return this.promptInstructions(role);},selectedHarness(role){return bound(role)?.config?clone(bound(role).config):null;},allowed:role=>!deriving[role]&&runnable(role)&&(!external(role)||$('#'+role+'-harness-consent').checked),
     // value covers execution, source binding and record transitions; CLI controls follow the same lock.
     busy(role,value){value=!!value;$('#'+role+'-harness').disabled=value;$('#'+role+'-harness-consent').disabled=value;if(locked[role]!==value){locked[role]=value;renderCli(role);}},
@@ -298,23 +414,23 @@
     async openArchive(archive){
       const epoch=++openEpoch,live=()=>epoch===openEpoch;
       await ready;
-      if(!live())throw staleOpen();
+      ensureOpenLive(live);
       const codec=await reviewBundle();
-      if(!live())throw staleOpen();
-      let normalized;try{normalized=await codec.validateArchive(archive,{harness:H,red:FalsifyDocumentRed,blue:FalsifyDocumentBlue,review:FalsifyReview});}catch(e){if(!live())throw staleOpen();status('#ledger-status','아카이브 열기 차단: '+(e.message||'형식 오류'),true);throw e;}
-      if(!live())throw staleOpen();
+      ensureOpenLive(live);
+      let normalized;try{normalized=await codec.validateArchive(archive,{harness:H,red:FalsifyDocumentRed,blue:FalsifyDocumentBlue,review:FalsifyReview});}catch(e){ensureOpenLive(live);status('#ledger-status','아카이브 열기 차단: '+(e.message||'형식 오류'),true);throw e;}
+      ensureOpenLive(live);
       clearRemoteExternal();renderExternal();
-      if(normalized.kind==='external-response'){clearRemoteExternal();remoteExternal={...clone(normalized.data),expiresAt:Date.now()+ARCHIVE_TTL};externalReviewId=normalized.id;remoteExternalTimer=setTimeout(()=>{clearRemoteExternal();renderExternal();},ARCHIVE_TTL);if(remoteExternalTimer&&typeof remoteExternalTimer.unref==='function')remoteExternalTimer.unref();renderExternal();return {kind:'external-response',id:normalized.id};}
-      if(normalized.kind==='attempt'){clearRemoteAttempt();remoteAttempt={row:normalized.data,expiresAt:Date.now()+ARCHIVE_TTL};remoteAttemptTimer=setTimeout(()=>{clearRemoteAttempt();renderAttempts();},ARCHIVE_TTL);if(remoteAttemptTimer&&typeof remoteAttemptTimer.unref==='function')remoteAttemptTimer.unref();renderAttempts();return {kind:'attempt',id:normalized.id};}
-      if(normalized.kind==='paper-edit'){const manual=globalThis.FalsifyPaperManualRecords;if(!manual||typeof manual.openImported!=='function'){const e=Error('수동 편집 아카이브 열람을 열지 못했습니다. 로컬 기록은 그대로입니다.');status('#ledger-status',e.message,true);throw e;}const opened=await manual.openImported(normalized,{live});if(!live())throw staleOpen();if(!opened||opened.kind!=='paper-edit'||opened.id!==normalized.id){const e=Error('수동 편집 임시 열람 결과가 아닙니다. 로컬 기록은 그대로입니다.');status('#ledger-status',e.message,true);throw e;}status('#ledger-status','수동 편집 팀 보관을 이 브라우저 메모리에서만 열었습니다. 로컬 AI 기록은 그대로입니다. 12시간이 지나거나 닫으면 사라집니다.');return {kind:'paper-edit',id:opened.id};}
-      if(normalized.kind==='harness'){const box=$('#harness-preview'),prior=harnessLease&&$('#harness-editor').value===harnessLease.shownEditor&&!harnessLease.pinned?{editor:harnessLease.priorEditor,hidden:harnessLease.priorHidden,nodes:harnessLease.priorNodes}:{editor:$('#harness-editor').value,hidden:box.hidden,nodes:[...box.children]};const hash=await this.previewSharedHarness(normalized.data.config,normalized.data.hash,live);if(!live())throw staleOpen();if(harnessTimer)clearTimeout(harnessTimer);harnessLease={priorEditor:prior.editor,priorHidden:prior.hidden,priorNodes:prior.nodes,hash,shownEditor:$('#harness-editor').value,pinned:false,expiresAt:Date.now()+ARCHIVE_TTL};harnessTimer=setTimeout(()=>{harnessTimer=0;if(harnessLease&&Date.now()>=harnessLease.expiresAt)releaseHarnessLease('expire');},Math.max(0,harnessLease.expiresAt-Date.now()));if(harnessTimer&&typeof harnessTimer.unref==='function')harnessTimer.unref();return {kind:'harness',hash};}
+      if(normalized.kind==='external-response')return openExternalArchive(normalized);
+      if(normalized.kind==='attempt')return openAttemptArchive(normalized);
+      if(normalized.kind==='paper-edit'){const manual=requireManualArchive();const opened=await manual.openImported(normalized,{live});ensureOpenLive(live);checkManualArchive(opened,normalized);status('#ledger-status','수동 편집 팀 보관을 이 브라우저 메모리에서만 열었습니다. 로컬 AI 기록은 그대로입니다. 12시간이 지나거나 닫으면 사라집니다.');return {kind:'paper-edit',id:opened.id};}
+      if(normalized.kind==='harness'){const prior=priorHarnessView();const hash=await this.previewSharedHarness(normalized.data.config,normalized.data.hash,live);ensureOpenLive(live);installHarnessLease(prior,hash);return {kind:'harness',hash};}
       let installed=false;
       try{
         const imported=await validateDatabase(normalized.data.ledger,true,[]);
-        if(!live())throw staleOpen();
-        if(!imported.runs.some(r=>r.id===normalized.id))throw Error('아카이브에 선택한 실행 기록이 없습니다.');
+        ensureOpenLive(live);
+        requireArchiveRun(imported,normalized.id);
         await validateDatabase(imported);
-        if(!live())throw staleOpen();
+        ensureOpenLive(live);
         if(heldSelection===null)heldSelection=$('#evaluation-run').value||'';
         const openedAt=Date.now();
         remote={ledger:imported,openedAt,expiresAt:openedAt+ARCHIVE_TTL};
@@ -335,54 +451,42 @@
     async previewSharedHarness(config,expectedHash,alive){await ready;if(typeof alive==='function'&&!alive())throw staleOpen();let valid,hash;try{valid=H.validate(config);hash=await H.hash(valid);if(expectedHash!==undefined&&expectedHash!==hash)throw Error('공유 harness의 내용 해시가 기록과 다릅니다.');}catch(e){if(typeof alive==='function'&&!alive())throw staleOpen();$('#harness-preview').hidden=true;status('#harness-status','공유 harness를 불러오지 못했습니다: '+e.message,true);throw e;}
       if(typeof alive==='function'&&!alive())throw staleOpen();$('#harness-editor').value=JSON.stringify(valid,null,2);showHarnessPreview(valid,hash,'공유 Harness 검토');
       const use=text('button',valid.id==='shinick-blue-evidence-external-v035'&&valid.role==='blue'&&valid.version==='0.3.5'?'이 PC에 BLUE 준비 후 사용':'이 Harness 사용');use.type='button';use.className='button primary';use.addEventListener('click',async()=>{use.disabled=true;try{
-        if(!harnessLease||harnessLease.hash!==hash||Date.now()>=harnessLease.expiresAt||$('#harness-editor').value!==harnessLease.shownEditor)throw Error('미리보기가 변경되거나 만료되었습니다. 다시 열어주세요.');
-        const lease=harnessLease, original=H.validate(JSON.parse($('#harness-editor').value)),actual=await H.hash(original);
+        const lease=requirePreviewLease(hash), original=H.validate(JSON.parse($('#harness-editor').value)),actual=await H.hash(original);
         if(actual!==hash||harnessLease!==lease||Date.now()>=lease.expiresAt||$('#harness-editor').value!==lease.shownEditor)throw staleOpen();
         let current=original, chosenHash=hash;
         if(original.id==='shinick-blue-evidence-external-v035'&&original.role==='blue'&&original.version==='0.3.5'){
           const bridge=globalThis.FalsifyLocalBridge, link=bridge?.session?.();
           if(!link||bridge?.capabilities?.()?.harnessDeployment!==true)throw Error('이 PC에 맞는 BLUE를 준비하려면 최신 companion을 연결하세요.');
           const result=await link.request('/api/harness/deploy',{schema:'falsify.harness-deployment-request.v1',family:'evidence-blue-v035'});
-          if(harnessLease!==lease||Date.now()>=lease.expiresAt||$('#harness-editor').value!==lease.shownEditor)throw staleOpen();
+          ensureHarnessLease(lease);
           if(result?.schema!=='falsify.harness-deployment.v1')throw Error('로컬 Harness 준비 결과를 확인할 수 없습니다.');
           current=H.validate(result.profile,'blue');chosenHash=await H.hash(current);
-          if(harnessLease!==lease||Date.now()>=lease.expiresAt||$('#harness-editor').value!==lease.shownEditor)throw staleOpen();
+          ensureHarnessLease(lease);
         }
-        const role=current.role;
-        if(locked[role])throw Error('해당 역할의 실행이 끝난 뒤 선택하세요.');
-        if(!db.harnesses.some(h=>h.hash===chosenHash)){if(db.harnesses.length>=100)throw Error('harness는 최대 100개');persist({...db,harnesses:[...db.harnesses,{config:current,hash:chosenHash}]});}
-        saveLibrary({...library,hidden:library.hidden.filter(h=>h!==chosenHash),preferred:{...library.preferred,[role]:chosenHash}});
-        selected[role]=db.harnesses.find(h=>h.hash===chosenHash);cli[role]=null;clearConsent(role);rebind(role);refreshHarness();harnessLease.pinned=true;
-        document.dispatchEvent(new CustomEvent('falsify:harness-change',{detail:{role}}));
-        document.querySelector('[data-view="'+(role==='red'?'workbench':role)+'"]')?.click();
-        status('#harness-status',role.toUpperCase()+' Harness를 선택했습니다. 실행 동의는 해당 화면에서 따로 선택하세요.');
+        selectSharedHarness(current,chosenHash);
       }catch(e){status('#harness-status',e.message,true);}finally{use.disabled=false;}});$('#harness-preview').append(use);
       status('#harness-status','공유 Harness를 검토하세요. 사용을 누르기 전에는 등록하거나 선택하지 않습니다.');return hash;},
     // extras: finalState (RED), sourceRunId (BLUE) are stored; isCurrent is a live-only guard checked right before the synchronous persist.
     externalRecords(fileHash){return clone((db.externalResponses||[]).filter(r=>r.fileHash===fileHash));},
     async recordExternal(doc,snapshot,isCurrent){doc=clone(doc);snapshot=clone(snapshot);await ready;const r={id:crypto.randomUUID(),createdAt:new Date().toISOString(),provenance:'external-ai-import',fileHash:doc.fileHash,sourceHash:doc.sourceHash,revision:doc.revision,sourceName:doc.name||'',segments:doc.segments,snapshot,...(doc.outputFileHash?{outputFileHash:doc.outputFileHash}:{})};const validated=await validateDatabase({schema:KEY,harnesses:[],runs:[],reviews:[],externalResponses:[r]});if(isCurrent&&!isCurrent())throw Error('입력이 바뀌어 기록을 취소했습니다.');const records=db.externalResponses||[];if(records.length>=100)throw Error('외부 응답 기록은 최대 100건입니다.');persist({...db,externalResponses:[...records,validated.externalResponses[0]]});renderBoard();return r.id;},
-    async record(role,doc,request,response,provenance,extras={}){const isCurrent=extras?.isCurrent;if(!plain(extras??{})||Object.keys(extras??{}).some(k=>!['finalState','sourceRunId','snapshotOf','isCurrent'].includes(k))||isCurrent!==undefined&&typeof isCurrent!=='function')throw Error('기록 추가 정보 형식 오류');const {finalState:final=null,sourceRunId=null,snapshotOf=null}=clone({...(extras??{}),isCurrent:undefined});doc=clone(doc);request=clone(request);response=clone(response);await ready;if(!request?.harness)throw Error('현재 harness 요청을 먼저 저장하거나 실행하세요.');const harness=H.validate(request.harness,role),harnessHash=await H.hash(harness);
+    async record(role,doc,request,response,provenance,extras={}){const isCurrent=validateRecordExtras(extras);const {finalState:final=null,sourceRunId=null,snapshotOf=null}=clone({...(extras??{}),isCurrent:undefined});doc=clone(doc);request=clone(request);response=clone(response);await ready;if(!request?.harness)throw Error('현재 harness 요청을 먼저 저장하거나 실행하세요.');const harness=H.validate(request.harness,role),harnessHash=await H.hash(harness);
       // A CLI selection derived from a registered version is registered as its own version on first record; stored versions are never edited.
-      let derived=false;if(!db.harnesses.some(h=>h.hash===harnessHash)){if(!db.harnesses.some(h=>h.config.role===role&&H.derivedFrom(harness,h.config)))throw Error('등록되지 않은 harness로 만든 요청입니다. 기록 차단');derived=true;}
-      if(provenance==='local-codex'&&(response.harnessHash!==harnessHash||H.canonical(response.harness)!==H.canonical(harness)))throw Error('실행 harness가 요청과 일치하지 않습니다. 기록 차단');
-      const r={id:crypto.randomUUID(),createdAt:new Date().toISOString(),role,revision:doc.revision,fileHash:doc.fileHash,sourceHash:doc.sourceHash,segments:clone(doc.segments),harness,harnessHash,maxCalls:request.maxCalls,...(role==='red'?{...(request.level===undefined?{}:{level:request.level}),...(request.attackTypes===undefined?{}:{attackTypes:clone(request.attackTypes)})}:{level:null}),model:provenance==='local-codex'?response.model:'manual-model-unverified',provenance,response:clone(response),inputMode:request.paperEvidence?(request.visualEvidence===undefined?'structured':'structured-visual'):(request.visualEvidence===undefined?'text':'visual')};
-      if(request.visualEvidence!==undefined){if(role!=='blue'||request.visualConsent!==true||request.fileHash!==doc.fileHash||!Array.isArray(request.visualEvidence))throw Error('시각 증거 동의 또는 문서 식별 오류');r.visualEvidence=[];for(const v of request.visualEvidence){if(!plain(v)||Object.keys(v).sort().join(',')!==['base64','bbox','fileHash','height','mime','page','rotation','sha256','sourceHash','width'].sort().join(',')||typeof v.base64!=='string'||v.base64.length>699052)throw Error('시각 요청 형식 오류');let bytes;try{bytes=Uint8Array.from(atob(v.base64),c=>c.charCodeAt(0));}catch{throw Error('시각 이미지 인코딩 오류');}if(!bytes.length||bytes.length>524288||Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)),b=>b.toString(16).padStart(2,'0')).join('')!==v.sha256)throw Error('시각 이미지 해시 불일치');const {base64,...ref}=v;r.visualEvidence.push({...ref,provenance:'client-declared-pdf-association',artifact:'unavailable'});}}
-      if(typeof doc.name==='string'&&doc.name.trim())r.sourceName=doc.name.trim().slice(0,200);if(typeof doc.format==='string'&&doc.format.trim())r.format=doc.format.trim().slice(0,40);
-      if(final!==null){if(role!=='red')throw Error('최종 상태는 RED 기록에만 둘 수 있습니다.');r.finalState=finalState(r,final);}
-      if(sourceRunId!==null){if(role!=='blue')throw Error('인계 관계는 BLUE 기록에만 둘 수 있습니다.');r.sourceRunId=sourceRunId;}
-      if(snapshotOf!==null)r.snapshotOf=snapshotOf;
-      if(request.requestId!==undefined&&request.requestId!==null){if(!validRequestId(request.requestId))throw Error('실행 요청 ID 형식 오류');r.requestId=request.requestId;}
+      const derived=validateRecordHarness(role,harness,harnessHash,provenance,response);
+      const r=makeRunRecord(role,doc,request,response,provenance,harness,harnessHash);
+      if(request.visualEvidence!==undefined){checkVisualConsent(role,request,doc);r.visualEvidence=[];for(const v of request.visualEvidence){const bytes=decodeVisualRequest(v);if(!bytes.length||bytes.length>524288||Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)),b=>b.toString(16).padStart(2,'0')).join('')!==v.sha256)throw Error('시각 이미지 해시 불일치');const {base64,...ref}=v;r.visualEvidence.push({...ref,provenance:'client-declared-pdf-association',artifact:'unavailable'});}}
+      attachRunMetadata(r,doc,role,request,final,sourceRunId,snapshotOf);
       const run=await checkRun(r,derived?[...db.harnesses,{config:harness,hash:harnessHash}]:db.harnesses,db.runs,false);checkLinks(run,[...db.runs,run]);
       if(isCurrent&&!isCurrent()){const e=Error('입력이 바뀌어 이전 결과 기록을 취소했습니다.');e.name='StaleRecordError';throw e;}
       // Same execution (same requestId) re-recorded unchanged, e.g. auto then manual: keep one record.
       const same=db.runs.find(x=>stable({...x,id:0,createdAt:0})===stable({...run,id:0,createdAt:0}));if(same)return same.id;
-      const add=!db.harnesses.some(h=>h.hash===harnessHash),next={...db,harnesses:add?[...db.harnesses,{config:harness,hash:harnessHash}]:db.harnesses,runs:[...db.runs,run]};if(next.runs.length>100)throw Error('실행 기록은 최대 100건입니다. 먼저 백업하세요.');if(next.harnesses.length>100)throw Error('harness는 최대 100개입니다. 먼저 백업하세요.');persist(next);if(add)refreshHarness();refreshRuns(remote?undefined:(shown?undefined:run.id));return run.id;
+      return persistRun(run,harness,harnessHash);
     }
   };
+  function validateNewReview(v,r){if(!v.reviewer||!v.caseLabel||!v.note)throw Error('평가자·사례·판정 근거가 필요합니다.');FalsifyReview.validateExtras(v,r);if(comparison?.assessments.some(a=>a.verdict!=='pending'&&!a.note.trim()))throw Error('변경별 판정 이유를 적어 주세요.');if(v.reviewContext)v.note='[검수 방식: '+(v.reviewContext.mode==='red-assisted'?'RED 공개 대조 · 블라인드 아님':'BLUE만 확인 · 사전 노출 미확인')+']\n'+v.note;if(v.note.length>3000)throw Error('전체 메모는 검수 방식 표기를 포함해 3000자 이내로 적어 주세요.');}
   $('#evaluation-run').addEventListener('change',()=>{if(sweep())return;renderEvaluation();});
   $('#evaluation-verdict').addEventListener('change',()=>{if($('#evaluation-verdict').value==='uncertain')$('#evaluation-score').value='';});
   $('#evaluation-plan').addEventListener('change',async()=>{if(sweep())return;const r=current(),file=$('#evaluation-plan').files[0],epoch=++planEpoch;if(!r||r.role!=='blue')return;if(!file){status('#evaluation-plan-status',comparison?'파일을 바꾸지 않았습니다. 기존 RED 대조와 판정을 유지합니다.':'변경 계획을 선택하지 않았습니다. BLUE만 검수할 수 있습니다.');return;}try{if(file.size>200000)throw Error('변경 계획은 200KB 이내');const parsed=JSON.parse(await file.text());if(epoch!==planEpoch||current()?.id!==r.id||sweep())return;const patches=FalsifyDocumentBlue.validatePlan({fileHash:r.fileHash,segments:r.segments},parsed);showComparison(r,patches,null);status('#evaluation-plan-status','출력 파일 SHA-256 일치. 검수 화면에만 보관하며 모델 입력으로 보내지 않습니다.');}catch(e){if(epoch===planEpoch)status('#evaluation-plan-status','대조 불러오기 실패: '+e.message+(comparison?' 기존 RED 대조와 판정을 유지했습니다.':''),true);}});
-  $('#evaluation-form').addEventListener('submit',e=>{e.preventDefault();if(sweep()){status('#evaluation-status','팀 아카이브 화면 유지 시간이 지나 검수를 저장하지 않았습니다. 로컬 기록은 그대로입니다.',true);return;}const r=current();if(!r)return;try{const verdict=$('#evaluation-verdict').value,score=verdict==='uncertain'?null:$('#evaluation-score').value?Number($('#evaluation-score').value):null;const v={id:crypto.randomUUID(),runId:r.id,createdAt:new Date().toISOString(),reviewer:$('#evaluation-reviewer').value.trim(),caseLabel:$('#evaluation-case').value.trim(),verdict,score,note:$('#evaluation-note').value.trim(),comparison:clone(comparison),...(r.role==='blue'?{findingAssessments:clone(findingAssessments),reviewContext:{mode:(remote?exposedRemote:exposedLocal).has(r.id)?'red-assisted':'blue-only'}}:{})};if(!v.reviewer||!v.caseLabel||!v.note)throw Error('평가자·사례·판정 근거가 필요합니다.');FalsifyReview.validateExtras(v,r);if(comparison?.assessments.some(a=>a.verdict!=='pending'&&!a.note.trim()))throw Error('변경별 판정 이유를 적어 주세요.');if(v.reviewContext)v.note='[검수 방식: '+(v.reviewContext.mode==='red-assisted'?'RED 공개 대조 · 블라인드 아님':'BLUE만 확인 · 사전 노출 미확인')+']\n'+v.note;if(v.note.length>3000)throw Error('전체 메모는 검수 방식 표기를 포함해 3000자 이내로 적어 주세요.');const active=remote?remote.ledger:db;if(active.reviews.length>=1000)throw Error('검수 기록 한도 초과. 백업하세요.');if(remote){active.reviews.push(v);renderEvaluation();renderBoard();status('#evaluation-status','이 검수는 팀 아카이브 화면에만 있습니다. 로컬 기록에 넣지 않았고 팀 발행 전까지 저장되지 않습니다.');}else{persist({...db,reviews:[...db.reviews,v]});renderEvaluation();renderBoard();status('#evaluation-status','검수 이력을 추가했습니다. 이전 평가를 덮어쓰지 않았습니다. 승인/gold는 별도입니다.');}}catch(err){status('#evaluation-status',err.message,true);}});
+  $('#evaluation-form').addEventListener('submit',e=>{e.preventDefault();if(sweep()){status('#evaluation-status','팀 아카이브 화면 유지 시간이 지나 검수를 저장하지 않았습니다. 로컬 기록은 그대로입니다.',true);return;}const r=current();if(!r)return;try{const verdict=$('#evaluation-verdict').value,score=verdict==='uncertain'?null:$('#evaluation-score').value?Number($('#evaluation-score').value):null;const v={id:crypto.randomUUID(),runId:r.id,createdAt:new Date().toISOString(),reviewer:$('#evaluation-reviewer').value.trim(),caseLabel:$('#evaluation-case').value.trim(),verdict,score,note:$('#evaluation-note').value.trim(),comparison:clone(comparison),...(r.role==='blue'?{findingAssessments:clone(findingAssessments),reviewContext:{mode:(remote?exposedRemote:exposedLocal).has(r.id)?'red-assisted':'blue-only'}}:{})};validateNewReview(v,r);const active=remote?remote.ledger:db;if(active.reviews.length>=1000)throw Error('검수 기록 한도 초과. 백업하세요.');if(remote){active.reviews.push(v);renderEvaluation();renderBoard();status('#evaluation-status','이 검수는 팀 아카이브 화면에만 있습니다. 로컬 기록에 넣지 않았고 팀 발행 전까지 저장되지 않습니다.');}else{persist({...db,reviews:[...db.reviews,v]});renderEvaluation();renderBoard();status('#evaluation-status','검수 이력을 추가했습니다. 이전 평가를 덮어쓰지 않았습니다. 승인/gold는 별도입니다.');}}catch(err){status('#evaluation-status',err.message,true);}});
   for(const role of ['red','blue'])$('#harness-example-'+role).addEventListener('click',()=>$('#harness-editor').value=JSON.stringify({...H.builtin(role),id:'my-'+role,name:'내 '+role.toUpperCase()},null,2));
   $('#harness-example-code').addEventListener('click',()=>$('#harness-editor').value=JSON.stringify({...H.builtin('red'),id:'my-code-red',name:'내 코드 RED',adapter:{type:'stdio',executable:'C:\\Path\\To\\python.exe',args:['C:\\Path\\To\\my_harness.py']},settings:{strategy:'my-strategy'}},null,2));
   $('#harness-example-http').addEventListener('click',()=>$('#harness-editor').value=JSON.stringify({...H.builtin('blue'),id:'my-server-blue',name:'내 서버 BLUE',adapter:{type:'http',url:'https://your-server.example/falsify'},settings:{strategy:'my-strategy'}},null,2));

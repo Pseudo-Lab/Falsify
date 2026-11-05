@@ -25,9 +25,10 @@
   function saveJSON(data,name){const url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
   // A BLUE job keeps the bridge link it started with for polls and cancel; the bridge refuses to switch while busy.
   function link(){const l=B.session();if(!l)throw new Error('로컬 broker 연결이 없습니다. 위 연결 패널에서 연결하거나 수동 JSON 교환을 쓰세요.');return l;}
-  function controls(){handoffReadiness();paperEnrichmentUI?.setBusy(busy);visualPicker?.setBusy(busy);paperEvidenceUI?.setBusy(busy);const active=!!doc&&!busy&&!enrichmentBusy;B.busy('blue',busy||enrichmentBusy);$('#doc-blue-start').disabled=!active||!doc?.segments?.some(s=>s.text.trim())||!B.capabilities()?.blue||!$('#doc-blue-consent').checked||!FalsifyLab.allowed('blue');$('#doc-blue-request').disabled=!active;$('#doc-blue-apply').disabled=!active;$('#doc-blue-cancel').hidden=!job;$('#doc-blue-budget').disabled=busy;$('#doc-blue-record').disabled=!active||!result||saving;FalsifyLab.busy('blue',busy||saving);renderRecord();document.dispatchEvent(new CustomEvent('falsify:blue-state',{detail:{name:doc?.name||'',busy,hasResult:!!result||!!(externalCollection&&externalIdentity===doc?.fileHash+':'+doc?.sourceHash&&externalCollection.snapshot().batches.length),file:sourceFile,handoff:handoffMode,phase:busy&&!doc?'import':'review'}}));}
+  function controls(){handoffReadiness();paperEnrichmentUI?.setBusy(busy);visualPicker?.setBusy(busy);paperEvidenceUI?.setBusy(busy);const active=!!doc&&!busy&&!enrichmentBusy;B.busy('blue',busy||enrichmentBusy);$('#doc-blue-start').disabled=!active||!doc?.segments?.some(s=>s.text.trim())||!B.capabilities()?.blue||!$('#doc-blue-consent').checked||!FalsifyLab.allowed('blue');$('#doc-blue-request').disabled=!active;$('#doc-blue-apply').disabled=!active;$('#doc-blue-cancel').hidden=!job;$('#doc-blue-budget').disabled=busy;$('#doc-blue-record').disabled=!active||!result||saving;FalsifyLab.busy('blue',busy||saving);renderRecord();emitBlueState();}
   function cancel(){const old=job,l=jobLink;job=null;jobLink=null;if(old&&l)void l.request('/api/blue/jobs/'+encodeURIComponent(old)+'/cancel',{}).catch(()=>{});}
   function invalidate(){epoch++;savedId=null;saving=false;failure=null;result=null;findings=[];request=null;$('#doc-blue-findings').replaceChildren();$('#doc-blue-result-summary').textContent='';$('#doc-blue-record-status').textContent='';}
+  function emitBlueState(){document.dispatchEvent(new CustomEvent('falsify:blue-state',{detail:{name:doc?.name||'',busy,hasResult:!!result||!!(externalCollection&&externalIdentity===doc?.fileHash+':'+doc?.sourceHash&&externalCollection.snapshot().batches.length),file:sourceFile,handoff:handoffMode,phase:busy&&!doc?'import':'review'}}));}
   function clear(keepFile=false,restore=true){if(restore){previousFailure=null;const previous=document.querySelector('#doc-blue-retry-previous');if(previous)previous.hidden=true;}handoffMode=false;visualPicker?.clear();paperEvidenceUI?.clear();paperEnrichmentUI?.clear();enrichmentBusy=false;generation++;cancel();abort?.abort();abort=null;doc=null;externalAliases=[];sourceFile=null;relation=null;busy=false;clearSticky();invalidate();if(keepFile!==true)$('#doc-blue-file').value='';$('#doc-blue-response').value='';$('#doc-blue-consent').checked=false;$('#blue-harness-consent').checked=false;if($('#blue-visual-select'))$('#blue-visual-select').checked=false;if($('#blue-visual-consent'))$('#blue-visual-consent').checked=false;if($('#blue-visual-regions'))$('#blue-visual-regions').value='';$('#doc-blue-summary').textContent='아직 파일을 입력하지 않았습니다. 수정 파일 또는 원본/대조군을 직접 선택하세요.';msg('');controls();if(restore)restorePending();}
   document.addEventListener('falsify:workspace-reset',clear);$('#doc-blue-clear').addEventListener('click',clear);
   // A user-chosen file is an independent BLUE input: clear() drops any RED relation.
@@ -64,8 +65,16 @@
     panel.hidden=!handoffMode;
     const previous=$('#doc-blue-previous-failure');if(previous)previous.hidden=!previousFailure;
     if(!handoffMode)return;
-    let text='',action='다음';nextAction=null;
+    nextAction=null;
     const pending=helperReady()?P.read('blue'):null;
+    const {text,action}=handoffChoice(pending);
+    if(label.textContent!==text)label.textContent=text;
+    if(button.textContent!==action)button.textContent=action;
+    button.disabled=!nextAction;button.hidden=busy;
+  }
+  function handoffChoice(pending){
+    let text='',action='다음';
+
     if(busy){text=doc?'BLUE 검토 중입니다.':'RED 변경본을 읽고 있습니다.';}
     else if(!doc){text='변경본을 읽지 못했습니다. 파일을 다시 선택하세요.';action='파일 선택';nextAction=()=>$('#doc-blue-file').click();}
     else if(pending&&pending.status!=='absent'&&pending.status!=='record'){
@@ -80,9 +89,7 @@
     else if(!FalsifyLab.allowed('blue')){text='변경본이 준비됐습니다. 선택한 BLUE 하네스를 확인하세요.';action='하네스 확인';nextAction=()=>revealControl(!$('#blue-harness-consent').checked?$('#blue-harness-consent'):$('#blue-harness'));}
     else if(!$('#doc-blue-consent').checked){text='이 변경본을 선택한 BLUE 도구에 보내 검토합니다.';action='이 파일로 BLUE 검토 시작';nextAction=()=>{$('#doc-blue-consent').checked=true;$('#doc-blue-consent').dispatchEvent(new Event('change'));$('#doc-blue-start').click();};}
     else{text='변경본과 BLUE 도구가 준비됐습니다.';action='BLUE 검토 시작';nextAction=()=>$('#doc-blue-start').click();}
-    if(label.textContent!==text)label.textContent=text;
-    if(button.textContent!==action)button.textContent=action;
-    button.disabled=!nextAction;button.hidden=busy;
+    return {text,action};
   }
   $('#doc-blue-next')?.addEventListener('click',()=>nextAction?.());
   $('#doc-blue-previous-request')?.addEventListener('click',()=>{if(previousFailure){const body=P.safeRequest(previousFailure);if(body)saveJSON(body,'falsify-previous-blue-request.json');}});
@@ -107,9 +114,7 @@
     const body=await FalsifyLab.bind('blue',C.request(frozen,Number($('#doc-blue-budget').value)));
     if(current!==generation||doc!==frozen||sourceFile!==visualFile)throw new Error('입력이 바뀌어 요청을 보내지 않았습니다.');
     if(visualEnabled){
-      if(!visualConsented)throw new Error('시각 이미지 전송 동의가 필요합니다.');
-      if(!visualFile||!globalThis.FalsifyBlueVisual)throw new Error('선택한 PDF 또는 시각 렌더러가 없습니다.');
-      if(!selections?.length)throw new Error('미리보기에서 이 쪽 또는 영역을 선택하세요.');
+      validateVisualRequest(visualConsented,visualFile,selections);
       body.visualEvidence=await FalsifyBlueVisual.renderBlueVisuals({file:visualFile,fileHash:frozen.fileHash,sourceHash:frozen.sourceHash,selections});
       if(current!==generation||doc!==frozen||sourceFile!==visualFile)throw new Error('입력 문서가 바뀌어 시각 증거를 보내지 않았습니다.');
       body.fileHash=frozen.fileHash;body.visualConsent=true;
@@ -120,6 +125,11 @@
     if(prepared){body.paperEvidence=prepared;body.paperEvidenceConsent=true;body.fileHash=frozen.fileHash;}
     return body;
   }
+  function validateVisualRequest(visualConsented,visualFile,selections){
+      if(!visualConsented)throw new Error('시각 이미지 전송 동의가 필요합니다.');
+      if(!visualFile||!globalThis.FalsifyBlueVisual)throw new Error('선택한 PDF 또는 시각 렌더러가 없습니다.');
+      if(!selections?.length)throw new Error('미리보기에서 이 쪽 또는 영역을 선택하세요.');
+  }
   // Server progress phase is shown only as a bounded identifier; known phases get fixed Korean names.
   const PHASES={reviewing:'검토',selecting:'근거 구간 선택',reread:'원문 근거 재확인',finalizing:'결과 정리'};
   function phase(p){return typeof p==='string'&&/^[a-z][a-z0-9_-]{0,31}$/.test(p)?' · 단계: '+(Object.hasOwn(PHASES,p)?PHASES[p]:p):'';}
@@ -129,6 +139,9 @@
     const r=res.coverage?.reread,ids=new Set(doc.segments.map(s=>s.id));if(r==null)return ' 원문 근거 재확인 보고 없음.';if(typeof r!=='object')return ' 원문 근거 재확인 보고 형식 확인 불가.';
     const segments=Array.isArray(r.selectedSegments)&&r.selectedSegments.length<=ids.size&&r.selectedSegments.every(x=>ids.has(x)),chars=Number.isSafeInteger(r.deliveredChars)&&r.deliveredChars>=0;
     // Direct full text is claimed only with consistent metadata and complete extracted-text delivery.
+    return rereadStatus(r,res,segments,chars);}
+
+  function rereadStatus(r,res,segments,chars){
     if(r.status==='not-needed'&&segments&&!r.selectedSegments.length&&chars&&r.truncated===false&&res.coverage.complete===true)return ' 한 번의 호출로 전체 추출 텍스트를 직접 검토해 별도 원문 재확인은 하지 않았습니다.';
     if(r.status==='completed'&&segments&&r.selectedSegments.length&&chars&&r.deliveredChars>0&&typeof r.truncated==='boolean')
       return ' 원문 근거 재확인 수행 · 구간 '+new Set(r.selectedSegments).size+'개 · '+r.deliveredChars.toLocaleString()+'자'+(r.truncated?' · 일부만 전달됨':'')+'.';
@@ -251,25 +264,31 @@
     if(kind==='failed'){const detail=P.safeFailure(data.error);if(detail)patch.serverFailure=detail;const f=P.structuredFailure(data.failure);if(f)patch.adapterFailure=f;}
     await P.note(record,patch);
   }
+  function matchWatchedJob(data){const found=P.read('blue');if(found.status!=='record'||found.record.requestId!==job||!P.matches(found.record,data))throw new Error('조회한 작업의 식별이 저장한 요청과 달라 적용하지 않았습니다.');return found.record;}
+  async function finishWatchFailure(data,strict,matched){
+        if(!strict)throw new Error(typeof data.error==='string'?data.error.slice(0,300):'BLUE 취소됨');
+        await persistWatch(matched,data);
+        const saved=P.read('blue');if(saved.status==='record'&&saved.record.requestId===matched.requestId)rememberTerminal(saved.record);
+  }
   async function watchBlue(current,l,strict){
     while(current===generation&&job){
       const data=await l.request('/api/blue/jobs/'+encodeURIComponent(job));if(current!==generation||!job)return;
       let matched=null;
-      if(strict){const found=P.read('blue');if(found.status!=='record'||found.record.requestId!==job||!P.matches(found.record,data))throw new Error('조회한 작업의 식별이 저장한 요청과 달라 적용하지 않았습니다.');matched=found.record;}
-      if(data.state==='completed'){clearSticky();apply(data.result,'local-codex');if(strict){const found={status:'record',record:matched};if(found.status==='record')await P.note(found.record,{disposition:'completed',finishedAt:Date.now(),...observedCalls(data)});}break;}
+      if(strict)matched=matchWatchedJob(data);
+      if(data.state==='completed'){clearSticky();apply(data.result,'local-codex');if(strict)await P.note(matched,{disposition:'completed',finishedAt:Date.now(),...observedCalls(data)});break;}
       if(data.state==='failed'||data.state==='cancelled'){
-        if(!strict)throw new Error(typeof data.error==='string'?data.error.slice(0,300):'BLUE 취소됨');
-        const found={status:'record',record:matched};if(found.status==='record')await persistWatch(found.record,data);
-        const saved=P.read('blue');if(saved.status==='record'&&saved.record.requestId===matched.requestId)rememberTerminal(saved.record);return;
+        await finishWatchFailure(data,strict,matched);return;
       }
       if(strict&&data.state!=='running'){
-        const found={status:'record',record:matched};
-        if(found.status==='record'){await P.note(found.record,{disposition:'unknown',finishedAt:Date.now()});const saved=P.read('blue');if(saved.status==='record')showUnknown(saved.record);}
+        await P.note(matched,{disposition:'unknown',finishedAt:Date.now()});const saved=P.read('blue');if(saved.status==='record')showUnknown(saved.record);
         return;
       }
-      if(strict){const found={status:'record',record:matched};if(found.status==='record'&&found.record.disposition!=='running')await P.note(found.record,{disposition:'running'});}
-      msg('BLUE 검토 중 · '+(data.progress&&data.progress.completedCalls||0)+' / '+(data.progress&&data.progress.requiredCalls||'?')+'회 완료'+phase(data.progress&&data.progress.phase));await new Promise(r=>setTimeout(r,1500));
+      if(strict&&matched.disposition!=='running')await P.note(matched,{disposition:'running'});
+      watchProgress(data);await new Promise(r=>setTimeout(r,1500));
     }
+  }
+  function watchProgress(data){
+      msg('BLUE 검토 중 · '+(data.progress&&data.progress.completedCalls||0)+' / '+(data.progress&&data.progress.requiredCalls||'?')+'회 완료'+phase(data.progress&&data.progress.phase));
   }
   let displayedPending=null;
   async function onDiscard(){
@@ -362,50 +381,70 @@
     if(outcome&&record.disposition==='cancelled'&&outcome.status==='cancelled'){rememberTerminal(record);return;}
     rememberTerminal(record);
   }
+  function recoveryReady(record){
+    if(doc){
+      const same=doc.sourceHash===record.sourceHash&&doc.fileHash===record.fileHash&&doc.revision===record.revision;
+      if(same&&(job||record.disposition==='completed'))return false;
+      if(!same){showPendingBlue({status:'unresolved',record});return false;}
+    }
+    if(!B.state().connected){
+      if(record.postReceipt==='unknown'||record.disposition==='unknown'){showUnknown(record);return false;}
+      showPendingBlue({status:'unpaired',record});return false;
+    }
+    return true;
+  }
+  async function finishRecoveryTerminal(outcome){
+        const patch={postReceipt:'accepted',disposition:outcome.status,finishedAt:Date.now()};
+        if(outcome.status==='failed'){const detail=P.safeFailure(outcome.error);if(detail)patch.serverFailure=detail;if(outcome.failure)patch.adapterFailure=outcome.failure;}
+        await P.note(outcome.record,patch);
+        const saved=P.read('blue');rememberTerminal(saved.status==='record'?saved.record:outcome.record);  }
+  async function recoverTerminal(record){
+      rememberTerminal(record);
+      if(!B.state().connected)return;
+      recovering=true;
+      try{await absorbTerminal(record,await P.recover(recoverOptions()));}finally{recovering=false;}
+  }
+  function recoveryUnknown(outcome,record){return outcome.status==='receipt-unknown'||outcome.status==='unknown'||record.postReceipt==='unknown'||record.disposition==='unknown';}
+  async function handleRecovered(outcome,record){
+      if(!outcome||outcome.status==='absent')return;
+      if(outcome.status==='server-restarted'){showUnknown(record,'저장된 요청 이후 로컬 서버가 재시작되어 현재 서버에서는 이전 접수를 확인할 수 없습니다.');return;}
+      if(outcome.status==='still-running'){await resumeBlue(outcome);return;}
+      if(outcome.status==='completed'){showRecoveredBlue(outcome);await P.note(outcome.record,{disposition:'completed',finishedAt:Date.now(),...observedCalls(outcome.job)});return;}
+      if((outcome.status==='failed'||outcome.status==='cancelled')&&outcome.record){await finishRecoveryTerminal(outcome);return;}
+      if(recoveryUnknown(outcome,record)){showUnknown(record);return;}
+      showPendingBlue(outcome);
+  }
   async function recoverBlue(){
     if(!helperReady()||recovering||busy)return;
     const found=P.read('blue');if(found.status==='absent')return;
     if(found.status!=='record'){if(!sticky&&!notice)showPendingBlue(found);return;}
     const record=found.record;
     if(terminalKind(record)){
-      rememberTerminal(record);
-      if(!B.state().connected)return;
-      recovering=true;
-      try{await absorbTerminal(record,await P.recover(recoverOptions()));}finally{recovering=false;}
-      return;
+      await recoverTerminal(record);return;
     }
-    if(doc){
-      const same=doc.sourceHash===record.sourceHash&&doc.fileHash===record.fileHash&&doc.revision===record.revision;
-      if(same&&(job||record.disposition==='completed'))return;
-      if(!same){showPendingBlue({status:'unresolved',record});return;}
-    }
-    if(!B.state().connected){
-      if(record.postReceipt==='unknown'||record.disposition==='unknown'){showUnknown(record);return;}
-      showPendingBlue({status:'unpaired',record});return;
-    }
+    if(!recoveryReady(record))return;
     recovering=true;
     try{
       const outcome=await P.recover(recoverOptions());
-      if(!outcome||outcome.status==='absent')return;
-      if(outcome.status==='server-restarted'){showUnknown(record,'저장된 요청 이후 로컬 서버가 재시작되어 현재 서버에서는 이전 접수를 확인할 수 없습니다.');return;}
-      if(outcome.status==='still-running'){await resumeBlue(outcome);return;}
-      if(outcome.status==='completed'){showRecoveredBlue(outcome);await P.note(outcome.record,{disposition:'completed',finishedAt:Date.now(),...observedCalls(outcome.job)});return;}
-      if((outcome.status==='failed'||outcome.status==='cancelled')&&outcome.record){
-        const patch={postReceipt:'accepted',disposition:outcome.status,finishedAt:Date.now()};
-        if(outcome.status==='failed'){const detail=P.safeFailure(outcome.error);if(detail)patch.serverFailure=detail;if(outcome.failure)patch.adapterFailure=outcome.failure;}
-        await P.note(outcome.record,patch);
-        const saved=P.read('blue');rememberTerminal(saved.status==='record'?saved.record:outcome.record);return;
-      }
-      if(outcome.status==='receipt-unknown'||outcome.status==='unknown'||record.postReceipt==='unknown'||record.disposition==='unknown'){showUnknown(record);return;}
-      showPendingBlue(outcome);
+      await handleRecovered(outcome,record);
     }finally{recovering=false;}
   }
-  $('#doc-blue-start').addEventListener('click',async()=>{if(!doc||busy||!$('#doc-blue-consent').checked||!FalsifyLab.allowed('blue'))return;const current=generation;
-    if(expectsHelper()){
+  async function discardPrevious(record,current){
+    if(!B.state().connected||!B.session()){rememberTerminal(record);return false;}
+    busy=true;controls();const removed=await P.discard('blue',{acknowledge:true,expectedRequestId:record.requestId});
+    if(!removed.ok||current!==generation){busy=false;if(!removed.ok)msg(removed.message,true,true);controls();return false;}
+    retainPrevious(record);clearSticky();return true;
+  }
+  async function startHeldBlue(current,l,held){
+      try{msg('전체 텍스트 호출 예산 확인 후 선택 BLUE harness를 실행합니다.');const started=await postBlue(l,held);if(current!==generation){void l.request('/api/blue/jobs/'+encodeURIComponent(started.id)+'/cancel',{}).catch(()=>{});return;}job=started.id;jobLink=l;controls();await watchBlue(current,l,true);}
+      catch(e){if(current===generation)reportCaught(e);}finally{if(current===generation){busy=false;job=null;jobLink=null;controls();}}
+  }
+  function unknownPending(pending){return pending.status==='record'&&(pending.record.disposition==='unknown'||pending.record.postReceipt==='unknown');}
+  async function startWithPending(current){
       if(!helperReady()){msg('대기 기록 도우미가 없거나 손상되어 실행하지 않았습니다. 요청을 보내지 않습니다.',true);return;}
       const pending=P.read('blue');
-      if(pending.status==='record'&&terminalKind(pending.record)&&pending.record.postReceipt!=='unknown'){if(!B.state().connected||!B.session()){rememberTerminal(pending.record);return;}busy=true;controls();const removed=await P.discard('blue',{acknowledge:true,expectedRequestId:pending.record.requestId});if(!removed.ok||current!==generation){busy=false;if(!removed.ok)msg(removed.message,true,true);controls();return;}retainPrevious(pending.record);clearSticky();}
-      if(pending.status==='record'&&(pending.record.disposition==='unknown'||pending.record.postReceipt==='unknown')){showUnknown(pending.record);return;}
+      if(pending.status==='record'&&terminalKind(pending.record)&&pending.record.postReceipt!=='unknown'){if(!await discardPrevious(pending.record,current))return;if(current!==generation)return;}
+      if(unknownPending(pending)){showUnknown(pending.record);return;}
       busy=true;controls();
       let l,held=null;
       try{l=link();const next=await makeRequest();if(current!==generation)return;held=await holdBlue(next);}
@@ -414,10 +453,12 @@
       if(current!==generation){busy=false;controls();return;}
       if(!held)return;
       clearSticky();invalidate();request=held.record.request;controls();
-      try{msg('전체 텍스트 호출 예산 확인 후 선택 BLUE harness를 실행합니다.');const started=await postBlue(l,held);if(current!==generation){void l.request('/api/blue/jobs/'+encodeURIComponent(started.id)+'/cancel',{}).catch(()=>{});return;}job=started.id;jobLink=l;controls();await watchBlue(current,l,true);}
-      catch(e){if(current===generation)reportCaught(e);}finally{if(current===generation){busy=false;job=null;jobLink=null;controls();}}
+      await startHeldBlue(current,l,held);
       return;
-    }
+
+  }
+  $('#doc-blue-start').addEventListener('click',async()=>{if(!doc||busy||!$('#doc-blue-consent').checked||!FalsifyLab.allowed('blue'))return;const current=generation;
+    if(expectsHelper()){await startWithPending(current);return;}
     // UNSHIPPED_TEST_ISOLATION: document-blue.js loaded with neither pending-job.js nor the shipped script tag.
     // Standalone page VMs keep this direct POST. index.html always includes the helper and never uses this branch.
     busy=true;invalidate();controls();

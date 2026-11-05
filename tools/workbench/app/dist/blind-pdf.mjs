@@ -29,6 +29,37 @@ function comparePixels(a, b, engine) {
   p.destroy(); q.destroy(); a.destroy(); b.destroy();
   return same;
 }
+function markerBounds(source,i) {
+      const page = source.loadPage(i), bounds = page.getBounds(), hits = page.search(MARKER);
+      if (bounds[0] !== 0 || bounds[1] !== 0 || hits.length !== 1 || hits[0].length !== 1) fail(`Marker geometry on page ${i + 1} is unsafe`);
+      const quad = hits[0][0], bbox = [Math.min(quad[0],quad[2],quad[4],quad[6]), Math.min(quad[1],quad[3],quad[5],quad[7]), Math.max(quad[0],quad[2],quad[4],quad[6]), Math.max(quad[1],quad[3],quad[5],quad[7])];
+      if (bbox[0] < 29 || bbox[2] > 320 || bbox[1] < bounds[3]-29 || bbox[3] > bounds[3]-10) fail(`Marker geometry on page ${i + 1} is unsafe`);
+      page.destroy();
+  return bbox;
+}
+function inspectPage(source,i,signal,plans,expected,beforeText) {
+    abort(signal);
+    const text = normalize(textOf(source, i)); beforeText.push(text);
+    const refs = streams(source, i), data = refs.map(decoded), raw = data.map(x => decoder.decode(x));
+    const marks = raw.map((s, n) => isMarkerStream(s) ? n : -1).filter(n => n >= 0);
+    const bands = raw.map((s, n) => bannerStream.test(s) ? n : -1).filter(n => n >= 0);
+    const hasText = text.includes(MARKER);
+    const suspicious = raw.some(s => s.toLowerCase().includes(markerHex) || s.includes(MARKER));
+    if (hasText || marks.length || suspicious) {
+      if (!hasText || marks.length !== 1 || bands.length !== 1 || bands[0] + 1 !== marks[0] || marks[0] !== refs.length - 1) fail(`Marker on page ${i + 1} is not safely separable`);
+      const bbox = markerBounds(source,i);
+      plans.push({pageIndex:i, marker:marks[0], banner:bands[0], bbox});
+    }
+    expected.push(data.filter((_, n) => !marks.includes(n) && !(marks.length && bands.includes(n))));
+}
+function verifyPage(original,result,i,engine,signal,beforeText,expected) {
+    abort(signal);
+    const after = normalize(textOf(result, i));
+    if (after.includes(MARKER) || withoutMarker(beforeText[i]) !== after) fail(`Text verification failed on page ${i + 1}`);
+    const actual = streams(result, i).map(decoded), prior = expected[i];
+    if (actual.length !== prior.length || actual.some((a,n) => a.length !== prior[n].length || a.some((b,j) => b !== prior[n][j]))) fail(`Stream verification failed on page ${i + 1}`);
+    if (!comparePixels(original.loadPage(i), result.loadPage(i), engine)) fail(`Rendering changed outside footer on page ${i + 1}`);
+}
 export async function prepare({file, signal}) {
   abort(signal);
   const bytes = file.bytes instanceof Uint8Array ? new Uint8Array(file.bytes) : new Uint8Array(await file.arrayBuffer());
@@ -42,23 +73,7 @@ export async function prepare({file, signal}) {
   if (source.needsPassword()) fail('Encrypted PDF is not supported');
   const count = source.countPages(), plans = [], expected = [], beforeText = [];
   for (let i = 0; i < count; i++) {
-    abort(signal);
-    const text = normalize(textOf(source, i)); beforeText.push(text);
-    const refs = streams(source, i), data = refs.map(decoded), raw = data.map(x => decoder.decode(x));
-    const marks = raw.map((s, n) => isMarkerStream(s) ? n : -1).filter(n => n >= 0);
-    const bands = raw.map((s, n) => bannerStream.test(s) ? n : -1).filter(n => n >= 0);
-    const hasText = text.includes(MARKER);
-    const suspicious = raw.some(s => s.toLowerCase().includes(markerHex) || s.includes(MARKER));
-    if (hasText || marks.length || suspicious) {
-      if (!hasText || marks.length !== 1 || bands.length !== 1 || bands[0] + 1 !== marks[0] || marks[0] !== refs.length - 1) fail(`Marker on page ${i + 1} is not safely separable`);
-      const page = source.loadPage(i), bounds = page.getBounds(), hits = page.search(MARKER);
-      if (bounds[0] !== 0 || bounds[1] !== 0 || hits.length !== 1 || hits[0].length !== 1) fail(`Marker geometry on page ${i + 1} is unsafe`);
-      const quad = hits[0][0], bbox = [Math.min(quad[0],quad[2],quad[4],quad[6]), Math.min(quad[1],quad[3],quad[5],quad[7]), Math.max(quad[0],quad[2],quad[4],quad[6]), Math.max(quad[1],quad[3],quad[5],quad[7])];
-      if (bbox[0] < 29 || bbox[2] > 320 || bbox[1] < bounds[3]-29 || bbox[3] > bounds[3]-10) fail(`Marker geometry on page ${i + 1} is unsafe`);
-      page.destroy();
-      plans.push({pageIndex:i, marker:marks[0], banner:bands[0], bbox});
-    }
-    expected.push(data.filter((_, n) => !marks.includes(n) && !(marks.length && bands.includes(n))));
+    inspectPage(source,i,signal,plans,expected,beforeText);
   }
   if (!plans.length) return {file, sha256:shaOriginal, changed:false, removed:[], verification:{status:'passed', pageCount:count, unchangedBytes:true}};
   for (const plan of plans) {
@@ -73,12 +88,7 @@ export async function prepare({file, signal}) {
   result = engine.Document.openDocument(out, 'application/pdf');
   if (result.countPages() !== count) fail('Page count changed');
   for (let i = 0; i < count; i++) {
-    abort(signal);
-    const after = normalize(textOf(result, i));
-    if (after.includes(MARKER) || withoutMarker(beforeText[i]) !== after) fail(`Text verification failed on page ${i + 1}`);
-    const actual = streams(result, i).map(decoded), prior = expected[i];
-    if (actual.length !== prior.length || actual.some((a,n) => a.length !== prior[n].length || a.some((b,j) => b !== prior[n][j]))) fail(`Stream verification failed on page ${i + 1}`);
-    if (!comparePixels(original.loadPage(i), result.loadPage(i), engine)) fail(`Rendering changed outside footer on page ${i + 1}`);
+    verifyPage(original,result,i,engine,signal,beforeText,expected);
   }
   const sha256 = await hash(out); abort(signal);
   const output = typeof File === 'function' ? new File([out], file.name || 'document.pdf', {type:'application/pdf'}) : {name:file.name || 'document.pdf', type:'application/pdf', bytes:out, arrayBuffer:async () => out.buffer.slice(out.byteOffset,out.byteOffset+out.byteLength)};

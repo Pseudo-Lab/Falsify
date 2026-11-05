@@ -112,6 +112,19 @@
       if(!CRED.test(credential)||credential.includes(triple.proof)||credential.includes(triple.commitment)||credential.includes(triple.challenge)||credential.includes(triple.state)||data.origin!==ORIGIN||data.port!==port)return {ok:false,error:'malformed',terminal:true};
       return {ok:true,credential,expiresAt:data.expiresAt,port};
     }
+    function openPairing(bridge,port,open){
+      let triple;try{triple=mint(random);}catch{return {error:bridge.report('일회용 연결 값을 만들지 못했습니다.')};}
+      const uri=pairingUri(port,triple);
+      if(forbidden(uri)||!uri||uri.includes(triple.proof))return {error:bridge.report('연결 링크가 거절되었습니다.')};
+      if(typeof open!=='function')return {error:bridge.report('이 브라우저에서는 연결 앱 열기를 쓸 수 없습니다. 수동 실행을 쓰세요.')};
+      try{open(uri);}catch{return {error:bridge.report('브라우저가 연결 앱 열기를 막았습니다. 수동 실행을 쓰세요.')};}
+      return {triple};
+    }
+    function reportPairingFailure(bridge,last){
+        if(last==='unknown_challenge')return bridge.report('로컬 승인이 없거나 취소되었습니다. 연결 앱이 없으면 아무 일도 없을 수 있습니다. 브라우저는 설치 여부를 알려주지 않습니다. 수동 토큰을 쓰세요.');
+        if(last==='network')return bridge.report('로컬 broker에 닿지 못했습니다. 브라우저의 로컬 네트워크 권한은 이 페이지가 대신 받을 수 없습니다.');
+        return bridge.report('일회용 연결이 거절되었습니다 ('+String(last).slice(0,80)+').');
+    }
     let generation=0;
     async function begin({bridge,port,open}){
       const held=bridge.hold(port);
@@ -120,11 +133,9 @@
       let success=false;
       const release=()=>{if(mine===generation){try{bridge.releaseHold();}catch{}}};
       try{
-        let triple;try{triple=mint(random);}catch{return bridge.report('일회용 연결 값을 만들지 못했습니다.');}
-        const uri=pairingUri(held.port,triple);
-        if(forbidden(uri)||!uri||uri.includes(triple.proof))return bridge.report('연결 링크가 거절되었습니다.');
-        if(typeof open!=='function')return bridge.report('이 브라우저에서는 연결 앱 열기를 쓸 수 없습니다. 수동 실행을 쓰세요.');
-        try{open(uri);}catch{return bridge.report('브라우저가 연결 앱 열기를 막았습니다. 수동 실행을 쓰세요.');}
+        const setup=openPairing(bridge,held.port,open);
+        if(!setup.triple)return setup.error;
+        const triple=setup.triple;
         let last='unknown_challenge';
         for(let i=0;i<attempts;i++){
           if(i)await sleep(step);
@@ -137,9 +148,7 @@
             last=result.error||last;if(result.terminal)break;
           }catch{last='network';}
         }
-        if(last==='unknown_challenge')return bridge.report('로컬 승인이 없거나 취소되었습니다. 연결 앱이 없으면 아무 일도 없을 수 있습니다. 브라우저는 설치 여부를 알려주지 않습니다. 수동 토큰을 쓰세요.');
-        if(last==='network')return bridge.report('로컬 broker에 닿지 못했습니다. 브라우저의 로컬 네트워크 권한은 이 페이지가 대신 받을 수 없습니다.');
-        return bridge.report('일회용 연결이 거절되었습니다 ('+String(last).slice(0,80)+').');
+        return reportPairingFailure(bridge,last);
       }finally{if(!success)release();}
     }
     async function refresh(bridge){

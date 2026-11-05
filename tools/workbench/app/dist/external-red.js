@@ -67,7 +67,14 @@
     if(input.length>LIMITS.segments)return {error:'source-limit'};
     const segments=[],seen=new Set();
     for(let i=0;i<input.length;i++){
-      const segment=input[i];
+      const result=normalizeSegment(input[i],i,seen);
+      if(result.error)return result;
+      segments.push(result.segment);
+    }
+    return {segments};
+  }
+  function normalizeSegment(segment,i,seen){
+
       if(!segment||typeof segment!=='object'||typeof segment.text!=='string')return {error:'bad-source'};
       if(segment.text.length>LIMITS.segmentChars)return {error:'source-limit'};
       let id=typeof segment.id==='string'&&segment.id.trim()?segment.id.trim():'s'+i;
@@ -78,9 +85,7 @@
       let pageIndex=null;
       if(Object.hasOwn(segment,'pageIndex')){if(!isPageIndex(segment.pageIndex))return {error:'bad-source'};pageIndex=segment.pageIndex;}
       else pageIndex=pageIndexFromLabel(label)??i;
-      segments.push({id,label:label.slice(0,LIMITS.labelChars),text:segment.text,pageIndex});
-    }
-    return {segments};
+      return {segment:{id,label:label.slice(0,LIMITS.labelChars),text:segment.text,pageIndex}};
   }
   function hashOf(fileHash){
     if(typeof fileHash!=='string')return null;
@@ -158,19 +163,33 @@
     let rewrite=null,model,hash=null,hashConflict=false,recognized=false;
     for(const value of values){
       if(Array.isArray(value)){
-        if(value.some(isChangeLike)){recognized=true;pushItems(value,changes,diagnostics);}
+        if(collectArray(value,changes,diagnostics))recognized=true;
         continue;
       }
       if(!value||typeof value!=='object')continue;
       const claimed=readClaimedHash(value);
       const nextModel=readModel(value);
       if(nextModel!==undefined)model=model===undefined?nextModel:model;
-      if(hasRewrite(value)&&!hasChanges(value)){
+      if(isStandaloneRewrite(value)){
         recognized=true;
-        const text=own(value,'rewritten')?value.rewritten:value.fullText;
-        if(typeof text!=='string')diagnostics.push(diag('malformed','전체 다시 쓰기 본문이 텍스트가 아닙니다.'));
-        else rewrite=normalizeNewlines(text);
+        const extracted=readRewrite(value,diagnostics);
+        if(extracted!==null)rewrite=extracted;
       }
+      if(collectChangeValue(value,changes,diagnostics))recognized=true;
+      if(claimed&&hasClaimContent(value)){if(hash&&hash!==claimed)hashConflict=true;else hash=claimed;}
+    }
+    return {recognized,changes,rewrite,model,hash,hashConflict,diagnostics};
+  }
+  function collectArray(value,changes,diagnostics){if(!value.some(isChangeLike))return false;pushItems(value,changes,diagnostics);return true;}
+  function isStandaloneRewrite(value){return hasRewrite(value)&&!hasChanges(value);}
+  function readRewrite(value,diagnostics){
+    const text=own(value,'rewritten')?value.rewritten:value.fullText;
+    if(typeof text!=='string'){diagnostics.push(diag('malformed','전체 다시 쓰기 본문이 텍스트가 아닙니다.'));return null;}
+    return normalizeNewlines(text);
+  }
+  function hasClaimContent(value){return hasChanges(value)||hasRewrite(value)||isChangeLike(value);}
+  function collectChangeValue(value,changes,diagnostics){
+    let recognized=false;
       const lists=changeKeys(value);
       if(lists.length){
         recognized=true;
@@ -180,9 +199,7 @@
       }else if(isChangeLike(value)){
         recognized=true;const read=readChange(value);if(read.error)diagnostics.push(read.error);else changes.push(read.change);
       }
-      if(claimed&&(hasChanges(value)||hasRewrite(value)||isChangeLike(value))){if(hash&&hash!==claimed)hashConflict=true;else hash=claimed;}
-    }
-    return {recognized,changes,rewrite,model,hash,hashConflict,diagnostics};
+    return recognized;
   }
   function scanEnd(text,start){
     let depth=0,string=false,escaped=false;
@@ -239,7 +256,17 @@
       if(git){segmentId=segmentFromPath(git[1],segments);i+=1;continue;}
       if(/^---\s+/.test(line)&&i+1<lines.length&&/^\+\+\+\s+/.test(lines[i+1])){segmentId=segmentFromPath(line.replace(/^---\s+/,''),segments);i+=2;continue;}
       if(/^@@\s+-\d+(?:,\d+)?\s+\+\d+(?:,\d+)?\s+@@/.test(line)){
-        saw=true;i+=1;const oldLines=[],newLines=[];
+        saw=true;i+=1;const hunk=parseHunk(lines,i,segmentId,changes);i=hunk.i;if(hunk.broken)broken=true;
+        continue;
+      }
+      i+=1;
+    }
+    if(!saw)return {error:'unified diff 덩어리를 찾지 못했습니다.',changes:[]};
+    return {changes,broken};
+  }
+  function parseHunk(lines,i,segmentId,changes){
+    let broken=false;
+    const oldLines=[],newLines=[];
         while(i<lines.length){
           const row=lines[i];
           if(/^@@\s+-\d/.test(row)||/^diff --git /.test(row)||/^--- /.test(row))break;
@@ -250,12 +277,7 @@
           broken=true;break;
         }
         if(oldLines.length||newLines.length)changes.push({before:oldLines.join('\n'),after:newLines.join('\n'),segmentId,pageIndex:null,pageSpecified:false});
-        continue;
-      }
-      i+=1;
-    }
-    if(!saw)return {error:'unified diff 덩어리를 찾지 못했습니다.',changes:[]};
-    return {changes,broken};
+        return {i,broken};
   }
   function readInline(chunk,name){const match=new RegExp('(?:^|\\n)[ \\t]*'+name+'[ \\t]*:[ \\t]*([^\\n]+)','i').exec(chunk);return match?match[1].trim():null;}
   function readField(chunk,name,stops){
@@ -397,10 +419,7 @@
     };
   }
   function locate(change,segments,diagnostics){
-    if(!normalizeNewlines(change.before)||!String(change.before).trim()){diagnostics.push(diag('malformed','Before가 비어 있어 변경을 만들지 않았습니다.'));return null;}
-    if(change.after.length>0&&!change.after.trim()){diagnostics.push(diag('field-limit','After가 공백만 있어 편집에 넣을 수 없습니다. 문장을 지우려면 After를 빈 문자열로 두세요.'));return null;}
-    if(change.before.length>LIMITS.beforeChars||change.after.length>LIMITS.afterChars){diagnostics.push(diag('field-limit','Before 또는 After가 '+LIMITS.beforeChars+'자를 넘어 편집에 넣을 수 없습니다. 더 짧은 인용으로 나누세요.'));return null;}
-    if(CORE_CTL.test(change.before)||CORE_CTL.test(change.after)){diagnostics.push(diag('field-limit','Before 또는 After에 편집으로 넣을 수 없는 제어 문자가 있습니다.'));return null;}
+    if(!validChange(change,diagnostics))return null;
     let scope=segments;
     if(change.segmentId){
       const hits=segments.filter(segment=>segment.id===change.segmentId);
@@ -411,22 +430,38 @@
       scope=segments.filter(segment=>segment.pageIndex===change.pageIndex);
       if(!scope.length){diagnostics.push(diag('missing','그 쪽에는 문단이 없습니다.'));return makeProposal(change,'missing',[],true);}
     }
+    const matches=findChangeMatches(change,scope,diagnostics);
+    if(!matches)return makeProposal(change,'ambiguous',[],false);
+    if(!matches.length){diagnostics.push(diag('missing','Before가 원문에 없습니다.'));return makeProposal(change,'missing',[],true);}
+    const sameExact=matches.every(match=>match.exact===matches[0].exact);
+    const resolved={...change,before:sameExact?matches[0].exact:change.before};
+    if(!validResolvedChange(resolved,diagnostics))return null;
+    if(matches.length>1){diagnostics.push(diag('ambiguous','같은 문장이 '+matches.length+'곳에 있어 자동으로 고르지 않았습니다. 위치를 고르세요.'));return makeProposal(resolved,'ambiguous',matches,true);}
+    return makeProposal(resolved,'matched',matches,true);
+  }
+  function validResolvedChange(resolved,diagnostics){
+    if(resolved.before===resolved.after){diagnostics.push(diag('unchanged','바꾸기 전과 후가 같아 변경을 만들지 않았습니다.'));return false;}
+    if(resolved.before.length>LIMITS.beforeChars||CORE_CTL.test(resolved.before)||!resolved.before.trim()){diagnostics.push(diag('field-limit','원문에서 찾은 Before가 4000자 편집 한도에 맞지 않습니다. 더 짧은 인용으로 나누세요.'));return false;}
+    return true;
+  }
+  function findChangeMatches(change,scope,diagnostics){
     const matches=[];
     for(const segment of scope){
       const found=findAll(segment.text,change.before,LIMITS.matchesListed-matches.length);
-      if(found.overflow){diagnostics.push(diag('match-limit','같은 인용이 너무 많아 위치를 고르지 않았습니다. 더 긴 고유 인용과 문단 ID를 쓰세요.'));return makeProposal(change,'ambiguous',[],false);}
+      if(found.overflow){diagnostics.push(diag('match-limit','같은 인용이 너무 많아 위치를 고르지 않았습니다. 더 긴 고유 인용과 문단 ID를 쓰세요.'));return null;}
       for(const span of found.spans){
         const exact=segment.text.slice(span.start,span.end);
         matches.push({segmentId:segment.id,pageIndex:segment.pageIndex,start:span.start,end:span.end,exact,occurrence:occurrenceAt(segment.text,exact,span.start)});
       }
     }
-    if(!matches.length){diagnostics.push(diag('missing','Before가 원문에 없습니다.'));return makeProposal(change,'missing',[],true);}
-    const sameExact=matches.every(match=>match.exact===matches[0].exact);
-    const resolved={...change,before:sameExact?matches[0].exact:change.before};
-    if(resolved.before===resolved.after){diagnostics.push(diag('unchanged','바꾸기 전과 후가 같아 변경을 만들지 않았습니다.'));return null;}
-    if(resolved.before.length>LIMITS.beforeChars||CORE_CTL.test(resolved.before)||!resolved.before.trim()){diagnostics.push(diag('field-limit','원문에서 찾은 Before가 4000자 편집 한도에 맞지 않습니다. 더 짧은 인용으로 나누세요.'));return null;}
-    if(matches.length>1){diagnostics.push(diag('ambiguous','같은 문장이 '+matches.length+'곳에 있어 자동으로 고르지 않았습니다. 위치를 고르세요.'));return makeProposal(resolved,'ambiguous',matches,true);}
-    return makeProposal(resolved,'matched',matches,true);
+    return matches;
+  }
+  function validChange(change,diagnostics){
+    if(!normalizeNewlines(change.before)||!String(change.before).trim()){diagnostics.push(diag('malformed','Before가 비어 있어 변경을 만들지 않았습니다.'));return false;}
+    if(change.after.length>0&&!change.after.trim()){diagnostics.push(diag('field-limit','After가 공백만 있어 편집에 넣을 수 없습니다. 문장을 지우려면 After를 빈 문자열로 두세요.'));return false;}
+    if(change.before.length>LIMITS.beforeChars||change.after.length>LIMITS.afterChars){diagnostics.push(diag('field-limit','Before 또는 After가 '+LIMITS.beforeChars+'자를 넘어 편집에 넣을 수 없습니다. 더 짧은 인용으로 나누세요.'));return false;}
+    if(CORE_CTL.test(change.before)||CORE_CTL.test(change.after)){diagnostics.push(diag('field-limit','Before 또는 After에 편집으로 넣을 수 없는 제어 문자가 있습니다.'));return false;}
+    return true;
   }
   function dedupe(changes,diagnostics){
     const seen=new Set(),kept=[];
@@ -444,8 +479,7 @@
     for(let i=0;i<proposals.length;i++)for(let j=i+1;j<proposals.length;j++){
       const left=proposals[i],right=proposals[j];
       if(left.before===right.before&&left.after===right.after){
-        const same=left.matches.length===1&&right.matches.length===1&&left.matches[0].segmentId===right.matches[0].segmentId&&left.matches[0].start===right.matches[0].start&&left.matches[0].end===right.matches[0].end;
-        if(same){right.status='drop';diagnostics.push(diag('repeated-fragment','같은 위치의 같은 변경이 겹쳐 한 번만 남겼습니다.'));}
+        dropRepeatedMatch(left,right,diagnostics);
         continue;
       }
       let overlap=false;
@@ -457,35 +491,14 @@
     if(conflict)diagnostics.push(diag('conflicting-replacement','같은 위치에 서로 다른 After가 있어 자동으로 고르지 않았습니다.'));
     return proposals.filter(proposal=>proposal.status!=='drop');
   }
+  function dropRepeatedMatch(left,right,diagnostics){
+        const same=left.matches.length===1&&right.matches.length===1&&left.matches[0].segmentId===right.matches[0].segmentId&&left.matches[0].start===right.matches[0].start&&left.matches[0].end===right.matches[0].end;
+        if(same){right.status='drop';diagnostics.push(diag('repeated-fragment','같은 위치의 같은 변경이 겹쳐 한 번만 남겼습니다.'));}
+  }
   function takePayload(body,segments,diagnostics){
     const fences=fencedBlocks(body);
     if(fences.length){
-      if(body.replace(/```[^\n`]*\n[\s\S]*?```/g,'').trim())diagnostics.push(diag('ignored-prose','코드 블록 밖의 글은 지시로 해석하지 않고 무시했습니다.'));
-      const changes=[],local=[];
-      let rewrite=null,model,hash=null,hashConflict=false,recognized=false;
-      for(const fence of fences){
-        if(fence.info==='diff'||(fence.info!=='json'&&looksLikeDiff(fence.body))){
-          const diff=parseUnified(fence.body,segments);
-          if(diff.error)local.push(diag('malformed',diff.error));
-          else {recognized=true;if(diff.broken)local.push(diag('malformed','unified diff 줄이 깨져 그 덩어리에서 멈추었습니다.'));changes.push(...diff.changes);}
-          continue;
-        }
-        const values=jsonValuesFrom(fence.body);
-        const got=collectJson(values);
-        if(got.recognized){
-          recognized=true;changes.push(...got.changes);local.push(...got.diagnostics);
-          if(got.rewrite&&rewrite==null)rewrite=got.rewrite;
-          if(got.model!==undefined&&model===undefined)model=got.model;
-          if(got.hash){if(hash&&hash!==got.hash)hashConflict=true;else hash=got.hash;}
-          if(got.hashConflict)hashConflict=true;
-          continue;
-        }
-        const pairs=parsePairs(fence.body);
-        if(pairs&&pairs.items&&pairs.items.length){recognized=true;changes.push(...pairs.items);continue;}
-        local.push(diag('malformed','코드 블록을 응답 형식으로 읽지 못했습니다.'));
-      }
-      diagnostics.push(...local);
-      return {recognized,changes,rewrite,model,hash,hashConflict};
+      return takeFenced(body,segments,diagnostics,fences);
     }
     const whole=(()=>{try{return [JSON.parse(body.trim())];}catch{return null;}})();
     const values=whole||scanJsonValues(body);
@@ -509,6 +522,40 @@
     if(rewrite!=null)return {recognized:true,changes:[],rewrite:normalizeNewlines(rewrite),model:undefined,hash:null,hashConflict:false};
     diagnostics.push(looksLikeMarkup(body)?diag('rejected-markup','HTML·스크립트로 실행하지 않았습니다. 바꿀 인용을 찾지 못했습니다.'):diag('malformed','응답에서 JSON, Before/After, unified diff를 찾지 못했습니다.'));
     return {recognized:false,changes:[],rewrite:null,model:undefined,hash:null,hashConflict:false};
+  }
+  function takeFenced(body,segments,diagnostics,fences){
+      if(body.replace(/```[^\n`]*\n[\s\S]*?```/g,'').trim())diagnostics.push(diag('ignored-prose','코드 블록 밖의 글은 지시로 해석하지 않고 무시했습니다.'));
+      const changes=[],local=[];
+      let rewrite=null,model,hash=null,hashConflict=false,recognized=false;
+      for(const fence of fences){
+        const got=readFence(fence,segments,local);
+        if(!got)continue;
+        recognized=true;changes.push(...got.changes);local.push(...got.diagnostics);
+        if(got.rewrite&&rewrite==null)rewrite=got.rewrite;
+        if(got.model!==undefined&&model===undefined)model=got.model;
+        if(got.hash){if(hash&&hash!==got.hash)hashConflict=true;else hash=got.hash;}
+        if(got.hashConflict)hashConflict=true;
+      }
+      diagnostics.push(...local);
+      return {recognized,changes,rewrite,model,hash,hashConflict};
+  }
+  function readFence(fence,segments,diagnostics){
+    if(fence.info==='diff'||(fence.info!=='json'&&looksLikeDiff(fence.body))){
+      const changes=[];
+      return appendDiff(fence.body,segments,changes,diagnostics)?{changes,diagnostics:[]}:null;
+    }
+    const got=collectJson(jsonValuesFrom(fence.body));
+    if(got.recognized)return got;
+    const pairs=parsePairs(fence.body);
+    if(pairs&&pairs.items&&pairs.items.length)return {changes:pairs.items,diagnostics:[]};
+    diagnostics.push(diag('malformed','코드 블록을 응답 형식으로 읽지 못했습니다.'));
+    return null;
+  }
+  function appendDiff(body,segments,changes,diagnostics){
+    const diff=parseUnified(body,segments);
+    if(diff.error){diagnostics.push(diag('malformed',diff.error));return false;}
+    if(diff.broken)diagnostics.push(diag('malformed','unified diff 줄이 깨져 그 덩어리에서 멈추었습니다.'));
+    changes.push(...diff.changes);return true;
   }
   function parse(text,options){
     const diagnostics=[];
@@ -539,8 +586,11 @@
     changes=dedupe(changes,diagnostics);
     let proposals=changes.map(change=>locate(change,normalized.segments,diagnostics)).filter(Boolean);
     proposals=markConflicts(proposals,diagnostics);
-    if(payload.recognized&&!proposals.length&&!diagnostics.some(item=>['unchanged','full-rewrite-limited','full-rewrite-span','input-limit','change-limit','field-limit','malformed','file-hash-mismatch'].includes(item.code)))diagnostics.push(diag('empty','변경 목록이 비어 있습니다. 검증된 실행이 아닙니다.'));
+    diagnoseEmpty(payload,proposals,diagnostics);
     return {proposals,diagnostics};
+  }
+  function diagnoseEmpty(payload,proposals,diagnostics){
+    if(payload.recognized&&!proposals.length&&!diagnostics.some(item=>['unchanged','full-rewrite-limited','full-rewrite-span','input-limit','change-limit','field-limit','malformed','file-hash-mismatch'].includes(item.code)))diagnostics.push(diag('empty','변경 목록이 비어 있습니다. 검증된 실행이 아닙니다.'));
   }
   return {VERSION,ORIGIN,LIMITS,pageIndexFromLabel,normalizeSegments,buildPrompt,parse};
 });

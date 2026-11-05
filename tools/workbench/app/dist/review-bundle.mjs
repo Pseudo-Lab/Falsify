@@ -42,64 +42,122 @@ async function sha256(s){return Array.from(new Uint8Array(await globalThis.crypt
 function utf8Bytes(s){return new TextEncoder().encode(s).length;}
 function boundedJSON(v){let raw;try{raw=JSON.stringify(v);}catch{fail('malformed');}if(typeof raw!=='string')fail('malformed');const canon=canonicalJSON(v);if(utf8Bytes(raw)>MAX_ARCHIVE_BYTES||utf8Bytes(canon)>MAX_ARCHIVE_BYTES)fail('oversize');return v;}
 
+function checkExperimentValidators(red,blue,review){
+  if(!red||typeof red.validateResponse!=='function'||typeof red.patches!=='function'||!blue||typeof blue.validateResponse!=='function'||typeof blue.validatePlan!=='function'||typeof blue.overlaps!=='function'||!review||typeof review.validateExtras!=='function')fail('validators');
+}
 function validatorsOf(v,kind){
   const g=globalThis,harness=v?.harness||g.FalsifyHarness;
   if(!harness||typeof harness.validate!=='function'||typeof harness.hash!=='function')fail('validators');
   if(kind==='harness')return {harness};
   const red=v?.red||g.FalsifyDocumentRed,blue=v?.blue||g.FalsifyDocumentBlue,review=v?.review||g.FalsifyReview;
-  if(!red||typeof red.validateResponse!=='function'||typeof red.patches!=='function'||!blue||typeof blue.validateResponse!=='function'||typeof blue.validatePlan!=='function'||typeof blue.overlaps!=='function'||!review||typeof review.validateExtras!=='function')fail('validators');
+  checkExperimentValidators(red,blue,review);
   return {harness,red,blue,review};
+}
+function finalPatch(p,original){if(!plain(p)||Object.keys(p).some(k=>!PATCH_KEYS.includes(k)))fail('malformed','RED final patch is malformed.');const c=original.get(p.id);if(!c)fail('conflict','RED final patch is not in the stored response.');if(p.segmentId!==c.segmentId||p.before!==c.before||typeof p.after!=='string')fail('conflict','RED final patch does not match the stored response.');if('edited' in p&&typeof p.edited!=='boolean')fail('malformed');return {id:c.id,segmentId:c.segmentId,before:c.before,after:p.after,edited:p.after!==c.after,selected:true};}
+function finalOutput(f){
+  const outputFileHash=f.outputFileHash??null;if(outputFileHash!==null&&(typeof outputFileHash!=='string'||!HEX.test(outputFileHash)))fail('hash_mismatch');
+  const verification=f.verification??null;if(verification!==null&&(!plain(verification)||JSON.stringify(verification).length>LIMITS.verification))fail('oversize');
+  return {outputFileHash,verification};
 }
 function finalState(run,f,red){
   if(!plain(f)||Object.keys(f).some(k=>!['selected','outputFileHash','verification'].includes(k))||!Array.isArray(f.selected)||!f.selected.length||f.selected.length>12)fail('malformed','RED final state is malformed.');
   const original=new Map((run.response?.candidates||[]).map(c=>[c?.id,c]));
-  const chosen=f.selected.map(p=>{if(!plain(p)||Object.keys(p).some(k=>!PATCH_KEYS.includes(k)))fail('malformed','RED final patch is malformed.');const c=original.get(p.id);if(!c)fail('conflict','RED final patch is not in the stored response.');if(p.segmentId!==c.segmentId||p.before!==c.before||typeof p.after!=='string')fail('conflict','RED final patch does not match the stored response.');if('edited' in p&&typeof p.edited!=='boolean')fail('malformed');return {id:c.id,segmentId:c.segmentId,before:c.before,after:p.after,edited:p.after!==c.after,selected:true};});
+  const chosen=f.selected.map(p=>finalPatch(p,original));
   if(new Set(chosen.map(c=>c.id)).size!==chosen.length)fail('conflict');
   let selected;try{selected=red.patches({segments:run.segments},chosen);}catch{fail('malformed','RED final state does not match the stored response.');}
-  const outputFileHash=f.outputFileHash??null;if(outputFileHash!==null&&(typeof outputFileHash!=='string'||!HEX.test(outputFileHash)))fail('hash_mismatch');
-  const verification=f.verification??null;if(verification!==null&&(!plain(verification)||JSON.stringify(verification).length>LIMITS.verification))fail('oversize');
+  const {outputFileHash,verification}=finalOutput(f);
   return {selected,outputFileHash,verification:copy(verification)};
 }
+function checkVisualMetadata(v,r){if(!exact(v,['fileHash','sourceHash','page','bbox','rotation','width','height','mime','sha256','provenance','artifact'])||v.fileHash!==r.fileHash||v.sourceHash!==r.sourceHash||!HEX.test(v.sha256)||v.mime!=='image/png'||v.provenance!=='client-declared-pdf-association'||v.artifact!=='unavailable'||!Number.isSafeInteger(v.page)||v.page<1||![0,90,180,270].includes(v.rotation))fail('malformed','Visual evidence reference is malformed.');}
+function checkVisualGeometry(v){if(!Array.isArray(v.bbox)||v.bbox.length!==4||!v.bbox.every(Number.isFinite)||v.bbox[0]<0||v.bbox[1]<0||v.bbox[2]<=0||v.bbox[3]<=0||!Number.isInteger(v.width)||!Number.isInteger(v.height)||v.width!==Math.ceil(v.bbox[2]*2)||v.height!==Math.ceil(v.bbox[3]*2)||v.width>4096||v.height>4096||v.width*v.height>8000000)fail('malformed','Visual evidence reference is malformed.');}
 function checkVisualRefs(items,r){
   const hasGold=x=>x&&typeof x==='object'&&(own(x,'gold')||Object.values(x).some(hasGold));
   if(r.role!=='blue'||!Array.isArray(items)||items.length<1||items.length>2||hasGold(r.response))fail('malformed','Visual evidence is malformed.');
   for(const v of items){
-    if(!exact(v,['fileHash','sourceHash','page','bbox','rotation','width','height','mime','sha256','provenance','artifact'])||v.fileHash!==r.fileHash||v.sourceHash!==r.sourceHash||!HEX.test(v.sha256)||v.mime!=='image/png'||v.provenance!=='client-declared-pdf-association'||v.artifact!=='unavailable'||!Number.isSafeInteger(v.page)||v.page<1||![0,90,180,270].includes(v.rotation)||!Array.isArray(v.bbox)||v.bbox.length!==4||!v.bbox.every(Number.isFinite)||v.bbox[0]<0||v.bbox[1]<0||v.bbox[2]<=0||v.bbox[3]<=0||!Number.isInteger(v.width)||!Number.isInteger(v.height)||v.width!==Math.ceil(v.bbox[2]*2)||v.height!==Math.ceil(v.bbox[3]*2)||v.width>4096||v.height>4096||v.width*v.height>8000000)fail('malformed','Visual evidence reference is malformed.');
+    checkVisualMetadata(v,r);
+    checkVisualGeometry(v);
   }
+}
+function checkRunConditions(r){
+  if(!['local-codex','manual-unverified','imported-unverified'].includes(r.provenance)||!Number.isInteger(r.maxCalls)||r.maxCalls<1||r.maxCalls>32)fail('malformed','Run identity or conditions are malformed.');
+  if(typeof r.fileHash!=='string'||!HEX.test(r.fileHash)||typeof r.model!=='string'||!r.model||r.model.length>120||typeof r.createdAt!=='string'||!Number.isFinite(Date.parse(r.createdAt)))fail('malformed','Run identity or conditions are malformed.');
+}
+function checkRunOptionalFields(r){
+  if('sourceName' in r&&(typeof r.sourceName!=='string'||!r.sourceName.trim()||r.sourceName.length>200)||'format' in r&&(typeof r.format!=='string'||!r.format.trim()||r.format.length>40))fail('malformed');
+  if('requestId' in r&&(typeof r.requestId!=='string'||!r.requestId.trim()||r.requestId.length>200))fail('malformed');
+}
+function checkRunIdentity(r,prior){
+  if(typeof r.id!=='string'||!r.id||r.id.length>LIMITS.runId||prior.some(x=>x.id===r.id)||!['red','blue'].includes(r.role)||typeof r.revision!=='string'||!r.revision||r.revision.length>160)fail('malformed','Run identity or conditions are malformed.');
+  checkRunConditions(r);
+  checkRunOptionalFields(r);
+}
+function validateRedResponse(r,doc,V){if(r.level!==undefined&&![1,2,3].includes(r.level))fail('malformed','RED level is malformed.');if(r.attackTypes!==undefined){V.red.types(r.attackTypes);if(r.level!==undefined&&(r.attackTypes.length!==1||r.attackTypes[0]!==V.red.types(r.level)[0]))fail('malformed','RED level and attack types disagree.');}else if(r.level===undefined)fail('malformed','RED attack types are missing.');const candidates=V.red.validateResponse(doc,r.response);if(r.attackTypes&&candidates.some(c=>c.attackTypes.some(t=>!r.attackTypes.includes(t))))fail('malformed','Candidate attack types were not selected.');}
+function checkRunSegments(r){
+  if(!Array.isArray(r.segments)||!r.segments.length||r.segments.length>LIMITS.segments||r.segments.some(s=>!plain(s)||typeof s.id!=='string'||!s.id||s.id.length>80||typeof s.label!=='string'||s.label.length>200||typeof s.text!=='string'||!s.text.trim())||new Set(r.segments.map(s=>s.id)).size!==r.segments.length)fail('malformed','Run source segments are malformed.');
+}
+function checkRunVisualMode(r){
+  if('inputMode' in r&&(!['text','visual'].includes(r.inputMode)||(r.inputMode==='visual')!==('visualEvidence' in r)))fail('malformed','Input mode and visual evidence do not match.');
+  if('visualEvidence' in r)checkVisualRefs(r.visualEvidence,r);
 }
 async function checkRun(r,harnesses,prior,V){
   if(!plain(r)||Object.keys(r).some(k=>!RUN_KEYS.includes(k)))fail('malformed','Run record has an unknown field.');
-  if(typeof r.id!=='string'||!r.id||r.id.length>LIMITS.runId||prior.some(x=>x.id===r.id)||!['red','blue'].includes(r.role)||typeof r.revision!=='string'||!r.revision||r.revision.length>160||!['local-codex','manual-unverified','imported-unverified'].includes(r.provenance)||!Number.isInteger(r.maxCalls)||r.maxCalls<1||r.maxCalls>32||typeof r.fileHash!=='string'||!HEX.test(r.fileHash)||typeof r.model!=='string'||!r.model||r.model.length>120||typeof r.createdAt!=='string'||!Number.isFinite(Date.parse(r.createdAt)))fail('malformed','Run identity or conditions are malformed.');
-  if('sourceName' in r&&(typeof r.sourceName!=='string'||!r.sourceName.trim()||r.sourceName.length>200)||'format' in r&&(typeof r.format!=='string'||!r.format.trim()||r.format.length>40))fail('malformed');
-  if('requestId' in r&&(typeof r.requestId!=='string'||!r.requestId.trim()||r.requestId.length>200))fail('malformed');
+  checkRunIdentity(r,prior);
   let harness;try{harness=V.harness.validate(r.harness,r.role);}catch{fail('malformed','Run harness is malformed.');}
   if(await V.harness.hash(harness)!==r.harnessHash||!harnesses.some(h=>h.hash===r.harnessHash))fail('hash_mismatch');
-  if(!Array.isArray(r.segments)||!r.segments.length||r.segments.length>LIMITS.segments||r.segments.some(s=>!plain(s)||typeof s.id!=='string'||!s.id||s.id.length>80||typeof s.label!=='string'||s.label.length>200||typeof s.text!=='string'||!s.text.trim())||new Set(r.segments.map(s=>s.id)).size!==r.segments.length)fail('malformed','Run source segments are malformed.');
+  checkRunSegments(r);
   const source=r.segments.map(s=>s.text).join('\n\n');if(source.length>LIMITS.source||await sha256(source)!==r.sourceHash)fail('hash_mismatch');
   const doc={revision:r.revision,sourceHash:r.sourceHash,segments:r.segments};
-  if('inputMode' in r&&(!['text','visual'].includes(r.inputMode)||(r.inputMode==='visual')!==('visualEvidence' in r)))fail('malformed','Input mode and visual evidence do not match.');
-  if('visualEvidence' in r)checkVisualRefs(r.visualEvidence,r);
-  try{if(r.role==='blue')V.blue.validateResponse(doc,r.response,'visualEvidence' in r?{visualEvidence:r.visualEvidence}:undefined);else{if(r.level!==undefined&&![1,2,3].includes(r.level))fail('malformed','RED level is malformed.');if(r.attackTypes!==undefined){V.red.types(r.attackTypes);if(r.level!==undefined&&(r.attackTypes.length!==1||r.attackTypes[0]!==V.red.types(r.level)[0]))fail('malformed','RED level and attack types disagree.');}else if(r.level===undefined)fail('malformed','RED attack types are missing.');const candidates=V.red.validateResponse(doc,r.response);if(r.attackTypes&&candidates.some(c=>c.attackTypes.some(t=>!r.attackTypes.includes(t))))fail('malformed','Candidate attack types were not selected.');}}catch(e){if(e instanceof ReviewBundleError)throw e;fail('malformed','Stored model response failed validation.');}
+  checkRunVisualMode(r);
+  try{if(r.role==='blue')V.blue.validateResponse(doc,r.response,'visualEvidence' in r?{visualEvidence:r.visualEvidence}:undefined);else validateRedResponse(r,doc,V);}catch(e){if(e instanceof ReviewBundleError)throw e;fail('malformed','Stored model response failed validation.');}
   if('finalState' in r&&(r.role!=='red'||stable(finalState(r,r.finalState,V.red))!==stable(r.finalState)))fail('conflict','RED final state does not match the stored response.');
   return copy(r);
 }
 // An imported-unverified snapshot may cite a root that keeps another provenance. Parent identity still has to match, and a non-imported snapshot may not.
+function checkSnapshotResponse(root,r){if(root.level!==r.level||JSON.stringify(root.attackTypes?.slice().sort()??null)!==JSON.stringify(r.attackTypes?.slice().sort()??null)||root.maxCalls!==r.maxCalls||stable(root.response)!==stable(r.response))fail('missing_ref','Snapshot parent is missing or does not match the stored response.');}
+function checkSnapshotContent(root,r){if(root.sourceHash!==r.sourceHash||root.fileHash!==r.fileHash||root.model!==r.model||(root.provenance!==r.provenance&&r.provenance!=='imported-unverified')||root.revision!==r.revision||root.harnessHash!==r.harnessHash||'requestId' in root&&root.requestId!==r.requestId)fail('missing_ref','Snapshot parent is missing or does not match the stored response.');checkSnapshotResponse(root,r);}
+function checkSnapshotLink(r,all){
+  if('snapshotOf' in r){const root=typeof r.snapshotOf==='string'&&all.find(x=>x.id===r.snapshotOf);if(r.role!=='red'||!r.finalState||!root||root.id===r.id||'snapshotOf' in root||root.role!=='red')fail('missing_ref','Snapshot parent is missing or does not match the stored response.');checkSnapshotContent(root,r);}
+}
 function checkLinks(r,all){
-  if('snapshotOf' in r){const root=typeof r.snapshotOf==='string'&&all.find(x=>x.id===r.snapshotOf);if(r.role!=='red'||!r.finalState||!root||root.id===r.id||'snapshotOf' in root||root.role!=='red'||root.sourceHash!==r.sourceHash||root.fileHash!==r.fileHash||root.model!==r.model||(root.provenance!==r.provenance&&r.provenance!=='imported-unverified')||root.revision!==r.revision||root.harnessHash!==r.harnessHash||'requestId' in root&&root.requestId!==r.requestId||root.level!==r.level||JSON.stringify(root.attackTypes?.slice().sort()??null)!==JSON.stringify(r.attackTypes?.slice().sort()??null)||root.maxCalls!==r.maxCalls||stable(root.response)!==stable(r.response))fail('missing_ref','Snapshot parent is missing or does not match the stored response.');}
+  checkSnapshotLink(r,all);
   if('sourceRunId' in r){const red=typeof r.sourceRunId==='string'&&all.find(x=>x.id===r.sourceRunId);if(r.role!=='blue'||red?.role!=='red'||red.finalState?.outputFileHash!==r.fileHash)fail('missing_ref','BLUE source RED run is missing or its output hash differs.');}
 }
 const REVIEW_KEYS=['id','runId','createdAt','reviewer','caseLabel','verdict','score','note','comparison','findingAssessments','reviewContext'];
-function checkReview(v,runs,prior,V){
-  if(!plain(v)||Object.keys(v).some(k=>!REVIEW_KEYS.includes(k))||!own(v,'comparison')||typeof v.id!=='string'||!v.id||v.id.length>160||prior.some(x=>x.id===v.id)||typeof v.runId!=='string'||!runs.some(r=>r.id===v.runId)||!['uncertain','supported','unsupported','mixed'].includes(v.verdict)||v.verdict==='uncertain'&&v.score!==null||v.score!==null&&(!Number.isInteger(v.score)||v.score<1||v.score>5)||typeof v.reviewer!=='string'||!v.reviewer.trim()||v.reviewer.length>120||typeof v.caseLabel!=='string'||!v.caseLabel.trim()||v.caseLabel.length>160||typeof v.note!=='string'||!v.note.trim()||v.note.length>3000||typeof v.createdAt!=='string'||!Number.isFinite(Date.parse(v.createdAt)))fail('malformed','Review record is malformed.');
-  const run=runs.find(r=>r.id===v.runId);
-  if(v.comparison!==null){const c=v.comparison;if(run.role!=='blue'||!plain(c)||Object.keys(c).some(k=>!['outputFileHash','selected','assessments','sourceRunId'].includes(k)))fail('malformed','BLUE comparison record is malformed.');
+function checkComparisonSource(c,runs){
     if('sourceRunId' in c){const red=runs.find(x=>x.id===c.sourceRunId);if(red?.role!=='red'||red.finalState?.outputFileHash!==c.outputFileHash||stable((red.finalState?.selected||[]).map(p=>({id:p.id,before:p.before,after:p.after,label:p.label})))!==stable((c.selected||[]).map(p=>({id:p.id,before:p.before,after:p.after,label:p.label}))))fail('missing_ref','Review comparison RED source is missing or its final text differs.');}
+}
+function checkReviewComparison(v,run,runs,V){
+  if(v.comparison!==null){const c=v.comparison;if(run.role!=='blue'||!plain(c)||Object.keys(c).some(k=>!['outputFileHash','selected','assessments','sourceRunId'].includes(k)))fail('malformed','BLUE comparison record is malformed.');
+    checkComparisonSource(c,runs);
     let patches;try{patches=V.blue.validatePlan(run,{schema:'falsify.document-edit-plan.v1',outputFileHash:c.outputFileHash,selected:c.selected});}catch{fail('malformed','BLUE comparison does not match the stored run.');}
     if(!Array.isArray(c.assessments)||c.assessments.length!==patches.length)fail('malformed');
     for(let i=0;i<patches.length;i++){const a=c.assessments[i],p=patches[i];if(!plain(a)||a.id!==p.id||!['pending','detected','missed','uncertain'].includes(a.verdict)||typeof a.note!=='string'||a.note.length>3000||JSON.stringify(a.quoteOverlapFindingIds)!==JSON.stringify(V.blue.overlaps(p,run.response.findings)))fail('conflict','Review item link does not match the stored response.');}
   }
+}
+function checkReviewerDetails(v){
+  if(typeof v.reviewer!=='string'||!v.reviewer.trim()||v.reviewer.length>120||typeof v.caseLabel!=='string'||!v.caseLabel.trim()||v.caseLabel.length>160||typeof v.note!=='string'||!v.note.trim()||v.note.length>3000||typeof v.createdAt!=='string'||!Number.isFinite(Date.parse(v.createdAt)))fail('malformed','Review record is malformed.');
+}
+function checkReviewJudgment(v){
+  if(!['uncertain','supported','unsupported','mixed'].includes(v.verdict)||v.verdict==='uncertain'&&v.score!==null||v.score!==null&&(!Number.isInteger(v.score)||v.score<1||v.score>5))fail('malformed','Review record is malformed.');
+  checkReviewerDetails(v);
+}
+function checkReviewEnvelope(v,runs,prior){
+  if(!plain(v)||Object.keys(v).some(k=>!REVIEW_KEYS.includes(k))||!own(v,'comparison')||typeof v.id!=='string'||!v.id||v.id.length>160||prior.some(x=>x.id===v.id)||typeof v.runId!=='string'||!runs.some(r=>r.id===v.runId))fail('malformed','Review record is malformed.');
+  checkReviewJudgment(v);
+}
+function checkReview(v,runs,prior,V){
+  checkReviewEnvelope(v,runs,prior);
+  const run=runs.find(r=>r.id===v.runId);
+  checkReviewComparison(v,run,runs,V);
   try{V.review.validateExtras(v,run);}catch{fail('malformed','Review item judgments do not match the stored response.');}
   return copy(v);
+}
+function expandClosure(runs,reviews,byId,included,add){
+  let grew=true;
+  while(grew){grew=false;
+    for(const v of reviews){if(!plain(v)||!included.has(v.runId))continue;const red=plain(v.comparison)?v.comparison.sourceRunId:undefined;if(red&&!included.has(red)){add(red);grew=true;}}
+    for(const id of [...included]){const r=byId.get(id);if(r?.role!=='blue'||r.sourceRunId)continue;const src=runs.filter(x=>x&&x.role==='red'&&x.finalState&&x.finalState.outputFileHash===r.fileHash).at(-1);if(src&&!included.has(src.id)){add(src.id);grew=true;}}
+  }
 }
 function closureIds(runs,reviews,selectedRunId){
   const byId=new Map();
@@ -108,21 +166,21 @@ function closureIds(runs,reviews,selectedRunId){
   const included=new Set(),stack=[];
   const add=id=>{if(!id)return;if(stack.includes(id))fail('cycle');if(included.has(id))return;if(!byId.has(id))fail('missing_ref');stack.push(id);included.add(id);const r=byId.get(id);add(r.snapshotOf);add(r.sourceRunId);stack.pop();};
   add(selectedRunId);
-  let grew=true;
-  while(grew){grew=false;
-    for(const v of reviews){if(!plain(v)||!included.has(v.runId))continue;const red=plain(v.comparison)?v.comparison.sourceRunId:undefined;if(red&&!included.has(red)){add(red);grew=true;}}
-    for(const id of [...included]){const r=byId.get(id);if(r?.role!=='blue'||r.sourceRunId)continue;const src=runs.filter(x=>x&&x.role==='red'&&x.finalState&&x.finalState.outputFileHash===r.fileHash).at(-1);if(src&&!included.has(src.id)){add(src.id);grew=true;}}
-  }
+  expandClosure(runs,reviews,byId,included,add);
   return included;
 }
-async function validateLedger(ledger,selectedRunId,V){
+function validateHarnessRecord(h,V){if(!exact(h,['config','hash']))fail('malformed','Harness record shape is malformed.');let config;try{config=V.harness.validate(h.config);}catch{fail('malformed','Harness config is malformed.');}return config;}
+function checkLedgerEnvelope(ledger){
   if(!exact(ledger,['schema','harnesses','runs','reviews'])||ledger.schema!==LEDGER_SCHEMA)fail('malformed','Review bundle ledger shape is malformed.');
   if(!Array.isArray(ledger.harnesses)||!Array.isArray(ledger.runs)||!Array.isArray(ledger.reviews))fail('malformed');
   if(ledger.harnesses.length>LIMITS.harnesses||ledger.runs.length>LIMITS.runs||ledger.reviews.length>LIMITS.reviews)fail('oversize');
+}
+async function validateLedger(ledger,selectedRunId,V){
+  checkLedgerEnvelope(ledger);
   const ids=closureIds(ledger.runs,ledger.reviews,selectedRunId);
   if(ledger.runs.some(r=>!ids.has(r?.id)))fail('conflict','Archive contains a run outside the selected-case closure.');
   const harnesses=[];
-  for(const h of ledger.harnesses){if(!exact(h,['config','hash']))fail('malformed','Harness record shape is malformed.');let config;try{config=V.harness.validate(h.config);}catch{fail('malformed','Harness config is malformed.');}if(await V.harness.hash(config)!==h.hash||harnesses.some(x=>x.hash===h.hash))fail('hash_mismatch');if(!ledger.runs.some(r=>r&&r.harnessHash===h.hash))fail('conflict','Archive contains a harness the selected case does not use.');harnesses.push({config:copy(config),hash:h.hash});}
+  for(const h of ledger.harnesses){let config=validateHarnessRecord(h,V);if(await V.harness.hash(config)!==h.hash||harnesses.some(x=>x.hash===h.hash))fail('hash_mismatch');if(!ledger.runs.some(r=>r&&r.harnessHash===h.hash))fail('conflict','Archive contains a harness the selected case does not use.');harnesses.push({config:copy(config),hash:h.hash});}
   const runs=[];
   for(const r of ledger.runs)runs.push(await checkRun(r,harnesses,runs,V));
   for(const r of runs)checkLinks(r,runs);
@@ -211,31 +269,35 @@ function paperBbox(bbox,real){
   if(real&&!(out[0]<out[2]&&out[1]<out[3]))fail('malformed','Edit anchor box is malformed.');
   return out;
 }
-function paperAnchor(anchor){
-  if(anchor===null)return null;
-  if(!plain(anchor))fail('malformed','Edit anchor is malformed.');
-  if(own(anchor,'style')||own(anchor,'bbox')&&anchor.bbox===null){
+function realPaperAnchor(anchor){
     if(!exact(anchor,REAL_ANCHOR_KEYS))fail('malformed','Edit anchor is malformed.');
     if(!Number.isInteger(anchor.start)||anchor.start<0||anchor.start>200000)fail('malformed','Edit anchor offset is malformed.');
     if(!Number.isInteger(anchor.end)||anchor.end<=anchor.start||anchor.end>200000)fail('malformed','Edit anchor offset is malformed.');
     if(!Number.isInteger(anchor.occurrence)||anchor.occurrence<0||anchor.occurrence>999)fail('malformed','Edit anchor offset is malformed.');
     return {start:anchor.start,end:anchor.end,occurrence:anchor.occurrence,bbox:paperBbox(anchor.bbox,true),style:paperStyle(anchor.style)};
   }
+function appendLegacyStyle(anchor,out){
+  if(own(anchor,'fontSize')){if(typeof anchor.fontSize!=='number'||!Number.isFinite(anchor.fontSize)||anchor.fontSize<=0||anchor.fontSize>512)fail('malformed');out.fontSize=anchor.fontSize;}
+  if(own(anchor,'fontName')){if(typeof anchor.fontName!=='string'||!anchor.fontName.trim()||anchor.fontName.length>80)fail('malformed');out.fontName=anchor.fontName;}
+  if(own(anchor,'color')){if(typeof anchor.color!=='string'||!/^#[0-9a-fA-F]{3,8}$/.test(anchor.color))fail('malformed');out.color=anchor.color;}
+}
+function paperAnchor(anchor){
+  if(anchor===null)return null;
+  if(!plain(anchor))fail('malformed','Edit anchor is malformed.');
+  if(own(anchor,'style')||own(anchor,'bbox')&&anchor.bbox===null)return realPaperAnchor(anchor);
   if(!Object.keys(anchor).length||Object.keys(anchor).some(key=>!LEGACY_ANCHOR_KEYS.includes(key)))fail('malformed','Edit anchor is malformed.');
   const out={};
   if(own(anchor,'bbox'))out.bbox=paperBbox(anchor.bbox,false);
   for(const key of ['occurrence','start','end'])if(own(anchor,key)){if(!Number.isInteger(anchor[key])||anchor[key]<0||anchor[key]>10000000)fail('malformed','Edit anchor offset is malformed.');out[key]=anchor[key];}
-  if(own(anchor,'fontSize')){if(typeof anchor.fontSize!=='number'||!Number.isFinite(anchor.fontSize)||anchor.fontSize<=0||anchor.fontSize>512)fail('malformed');out.fontSize=anchor.fontSize;}
-  if(own(anchor,'fontName')){if(typeof anchor.fontName!=='string'||!anchor.fontName.trim()||anchor.fontName.length>80)fail('malformed');out.fontName=anchor.fontName;}
-  if(own(anchor,'color')){if(typeof anchor.color!=='string'||!/^#[0-9a-fA-F]{3,8}$/.test(anchor.color))fail('malformed');out.color=anchor.color;}
+  appendLegacyStyle(anchor,out);
   return out;
 }
-function paperHistory(list,edit){
+function checkHistoryEnvelope(list,edit){
   if(!Array.isArray(list)||list.length<1||list.length>12)fail('malformed','Edit history is malformed.');
   if(!clockOf(edit.createdAt)||!clockOf(edit.updatedAt)||edit.createdAt>edit.updatedAt)fail('malformed','Edit history is malformed.');
   if(!edit.anchor||!Number.isInteger(edit.anchor.start)||!Number.isInteger(edit.anchor.end)||!Number.isInteger(edit.anchor.occurrence))fail('malformed','Edit history range does not match the edit.');
-  const history=[];
-  for(const entry of list){
+}
+function paperHistoryEntry(entry,edit){
     if(!exact(entry,HISTORY_KEYS))fail('malformed','Edit history is malformed.');
     if(!clockOf(entry.revision)||!clockOf(entry.at))fail('malformed','Edit history is malformed.');
     if(typeof entry.after!=='string'||entry.after.length>LIMITS.editText||entry.after===edit.before)fail('malformed','Edit history is malformed.');
@@ -243,22 +305,29 @@ function paperHistory(list,edit){
     rejectPaperCarrier(entry.after,0);
     const anchor=paperAnchor(entry.anchor);
     if(!anchor||anchor.start!==edit.anchor.start||anchor.end!==edit.anchor.end||anchor.occurrence!==edit.anchor.occurrence)fail('malformed','Edit history range does not match the edit.');
-    history.push({revision:entry.revision,at:entry.at,after:entry.after,enabled:entry.enabled,anchor});
-  }
+    return {revision:entry.revision,at:entry.at,after:entry.after,enabled:entry.enabled,anchor};
+}
+function paperHistory(list,edit){
+  checkHistoryEnvelope(list,edit);
+  const history=[];
+  for(const entry of list){const row=paperHistoryEntry(entry,edit);history.push(row);}
   const first=history[0],last=history[history.length-1];
   if(first.at!==edit.createdAt||last.at!==edit.updatedAt||last.after!==edit.after||last.enabled!==edit.enabled)fail('malformed','Edit history does not match the current After.');
   if(JSON.stringify(last.anchor)!==JSON.stringify(edit.anchor))fail('malformed','Edit history does not match the current After.');
   return {createdAt:edit.createdAt,updatedAt:edit.updatedAt,history};
+}
+function checkPaperSegment(segment,ids){
+    if(!plain(segment)||Object.keys(segment).some(key=>!['id','label','text','pageIndex'].includes(key))||!own(segment,'id')||!own(segment,'label')||!own(segment,'text'))fail('malformed','Paper source segment is malformed.');
+    if(typeof segment.id!=='string'||!segment.id||segment.id.length>80||ids.has(segment.id))fail('conflict','Duplicate source segment id.');
+    ids.add(segment.id);
+    if(typeof segment.label!=='string'||!segment.label.trim()||segment.label.length>200||typeof segment.text!=='string')fail('malformed','Paper source segment text is malformed.');
 }
 function paperSegments(list){
   if(!Array.isArray(list))fail('malformed','Paper source segments are malformed.');
   if(list.length>LIMITS.segments)fail('oversize');
   const ids=new Set(),out=[];let chars=0;
   for(const segment of list){
-    if(!plain(segment)||Object.keys(segment).some(key=>!['id','label','text','pageIndex'].includes(key))||!own(segment,'id')||!own(segment,'label')||!own(segment,'text'))fail('malformed','Paper source segment is malformed.');
-    if(typeof segment.id!=='string'||!segment.id||segment.id.length>80||ids.has(segment.id))fail('conflict','Duplicate source segment id.');
-    ids.add(segment.id);
-    if(typeof segment.label!=='string'||!segment.label.trim()||segment.label.length>200||typeof segment.text!=='string')fail('malformed','Paper source segment text is malformed.');
+    checkPaperSegment(segment,ids);
     chars+=segment.text.length;if(chars>LIMITS.source)fail('oversize');
     rejectPaperCarrier(segment.text,0);
     const row={id:segment.id,label:segment.label.trim(),text:segment.text};
@@ -267,27 +336,34 @@ function paperSegments(list){
   }
   return out;
 }
-function paperEdits(list,segments){
-  if(!Array.isArray(list))fail('malformed','Paper edits are malformed.');
-  if(list.length>LIMITS.paperEdits)fail('oversize');
-  const ids=new Set(),known=new Set(segments.map(segment=>segment.id)),out=[];
-  for(const edit of list){
+function checkPaperEditIdentity(edit,ids){
     if(!plain(edit)||Object.keys(edit).some(key=>!['id','enabled','pageIndex','segmentId','before','after','anchor','origin',...EDIT_META_KEYS].includes(key)))fail('malformed','Paper edit is malformed.');
     for(const key of ['id','enabled','pageIndex','before','after','origin'])if(!own(edit,key))fail('malformed','Paper edit is missing captured text or provenance.');
     if(typeof edit.id!=='string'||!edit.id||edit.id.length>80||ids.has(edit.id))fail('conflict','Duplicate edit id.');
     ids.add(edit.id);
+}
+function checkPaperEditContent(edit){
     if(typeof edit.enabled!=='boolean'||!Number.isInteger(edit.pageIndex)||edit.pageIndex<0||edit.pageIndex>100000)fail('malformed','Paper edit page or enabled flag is malformed.');
     if(typeof edit.before!=='string'||typeof edit.after!=='string'||edit.before.length>LIMITS.editText||edit.after.length>LIMITS.editText)fail('malformed','Paper edit text is malformed.');
     if(!PAPER_ORIGINS.includes(edit.origin))fail('malformed','Edit origin is not human, external-ai-import, or ai-proposal.');
     rejectPaperCarrier(edit.before,0);rejectPaperCarrier(edit.after,0);
+}
+function paperEditRow(edit,ids,known){
+    checkPaperEditIdentity(edit,ids);
+    checkPaperEditContent(edit);
     const anchor=own(edit,'anchor')?paperAnchor(edit.anchor):null;
     if(anchor&&Number.isInteger(anchor.start)&&Number.isInteger(anchor.end)&&anchor.end-anchor.start!==edit.before.length)fail('malformed','Edit anchor offset is malformed.');
     const row={id:edit.id,enabled:edit.enabled,pageIndex:edit.pageIndex,before:edit.before,after:edit.after,origin:edit.origin,anchor};
     if(own(edit,'segmentId')){if(typeof edit.segmentId!=='string'||!edit.segmentId||edit.segmentId.length>80||!known.has(edit.segmentId))fail('conflict','Edit segment is not in the captured source.');row.segmentId=edit.segmentId;}
     const meta=EDIT_META_KEYS.filter(key=>own(edit,key));
     if(meta.length){if(meta.length!==EDIT_META_KEYS.length)fail('malformed','Edit history is malformed.');const history=paperHistory(edit.history,{...row,createdAt:edit.createdAt,updatedAt:edit.updatedAt});row.createdAt=history.createdAt;row.updatedAt=history.updatedAt;row.history=history.history;}
-    out.push(row);
-  }
+    return row;
+}
+function paperEdits(list,segments){
+  if(!Array.isArray(list))fail('malformed','Paper edits are malformed.');
+  if(list.length>LIMITS.paperEdits)fail('oversize');
+  const ids=new Set(),known=new Set(segments.map(segment=>segment.id)),out=[];
+  for(const edit of list){const row=paperEditRow(edit,ids,known);out.push(row);}
   return out;
 }
 function paperOutput(output,editRevision){
@@ -301,26 +377,15 @@ function paperOutput(output,editRevision){
   if(utf8Bytes(canonicalJSON(verification))>LIMITS.verification)fail('oversize');
   return {sha256:output.sha256,revision:output.revision,verification};
 }
-function paperReviews(list,output,editRevision){
-  if(!Array.isArray(list))fail('malformed','Paper review notes are malformed.');
-  if(list.length>LIMITS.paperReviews)fail('oversize');
-  const ids=new Set(),out=[],currentHash=output?output.sha256:null;
-  for(const review of list){
-    if(!plain(review)||Object.keys(review).some(key=>!PAPER_REVIEW_KEYS.includes(key)))fail('malformed','Paper review note is malformed.');
-    for(const key of PAPER_REVIEW_KEYS)if(!own(review,key))fail('malformed','Paper review note is malformed.');
-    if(typeof review.id!=='string'||!review.id||review.id.length>LIMITS.runId||ids.has(review.id))fail('conflict','Duplicate review id.');
-    ids.add(review.id);
-    if(typeof review.createdAt!=='string'||!Number.isFinite(Date.parse(review.createdAt)))fail('malformed','Paper review time is malformed.');
-    if(typeof review.reviewer!=='string'||!review.reviewer.trim()||review.reviewer.length>120||typeof review.caseLabel!=='string'||!review.caseLabel.trim()||review.caseLabel.length>160)fail('malformed','Paper review identity is malformed.');
-    if(!PAPER_VERDICTS.includes(review.verdict))fail('malformed','Paper review verdict is malformed.');
-    if(review.verdict==='uncertain'&&review.score!==null||review.score!==null&&(!Number.isInteger(review.score)||review.score<1||review.score>5))fail('malformed','Paper review score is not a human 1–5 score.');
-    if(typeof review.note!=='string'||!review.note.trim()||review.note.length>3000)fail('malformed','Paper review needs a human reason.');
-    if(!Number.isInteger(review.editRevision)||review.editRevision<0||review.editRevision>1000000)fail('malformed','Paper review is not bound to an edit revision.');
-    if(!(review.outputHash===null||typeof review.outputHash==='string'&&HEX.test(review.outputHash)))fail('hash_mismatch','Paper review is not bound to an output hash.');
-    if(typeof review.stale!=='boolean')fail('malformed','Paper review staleness is malformed.');
-    const current=review.editRevision===editRevision&&review.outputHash===currentHash;
-    if(current&&review.stale)fail('conflict','A review of this edit revision is marked stale.');
-    if(!current&&!review.stale)fail('conflict','A review of another edit revision cannot apply to the current After.');
+function paperFindingNote(note,seen){
+        if(!exact(note,['id','verdict','note']))fail('malformed','Paper finding note is malformed.');
+        if(typeof note.id!=='string'||!note.id||note.id.length>80||seen.has(note.id))fail('conflict','Duplicate finding note id.');
+        seen.add(note.id);
+        if(!FINDING_VERDICTS.includes(note.verdict)||typeof note.note!=='string'||note.note.length>3000)fail('malformed','Paper finding note is malformed.');
+        if(note.verdict!=='pending'&&!note.note.trim())fail('malformed','A human finding judgment needs a reason.');
+        return {id:note.id,verdict:note.verdict,note:note.note};
+}
+function paperReviewAlignment(review){
     let alignment=null;
     if(review.alignment!==null){
       if(review.outputHash===null)fail('conflict','A review without an output hash cannot claim a BLUE file match.');
@@ -328,16 +393,44 @@ function paperReviews(list,output,editRevision){
       if(review.alignment.fileHash!==review.outputHash)fail('hash_mismatch','Review alignment file hash is not the reviewed output.');
       if(!Array.isArray(review.alignment.findingNotes)||review.alignment.findingNotes.length>12)fail('malformed','Paper finding notes are malformed.');
       const seen=new Set(),notes=[];
-      for(const note of review.alignment.findingNotes){
-        if(!exact(note,['id','verdict','note']))fail('malformed','Paper finding note is malformed.');
-        if(typeof note.id!=='string'||!note.id||note.id.length>80||seen.has(note.id))fail('conflict','Duplicate finding note id.');
-        seen.add(note.id);
-        if(!FINDING_VERDICTS.includes(note.verdict)||typeof note.note!=='string'||note.note.length>3000)fail('malformed','Paper finding note is malformed.');
-        if(note.verdict!=='pending'&&!note.note.trim())fail('malformed','A human finding judgment needs a reason.');
-        notes.push({id:note.id,verdict:note.verdict,note:note.note});
-      }
+      for(const note of review.alignment.findingNotes){const row=paperFindingNote(note,seen);notes.push(row);}
       alignment={fileHash:review.outputHash,findingNotes:notes};
     }
+    return alignment;
+}
+function checkPaperReviewBinding(review,editRevision,currentHash){
+    if(!Number.isInteger(review.editRevision)||review.editRevision<0||review.editRevision>1000000)fail('malformed','Paper review is not bound to an edit revision.');
+    if(!(review.outputHash===null||typeof review.outputHash==='string'&&HEX.test(review.outputHash)))fail('hash_mismatch','Paper review is not bound to an output hash.');
+    if(typeof review.stale!=='boolean')fail('malformed','Paper review staleness is malformed.');
+    const current=review.editRevision===editRevision&&review.outputHash===currentHash;
+    if(current&&review.stale)fail('conflict','A review of this edit revision is marked stale.');
+    if(!current&&!review.stale)fail('conflict','A review of another edit revision cannot apply to the current After.');
+}
+function checkPaperReviewJudgment(review,editRevision,currentHash){
+    if(!PAPER_VERDICTS.includes(review.verdict))fail('malformed','Paper review verdict is malformed.');
+    if(review.verdict==='uncertain'&&review.score!==null||review.score!==null&&(!Number.isInteger(review.score)||review.score<1||review.score>5))fail('malformed','Paper review score is not a human 1–5 score.');
+    if(typeof review.note!=='string'||!review.note.trim()||review.note.length>3000)fail('malformed','Paper review needs a human reason.');
+    checkPaperReviewBinding(review,editRevision,currentHash);
+}
+function checkPaperReviewer(review){
+    if(typeof review.createdAt!=='string'||!Number.isFinite(Date.parse(review.createdAt)))fail('malformed','Paper review time is malformed.');
+    if(typeof review.reviewer!=='string'||!review.reviewer.trim()||review.reviewer.length>120||typeof review.caseLabel!=='string'||!review.caseLabel.trim()||review.caseLabel.length>160)fail('malformed','Paper review identity is malformed.');
+}
+function checkPaperReview(review,ids,editRevision,currentHash){
+    if(!plain(review)||Object.keys(review).some(key=>!PAPER_REVIEW_KEYS.includes(key)))fail('malformed','Paper review note is malformed.');
+    for(const key of PAPER_REVIEW_KEYS)if(!own(review,key))fail('malformed','Paper review note is malformed.');
+    if(typeof review.id!=='string'||!review.id||review.id.length>LIMITS.runId||ids.has(review.id))fail('conflict','Duplicate review id.');
+    ids.add(review.id);
+    checkPaperReviewer(review);
+    checkPaperReviewJudgment(review,editRevision,currentHash);
+}
+function paperReviews(list,output,editRevision){
+  if(!Array.isArray(list))fail('malformed','Paper review notes are malformed.');
+  if(list.length>LIMITS.paperReviews)fail('oversize');
+  const ids=new Set(),out=[],currentHash=output?output.sha256:null;
+  for(const review of list){
+    checkPaperReview(review,ids,editRevision,currentHash);
+    const alignment=paperReviewAlignment(review);
     out.push({id:review.id,createdAt:review.createdAt,reviewer:review.reviewer.trim(),caseLabel:review.caseLabel.trim(),verdict:review.verdict,score:review.score,note:review.note.trim(),alignment,editRevision:review.editRevision,outputHash:review.outputHash,stale:review.stale});
   }
   return out;
@@ -345,6 +438,18 @@ function paperReviews(list,output,editRevision){
 function paperTitle(record){
   const name=record.sourceName.trim()||record.sourceFileHash.slice(0,12);
   return assertTitle(`수동 편집 · ${name} · r${record.editRevision} · ${record.id}`);
+}
+function checkPaperEditSourceIdentity(source){
+  if(typeof source.id!=='string'||!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/.test(source.id))fail('malformed','Paper-edit record id is malformed.');
+  if(typeof source.createdAt!=='string'||!Number.isFinite(Date.parse(source.createdAt)))fail('malformed','Paper-edit record time is malformed.');
+  if(typeof source.sourceFileHash!=='string'||!HEX.test(source.sourceFileHash))fail('hash_mismatch','Paper source file hash is malformed.');
+  if(typeof source.sourceName!=='string'||source.sourceName.length>200||/[\u0000-\u001f\u007f]/.test(source.sourceName))fail('malformed','Paper source name is malformed.');
+  if(!Number.isInteger(source.editRevision)||source.editRevision<0||source.editRevision>1000000)fail('malformed','Paper edit revision is malformed.');
+}
+function checkPaperEditSource(source){
+  if(!plain(source)||Object.keys(source).some(key=>!['id','createdAt','sourceFileHash','sourceName','segments','edits','editRevision','output','reviews'].includes(key)))fail('malformed','Paper-edit record carries a field that is not manual provenance.');
+  for(const key of ['id','createdAt','sourceFileHash','sourceName','segments','edits','editRevision','output'])if(!own(source,key))fail('malformed','Paper-edit record is missing captured provenance.');
+  checkPaperEditSourceIdentity(source);
 }
 export function normalizePaperEdit(input){
   if(!plain(input))fail('malformed','Paper-edit record is malformed.');
@@ -354,13 +459,7 @@ export function normalizePaperEdit(input){
   const reviews=wrapped?input.reviews:source.reviews;
   if(reviews!==undefined&&!Array.isArray(reviews))fail('malformed','Paper review notes are malformed.');
   if(wrapped&&own(source,'reviews'))fail('malformed','Paper-edit record mixes review notes into the edit snapshot.');
-  if(!plain(source)||Object.keys(source).some(key=>!['id','createdAt','sourceFileHash','sourceName','segments','edits','editRevision','output','reviews'].includes(key)))fail('malformed','Paper-edit record carries a field that is not manual provenance.');
-  for(const key of ['id','createdAt','sourceFileHash','sourceName','segments','edits','editRevision','output'])if(!own(source,key))fail('malformed','Paper-edit record is missing captured provenance.');
-  if(typeof source.id!=='string'||!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/.test(source.id))fail('malformed','Paper-edit record id is malformed.');
-  if(typeof source.createdAt!=='string'||!Number.isFinite(Date.parse(source.createdAt)))fail('malformed','Paper-edit record time is malformed.');
-  if(typeof source.sourceFileHash!=='string'||!HEX.test(source.sourceFileHash))fail('hash_mismatch','Paper source file hash is malformed.');
-  if(typeof source.sourceName!=='string'||source.sourceName.length>200||/[\u0000-\u001f\u007f]/.test(source.sourceName))fail('malformed','Paper source name is malformed.');
-  if(!Number.isInteger(source.editRevision)||source.editRevision<0||source.editRevision>1000000)fail('malformed','Paper edit revision is malformed.');
+  checkPaperEditSource(source);
   const segments=paperSegments(source.segments);
   const edits=paperEdits(source.edits,segments);
   const output=paperOutput(source.output,source.editRevision);
@@ -388,18 +487,51 @@ export async function buildAttemptArchive(record,validators){
 }
 // External responses have no implied model invocation or harness. The source text,
 // raw batches and optional human reviews remain part of a single selected case.
+function externalBatches(s,r){
+  const batches=new Map();for(const b of s.batches){if(!plain(b)||b.schema!=='falsify.external-batch.v1'||b.fileHash!==r.fileHash||b.role!==s.role||typeof b.id!=='string'||!b.id||batches.has(b.id)||typeof b.raw!=='string'||!Array.isArray(b.items))fail('malformed');batches.set(b.id,b);}
+  return batches;
+}
+function checkExternalAnchor(item,r){if(item.anchor){const part=r.segments.find(x=>x.id===item.segmentId),a=item.anchor;if(!part||!Number.isInteger(a.start)||!Number.isInteger(a.end)||a.start<0||a.end<=a.start||a.end>part.text.length||part.text.slice(a.start,a.end)!==(item.before||item.sourceQuote||item.quote))fail('conflict','External anchor differs from source.');}}
+function checkExternalSelection(item,s,selected){if(s.role==='red'&&item.enabled){if(item.kind!=='change'||item.matchStatus!=='matched'||!item.anchor||typeof item.after!=='string'||item.after===item.before)fail('conflict');for(const other of selected)if(item.segmentId===other.segmentId&&item.anchor.start<other.anchor.end&&other.anchor.start<item.anchor.end)fail('conflict');selected.push(item);}}
+function checkExternalItems(s,r,batches){
+  const ids=new Set(),selected=[];for(const item of s.items)checkExternalItem(item,s,r,batches,ids,selected);}
+function checkExternalItem(item,s,r,batches,ids,selected){if(!plain(item)||typeof item.id!=='string'||!item.id||ids.has(item.id)||!Array.isArray(item.sourceRefs)||typeof item.enabled!=='boolean')fail('malformed');ids.add(item.id);for(const ref of item.sourceRefs){const b=ref&&batches.get(ref.batchId);if(!b||!b.items.some(x=>x&&x.id===ref.itemId))fail('missing_ref');}checkExternalAnchor(item,r);checkExternalSelection(item,s,selected);
+}
+function checkExternalReviews(reviews){
+  const reviewIds=new Set();for(const review of reviews){if(!exact(review,['id','createdAt','reviewer','note'])||typeof review.id!=='string'||!review.id||review.id.length>160||reviewIds.has(review.id)||typeof review.reviewer!=='string'||!review.reviewer.trim()||review.reviewer.length>120||typeof review.note!=='string'||!review.note.trim()||review.note.length>3000||!Number.isFinite(Date.parse(review.createdAt)))fail('malformed');reviewIds.add(review.id);}
+}
+function checkExternalSegments(r){if(!Array.isArray(r.segments)||!r.segments.length||r.segments.length>LIMITS.segments||r.segments.some(x=>!plain(x)||typeof x.id!=='string'||!x.id||typeof x.text!=='string')||new Set(r.segments.map(x=>x.id)).size!==r.segments.length||JSON.stringify(r).includes('%PDF-'))fail('malformed','External record is malformed.');}
+function checkExternalRecord(r){
+  if(Object.keys(r).some(k=>!['id','createdAt','provenance','fileHash','sourceHash','revision','sourceName','segments','snapshot','outputFileHash'].includes(k))||typeof r.id!=='string'||!r.id||r.id.length>160||r.provenance!=='external-ai-import'||(r.outputFileHash!==undefined&&(!HEX.test(r.outputFileHash)||r.snapshot?.role!=='red'))||!HEX.test(r.fileHash)||!HEX.test(r.sourceHash)||typeof r.revision!=='string'||!r.revision||!Number.isFinite(Date.parse(r.createdAt)))fail('malformed','External record is malformed.');
+  checkExternalSegments(r);
+}
 async function externalCase(value){
   if(!exact(value,['record','reviews'])||!plain(value.record)||!Array.isArray(value.reviews)||value.reviews.length>100)fail('malformed');
   const r=value.record,s=r.snapshot;
-  if(Object.keys(r).some(k=>!['id','createdAt','provenance','fileHash','sourceHash','revision','sourceName','segments','snapshot','outputFileHash'].includes(k))||typeof r.id!=='string'||!r.id||r.id.length>160||r.provenance!=='external-ai-import'||(r.outputFileHash!==undefined&&(!HEX.test(r.outputFileHash)||r.snapshot?.role!=='red'))||!HEX.test(r.fileHash)||!HEX.test(r.sourceHash)||typeof r.revision!=='string'||!r.revision||!Number.isFinite(Date.parse(r.createdAt))||!Array.isArray(r.segments)||!r.segments.length||r.segments.length>LIMITS.segments||r.segments.some(x=>!plain(x)||typeof x.id!=='string'||!x.id||typeof x.text!=='string')||new Set(r.segments.map(x=>x.id)).size!==r.segments.length||JSON.stringify(r).includes('%PDF-'))fail('malformed','External record is malformed.');
+  checkExternalRecord(r);
   const source=r.segments.map(x=>x.text).join('\n\n');if(source.length>LIMITS.source||await sha256(source)!==r.sourceHash)fail('hash_mismatch');
   if(!plain(s)||s.schema!=='falsify.external-proposals.v1'||s.fileHash!==r.fileHash||!['red','blue'].includes(s.role)||!Array.isArray(s.items)||!Array.isArray(s.batches)||s.items.length>1000||s.batches.length>100)fail('malformed');
-  const batches=new Map();for(const b of s.batches){if(!plain(b)||b.schema!=='falsify.external-batch.v1'||b.fileHash!==r.fileHash||b.role!==s.role||typeof b.id!=='string'||!b.id||batches.has(b.id)||typeof b.raw!=='string'||!Array.isArray(b.items))fail('malformed');batches.set(b.id,b);}
-  const ids=new Set(),selected=[];for(const item of s.items){if(!plain(item)||typeof item.id!=='string'||!item.id||ids.has(item.id)||!Array.isArray(item.sourceRefs)||typeof item.enabled!=='boolean')fail('malformed');ids.add(item.id);for(const ref of item.sourceRefs){const b=ref&&batches.get(ref.batchId);if(!b||!b.items.some(x=>x&&x.id===ref.itemId))fail('missing_ref');}if(item.anchor){const part=r.segments.find(x=>x.id===item.segmentId),a=item.anchor;if(!part||!Number.isInteger(a.start)||!Number.isInteger(a.end)||a.start<0||a.end<=a.start||a.end>part.text.length||part.text.slice(a.start,a.end)!==(item.before||item.sourceQuote||item.quote))fail('conflict','External anchor differs from source.');}if(s.role==='red'&&item.enabled){if(item.kind!=='change'||item.matchStatus!=='matched'||!item.anchor||typeof item.after!=='string'||item.after===item.before)fail('conflict');for(const other of selected)if(item.segmentId===other.segmentId&&item.anchor.start<other.anchor.end&&other.anchor.start<item.anchor.end)fail('conflict');selected.push(item);}}
-  const reviewIds=new Set();for(const review of value.reviews){if(!exact(review,['id','createdAt','reviewer','note'])||typeof review.id!=='string'||!review.id||review.id.length>160||reviewIds.has(review.id)||typeof review.reviewer!=='string'||!review.reviewer.trim()||review.reviewer.length>120||typeof review.note!=='string'||!review.note.trim()||review.note.length>3000||!Number.isFinite(Date.parse(review.createdAt)))fail('malformed');reviewIds.add(review.id);}
+  const batches=externalBatches(s,r);
+  checkExternalItems(s,r,batches);
+  checkExternalReviews(value.reviews);
   return copy(value);
 }
 export async function buildExternalResponseArchive(record,reviews=[]){const data=await externalCase({record:copy(record),reviews:copy(reviews)});return boundedJSON({schema:ARCHIVE_SCHEMA,kind:'external-response',id:data.record.id,title:assertTitle('외부 '+data.record.snapshot.role.toUpperCase()+' 응답 · '+(data.record.sourceName||data.record.id)),data});}
+function paperArchiveData(value){
+    if(typeof value.id!=='string'||!value.id||value.id.length>LIMITS.runId)fail('malformed','Paper-edit archive id is malformed.');
+    const data=normalizePaperEdit(value.data);
+    if(value.id!==data.record.id)fail('conflict','Paper-edit archive id does not match the manual record.');
+    return data;
+}
+function prepareHarnessArchive(value,validators){
+    const V=validatorsOf(validators,'harness');
+    if(typeof value.id!=='string'||!HEX.test(value.id)||!exact(value.data,['config','hash']))fail('malformed','Harness archive shape is malformed.');
+    let config;try{config=V.harness.validate(value.data.config);}catch{fail('malformed','Harness config is malformed.');}
+    return {V,config};
+}
+function checkExperimentArchive(data,value){
+  if(!exact(data,['schema','selectedRunId','ledger'])||data.schema!==BUNDLE_SCHEMA||data.selectedRunId!==value.id||typeof value.id!=='string'||!value.id||value.id.length>LIMITS.runId)fail('malformed','Experiment archive shape is malformed.');
+}
 export async function validateArchive(archive,validators){
   const value=copy(archive);
   boundedJSON(value);
@@ -412,23 +544,19 @@ export async function validateArchive(archive,validators){
     return {schema:ARCHIVE_SCHEMA,kind:'attempt',id:value.id,title:value.title,data:attempt};
   }
   if(value.kind==='harness'){
-    const V=validatorsOf(validators,'harness');
-    if(typeof value.id!=='string'||!HEX.test(value.id)||!exact(value.data,['config','hash']))fail('malformed','Harness archive shape is malformed.');
-    let config;try{config=V.harness.validate(value.data.config);}catch{fail('malformed','Harness config is malformed.');}
+    const {V,config}=prepareHarnessArchive(value,validators);
     const hash=await V.harness.hash(config);
     if(value.id!==hash||value.data.hash!==hash)fail('hash_mismatch');
     return {schema:ARCHIVE_SCHEMA,kind:'harness',id:hash,title:value.title,data:{config:copy(config),hash}};
   }
   if(value.kind==='paper-edit'){
-    if(typeof value.id!=='string'||!value.id||value.id.length>LIMITS.runId)fail('malformed','Paper-edit archive id is malformed.');
-    const data=normalizePaperEdit(value.data);
-    if(value.id!==data.record.id)fail('conflict','Paper-edit archive id does not match the manual record.');
+    const data=paperArchiveData(value);
     return {schema:ARCHIVE_SCHEMA,kind:'paper-edit',id:data.record.id,title:value.title,data};
   }
   if(value.kind!=='experiment')fail('malformed');
   const V=validatorsOf(validators,'experiment');
   const data=value.data;
-  if(!exact(data,['schema','selectedRunId','ledger'])||data.schema!==BUNDLE_SCHEMA||data.selectedRunId!==value.id||typeof value.id!=='string'||!value.id||value.id.length>LIMITS.runId)fail('malformed','Experiment archive shape is malformed.');
+  checkExperimentArchive(data,value);
   const ledger=await validateLedger(data.ledger,value.id,V);
   return {schema:ARCHIVE_SCHEMA,kind:'experiment',id:value.id,title:value.title,data:{schema:BUNDLE_SCHEMA,selectedRunId:value.id,ledger}};
 }

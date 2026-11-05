@@ -64,6 +64,59 @@ def ref(value):
 def numbers(text):
     return [float(n) for n in re.findall(r'-?\d+(?:\.\d+)?|-?\.\d+', text)]
 
+def _cmap_ranges(spaces, pair, width, code_bytes):
+    ranges = []
+    for count, body in spaces:
+        entries = re.findall(pair, body)
+        if len(entries) != int(count) or re.sub(pair, '', body).strip(): raise ValueError('ToUnicode codespace 형식 오류')
+        for lo, hi in entries:
+            if len(lo) != width or len(hi) != width: raise ValueError(f'ToUnicode codespace가 {code_bytes}바이트 코드가 아닙니다(혼합 또는 다른 길이)')
+            if int(lo, 16) > int(hi, 16): raise ValueError('ToUnicode codespace 범위 오류')
+            ranges.append((int(lo, 16), int(hi, 16)))
+    return ranges
+
+
+def _cmap_chars(text, pair, width, spend, put, utf16):
+    for count, body in re.findall(r'(\d+)\s+beginbfchar(.*?)endbfchar', text, re.S):
+        entries = re.findall(pair, body)
+        if len(entries) != int(count) or re.sub(pair, '', body).strip(): raise ValueError('ToUnicode bfchar 형식 오류')
+        spend(len(entries))
+        for src, dst in entries:
+            if len(src) != width: raise ValueError('ToUnicode bfchar 코드 길이 오류')
+            put(int(src, 16), utf16(dst))
+
+
+def _cmap_range_entry(lo, hi, dst, width, spend, put, utf16):
+    if len(lo) != width or len(hi) != width or lo[:-2].lower() != hi[:-2].lower():
+        raise ValueError('ToUnicode bfrange 코드 범위 오류')
+    lo, hi = int(lo, 16), int(hi, 16)
+    if lo > hi: raise ValueError('ToUnicode bfrange 코드 범위 오류')
+    spend(hi - lo + 1)
+    if dst.startswith('['):
+        items = re.findall(r'<([0-9A-Fa-f]*)>', dst)
+        if len(items) != hi - lo + 1: raise ValueError('ToUnicode bfrange 배열 길이 오류')
+        for i, item in enumerate(items): put(lo + i, utf16(item))
+    else:
+        if len(dst) % 2:
+            for i in range(hi - lo + 1): put(lo + i, None)
+            return
+        base = bytes.fromhex(dst[1:-1])
+        if len(base) < 2 or len(base) % 2: raise ValueError('ToUnicode bfrange 대상 오류')
+        for i in range(hi - lo + 1):
+            last = int.from_bytes(base[-2:], 'big') + i
+            if last > 0xFFFF: raise ValueError('ToUnicode bfrange 대상 범위 오류')
+            put(lo + i, utf16((base[:-2] + last.to_bytes(2, 'big')).hex()))
+
+
+def _cmap_bfranges(text, width, spend, put, utf16):
+    entry = r'<([0-9A-Fa-f]*)>\s*<([0-9A-Fa-f]*)>\s*(<[0-9A-Fa-f]*>|\[(?:\s*<[0-9A-Fa-f]*>)*\s*\])'
+    for count, body in re.findall(r'(\d+)\s+beginbfrange(.*?)endbfrange', text, re.S):
+        entries = re.findall(entry, body)
+        if len(entries) != int(count) or re.sub(entry, '', body).strip(): raise ValueError('ToUnicode bfrange 형식 오류')
+        for lo, hi, dst in entries:
+            _cmap_range_entry(lo, hi, dst, width, spend, put, utf16)
+
+
 def parse_to_unicode(data, code_bytes):
     """Strict bounded ToUnicode CMap parser for a single code length.
 
@@ -79,14 +132,7 @@ def parse_to_unicode(data, code_bytes):
     spaces = re.findall(r'(\d+)\s+begincodespacerange(.*?)endcodespacerange', text, re.S)
     if not spaces or len(spaces) != len(re.findall(r'begincodespacerange', text)):
         raise ValueError('ToUnicode codespace가 없거나 형식이 잘못되었습니다')
-    ranges = []
-    for count, body in spaces:
-        entries = re.findall(pair, body)
-        if len(entries) != int(count) or re.sub(pair, '', body).strip(): raise ValueError('ToUnicode codespace 형식 오류')
-        for lo, hi in entries:
-            if len(lo) != width or len(hi) != width: raise ValueError(f'ToUnicode codespace가 {code_bytes}바이트 코드가 아닙니다(혼합 또는 다른 길이)')
-            if int(lo, 16) > int(hi, 16): raise ValueError('ToUnicode codespace 범위 오류')
-            ranges.append((int(lo, 16), int(hi, 16)))
+    ranges = _cmap_ranges(spaces, pair, width, code_bytes)
     inside = lambda code: any(lo <= code <= hi for lo, hi in ranges)
     mapping, unknown, budget = {}, set(), [MAX_EXPANSION]
     def spend(n):
@@ -108,41 +154,38 @@ def parse_to_unicode(data, code_bytes):
         if mapping.get(code, value) != value: raise ValueError('ToUnicode에 같은 코드의 상충하는 매핑이 있습니다')
         mapping[code] = value
         if len(mapping) > 65536: raise ValueError('ToUnicode 매핑이 너무 많습니다')
-    for count, body in re.findall(r'(\d+)\s+beginbfchar(.*?)endbfchar', text, re.S):
-        entries = re.findall(pair, body)
-        if len(entries) != int(count) or re.sub(pair, '', body).strip(): raise ValueError('ToUnicode bfchar 형식 오류')
-        spend(len(entries))
-        for src, dst in entries:
-            if len(src) != width: raise ValueError('ToUnicode bfchar 코드 길이 오류')
-            put(int(src, 16), utf16(dst))
-    entry = r'<([0-9A-Fa-f]*)>\s*<([0-9A-Fa-f]*)>\s*(<[0-9A-Fa-f]*>|\[(?:\s*<[0-9A-Fa-f]*>)*\s*\])'
-    for count, body in re.findall(r'(\d+)\s+beginbfrange(.*?)endbfrange', text, re.S):
-        entries = re.findall(entry, body)
-        if len(entries) != int(count) or re.sub(entry, '', body).strip(): raise ValueError('ToUnicode bfrange 형식 오류')
-        for lo, hi, dst in entries:
-            if len(lo) != width or len(hi) != width or lo[:-2].lower() != hi[:-2].lower():
-                raise ValueError('ToUnicode bfrange 코드 범위 오류')
-            lo, hi = int(lo, 16), int(hi, 16)
-            if lo > hi: raise ValueError('ToUnicode bfrange 코드 범위 오류')
-            spend(hi - lo + 1)
-            if dst.startswith('['):
-                items = re.findall(r'<([0-9A-Fa-f]*)>', dst)
-                if len(items) != hi - lo + 1: raise ValueError('ToUnicode bfrange 배열 길이 오류')
-                for i, item in enumerate(items): put(lo + i, utf16(item))
-            else:
-                if len(dst) % 2:
-                    for i in range(hi - lo + 1): put(lo + i, None)
-                    continue
-                base = bytes.fromhex(dst[1:-1])
-                if len(base) < 2 or len(base) % 2: raise ValueError('ToUnicode bfrange 대상 오류')
-                for i in range(hi - lo + 1):
-                    last = int.from_bytes(base[-2:], 'big') + i
-                    if last > 0xFFFF: raise ValueError('ToUnicode bfrange 대상 범위 오류')
-                    put(lo + i, utf16((base[:-2] + last.to_bytes(2, 'big')).hex()))
+    _cmap_chars(text, pair, width, spend, put, utf16)
+    _cmap_bfranges(text, width, spend, put, utf16)
     sections = len(re.findall(r'beginbf(?:char|range)', text))
     if sections != len(re.findall(r'\d+\s+beginbf(?:char|range)', text)): raise ValueError('ToUnicode bf 구역 형식 오류')
     if re.search(r'begin(?:cid|notdef)(?:char|range)', text): raise ValueError('ToUnicode에 지원하지 않는 cid/notdef 구역이 있습니다')
     return mapping
+
+def _cid_array_entry(tokens, i, first, num, put, budget):
+    try: end = tokens.index(']', i + 2)
+    except ValueError: raise ValueError('/W 배열 형식 오류') from None
+    items = tokens[i + 2:end]
+    if not items or not all(num(t) for t in items): raise ValueError('/W 배열 형식 오류')
+    budget -= len(items)
+    if budget < 0: raise ValueError('/W 배열 확장이 너무 많습니다')
+    for k, t in enumerate(items): put(first + k, float(t))
+    i = end + 1
+    return i, budget
+
+
+def _cid_width_entry(tokens, i, first, num, put, budget):
+    if i + 1 < len(tokens) and tokens[i + 1] == '[':
+        i, budget = _cid_array_entry(tokens, i, first, num, put, budget)
+    elif i + 2 < len(tokens) and all(num(t) for t in tokens[i + 1:i + 3]) and '.' not in tokens[i + 1]:
+        last = int(tokens[i + 1])
+        if last < first or last > MAX_CODE: raise ValueError('/W 배열 범위 오류')
+        budget -= last - first + 1
+        if budget < 0: raise ValueError('/W 배열 확장이 너무 많습니다')
+        for cid in range(first, last + 1): put(cid, float(tokens[i + 2]))
+        i += 3
+    else: raise ValueError('/W 배열 형식 오류')
+    return i, budget
+
 
 def parse_cid_widths(text):
     """Strict /W array parser: [c [w...] c1 c2 w ...] -> {cid: width}."""
@@ -158,23 +201,7 @@ def parse_cid_widths(text):
     while i < len(tokens):
         if not num(tokens[i]) or '.' in tokens[i] or int(tokens[i]) < 0: raise ValueError('/W 배열 형식 오류')
         first = int(tokens[i])
-        if i + 1 < len(tokens) and tokens[i + 1] == '[':
-            try: end = tokens.index(']', i + 2)
-            except ValueError: raise ValueError('/W 배열 형식 오류') from None
-            items = tokens[i + 2:end]
-            if not items or not all(num(t) for t in items): raise ValueError('/W 배열 형식 오류')
-            budget -= len(items)
-            if budget < 0: raise ValueError('/W 배열 확장이 너무 많습니다')
-            for k, t in enumerate(items): put(first + k, float(t))
-            i = end + 1
-        elif i + 2 < len(tokens) and all(num(t) for t in tokens[i + 1:i + 3]) and '.' not in tokens[i + 1]:
-            last = int(tokens[i + 1])
-            if last < first or last > MAX_CODE: raise ValueError('/W 배열 범위 오류')
-            budget -= last - first + 1
-            if budget < 0: raise ValueError('/W 배열 확장이 너무 많습니다')
-            for cid in range(first, last + 1): put(cid, float(tokens[i + 2]))
-            i += 3
-        else: raise ValueError('/W 배열 형식 오류')
+        i, budget = _cid_width_entry(tokens, i, first, num, put, budget)
     return widths
 
 def object_text(doc, kind, value, what):
@@ -219,6 +246,15 @@ def resource_xref(doc, page, name):
     kind, value = doc.xref_get_key(owner, prefix + name)
     return ref(value) if kind == 'xref' else None
 
+def _raise_missing_glyphs(absent, ambiguous, unproven, label):
+    if absent or ambiguous or unproven:
+        parts = []
+        if absent: parts.append(f'원본 {label} 글꼴에 매핑이 없는 문자: ' + describe(absent))
+        if ambiguous: parts.append('글리프 매핑이 모호한 문자: ' + describe(ambiguous))
+        if unproven: parts.append('원본에서 이 글꼴로 그려진 적이 없어 글리프를 검증할 수 없는 문자: ' + describe(unproven))
+        raise ValueError('; '.join(parts) + '. 대체 글꼴을 쓰지 않습니다. 원본 문서에 이 글꼴로 이미 나오는 문자만 사용하도록 After를 수정하세요.')
+
+
 def encode(after, mapping, widths, drawn, label):
     """Unique, drawn, positive-width code per After char, else ValueError naming the chars."""
     reverse = {}
@@ -233,23 +269,10 @@ def encode(after, mapping, widths, drawn, label):
         if len(found) != 1: ambiguous.append(c); continue
         if not seen or widths.get(found[0], 0) <= 0 or found[0] == 0: unproven.append(c); continue
         codes.append(found[0])
-    if absent or ambiguous or unproven:
-        parts = []
-        if absent: parts.append(f'원본 {label} 글꼴에 매핑이 없는 문자: ' + describe(absent))
-        if ambiguous: parts.append('글리프 매핑이 모호한 문자: ' + describe(ambiguous))
-        if unproven: parts.append('원본에서 이 글꼴로 그려진 적이 없어 글리프를 검증할 수 없는 문자: ' + describe(unproven))
-        raise ValueError('; '.join(parts) + '. 대체 글꼴을 쓰지 않습니다. 원본 문서에 이 글꼴로 이미 나오는 문자만 사용하도록 After를 수정하세요.')
+    _raise_missing_glyphs(absent, ambiguous, unproven, label)
     return codes
 
-def base14_codec(doc, xref, name, after, drawn):
-    import pymupdf as fitz
-    get = lambda key: doc.xref_get_key(xref, key)
-    basefont = get('BaseFont')[1].lstrip('/') if get('BaseFont')[0] == 'name' else ''
-    if basefont not in BASE14: raise ValueError(f'표준 14 글꼴이 아닌 비임베디드 Type1 글꼴({basefont!r})은 지원하지 않습니다.')
-    if get('FontDescriptor')[0] != 'null':
-        for key in ('FontFile', 'FontFile2', 'FontFile3'):
-            if doc.xref_get_key(xref, 'FontDescriptor/' + key)[0] != 'null':
-                raise ValueError(f'임베디드 Type1 글꼴({basefont})은 이 codec에서 지원하지 않습니다.')
+def _base14_encoding(doc, xref, get, basefont):
     kind, value = get('Encoding')
     if kind == 'null': encoding = 'StandardEncoding'
     elif kind == 'name': encoding = value.lstrip('/')
@@ -259,6 +282,35 @@ def base14_codec(doc, xref, name, after, drawn):
         kind, value = doc.xref_get_key(xref, 'Encoding/BaseEncoding')
         encoding = value.lstrip('/') if kind == 'name' else 'StandardEncoding' if kind == 'null' else ''
     else: encoding = ''
+    return encoding, value
+
+
+def _base14_widths(doc, get, basefont, table, font):
+    if get('Widths')[0] != 'null':
+        first, last = get('FirstChar'), get('LastChar')
+        listed = numbers(object_text(doc, *get('Widths'), '/Widths'))
+        if first[0] != 'int' or last[0] != 'int' or len(listed) != int(last[1]) - int(first[1]) + 1:
+            raise ValueError(f'{basefont}의 /Widths를 검증할 수 없습니다.')
+        widths = {code: listed[code - int(first[1])] for code in table if int(first[1]) <= code <= int(last[1])}
+    # Unrounded advance of the standard font program PyMuPDF renders/measures (matches text_length).
+    else: widths = {code: font.glyph_advance(ord(char)) * 1000 for code, char in table.items()}
+    return widths
+
+
+def _validate_base14_embedding(doc, xref, get, basefont):
+    if get('FontDescriptor')[0] != 'null':
+        for key in ('FontFile', 'FontFile2', 'FontFile3'):
+            if doc.xref_get_key(xref, 'FontDescriptor/' + key)[0] != 'null':
+                raise ValueError(f'임베디드 Type1 글꼴({basefont})은 이 codec에서 지원하지 않습니다.')
+
+
+def base14_codec(doc, xref, name, after, drawn):
+    import pymupdf as fitz
+    get = lambda key: doc.xref_get_key(xref, key)
+    basefont = get('BaseFont')[1].lstrip('/') if get('BaseFont')[0] == 'name' else ''
+    if basefont not in BASE14: raise ValueError(f'표준 14 글꼴이 아닌 비임베디드 Type1 글꼴({basefont!r})은 지원하지 않습니다.')
+    _validate_base14_embedding(doc, xref, get, basefont)
+    encoding, value = _base14_encoding(doc, xref, get, basefont)
     table = encoding_table(encoding)
     if table is None: raise ValueError(f'{basefont}의 인코딩 {encoding or value!r}은(는) 지원하지 않습니다.')
     if get('ToUnicode')[0] != 'null':
@@ -268,18 +320,22 @@ def base14_codec(doc, xref, name, after, drawn):
             raise ValueError(f'{basefont} ToUnicode가 /Encoding과 일치하지 않아 모호합니다.')
     font = fitz.Font(BASE14[basefont])
     table = {code: char for code, char in table.items() if font.has_glyph(ord(char), fallback=False)}
-    if get('Widths')[0] != 'null':
-        first, last = get('FirstChar'), get('LastChar')
-        listed = numbers(object_text(doc, *get('Widths'), '/Widths'))
-        if first[0] != 'int' or last[0] != 'int' or len(listed) != int(last[1]) - int(first[1]) + 1:
-            raise ValueError(f'{basefont}의 /Widths를 검증할 수 없습니다.')
-        widths = {code: listed[code - int(first[1])] for code in table if int(first[1]) <= code <= int(last[1])}
-    # Unrounded advance of the standard font program PyMuPDF renders/measures (matches text_length).
-    else: widths = {code: font.glyph_advance(ord(char)) * 1000 for code, char in table.items()}
+    widths = _base14_widths(doc, get, basefont, table, font)
     mapping = {code: char for code, char in table.items() if widths.get(code, 0) > 0}
     codes = encode(after, mapping, widths, drawn, basefont)
     return {'xref': xref, 'resource': name, 'mapping': mapping, 'codes': codes,
         'widths': {code: widths[code] for code in mapping}, 'codeBytes': 1}
+
+def _type0_widths(doc, dget):
+    kind, value = dget('DW')
+    if kind not in ('null', 'int', 'float'): raise ValueError('CIDFont /DW를 확인할 수 없습니다.')
+    default = float(value) if kind != 'null' else 1000.0
+    kind, value = dget('W')
+    if kind == 'null': listed = {}
+    elif kind in ('array', 'xref'): listed = parse_cid_widths(object_text(doc, kind, value, "/W"))
+    else: raise ValueError('CIDFont /W를 확인할 수 없습니다.')
+    return default, listed
+
 
 def type0_codec(doc, xref, name, after, drawn):
     get = lambda key: doc.xref_get_key(xref, key)
@@ -297,13 +353,7 @@ def type0_codec(doc, xref, name, after, drawn):
     if get('ToUnicode')[0] != 'xref': raise ValueError('Type0 글꼴에 ToUnicode가 없어 문자 매핑을 검증할 수 없습니다.')
     try: unicode = parse_to_unicode(doc.xref_stream(ref(get('ToUnicode')[1]) or 0) or b'', 2)
     except ValueError as error: raise ValueError(f'Type0 ToUnicode를 검증할 수 없습니다: {error}') from None
-    kind, value = dget('DW')
-    if kind not in ('null', 'int', 'float'): raise ValueError('CIDFont /DW를 확인할 수 없습니다.')
-    default = float(value) if kind != 'null' else 1000.0
-    kind, value = dget('W')
-    if kind == 'null': listed = {}
-    elif kind in ('array', 'xref'): listed = parse_cid_widths(object_text(doc, kind, value, "/W"))
-    else: raise ValueError('CIDFont /W를 확인할 수 없습니다.')
+    default, listed = _type0_widths(doc, dget)
     # Identity-H: code == CID.
     mapping = {code: text for code, text in unicode.items() if len(text) == 1}
     widths = {code: listed.get(code, default) for code in mapping}

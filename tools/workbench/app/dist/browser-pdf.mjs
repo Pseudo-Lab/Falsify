@@ -1,7 +1,7 @@
-// app/src/browser-pdf.mjs
+// src/browser-pdf.mjs
 import * as mupdf from "./browser-pdf-vendor/mupdf.js";
 
-// app/src/browser-fonts.mjs
+// src/browser-fonts.mjs
 var error = (message) => new Error(message);
 var key = (value) => String(value || "").replace(/^[A-Z]{6}\+/, "").toLowerCase().replace(/[\s_-]+/g, "");
 function parseFont(bytes) {
@@ -19,44 +19,67 @@ function parseFont(bytes) {
     return view.getUint32(o);
   };
   const tag = (o) => String.fromCharCode(...bytes.subarray(o, o + 4));
-  const sig = u32(0);
-  if (sig === 1953784678) throw error("\uAE00\uAF34 \uCEEC\uB809\uC158(TTC/OTC)\uC740 \uC9C0\uC6D0\uD558\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4. \uB2E8\uC77C TTF \uB610\uB294 OTF\uB97C \uC120\uD0DD\uD574 \uC8FC\uC138\uC694.");
-  if (sig !== 65536 && sig !== 1330926671 && sig !== 1953658213) bad();
-  const count2 = u16(4), tables = /* @__PURE__ */ new Map();
-  if (!count2 || 12 + count2 * 16 > bytes.length) bad();
-  for (let i = 0; i < count2; i++) {
-    const p = 12 + i * 16, name = tag(p), offset = u32(p + 8), length = u32(p + 12);
-    if (offset > bytes.length || length > bytes.length - offset || tables.has(name)) bad();
-    tables.set(name, { offset, length });
+  function validateHeader() {
+    const sig = u32(0);
+    if (sig === 1953784678) throw error("\uAE00\uAF34 \uCEEC\uB809\uC158(TTC/OTC)\uC740 \uC9C0\uC6D0\uD558\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4. \uB2E8\uC77C TTF \uB610\uB294 OTF\uB97C \uC120\uD0DD\uD574 \uC8FC\uC138\uC694.");
+    if (sig !== 65536 && sig !== 1330926671 && sig !== 1953658213) bad();
+    const count3 = u16(4), tables2 = /* @__PURE__ */ new Map();
+    if (!count3 || 12 + count3 * 16 > bytes.length) bad();
+    return { count: count3, tables: tables2 };
   }
-  if (tables.has("fvar")) throw error("\uAC00\uBCC0 \uAE00\uAF34\uC740 \uC9C0\uC6D0\uD558\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4. \uACE0\uC815 \uAD75\uAE30\uC758 TTF \uB610\uB294 OTF\uB97C \uC120\uD0DD\uD574 \uC8FC\uC138\uC694.");
-  const names = tables.get("name"), os2 = tables.get("OS/2"), head = tables.get("head");
-  if (!names || names.length < 6 || !os2 || os2.length < 64 || !head || head.length < 46) bad();
+  const { count: count2, tables } = validateHeader();
+  function readTables() {
+    for (let i = 0; i < count2; i++) {
+      const p = 12 + i * 16, name = tag(p), offset = u32(p + 8), length = u32(p + 12);
+      if (offset > bytes.length || length > bytes.length - offset || tables.has(name)) bad();
+      tables.set(name, { offset, length });
+    }
+  }
+  readTables();
+  function requiredTables() {
+    if (tables.has("fvar")) throw error("\uAC00\uBCC0 \uAE00\uAF34\uC740 \uC9C0\uC6D0\uD558\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4. \uACE0\uC815 \uAD75\uAE30\uC758 TTF \uB610\uB294 OTF\uB97C \uC120\uD0DD\uD574 \uC8FC\uC138\uC694.");
+    const names2 = tables.get("name"), os22 = tables.get("OS/2"), head2 = tables.get("head");
+    if (!names2 || names2.length < 6 || !os22 || os22.length < 64 || !head2 || head2.length < 46) bad();
+    return { names: names2, os2: os22, head: head2 };
+  }
+  const { names, os2, head } = requiredTables();
   const n = names.offset, entries = u16(n + 2), strings = n + u16(n + 4), end = n + names.length;
   if (n + 6 + entries * 12 > end || strings > end) bad();
   const values = /* @__PURE__ */ new Map();
-  for (let i = 0; i < entries; i++) {
-    const p = n + 6 + i * 12, platform = u16(p), encoding = u16(p + 2), language = u16(p + 4), id = u16(p + 6), length = u16(p + 8), start = strings + u16(p + 10);
-    if (start > end || length > end - start) bad();
-    if (![1, 2, 6, 16, 17].includes(id)) continue;
+  function decodeName(platform, encoding, length, start) {
     let text;
     if (platform === 0 || platform === 3) {
       if (length % 2) bad();
       text = "";
       for (let j = 0; j < length; j += 2) text += String.fromCharCode(u16(start + j));
     } else if (platform === 1 && encoding === 0) text = String.fromCharCode(...bytes.subarray(start, start + length));
-    else continue;
-    text = text.replace(/\0/g, "").trim();
-    const score = (platform === 3 ? 4 : platform === 0 ? 3 : 1) + (language === 1033 ? 2 : 0);
-    if (text && (!values.has(id) || values.get(id).score < score)) values.set(id, { text, score });
+    else return null;
+    return text;
   }
+  function readNames() {
+    for (let i = 0; i < entries; i++) {
+      const p = n + 6 + i * 12, platform = u16(p), encoding = u16(p + 2), language = u16(p + 4), id = u16(p + 6), length = u16(p + 8), start = strings + u16(p + 10);
+      if (start > end || length > end - start) bad();
+      if (![1, 2, 6, 16, 17].includes(id)) continue;
+      let text;
+      text = decodeName(platform, encoding, length, start);
+      if (text === null) continue;
+      text = text.replace(/\0/g, "").trim();
+      const score = (platform === 3 ? 4 : platform === 0 ? 3 : 1) + (language === 1033 ? 2 : 0);
+      if (text && (!values.has(id) || values.get(id).score < score)) values.set(id, { text, score });
+    }
+  }
+  readNames();
   const get = (id) => values.get(id)?.text;
   const family = get(16) || get(1), postscriptName = get(6);
   if (!family) bad();
-  const weight = u16(os2.offset + 4), fsType = u16(os2.offset + 8), selection = u16(os2.offset + 62), macStyle = u16(head.offset + 44);
-  if (weight < 1 || weight > 1e3) bad();
-  if (fsType & 512 || fsType & 2 && !(fsType & 12)) throw error("\uC774 \uAE00\uAF34\uC740 \uC784\uBCA0\uB529 \uC81C\uD55C \uB610\uB294 \uBE44\uD2B8\uB9F5 \uC804\uC6A9 \uC81C\uD55C\uC774 \uC788\uC5B4 PDF\uC5D0 \uC0AC\uC6A9\uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4. \uB2E4\uB978 \uAE00\uAF34\uC744 \uC120\uD0DD\uD574 \uC8FC\uC138\uC694.");
-  return { family, ...postscriptName ? { postscriptName } : {}, weight, italic: Boolean(selection & 1 || macStyle & 2), fsType };
+  function fontMetadata() {
+    const weight = u16(os2.offset + 4), fsType = u16(os2.offset + 8), selection = u16(os2.offset + 62), macStyle = u16(head.offset + 44);
+    if (weight < 1 || weight > 1e3) bad();
+    if (fsType & 512 || fsType & 2 && !(fsType & 12)) throw error("\uC774 \uAE00\uAF34\uC740 \uC784\uBCA0\uB529 \uC81C\uD55C \uB610\uB294 \uBE44\uD2B8\uB9F5 \uC804\uC6A9 \uC81C\uD55C\uC774 \uC788\uC5B4 PDF\uC5D0 \uC0AC\uC6A9\uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4. \uB2E4\uB978 \uAE00\uAF34\uC744 \uC120\uD0DD\uD574 \uC8FC\uC138\uC694.");
+    return { family, ...postscriptName ? { postscriptName } : {}, weight, italic: Boolean(selection & 1 || macStyle & 2), fsType };
+  }
+  return fontMetadata();
 }
 function familyKey(value) {
   let name = String(value || "").replace(/^[A-Z]{6}\+/, "");
@@ -66,7 +89,7 @@ function familyKey(value) {
   return { timesnewromanpsmt: "timesnewroman", arialmt: "arial" }[normalized2] || normalized2;
 }
 
-// app/src/browser-pdf.mjs
+// src/browser-pdf.mjs
 var ENGINE = Object.freeze({
   name: "mupdf.js",
   version: "1.28.1",
@@ -178,15 +201,7 @@ async function prepareExclusive(request) {
   const bytes = await readBytes(parsed.file);
   checkAbort(request.signal);
   const sourceSha256 = await sha256(bytes);
-  if (parsed.fileHash && parsed.fileHash !== sourceSha256) {
-    throw new BrowserPdfError("stale-source", "\uC6D0\uBCF8 PDF \uD574\uC2DC\uAC00 \uD3B8\uC9D1 \uC138\uC158\uACFC \uB2E4\uB985\uB2C8\uB2E4. \uD30C\uC77C\uC744 \uB2E4\uC2DC \uC5F0 \uB4A4 \uC801\uC6A9\uD558\uC138\uC694. \uCD9C\uB825\uC740 \uB9CC\uB4E4\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4.", {
-      sourceSha256,
-      expectedSha256: parsed.fileHash
-    });
-  }
-  const enabled = parsed.edits.filter((edit) => edit.enabled !== false);
-  if (!enabled.length) throw new BrowserPdfError("no-edits", "\uC801\uC6A9\uD560 \uD3B8\uC9D1\uC774 \uC5C6\uC2B5\uB2C8\uB2E4. \uC6D0\uBCF8\uC744 \uBCC0\uACBD\uB41C \uD30C\uC77C\uB85C \uBC18\uD658\uD558\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4.");
-  if (enabled.length > LIMITS.maxEdits) throw new BrowserPdfError("limit", `\uD3B8\uC9D1\uC740 \uD55C \uBC88\uC5D0 ${LIMITS.maxEdits}\uAC1C\uAE4C\uC9C0\uC785\uB2C8\uB2E4.`);
+  const enabled = validateSourceEdits(parsed, sourceSha256);
   let doc;
   try {
     doc = openPdf(bytes);
@@ -198,46 +213,11 @@ async function prepareExclusive(request) {
       checkAbort(request.signal);
       models.push(readPage(doc.loadPage(i)));
     }
-    const plans = [];
-    const failures = [];
-    enabled.forEach((edit, index) => {
-      const result = locate(edit, index, models, pageCount, snapshot);
-      if (result.ok) plans.push(result.plan);
-      else failures.push(result.failure);
-    });
-    const overlaps = overlapping(plans);
-    if (overlaps.length) failures.push(...overlaps);
-    if (failures.length) throw unsupported(failures, models);
+    const { plans, failures } = locateEditPlans(enabled, models, pageCount, snapshot);
     checkAbort(request.signal);
     const warnings = [];
-    const byPage = /* @__PURE__ */ new Map();
-    for (const plan of plans) {
-      const laid = layout(plan, models[plan.pageIndex], doc.loadPage(plan.pageIndex));
-      if (laid.error) failures.push(failure(plan.edit, plan.pageIndex, laid.error));
-      else {
-        plan.layout = laid;
-        if (plan.anchorApproximate) warnings.push(warn("selection-font-metrics", "warning", plan.pageIndex, plan.edit.id));
-        if (laid.substituted) warnings.push(warn("font-substituted", "warning", plan.pageIndex, plan.edit.id));
-        if (laid.lines.length > 1) warnings.push(warn("wrapped-after", "info", plan.pageIndex, plan.edit.id));
-        if (plan.partialLine) warnings.push(warn("extraction-gap", "info", plan.pageIndex, plan.edit.id));
-        const list = byPage.get(plan.pageIndex) || [];
-        list.push(plan);
-        byPage.set(plan.pageIndex, list);
-      }
-    }
-    if (failures.length) throw unsupported(failures, models);
-    for (const [pageIndex, group] of byPage) {
-      checkAbort(request.signal);
-      const turned = group.filter((plan) => plan.rotation !== 0);
-      if (turned.length) throw unsupported(turned.map((plan) => failure(plan.edit, plan.pageIndex, "rotated-page")), models);
-      const page = doc.loadPage(pageIndex);
-      const selected = new Set(group.flatMap((plan) => plan.chars));
-      const protectedBoxes = removalBoxes(models[pageIndex].chars.filter((ch) => !selected.has(ch)));
-      for (const plan of group) redact(page, plan.chars, protectedBoxes);
-      page.applyRedactions(false, mupdf.PDFPage.REDACT_IMAGE_NONE, mupdf.PDFPage.REDACT_LINE_ART_NONE, mupdf.PDFPage.REDACT_TEXT_REMOVE);
-      const piece = group.map((plan) => showText(doc, page, plan)).join("");
-      if (piece) appendStream(doc, page, piece);
-    }
+    const byPage = layoutEditPlans(plans, models, doc, failures, warnings);
+    applyPageEdits(byPage, models, doc, request);
     checkAbort(request.signal);
     const saved = doc.saveToBuffer("garbage=compact");
     const out = new Uint8Array(saved.asUint8Array());
@@ -313,6 +293,64 @@ async function prepareExclusive(request) {
     }
   }
 }
+function validateSourceEdits(parsed, sourceSha256) {
+  if (parsed.fileHash && parsed.fileHash !== sourceSha256) {
+    throw new BrowserPdfError("stale-source", "\uC6D0\uBCF8 PDF \uD574\uC2DC\uAC00 \uD3B8\uC9D1 \uC138\uC158\uACFC \uB2E4\uB985\uB2C8\uB2E4. \uD30C\uC77C\uC744 \uB2E4\uC2DC \uC5F0 \uB4A4 \uC801\uC6A9\uD558\uC138\uC694. \uCD9C\uB825\uC740 \uB9CC\uB4E4\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4.", {
+      sourceSha256,
+      expectedSha256: parsed.fileHash
+    });
+  }
+  const enabled = parsed.edits.filter((edit) => edit.enabled !== false);
+  if (!enabled.length) throw new BrowserPdfError("no-edits", "\uC801\uC6A9\uD560 \uD3B8\uC9D1\uC774 \uC5C6\uC2B5\uB2C8\uB2E4. \uC6D0\uBCF8\uC744 \uBCC0\uACBD\uB41C \uD30C\uC77C\uB85C \uBC18\uD658\uD558\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4.");
+  if (enabled.length > LIMITS.maxEdits) throw new BrowserPdfError("limit", `\uD3B8\uC9D1\uC740 \uD55C \uBC88\uC5D0 ${LIMITS.maxEdits}\uAC1C\uAE4C\uC9C0\uC785\uB2C8\uB2E4.`);
+  return enabled;
+}
+function locateEditPlans(enabled, models, pageCount, snapshot) {
+  const plans = [];
+  const failures = [];
+  enabled.forEach((edit, index) => {
+    const result = locate(edit, index, models, pageCount, snapshot);
+    if (result.ok) plans.push(result.plan);
+    else failures.push(result.failure);
+  });
+  const overlaps = overlapping(plans);
+  if (overlaps.length) failures.push(...overlaps);
+  if (failures.length) throw unsupported(failures, models);
+  return { plans, failures };
+}
+function layoutEditPlans(plans, models, doc, failures, warnings) {
+  const byPage = /* @__PURE__ */ new Map();
+  for (const plan of plans) {
+    const laid = layout(plan, models[plan.pageIndex], doc.loadPage(plan.pageIndex));
+    if (laid.error) failures.push(failure(plan.edit, plan.pageIndex, laid.error));
+    else {
+      plan.layout = laid;
+      if (plan.anchorApproximate) warnings.push(warn("selection-font-metrics", "warning", plan.pageIndex, plan.edit.id));
+      if (laid.substituted) warnings.push(warn("font-substituted", "warning", plan.pageIndex, plan.edit.id));
+      if (laid.lines.length > 1) warnings.push(warn("wrapped-after", "info", plan.pageIndex, plan.edit.id));
+      if (plan.partialLine) warnings.push(warn("extraction-gap", "info", plan.pageIndex, plan.edit.id));
+      const list = byPage.get(plan.pageIndex) || [];
+      list.push(plan);
+      byPage.set(plan.pageIndex, list);
+    }
+  }
+  if (failures.length) throw unsupported(failures, models);
+  return byPage;
+}
+function applyPageEdits(byPage, models, doc, request) {
+  for (const [pageIndex, group] of byPage) {
+    checkAbort(request.signal);
+    const turned = group.filter((plan) => plan.rotation !== 0);
+    if (turned.length) throw unsupported(turned.map((plan) => failure(plan.edit, plan.pageIndex, "rotated-page")), models);
+    const page = doc.loadPage(pageIndex);
+    const selected = new Set(group.flatMap((plan) => plan.chars));
+    const protectedBoxes = removalBoxes(models[pageIndex].chars.filter((ch) => !selected.has(ch)));
+    for (const plan of group) redact(page, plan.chars, protectedBoxes);
+    page.applyRedactions(false, mupdf.PDFPage.REDACT_IMAGE_NONE, mupdf.PDFPage.REDACT_LINE_ART_NONE, mupdf.PDFPage.REDACT_TEXT_REMOVE);
+    const piece = group.map((plan) => showText(doc, page, plan)).join("");
+    if (piece) appendStream(doc, page, piece);
+  }
+}
 function parseRequest(request) {
   const file = request.file;
   const signal = request.signal;
@@ -386,23 +424,28 @@ function readPage(page) {
   });
   return { chars, images, transform, toPdf, bounds: page.getBounds(), rotation: rotationOf(page) };
 }
-function locate(edit, index, models, pageCount, snapshot) {
-  const id = typeof edit?.id === "string" && edit.id ? edit.id : `edit-${index}`;
-  const pageIndex = edit?.pageIndex;
-  const fail = (code) => ({ ok: false, failure: { id, pageIndex: Number.isInteger(pageIndex) ? pageIndex : null, status: "unapplied", code } });
+function validateEditText(edit, pageIndex, pageCount, fail) {
   if (!edit || typeof edit !== "object") return fail("invalid-edit");
   if (!Number.isInteger(pageIndex) || pageIndex < 0 || pageIndex >= pageCount) return fail("invalid-page");
   if (typeof edit.before !== "string" || !edit.before.trim() || edit.before.length > LIMITS.maxChars) return fail("invalid-before");
   if (typeof edit.after !== "string" || edit.after.length > LIMITS.maxChars) return fail("invalid-after");
+  return null;
+}
+function validAnchorRange(anchor) {
+  if (anchor && (anchor.start !== void 0 || anchor.end !== void 0)) {
+    if (!Number.isInteger(anchor.start) || !Number.isInteger(anchor.end) || anchor.end <= anchor.start) return false;
+  }
+  return true;
+}
+function validateEditAnchor(edit, pageIndex, pageCount, fail) {
   const anchor = edit.anchor && typeof edit.anchor === "object" ? edit.anchor : null;
   if (anchorConvention(edit, anchor)) return fail("invalid-anchor");
   if (anchor?.bbox && !validBox(anchor.bbox)) return fail("invalid-anchor");
   if (anchor && anchor.occurrence !== void 0 && (!Number.isInteger(anchor.occurrence) || anchor.occurrence < 0)) return fail("invalid-anchor");
-  if (anchor && (anchor.start !== void 0 || anchor.end !== void 0)) {
-    if (!Number.isInteger(anchor.start) || !Number.isInteger(anchor.end) || anchor.end <= anchor.start) return fail("invalid-anchor");
-  }
-  const model = models[pageIndex];
-  if (model.rotation !== 0) return fail("rotated-page");
+  if (!validAnchorRange(anchor)) return fail("invalid-anchor");
+  return { anchor };
+}
+function findAnchoredQuotes(model, edit, anchor) {
   const { text, map } = normalized(model.chars);
   const needle = edit.before.replace(/\s+/g, " ").trim();
   const hits = [];
@@ -412,23 +455,22 @@ function locate(edit, index, models, pageCount, snapshot) {
     const at = text.indexOf(needle, from);
     if (at < 0) break;
     from = at + 1;
-    const chars2 = [];
-    for (let i = at; i < at + needle.length; i++) if (map[i] !== null && map[i] !== void 0) chars2.push(model.chars[map[i]]);
-    if (!chars2.length) continue;
+    const chars = [];
+    for (let i = at; i < at + needle.length; i++) if (map[i] !== null && map[i] !== void 0) chars.push(model.chars[map[i]]);
+    if (!chars.length) continue;
     foundQuote = true;
     const occurrence = ordinal++;
     if (requestedOrdinal !== void 0 && occurrence !== requestedOrdinal) continue;
     if (anchor?.bbox) {
-      const box2 = union(chars2);
-      if (!contains(box2, anchor.bbox, Math.max(4, Math.min(8, (box2[3] - box2[1]) / 2)))) continue;
+      const box = union(chars);
+      if (!contains(box, anchor.bbox, Math.max(4, Math.min(8, (box[3] - box[1]) / 2)))) continue;
     }
-    hits.push({ at, chars: chars2 });
+    hits.push({ at, chars });
     if (requestedOrdinal !== void 0 || hits.length > 1) break;
   }
-  const pool = hits;
-  if (!pool.length) return fail(foundQuote ? "anchor-mismatch" : "not-found");
-  if (pool.length > 1) return fail("ambiguous");
-  const chars = pool[0].chars;
+  return { hits, foundQuote };
+}
+function buildLocatedPlan(edit, id, pageIndex, model, anchor, chars, snapshot, fail) {
   const drawn = chars.filter((ch) => ch.c.trim());
   if (!drawn.length) return fail("not-found");
   if (!drawn.every((ch) => horizontalLine(chars.filter((item) => item.lineId === ch.lineId)))) return fail("rotated-text");
@@ -462,6 +504,24 @@ function locate(edit, index, models, pageCount, snapshot) {
     partialLine,
     rotation: model.rotation
   } };
+}
+function locate(edit, index, models, pageCount, snapshot) {
+  const id = typeof edit?.id === "string" && edit.id ? edit.id : `edit-${index}`;
+  const pageIndex = edit?.pageIndex;
+  const fail = (code) => ({ ok: false, failure: { id, pageIndex: Number.isInteger(pageIndex) ? pageIndex : null, status: "unapplied", code } });
+  const invalid = validateEditText(edit, pageIndex, pageCount, fail);
+  if (invalid) return invalid;
+  const validated = validateEditAnchor(edit, pageIndex, pageCount, fail);
+  if (validated.ok === false) return validated;
+  const { anchor } = validated;
+  const model = models[pageIndex];
+  if (model.rotation !== 0) return fail("rotated-page");
+  const { hits, foundQuote } = findAnchoredQuotes(model, edit, anchor);
+  const pool = hits;
+  if (!pool.length) return fail(foundQuote ? "anchor-mismatch" : "not-found");
+  if (pool.length > 1) return fail("ambiguous");
+  const chars = pool[0].chars;
+  return buildLocatedPlan(edit, id, pageIndex, model, anchor, chars, snapshot, fail);
 }
 function layout(plan, model, page) {
   const font = plan.supplied?.font || (plan.encoding === "uniks-utf16" ? cjkFont() : metrics(plan.face.name));
@@ -604,30 +664,8 @@ function verify(sourceBytes, outBytes, plans, models, unchanged) {
   }
   try {
     if (check.countPages() !== models.length) checks.push({ pageIndex: null, status: "failed", code: "page-count" });
-    const edited = new Set(plans.map((plan) => plan.pageIndex));
-    for (let i = 0; i < models.length; i++) {
-      const page = check.loadPage(i);
-      const again = readPage(page);
-      if (!sameImages(models[i].images, again.images)) checks.push({ pageIndex: i, status: "failed", code: "figure-changed" });
-      if (!edited.has(i)) {
-        if (normalizeText(again.chars) !== normalizeText(models[i].chars)) checks.push({ pageIndex: i, status: "failed", code: "untouched-text" });
-      } else if (!keptOutsideSelection(models[i].chars, again.chars, selectedCharIndexes(plans, i))) {
-        checks.push({ pageIndex: i, status: "failed", code: "untouched-text" });
-      }
-    }
-    for (const plan of plans) {
-      const text = normalizeText(readPage(check.loadPage(plan.pageIndex)).chars);
-      const before = plan.edit.before.replace(/\s+/g, " ").trim();
-      const after = plan.edit.after.replace(/\s+/g, " ").trim();
-      const sourceText = normalizeText(models[plan.pageIndex].chars);
-      if (after && !text.includes(after)) {
-        const words = after.split(" ").filter(Boolean);
-        if (words.length && words.every((word) => text.includes(word))) warnings.push(warn("after-extraction-order", "warning", plan.pageIndex, plan.edit.id));
-        else checks.push({ id: plan.edit.id, pageIndex: plan.pageIndex, status: "failed", code: "present-after" });
-      }
-      const expected = Math.max(0, count(sourceText, before) - 1 + count(after, before));
-      if (count(text, before) > expected) checks.push({ id: plan.edit.id, pageIndex: plan.pageIndex, status: "failed", code: "removed-before" });
-    }
+    verifyUneditedContent(check, plans, models, checks);
+    verifyEditText(check, plans, models, warnings, checks);
     if (unchanged || outBytes.length === sourceBytes.length && outBytes.every((byte, index) => byte === sourceBytes[index])) {
       checks.push({ status: "failed", code: "unchanged-output" });
     }
@@ -638,6 +676,34 @@ function verify(sourceBytes, outBytes, plans, models, unchanged) {
     }
   }
   return { warnings, checks };
+}
+function verifyUneditedContent(check, plans, models, checks) {
+  const edited = new Set(plans.map((plan) => plan.pageIndex));
+  for (let i = 0; i < models.length; i++) {
+    const page = check.loadPage(i);
+    const again = readPage(page);
+    if (!sameImages(models[i].images, again.images)) checks.push({ pageIndex: i, status: "failed", code: "figure-changed" });
+    if (!edited.has(i)) {
+      if (normalizeText(again.chars) !== normalizeText(models[i].chars)) checks.push({ pageIndex: i, status: "failed", code: "untouched-text" });
+    } else if (!keptOutsideSelection(models[i].chars, again.chars, selectedCharIndexes(plans, i))) {
+      checks.push({ pageIndex: i, status: "failed", code: "untouched-text" });
+    }
+  }
+}
+function verifyEditText(check, plans, models, warnings, checks) {
+  for (const plan of plans) {
+    const text = normalizeText(readPage(check.loadPage(plan.pageIndex)).chars);
+    const before = plan.edit.before.replace(/\s+/g, " ").trim();
+    const after = plan.edit.after.replace(/\s+/g, " ").trim();
+    const sourceText = normalizeText(models[plan.pageIndex].chars);
+    if (after && !text.includes(after)) {
+      const words = after.split(" ").filter(Boolean);
+      if (words.length && words.every((word) => text.includes(word))) warnings.push(warn("after-extraction-order", "warning", plan.pageIndex, plan.edit.id));
+      else checks.push({ id: plan.edit.id, pageIndex: plan.pageIndex, status: "failed", code: "present-after" });
+    }
+    const expected = Math.max(0, count(sourceText, before) - 1 + count(after, before));
+    if (count(text, before) > expected) checks.push({ id: plan.edit.id, pageIndex: plan.pageIndex, status: "failed", code: "removed-before" });
+  }
 }
 function selectedCharIndexes(plans, pageIndex) {
   const selected = /* @__PURE__ */ new Set();
@@ -870,8 +936,12 @@ function base14(fontName, font) {
   const bold = font.isBold();
   const italic = font.isItalic();
   const family = font.isMono() ? "Courier" : font.isSerif() ? "Times" : "Helvetica";
-  const name = family === "Times" ? bold && italic ? "Times-BoldItalic" : bold ? "Times-Bold" : italic ? "Times-Italic" : "Times-Roman" : family === "Courier" ? bold && italic ? "Courier-BoldOblique" : bold ? "Courier-Bold" : italic ? "Courier-Oblique" : "Courier" : bold && italic ? "Helvetica-BoldOblique" : bold ? "Helvetica-Bold" : italic ? "Helvetica-Oblique" : "Helvetica";
+  const name = base14Style(family, bold, italic);
   return { name, substituted: true };
+}
+function base14Style(family, bold, italic) {
+  const name = family === "Times" ? bold && italic ? "Times-BoldItalic" : bold ? "Times-Bold" : italic ? "Times-Italic" : "Times-Roman" : family === "Courier" ? bold && italic ? "Courier-BoldOblique" : bold ? "Courier-Bold" : italic ? "Courier-Oblique" : "Courier" : bold && italic ? "Helvetica-BoldOblique" : bold ? "Helvetica-Bold" : italic ? "Helvetica-Oblique" : "Helvetica";
+  return name;
 }
 function metrics(name) {
   if (!fonts.has(name)) fonts.set(name, new mupdf.Font(name));

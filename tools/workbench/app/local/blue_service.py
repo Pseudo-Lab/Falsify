@@ -1,6 +1,7 @@
 """Fresh bounded BLUE reads: only supplied modified text, never RED plans/gold."""
 import json
 import hashlib
+from harness_adapter import cli_failure
 from harness import resolve, guidance, backend, model_label, builtin, record
 from red_service import (CodexBackend, ClaudeBackend, strict_object, STRING, EVIDENCE, SCAN,
                          evidence_check, validate_request as validate_document)
@@ -61,12 +62,16 @@ def external_literature_enabled(harness):
         and settings.get('scope') == 'document-plus-external-literature'
         and settings.get('externalLookup') == {'enabled': True, 'providers': ['crossref', 'europepmc']})
 
-def validate_request(data):
-    if not isinstance(data, dict) or not KEYS <= set(data) or set(data) - KEYS - {'harness','harnessCanonical','executionConsent','visualEvidence','visualConsent','fileHash','paperEvidence','paperEvidenceConsent'} or data.get('schema') != VERSION:
-        raise ValueError('BLUE는 허용된 문서 텍스트 필드만 받습니다. RED 계획·정답·파일명은 보내지 마세요.')
+def _validate_blue_segments(data):
     for s in data.get('segments', []) if isinstance(data.get('segments'), list) else []:
         if not isinstance(s, dict) or set(s) != {'id', 'label', 'text'}:
             raise ValueError('BLUE 문단에 추가 메타데이터를 넣을 수 없습니다.')
+
+
+def validate_request(data):
+    if not isinstance(data, dict) or not KEYS <= set(data) or set(data) - KEYS - {'harness','harnessCanonical','executionConsent','visualEvidence','visualConsent','fileHash','paperEvidence','paperEvidenceConsent'} or data.get('schema') != VERSION:
+        raise ValueError('BLUE는 허용된 문서 텍스트 필드만 받습니다. RED 계획·정답·파일명은 보내지 마세요.')
+    _validate_blue_segments(data)
     if type(data.get('maxCalls')) is not int or not 1 <= data['maxCalls'] <= 32:
         raise ValueError('호출 예산(1–32)을 확인하세요.')
     paper_context(data)
@@ -85,6 +90,23 @@ def validate_request(data):
         raise ValueError(f'전체 추출 텍스트 검토와 근거 재독에는 {required}회 호출이 필요합니다. 현재 예산에서는 시작하지 않습니다.')
     return chunks, required
 
+def _validate_delivered_finding(f, delivered):
+    if delivered is not None:
+        for sid, quote in [(f['segmentId'], f['quote'])] + [(e['segmentId'], e['quote']) for e in f['evidence']]:
+            if not any(quote in text for text in delivered.get(sid, ())):
+                raise ValueError('BLUE 지적/근거 인용이 최종 단계에 전달된 원문 창이나 검증된 스캔 인용에 없습니다.')
+
+def _validate_finding(f, source, ids, delivered):
+    if not 1 <= len(f['id']) <= 80 or f['id'] in ids: raise ValueError('BLUE 지적 ID 오류')
+    ids.add(f['id'])
+    if f['segmentId'] not in source or not f['quote'].strip() or len(f['quote']) > 4000 or source[f['segmentId']].count(f['quote']) != 1:
+        raise ValueError('BLUE 지적 위치가 원문에 없거나 중복됩니다.')
+    if not f['rationale'].strip() or len(f['rationale']) > 3000 or not f['uncertainty'].strip() or len(f['uncertainty']) > 1500:
+        raise ValueError('BLUE 설명/한계 제한 초과')
+    evidence_check(f['evidence'], source)
+    _validate_delivered_finding(f, delivered)
+
+
 def validate_findings(response, segments, delivered=None):
     """delivered: segmentId -> texts the final pass actually received (raw windows, validated scan quotes).
     None means the whole supplied text was in the same call (single chunk)."""
@@ -93,17 +115,8 @@ def validate_findings(response, segments, delivered=None):
         raise ValueError('유보/거절 응답에는 지적이 없어야 합니다.')
     ids = set()
     for f in response['findings']:
-        if not 1 <= len(f['id']) <= 80 or f['id'] in ids: raise ValueError('BLUE 지적 ID 오류')
-        ids.add(f['id'])
-        if f['segmentId'] not in source or not f['quote'].strip() or len(f['quote']) > 4000 or source[f['segmentId']].count(f['quote']) != 1:
-            raise ValueError('BLUE 지적 위치가 원문에 없거나 중복됩니다.')
-        if not f['rationale'].strip() or len(f['rationale']) > 3000 or not f['uncertainty'].strip() or len(f['uncertainty']) > 1500:
-            raise ValueError('BLUE 설명/한계 제한 초과')
-        evidence_check(f['evidence'], source)
-        if delivered is not None:
-            for sid, quote in [(f['segmentId'], f['quote'])] + [(e['segmentId'], e['quote']) for e in f['evidence']]:
-                if not any(quote in text for text in delivered.get(sid, ())):
-                    raise ValueError('BLUE 지적/근거 인용이 최종 단계에 전달된 원문 창이나 검증된 스캔 인용에 없습니다.')
+        _validate_finding(f, source, ids, delivered)
+
 
 def segment_index(segments, budget):
     """Bounded deterministic map of the supplied text. One entry per INDEX_PART so a long segment
@@ -119,6 +132,20 @@ def segment_index(segments, budget):
             entries.append(entry)
         if len(entries) == len(parts) or size == 0: return entries, len(entries) < len(parts)
 
+def _target_anchor(t, text, visible, catalog, delivered_spans):
+    if is_evidence_ref_id(t['anchor']):
+        offset, anchor = resolve_evidence_ref(t['anchor'], t['segmentId'], text, visible.get(t['segmentId'], ()),
+                                               catalog, delivered_spans)
+    else:
+        if not t['anchor'].strip() or len(t['anchor']) > MAX_ANCHOR or text.count(t['anchor']) != 1:
+            raise ValueError('BLUE 재독 기준 인용이 해당 문단에 없거나 중복됩니다.')
+        if not any(t['anchor'] in v for v in visible.get(t['segmentId'], ())):
+            raise ValueError('BLUE 재독 기준 인용이 선택 단계에 전달된 미리보기/스캔 인용에 없습니다.')
+        # count == 1, so find is the only offset and not a multi-match fallback.
+        offset, anchor = text.find(t['anchor']), t['anchor']
+    return offset, anchor
+
+
 def validate_targets(selection, source, visible, catalog=None, delivered_spans=()):
     """visible: segmentId -> texts the selection pass actually received (index previews, validated note
     quotes). An evidence-ref id is resolved only from the host catalog sent with this call.
@@ -133,16 +160,7 @@ def validate_targets(selection, source, visible, catalog=None, delivered_spans=(
     for t in selection['targets']:
         if t['segmentId'] not in source: raise ValueError('BLUE 재독 대상 문단 ID가 입력에 없습니다.')
         text = source[t['segmentId']]
-        if is_evidence_ref_id(t['anchor']):
-            offset, anchor = resolve_evidence_ref(t['anchor'], t['segmentId'], text, visible.get(t['segmentId'], ()),
-                                                   catalog, delivered_spans)
-        else:
-            if not t['anchor'].strip() or len(t['anchor']) > MAX_ANCHOR or text.count(t['anchor']) != 1:
-                raise ValueError('BLUE 재독 기준 인용이 해당 문단에 없거나 중복됩니다.')
-            if not any(t['anchor'] in v for v in visible.get(t['segmentId'], ())):
-                raise ValueError('BLUE 재독 기준 인용이 선택 단계에 전달된 미리보기/스캔 인용에 없습니다.')
-            # count == 1, so find is the only offset and not a multi-match fallback.
-            offset, anchor = text.find(t['anchor']), t['anchor']
+        offset, anchor = _target_anchor(t, text, visible, catalog, delivered_spans)
         if not t['reason'].strip() or len(t['reason']) > MAX_REASON: raise ValueError('BLUE 재독 사유 제한 초과')
         key = (t['segmentId'], offset, len(anchor))
         if key not in seen:
@@ -179,13 +197,17 @@ def reread_record(status, targets=(), windows=(), truncated=False):
             'deliveredChars': sum(w['end'] - w['start'] for w in windows), 'truncated': truncated,
             'meaning': REREAD[status]}
 
-def run_review(data, progress, cancelled, backend_factory=CodexBackend, claude_factory=ClaudeBackend):
-    chunks, required = validate_request(data)
-    images = visual_inputs(data)
-    structured = paper_context(data)
-    harness, harness_hash = resolve(data, 'blue')
-    source = {s['id']: s['text'] for s in data['segments']}
-    calls, notes = 0, []
+def _validate_visual_observations(response, data):
+    observations = response.get('visualObservations', [])
+    if response['status'] != 'ok' and observations: raise ValueError('visual_observations_invalid')
+    ids = set()
+    for observation in observations:
+        if not observation['id'].strip() or len(observation['id']) > 80 or observation['id'] in ids or not observation['observation'].strip() or len(observation['observation']) > 3000 or not observation['uncertainty'].strip() or len(observation['uncertainty']) > 1500: raise ValueError('visual_observations_invalid')
+        ids.add(observation['id'])
+        if not any(all(observation[k] == item[k] for k in ('sha256','page','bbox')) for item in data['visualEvidence']): raise ValueError('visual_reference_invalid')
+
+
+def _blue_policy(harness, structured):
     policy = ('Independently review the supplied scientific document for INTERNAL document consistency only. '
         'Do not assume a defect exists. Identify contradictory statements, missing qualifications or unsupported '
         'interpretations only where exact supplied evidence supports them. No external knowledge verification, '
@@ -214,72 +236,10 @@ def run_review(data, progress, cancelled, backend_factory=CodexBackend, claude_f
             'but no image has been observed through this text context. Cite supplied source text in findings; '
             'identify relevant table/figure IDs in the rationale. Do not claim unprovided cells or images were checked.\n'
             + structured['text'] + '\nEND_SOURCE_PDF_STRUCTURED_EVIDENCE\n')
-    final = ('Return up to 12 findings, each at a unique exact source quote (<=4000 chars), '
-        'with rationale <=3000 chars, exact evidence and uncertainty <=1500 chars. ')
-    # Model-independent prompts are built and bounded before any backend exists (JSON escaping can expand text).
-    if len(chunks) == 1:
-        first = [policy + final + 'Use only quotations supplied here. Abstain where the evidence is insufficient. '
-            + json.dumps({'segments': chunks[0]}, ensure_ascii=False)]
-    else:
-        first = [policy + 'Read every fragment, summarize claims and qualifications in <=2500 chars. '
-            'Quote up to four exact excerpts (<=600 chars each), including possible inconsistencies. '
-            + json.dumps({'part': i+1, 'parts': len(chunks), 'segments': chunk}, ensure_ascii=False) for i, chunk in enumerate(chunks)]
-    if any(len(p) > MAX_PROMPT for p in first):
-        raise ValueError(f'BLUE 호출 프롬프트가 {MAX_PROMPT}자 상한을 넘습니다. 모델을 호출하지 않습니다.')
-    # A new backend and ephemeral CLI session; no shared RED conversation or notes.
-    engine = backend(data, 'blue', required, backend_factory, claude_factory)
-    def invoke(prompt, schema, phase):
-        nonlocal calls
-        if cancelled.is_set(): raise ValueError('BLUE 취소됨')
-        if calls >= required: raise ValueError('BLUE 호출 예산 초과')
-        if len(prompt) > MAX_PROMPT: raise ValueError('BLUE 프롬프트 상한 초과. 호출하지 않습니다.')
-        progress({'completedCalls': calls, 'requiredCalls': required, 'phase': phase})
-        calls += 1
-        if images and schema is RESULT:
-            refs = [{k: v for k, v in item.items() if k not in ('base64', 'mime', 'fileHash', 'sourceHash', 'width', 'height', 'rotation')} for item in data['visualEvidence']]
-            prompt += '\nSupplemental images in order, identified by these references: ' + json.dumps(refs) + '. Return visualObservations separately; never fabricate text quotes. Reference exact sha256, page and bbox. An observation is a model judgment, not verified image correctness.'
-            if len(prompt) > MAX_PROMPT: raise ValueError('BLUE visual prompt limit')
-            result = infer_visual(engine, prompt, VISUAL_RESULT, images)
-        else:
-            result = engine.infer(prompt, schema)
-        if cancelled.is_set(): raise ValueError('BLUE 취소됨. 결과 폐기')
-        if result['status'] != 'ok': raise ValueError('CLI BLUE 중단: ' + str(result.get('error_code') or result['status']))
-        response = result['response']
-        if images and schema is RESULT:
-            observations = response.get('visualObservations', [])
-            if response['status'] != 'ok' and observations: raise ValueError('visual_observations_invalid')
-            ids = set()
-            for observation in observations:
-                if not observation['id'].strip() or len(observation['id']) > 80 or observation['id'] in ids or not observation['observation'].strip() or len(observation['observation']) > 3000 or not observation['uncertainty'].strip() or len(observation['uncertainty']) > 1500: raise ValueError('visual_observations_invalid')
-                ids.add(observation['id'])
-                if not any(all(observation[k] == item[k] for k in ('sha256','page','bbox')) for item in data['visualEvidence']): raise ValueError('visual_reference_invalid')
-        return response
-    visual_observations = []
-    def finish(status, findings, completed, reread, complete=True, windows=()):
-        coverage = {'complete': complete, 'calls': calls, 'chunks': len(chunks), 'completedChunks': completed, 'reread': reread,
-                    'rereadWindows': [{'segmentId': w['segmentId'], 'start': w['start'], 'end': w['end']} for w in windows]}
-        if complete: coverage['meaning'] = MEANING
-        if structured: coverage['paperEvidence'] = {**structured['coverage'], 'fileHash': data['fileHash'], 'contextSha256': hashlib.sha256(structured['text'].encode('utf-8')).hexdigest()}
-        if external:
-            coverage['externalLiterature'] = {'requested': True,
-                'providers': ['crossref', 'europepmc'], 'verification': 'custom-script-unverified',
-                'meaning': '사용자 코드의 외부 문헌 조회 허용. 실제 조회 성공·범위는 harness 감사기록에서 확인; 앱이 독립 검증하지 않음.'}
-        extra = {'visualObservations': visual_observations, 'visualScope': 'Image bytes and hashes verified; PDF and extracted text association is client-declared; image interpretation is unverified.'} if images else {}
-        return {**extra, 'schema': VERSION, 'revision': data['revision'], 'sourceHash': data['sourceHash'], 'status': status, 'findings': findings,
-            'harness': harness, 'harnessHash': harness_hash, 'model': model_label(harness), **record(harness),
-            'coverage': coverage, 'isolation': ISOLATION}
-    if len(chunks) == 1:
-        response = invoke(first[0], RESULT, 'reviewing')
-        validate_findings(response, data['segments'])
-        if images: visual_observations.extend(response['visualObservations'])
-        return finish(response['status'], response['findings'], 1, reread_record('not-needed'))
-    for i, prompt in enumerate(first):
-        note = invoke(prompt, SCAN, 'reviewing')
-        if note['status'] != 'ok':
-            return finish(note['status'], [], i+1, reread_record('incomplete'), complete=False)
-        if len(note['summary']) > 2500: raise ValueError('BLUE 요약 제한 초과')
-        evidence_check(note['evidence'], source, 600)
-        notes.append(note)
+    return policy, external
+
+
+def _selection_prompt(policy, notes, data):
     head = (policy + 'Evidence reread selection. Chunk notes are lossy and may omit qualifiers. '
         f'Choose up to {MAX_TARGETS} places whose RAW supplied text must be reread before the final judgment, '
         'including cross-section conditions (Methods/Results qualifiers, limitations) the notes may have omitted. '
@@ -308,16 +268,24 @@ def run_review(data, progress, cancelled, backend_factory=CodexBackend, claude_f
         prompt = head + json.dumps(payload, ensure_ascii=False)
     if len(prompt) > MAX_PROMPT:
         raise ValueError('BLUE 재독 선택 프롬프트가 상한을 넘습니다. 호출하지 않습니다.')
-    selection = invoke(prompt, SELECTION, 'selecting')
-    visible = {}
-    for e in index: visible.setdefault(e['segmentId'], []).append(e['preview'])
-    for sid, quote in quotes: visible.setdefault(sid, []).append(quote)
-    targets = validate_targets(selection, source, visible, {r['id']: r for r in payload['evidenceRefs']}, spans)
-    if selection['status'] != 'ok':
-        return finish(selection['status'], [], len(chunks), reread_record('incomplete'))
-    if not targets:  # never a summary-only final judgment
-        return finish('abstain', [], len(chunks), reread_record('incomplete'))
-    progress({'completedCalls': calls, 'requiredCalls': required, 'phase': 'reread'})
+    return prompt, index, quotes, payload, spans
+
+
+def _first_review_prompts(policy, final, chunks):
+    # Model-independent prompts are built and bounded before any backend exists (JSON escaping can expand text).
+    if len(chunks) == 1:
+        first = [policy + final + 'Use only quotations supplied here. Abstain where the evidence is insufficient. '
+            + json.dumps({'segments': chunks[0]}, ensure_ascii=False)]
+    else:
+        first = [policy + 'Read every fragment, summarize claims and qualifications in <=2500 chars. '
+            'Quote up to four exact excerpts (<=600 chars each), including possible inconsistencies. '
+            + json.dumps({'part': i+1, 'parts': len(chunks), 'segments': chunk}, ensure_ascii=False) for i, chunk in enumerate(chunks)]
+    if any(len(p) > MAX_PROMPT for p in first):
+        raise ValueError(f'BLUE 호출 프롬프트가 {MAX_PROMPT}자 상한을 넘습니다. 모델을 호출하지 않습니다.')
+    return first
+
+
+def _reread_prompt(policy, final, targets, data, notes):
     head = (policy + final + 'rereadWindows are RAW supplied text at the given source offsets [start,end) and may be '
         'partial; text outside them and outside exact note quotes is NOT available here. Use only quotations present '
         'in rereadWindows or exact note quotes. Abstain where the evidence is insufficient. ')
@@ -329,10 +297,94 @@ def run_review(data, progress, cancelled, backend_factory=CodexBackend, claude_f
         prompt = head + json.dumps({'allChunkNotes': notes, 'rereadWindows': windows}, ensure_ascii=False)
         if len(prompt) <= MAX_PROMPT: break
         budget = max(0, budget - (len(prompt) - MAX_PROMPT) - 64)
-    response = invoke(prompt, RESULT, 'finalizing')
+    return prompt, windows, truncated
+
+
+def _selection_visible(index, quotes):
+    visible = {}
+    for e in index: visible.setdefault(e['segmentId'], []).append(e['preview'])
+    for sid, quote in quotes: visible.setdefault(sid, []).append(quote)
+    return visible
+
+
+def _final_delivered(windows, notes):
     delivered = {}
     for w in windows: delivered.setdefault(w['segmentId'], []).append(w['text'])
     for e in (e for n in notes for e in n['evidence']): delivered.setdefault(e['segmentId'], []).append(e['quote'])
+    return delivered
+
+
+def run_review(data, progress, cancelled, backend_factory=CodexBackend, claude_factory=ClaudeBackend):
+    chunks, required = validate_request(data)
+    images = visual_inputs(data)
+    structured = paper_context(data)
+    harness, harness_hash = resolve(data, 'blue')
+    source = {s['id']: s['text'] for s in data['segments']}
+    calls, notes = 0, []
+    policy, external = _blue_policy(harness, structured)
+    final = ('Return up to 12 findings, each at a unique exact source quote (<=4000 chars), '
+        'with rationale <=3000 chars, exact evidence and uncertainty <=1500 chars. ')
+    first = _first_review_prompts(policy, final, chunks)
+    # A new backend and ephemeral CLI session; no shared RED conversation or notes.
+    engine = backend(data, 'blue', required, backend_factory, claude_factory)
+    def invoke(prompt, schema, phase):
+        nonlocal calls
+        if cancelled.is_set(): raise ValueError('BLUE 취소됨')
+        if calls >= required: raise ValueError('BLUE 호출 예산 초과')
+        if len(prompt) > MAX_PROMPT: raise ValueError('BLUE 프롬프트 상한 초과. 호출하지 않습니다.')
+        progress({'completedCalls': calls, 'requiredCalls': required, 'phase': phase})
+        calls += 1
+        if images and schema is RESULT:
+            refs = [{k: v for k, v in item.items() if k not in ('base64', 'mime', 'fileHash', 'sourceHash', 'width', 'height', 'rotation')} for item in data['visualEvidence']]
+            prompt += '\nSupplemental images in order, identified by these references: ' + json.dumps(refs) + '. Return visualObservations separately; never fabricate text quotes. Reference exact sha256, page and bbox. An observation is a model judgment, not verified image correctness.'
+            if len(prompt) > MAX_PROMPT: raise ValueError('BLUE visual prompt limit')
+            result = infer_visual(engine, prompt, VISUAL_RESULT, images)
+        else:
+            result = engine.infer(prompt, schema)
+        if cancelled.is_set(): raise ValueError('BLUE 취소됨. 결과 폐기')
+        if result['status'] != 'ok': raise cli_failure(result.get('error_code') or result['status'])
+        response = result['response']
+        if images and schema is RESULT:
+            _validate_visual_observations(response, data)
+        return response
+    visual_observations = []
+    def finish(status, findings, completed, reread, complete=True, windows=()):
+        coverage = {'complete': complete, 'calls': calls, 'chunks': len(chunks), 'completedChunks': completed, 'reread': reread,
+                    'rereadWindows': [{'segmentId': w['segmentId'], 'start': w['start'], 'end': w['end']} for w in windows]}
+        if complete: coverage['meaning'] = MEANING
+        if structured: coverage['paperEvidence'] = {**structured['coverage'], 'fileHash': data['fileHash'], 'contextSha256': hashlib.sha256(structured['text'].encode('utf-8')).hexdigest()}
+        if external:
+            coverage['externalLiterature'] = {'requested': True,
+                'providers': ['crossref', 'europepmc'], 'verification': 'custom-script-unverified',
+                'meaning': '사용자 코드의 외부 문헌 조회 허용. 실제 조회 성공·범위는 harness 감사기록에서 확인; 앱이 독립 검증하지 않음.'}
+        extra = {'visualObservations': visual_observations, 'visualScope': 'Image bytes and hashes verified; PDF and extracted text association is client-declared; image interpretation is unverified.'} if images else {}
+        return {**extra, 'schema': VERSION, 'revision': data['revision'], 'sourceHash': data['sourceHash'], 'status': status, 'findings': findings,
+            'harness': harness, 'harnessHash': harness_hash, 'model': model_label(harness), **record(harness),
+            'coverage': coverage, 'isolation': ISOLATION}
+    if len(chunks) == 1:
+        response = invoke(first[0], RESULT, 'reviewing')
+        validate_findings(response, data['segments'])
+        if images: visual_observations.extend(response['visualObservations'])
+        return finish(response['status'], response['findings'], 1, reread_record('not-needed'))
+    for i, prompt in enumerate(first):
+        note = invoke(prompt, SCAN, 'reviewing')
+        if note['status'] != 'ok':
+            return finish(note['status'], [], i+1, reread_record('incomplete'), complete=False)
+        if len(note['summary']) > 2500: raise ValueError('BLUE 요약 제한 초과')
+        evidence_check(note['evidence'], source, 600)
+        notes.append(note)
+    prompt, index, quotes, payload, spans = _selection_prompt(policy, notes, data)
+    selection = invoke(prompt, SELECTION, 'selecting')
+    visible = _selection_visible(index, quotes)
+    targets = validate_targets(selection, source, visible, {r['id']: r for r in payload['evidenceRefs']}, spans)
+    if selection['status'] != 'ok':
+        return finish(selection['status'], [], len(chunks), reread_record('incomplete'))
+    if not targets:  # never a summary-only final judgment
+        return finish('abstain', [], len(chunks), reread_record('incomplete'))
+    progress({'completedCalls': calls, 'requiredCalls': required, 'phase': 'reread'})
+    prompt, windows, truncated = _reread_prompt(policy, final, targets, data, notes)
+    response = invoke(prompt, RESULT, 'finalizing')
+    delivered = _final_delivered(windows, notes)
     validate_findings(response, data['segments'], delivered)
     if images: visual_observations.extend(response['visualObservations'])
     return finish(response['status'], response['findings'], len(chunks),

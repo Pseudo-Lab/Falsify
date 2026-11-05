@@ -1,6 +1,6 @@
 {
   "name": "falsify-paper-workbench",
-  "version": "0.2.0-alpha.48",
+  "version": "0.2.0-alpha.51",
   "license": "AGPL-3.0-only",
   "private": true,
   "scripts": {
@@ -8,6 +8,7 @@
     "build:fonts": "node scripts/build-paper-fonts.mjs",
     "build:plottracer": "node scripts/build-plottracer.mjs",
     "build:chart-redraw": "node scripts/build-chart-redraw.mjs",
+    "build:chart-shape": "node scripts/build-chart-shape.mjs && node scripts/build-chart-shape-editor.mjs && node scripts/build-chart-mark-editor.mjs",
     "build:blue-visual": "node scripts/build-blue-visual.mjs",
     "build:import": "node scripts/build-import.mjs",
     "build:preview": "node scripts/build-preview.mjs",

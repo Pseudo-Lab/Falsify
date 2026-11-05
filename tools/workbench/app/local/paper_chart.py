@@ -421,6 +421,36 @@ def _geometry_result(geometry,image):
     return result
 
 
+def _extract_geometry(png_bytes, options, image, title, axes):
+    try:
+        from paper_plottracer import trace_geometry
+        geometry=trace_geometry(png_bytes,manual=options.get('chartOptions'))
+        if geometry['status'] in ('ready','partial') and geometry['series']:
+            return _geometry_result(geometry,image)
+    except (ImportError,OSError):
+        geometry={'status':'unavailable','issues':['plottracer-runtime-missing'],'series':[],'axes':{}}
+    # A model's parseable table is not an alternative axis calibration.
+    # Keep the source image available so callers can supply ticks/colors.
+    result=_result('partial',image,geometry.get('issues',[]),'',
+        {'engine':'plottracer','model':None,'revision':'dcc28a5da453ff5c4e7cadd4478523560d15c0dc','device':'cpu','method':'calibration-required'},
+        ['series','axis','x','y'],[],[],title,'xy',axes)
+    result['geometry']=geometry
+    result['pointKind']='curve-sample'
+    return result
+
+
+def _table_lines_and_title(raw, title):
+    # DePlot emits an optional TITLE metadata row before the actual header.
+    # Keep rawOutput byte-for-byte, while presenting the real series columns.
+    table_lines = _lines(raw)
+    if len(table_lines) >= 2:
+        first = _cells(table_lines[0])
+        if len(first) == 2 and first[0] == 'TITLE':
+            if title is None: title = first[1]
+            table_lines = table_lines[1:]
+    return table_lines, title
+
+
 def extract_chart(png_bytes, engine=None, options=None):
     """Return a falsify.chart-data.v1 dict. See the module docstring for injection."""
     image, image_issue = _image_info(png_bytes)
@@ -435,21 +465,7 @@ def extract_chart(png_bytes, engine=None, options=None):
     title, chart_type, axes, issues = _grounding(options)
     geometry=None
     if engine is None:
-        try:
-            from paper_plottracer import trace_geometry
-            geometry=trace_geometry(png_bytes,manual=options.get('chartOptions'))
-            if geometry['status'] in ('ready','partial') and geometry['series']:
-                return _geometry_result(geometry,image)
-        except (ImportError,OSError):
-            geometry={'status':'unavailable','issues':['plottracer-runtime-missing'],'series':[],'axes':{}}
-        # A model's parseable table is not an alternative axis calibration.
-        # Keep the source image available so callers can supply ticks/colors.
-        result=_result('partial',image,geometry.get('issues',[]),'',
-            {'engine':'plottracer','model':None,'revision':'dcc28a5da453ff5c4e7cadd4478523560d15c0dc','device':'cpu','method':'calibration-required'},
-            ['series','axis','x','y'],[],[],title,'xy',axes)
-        result['geometry']=geometry
-        result['pointKind']='curve-sample'
-        return result
+        return _extract_geometry(png_bytes, options, image, title, axes)
     selected = default_engine() if engine is None else engine
     try:
         raw = _invoke(selected, png_bytes, options)
@@ -463,14 +479,7 @@ def extract_chart(png_bytes, engine=None, options=None):
     if getattr(selected, 'generation_truncated', False):
         limit = getattr(selected, 'generation_token_limit', MAX_NEW_TOKENS)
         issues.append('generation truncated at %d tokens' % int(limit))
-    # DePlot emits an optional TITLE metadata row before the actual header.
-    # Keep rawOutput byte-for-byte, while presenting the real series columns.
-    table_lines = _lines(raw)
-    if len(table_lines) >= 2:
-        first = _cells(table_lines[0])
-        if len(first) == 2 and first[0] == 'TITLE':
-            if title is None: title = first[1]
-            table_lines = table_lines[1:]
+    table_lines, title = _table_lines_and_title(raw, title)
     parsed = _parse_table('\n'.join(table_lines))
     if parsed is None:
         issues.append('empty output')

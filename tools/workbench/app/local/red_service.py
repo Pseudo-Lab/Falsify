@@ -7,6 +7,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from experiments.selfplay_codex import CodexBackend
 from cli_backend import ClaudeBackend
+from harness_adapter import cli_failure
 from harness import resolve, guidance, backend, model_label, builtin, record
 
 VERSION = 'falsify.document-red.v1'
@@ -32,7 +33,29 @@ RESULT = strict_object({'status': {'type': 'string', 'enum': ['ok', 'abstain', '
 SCAN = strict_object({'status': {'type': 'string', 'enum': ['ok', 'abstain', 'refusal']}, 'summary': STRING,
     'evidence': {'type': 'array', 'items': EVIDENCE, 'maxItems': 4}})
 
-def validate_request(data):
+def _validate_segments(segments):
+    ids = set()
+    for s in segments:
+        if not isinstance(s, dict) or not isinstance(s.get('id'), str) or len(s['id']) > 80 or s['id'] in ids:
+            raise ValueError('문단 ID가 올바르지 않습니다.')
+        ids.add(s['id'])
+        if not isinstance(s.get('text'), str) or not s['text'].strip() or not isinstance(s.get('label'), str) or len(s['label']) > 200:
+            raise ValueError('문단 텍스트/위치가 올바르지 않습니다.')
+
+
+def _chunk_segments(segments):
+    chunks, current, count = [], [], 0
+    for s in segments:
+        for start in range(0, len(s['text']), CHUNK):
+            fragment = {'id': s['id'], 'label': s['label'], 'text': s['text'][start:start + CHUNK]}
+            if current and count + len(fragment['text']) > CHUNK:
+                chunks.append(current); current, count = [], 0
+            current.append(fragment); count += len(fragment['text'])
+    if current: chunks.append(current)
+    return chunks
+
+
+def _validate_review_envelope(data):
     if not isinstance(data, dict) or data.get('schema') != VERSION or data.get('consent') is not True:
         raise ValueError('요청 스키마와 명시적 모델 전송 동의가 필요합니다.')
     for field in ['revision', 'requestId']:
@@ -48,27 +71,19 @@ def validate_request(data):
         raise ValueError('근거 언어는 ko 또는 en입니다.')
     if not builtin(harness) and data.get('executionConsent') is not True:
         raise ValueError('사용자 harness 실행/전송 동의가 필요합니다.')
+    return harness
+
+
+def validate_request(data):
+    harness = _validate_review_envelope(data)
     segments = data.get('segments')
     if not isinstance(segments, list) or not 1 <= len(segments) <= 10000:
         raise ValueError('추출 문단/페이지가 필요합니다.')
-    ids = set()
-    for s in segments:
-        if not isinstance(s, dict) or not isinstance(s.get('id'), str) or len(s['id']) > 80 or s['id'] in ids:
-            raise ValueError('문단 ID가 올바르지 않습니다.')
-        ids.add(s['id'])
-        if not isinstance(s.get('text'), str) or not s['text'].strip() or not isinstance(s.get('label'), str) or len(s['label']) > 200:
-            raise ValueError('문단 텍스트/위치가 올바르지 않습니다.')
+    _validate_segments(segments)
     source = '\n\n'.join(s['text'] for s in segments)
     if len(source) > 1000000 or '\0' in source or hashlib.sha256(source.encode('utf-8')).hexdigest() != data.get('sourceHash'):
         raise ValueError('원문 크기/해시가 일치하지 않습니다.')
-    chunks, current, count = [], [], 0
-    for s in segments:
-        for start in range(0, len(s['text']), CHUNK):
-            fragment = {'id': s['id'], 'label': s['label'], 'text': s['text'][start:start + CHUNK]}
-            if current and count + len(fragment['text']) > CHUNK:
-                chunks.append(current); current, count = [], 0
-            current.append(fragment); count += len(fragment['text'])
-    if current: chunks.append(current)
+    chunks = _chunk_segments(segments)
     calls = 1 if len(chunks) == 1 else len(chunks) + 1
     if calls > min(data['maxCalls'], harness['maxCalls']):
         raise ValueError(f'전체 추출 텍스트 검토에는 {calls}회 호출이 필요합니다. 현재 예산에서는 시작하지 않습니다.')
@@ -80,22 +95,47 @@ def evidence_check(items, source, max_quote=2000):
             raise ValueError('모델이 원문에 없는 근거를 반환했습니다. 응답을 적용하지 않습니다.')
         if not e['relation'].strip() or len(e['relation']) > 1500: raise ValueError('근거 설명 제한 초과')
 
+def _validate_candidate_rationale(c):
+    if not c['rationale'].strip() or len(c['rationale']) > 3000 or (c.get('uncertainty') is not None and (not isinstance(c['uncertainty'], str) or len(c['uncertainty']) > 1500)):
+        raise ValueError('근거/한계 설명 제한 초과')
+
+
+def _validate_candidate(c, source, ids):
+    before, after = c['before'], c['after']
+    if c['id'] in ids or not 1 <= len(c['id']) <= 80: raise ValueError('후보 ID 중복/제한 초과')
+    ids.add(c['id'])
+    if c['segmentId'] not in source or not before.strip() or len(before) > 4000 or source[c['segmentId']].count(before) != 1:
+        raise ValueError('공격 위치 인용이 없거나 중복됩니다.')
+    if not isinstance(after, str) or (after and not after.strip()) or len(after) > 4000 or before == after: raise ValueError('변경문이 올바르지 않습니다.')
+    if 'attackTypes' in c or 'level' in c: attack_types(c)
+    _validate_candidate_rationale(c)
+    evidence_check(c['evidence'], source)
+
 def validate_candidates(response, segments):
     import re
     source = {s['id']: s['text'] for s in segments}
     if response['status'] != 'ok' and response['candidates']: raise ValueError('유보/거절에는 후보가 없어야 합니다.')
     ids = set()
     for c in response['candidates']:
-        before, after = c['before'], c['after']
-        if c['id'] in ids or not 1 <= len(c['id']) <= 80: raise ValueError('후보 ID 중복/제한 초과')
-        ids.add(c['id'])
-        if c['segmentId'] not in source or not before.strip() or len(before) > 4000 or source[c['segmentId']].count(before) != 1:
-            raise ValueError('공격 위치 인용이 없거나 중복됩니다.')
-        if not isinstance(after, str) or (after and not after.strip()) or len(after) > 4000 or before == after: raise ValueError('변경문이 올바르지 않습니다.')
-        if 'attackTypes' in c or 'level' in c: attack_types(c)
-        if not c['rationale'].strip() or len(c['rationale']) > 3000 or (c.get('uncertainty') is not None and (not isinstance(c['uncertainty'], str) or len(c['uncertainty']) > 1500)):
-            raise ValueError('근거/한계 설명 제한 초과')
-        evidence_check(c['evidence'], source)
+        _validate_candidate(c, source, ids)
+
+
+def _trim_notes(notes, notesTrimmed):
+    room = max(400, NOTES_BUDGET // len(notes))
+    for n in notes:
+        if len(n['summary']) > room:
+            n['summary'] = n['summary'][:room].rstrip() + '…'; notesTrimmed = True
+    return notesTrimmed
+
+
+def _candidate_request(data, chunks, notes):
+    selected = attack_types(data)
+    legacy = type(data.get('level')) is int and data['level'] in (1, 2, 3) and selected == [TYPES[data['level'] - 1]]
+    payload = {'attackTypes': selected, **({'level': data['level']} if legacy else {}), 'format': data.get('format'), **({'segments': chunks[0]} if len(chunks) == 1 else {'allChunkNotes': notes})}
+    candidate_schema = CANDIDATE if legacy else strict_object({**{k:v for k,v in CANDIDATE['properties'].items() if k != 'level'}, 'attackTypes': {'type':'array', 'items':{'type':'string','enum':TYPES}, 'minItems':1, 'maxItems':3}})
+    result_schema = strict_object({'status': RESULT['properties']['status'], 'candidates': {'type':'array','items':candidate_schema,'maxItems':12}})
+    return selected, payload, result_schema
+
 
 def run_review(data, progress, cancelled, backend_factory=CodexBackend, claude_factory=ClaudeBackend):
     chunks, required = validate_request(data)
@@ -120,7 +160,7 @@ def run_review(data, progress, cancelled, backend_factory=CodexBackend, claude_f
         calls += 1; progress({'completedCalls': calls - 1, 'requiredCalls': required, 'phase': '검토 중'})
         result = engine.infer(prompt, schema)
         if cancelled.is_set(): raise ValueError('취소됨. 결과는 폐기했습니다.')
-        if result['status'] != 'ok': raise ValueError('CLI 검토 중단: ' + str(result.get('error_code') or result['status']))
+        if result['status'] != 'ok': raise cli_failure(result.get('error_code') or result['status'])
         return result['response']
     notesTrimmed = False
     if len(chunks) > 1:
@@ -136,15 +176,8 @@ def run_review(data, progress, cancelled, backend_factory=CodexBackend, claude_f
             if len(summary) > MAX_NOTE:
                 summary = summary[:MAX_NOTE].rstrip() + '…'; notesTrimmed = True
             notes.append({**note, 'summary': summary})
-        room = max(400, NOTES_BUDGET // len(notes))
-        for n in notes:
-            if len(n['summary']) > room:
-                n['summary'] = n['summary'][:room].rstrip() + '…'; notesTrimmed = True
-    selected = attack_types(data)
-    legacy = type(data.get('level')) is int and data['level'] in (1, 2, 3) and selected == [TYPES[data['level'] - 1]]
-    payload = {'attackTypes': selected, **({'level': data['level']} if legacy else {}), 'format': data.get('format'), **({'segments': chunks[0]} if len(chunks) == 1 else {'allChunkNotes': notes})}
-    candidate_schema = CANDIDATE if legacy else strict_object({**{k:v for k,v in CANDIDATE['properties'].items() if k != 'level'}, 'attackTypes': {'type':'array', 'items':{'type':'string','enum':TYPES}, 'minItems':1, 'maxItems':3}})
-    result_schema = strict_object({'status': RESULT['properties']['status'], 'candidates': {'type':'array','items':candidate_schema,'maxItems':12}})
+        notesTrimmed = _trim_notes(notes, notesTrimmed)
+    selected, payload, result_schema = _candidate_request(data, chunks, notes)
     response = invoke(policy + 'All extracted text has been supplied in this call or previous chunk reads. Propose up to 12 candidates at exact unique quotations. '
         'Each candidate needs a clear causal/logical rationale (<=3000 chars), exact evidence quotes, before/after <=4000 chars. Uncertainty is optional; use null when absent (otherwise <=1500 chars). '
         'A candidate is a hypothesis, not proof. Use only quoted text available here; abstain if unsupported. Return only selected attack types. '

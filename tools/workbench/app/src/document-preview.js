@@ -30,14 +30,21 @@ export function createPreview({document:d=globalThis.document,importPdf=defaultI
   function stop(s){if(!s)return;s.stale=true;timers.clearTimeout(s.timer);timers.clearTimeout(s.pageTimer);s.render?.cancel();s.render=null;const task=s.task;s.task=null;s.doc=null;if(task)void Promise.resolve().then(()=>task.destroy()).catch(()=>{});}
   function clear(){const s=state;state=null;stop(s);root.hidden=true;wipe();say('');ui.hash.textContent='';nav();}
   function fail(s,error){if(state!==s||s.failed)return;s.failed=true;stop(s);wipe();say((FAILURE[error?.name]||'이 브라우저에서 미리보기를 그리지 못했습니다.')+(s.downloadable?KEEP:''),true);nav();}
+  function previewSizeAllowed(file,s){
+    if(!(file.size>0&&file.size<=maxBytes)){s.downloadable=true;say(file.size>maxBytes?'출력 사본이 64 MiB를 넘어 미리보기를 생략했습니다.'+KEEP:'빈 출력 사본이라 미리보기를 그리지 않았습니다.',file.size<=0);nav();return false;}
+    return true;
+  }
+  function validPreviewInput(file,sha256){return !!file&&typeof sha256==='string'&&HEX.test(sha256);}
+  function reportHashMismatch(s){if(state!==s)return;say('미리보기용으로 다시 읽은 바이트가 검증된 해시와 달라 그리지 않았습니다. 이 화면의 다시 다운로드도 막았습니다.',true);}
+  function validatePageCount(doc){if(!(Number.isSafeInteger(doc.numPages)&&doc.numPages>0))throw new Error('no pages');}
   async function show({file,sha256,changes=[]}={}){
-    clear();if(!file||typeof sha256!=='string'||!HEX.test(sha256))return;
+    clear();if(!validPreviewInput(file,sha256))return;
     const s={file,sha256,changes:changes.map(c=>({...c})),page:1,pages:0,seq:0,doc:null,task:null,render:null,timer:null,pageTimer:null,stale:false,downloadable:false};state=s;
     root.hidden=false;ui.hash.textContent='SHA-256 '+sha256;nav();
-    if(!(file.size>0&&file.size<=maxBytes)){s.downloadable=true;say(file.size>maxBytes?'출력 사본이 64 MiB를 넘어 미리보기를 생략했습니다.'+KEEP:'빈 출력 사본이라 미리보기를 그리지 않았습니다.',file.size<=0);nav();return;}
+    if(!previewSizeAllowed(file,s))return;
     say('다운로드한 사본의 바이트와 해시를 다시 확인하는 중입니다.');
     try{const bytes=new Uint8Array(await file.arrayBuffer());if(state!==s)return;
-      if(bytes.length!==file.size||hex(await subtle.digest('SHA-256',bytes))!==sha256){if(state!==s)return;say('미리보기용으로 다시 읽은 바이트가 검증된 해시와 달라 그리지 않았습니다. 이 화면의 다시 다운로드도 막았습니다.',true);return;}
+      if(bytes.length!==file.size||hex(await subtle.digest('SHA-256',bytes))!==sha256){reportHashMismatch(s);return;}
       if(state!==s)return;s.downloadable=true;nav();
       if(new TextDecoder().decode(bytes.subarray(0,1024)).indexOf('%PDF-')<0){say('PDF 서명이 없어 미리보기를 그리지 않았습니다.'+KEEP,true);return;}
       say('검증된 사본을 이 브라우저에서 여는 중입니다.');const lib=await importPdf();if(state!==s)return;
@@ -46,22 +53,26 @@ export function createPreview({document:d=globalThis.document,importPdf=defaultI
       const task=lib.getDocument(pdfParams(bytes,d.baseURI));s.task=task;
       s.timer=timers.setTimeout(()=>fail(s,{name:'timeout'}),LOAD_MS);
       const doc=await task.promise;if(state!==s||s.stale)return;timers.clearTimeout(s.timer);
-      if(!(Number.isSafeInteger(doc.numPages)&&doc.numPages>0))throw new Error('no pages');
+      validatePageCount(doc);
       s.doc=doc;s.pages=doc.numPages;await draw(s,1);
     }catch(error){if(state===s&&!s.stale)fail(s,error);}
   }
   // One page at a time into a fresh canvas that replaces the visible one only when it finished for the current page.
   // getPage+render share one 60 s bound; on expiry the render is cancelled and this draw is retired (seq), so a late finish never paints.
+  function expirePage(s,n,live){if(!live())return;s.seq++;s.render?.cancel();s.render=null;wipe();say(n+'쪽을 60초 안에 그리지 못해 멈췄습니다. 다른 쪽은 이전·다음으로 시도할 수 있습니다.'+KEEP,true);}
+  function acceptRenderedPage(s,page,canvas,live){if(live())return true;canvas.width=0;canvas.height=0;if(!s.stale)page.cleanup();return false;}
+  function handleDrawError(s,n,canvas,live,error){if(canvas){canvas.width=0;canvas.height=0;}if(!live()||error?.name==='RenderingCancelledException')return;s.render=null;wipe();say(n+'쪽을 그리지 못했습니다. 다른 쪽은 이전·다음으로 시도할 수 있습니다.'+KEEP,true);}
+  function canDraw(s,n){return state===s&&!!s.doc&&Number.isSafeInteger(n)&&n>=1&&n<=s.pages;}
   async function draw(s,n){
-    if(state!==s||!s.doc||!Number.isSafeInteger(n)||n<1||n>s.pages)return;
+    if(!canDraw(s,n))return;
     s.render?.cancel();s.render=null;timers.clearTimeout(s.pageTimer);s.page=n;const mine=++s.seq,live=()=>state===s&&!s.stale&&s.seq===mine;nav();say(n+' / '+s.pages+'쪽을 그리는 중입니다.');
-    s.pageTimer=timers.setTimeout(()=>{if(!live())return;s.seq++;s.render?.cancel();s.render=null;wipe();say(n+'쪽을 60초 안에 그리지 못해 멈췄습니다. 다른 쪽은 이전·다음으로 시도할 수 있습니다.'+KEEP,true);},LOAD_MS);
+    s.pageTimer=timers.setTimeout(()=>expirePage(s,n,live),LOAD_MS);
     let canvas=null,page=null;
     try{page=await s.doc.getPage(n);if(!live())return;
       const scale=fitScale(page.getViewport({scale:1}),ui.stage.clientWidth,ratio());if(!scale)throw new Error('page size');
       const viewport=page.getViewport({scale});canvas=d.createElement('canvas');canvas.width=Math.max(1,Math.floor(viewport.width));canvas.height=Math.max(1,Math.floor(viewport.height));
       const context=canvas.getContext('2d');if(!context)throw new Error('canvas');
-      const task=page.render({canvasContext:context,canvas,viewport});s.render=task;await task.promise;if(!live()){canvas.width=0;canvas.height=0;if(!s.stale)page.cleanup();return;}
+      const task=page.render({canvasContext:context,canvas,viewport});s.render=task;await task.promise;if(!acceptRenderedPage(s,page,canvas,live))return;
       s.render=null;canvas.className='red-preview-canvas';canvas.setAttribute('role','img');canvas.setAttribute('aria-label','다운로드한 사본 '+n+'쪽 미리보기 (전체 '+s.pages+'쪽). 이미지이므로 글자 단위로 읽을 수 없습니다.');
       wipe();ui.stage.append(canvas);say(n+' / '+s.pages+'쪽 · 다운로드한 바이트 그대로 이 브라우저에서 그렸습니다.');
       const marks=globalThis.FalsifyChangeMarks;
@@ -78,8 +89,7 @@ export function createPreview({document:d=globalThis.document,importPdf=defaultI
         }
       }
       page.cleanup();
-    }catch(error){if(canvas){canvas.width=0;canvas.height=0;}if(!live()||error?.name==='RenderingCancelledException')return;s.render=null;
-      wipe();say(n+'쪽을 그리지 못했습니다. 다른 쪽은 이전·다음으로 시도할 수 있습니다.'+KEEP,true);}
+    }catch(error){handleDrawError(s,n,canvas,live,error);}
     finally{if(s.seq===mine)timers.clearTimeout(s.pageTimer);}
   }
   ui.prev.addEventListener('click',()=>{if(state?.doc)void draw(state,state.page-1);});

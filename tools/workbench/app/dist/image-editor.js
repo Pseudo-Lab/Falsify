@@ -40,13 +40,22 @@
       panel.hidden=!src;if(!src)return;
       const {connected,editor}=cap(),ready=connected&&editor?.available===true,running=!!op,idle=!running&&!locked,occ=current();
       say('image-note',!connected?NEED_LINK:!editor?OLD:!editor.available?OFF:READY);
-      const list=$('image-list');if(list)list.disabled=!idle||!ready;
-      for(const r of radios)r.input.disabled=!idle||!r.editable;
+      renderControls(idle,ready,occ);
+      renderPreview(occ);
+    }
+    function renderControls(idle,ready,occ){
+      renderListControls(idle,ready);
       const replace=$('image-replace');if(replace)replace.hidden=!occ;
       const input=$('image-png');if(input)input.disabled=!idle||!occ;
       const consent=$('image-consent');if(consent)consent.disabled=!idle;
       const go=$('image-export');if(go)go.disabled=!idle||!ready||!occ||!png||!consent?.checked;
       for(const id of ['image-download-pdf','image-download-report']){const b=$(id);if(b)b.disabled=!idle||!output;}
+    }
+    function renderListControls(idle,ready){
+      const list=$('image-list');if(list)list.disabled=!idle||!ready;
+      for(const r of radios)r.input.disabled=!idle||!r.editable;
+    }
+    function renderPreview(occ){
       const before=$('image-before');if(before){if(occ?.thumbnail){before.src='data:image/png;base64,'+occ.thumbnail;before.alt='교체 전 그림 미리보기 · '+label(occ);before.hidden=false;frame(before,occ);}else blank(before);}
       const after=$('image-after');if(after&&png)frame(after,occ);
       say('image-before-note',occ&&!occ.thumbnail?'companion이 이 그림의 미리보기를 보내지 않았습니다.':'');
@@ -55,17 +64,19 @@
     function label(o){return I.label(o,occurrences.indexOf(o));}
     // One request at a time against one link snapshot, under the shared RED hold, a 95 s deadline and a sequence check.
     async function run(body,path){
-      const {connected,editor}=cap();if(op||locked||!src||!connected||editor?.available!==true)return null;
+      const {connected,editor}=cap();if(!canRun(connected,editor))return null;
       const l=B.session();if(!l){say('image-status',NEED_LINK,true);return null;}
       const release=hold();if(!release)return null;
       const id=++seq,controller=typeof AbortController==='function'?new AbortController():null,self={controller,release,timer:null,expired:false};op=self;render();
       const deadline=new Promise((_,reject)=>{self.timer=setTimeout(()=>{self.expired=true;controller?.abort();reject(new Error('deadline'));},I.DEADLINE_MS);});
-      try{const payload=await Promise.race([body(),deadline]);if(op!==self||id!==seq)return null;
+      try{const payload=await Promise.race([body(),deadline]);if(staleRun(self,id))return null;
         const res=await Promise.race([l.request(path,payload,controller?{signal:controller.signal}:undefined),deadline]);
-        return op===self&&id===seq?{res}:null;}
-      catch(e){if(op!==self||id!==seq)return null;return {error:self.expired?'deadline':e};}
+        return staleRun(self,id)?null:{res};}
+      catch(e){if(staleRun(self,id))return null;return {error:self.expired?'deadline':e};}
       finally{clearTimeout(self.timer);if(op===self){op=null;release();render();}}
     }
+    function canRun(connected,editor){return !(op||locked||!src||!connected||editor?.available!==true);}
+    function staleRun(self,id){return op!==self||id!==seq;}
     // Reads the bound file again and refuses if its bytes no longer match the hash bound at upload.
     async function sourceBase64(s){if(s.file.size>I.MAX_FILE_BYTES)throw Object.assign(new Error('25 MiB를 넘는 PDF는 그림 교체에 쓰지 않습니다.'),{image:true});
       const bytes=new Uint8Array(await s.file.arrayBuffer());if(await hash(bytes)!==s.fileHash)throw Object.assign(new Error('원본 파일이 올린 뒤 바뀌어 요청하지 않았습니다. 원본을 다시 올리세요.'),{image:true});return I.encode(bytes);}
@@ -109,11 +120,14 @@
       if(!r||src!==s)return;if(selected!==occ.id||png!==p){say('image-export-status',STALE);render();return;}
       if(r.error){say('image-export-status',failure(r.error,'export'),true);render();return;}
       let v;try{v=I.exportResult(r.res,{sourceSha256:s.fileHash,occurrence:occ});}catch(e){say('image-export-status',e.image?e.message:EXPORT_FAILED,true);render();return;}
-      const actual=await hash(v.bytes);if(src!==s||selected!==occ.id||png!==p||op)return;
+      const actual=await hash(v.bytes);finishExport(v,actual,s,occ,p);});
+    function finishExport(v,actual,s,occ,p){
+      if(src!==s||selected!==occ.id||png!==p||op)return;
       if(actual!==v.outputSha256){say('image-export-status','companion이 보고한 출력 해시와 받은 파일이 달라 결과를 버렸습니다.',true);render();return;}
       output=Object.freeze({...v,occurrence:occ});const box=$('image-result');if(box)box.hidden=false;
       say('image-result-hash','출력 SHA-256 '+actual);
-      say('image-export-status','교체한 실험용 PDF를 만들었습니다 · 바뀐 그림 1곳 · 엔진 자체 렌더 검사 통과(같은 엔진의 확인이며 독립 검사가 아닙니다) · 도메인 검수 대기. 아래에서 PDF와 보고서 JSON을 따로 내려받으세요.');render();});
+      say('image-export-status','교체한 실험용 PDF를 만들었습니다 · 바뀐 그림 1곳 · 엔진 자체 렌더 검사 통과(같은 엔진의 확인이며 독립 검사가 아닙니다) · 도메인 검수 대기. 아래에서 PDF와 보고서 JSON을 따로 내려받으세요.');render();
+    }
     // Each download recomputes the output hash in the browser right before saving.
     async function verified(){const o=output;if(!o||op)return null;const actual=await hash(o.bytes);if(output!==o)return null;
       if(actual!==o.outputSha256){clearOutput();say('image-export-status','출력 해시가 맞지 않아 다운로드하지 않았습니다.',true);render();return null;}return o;}

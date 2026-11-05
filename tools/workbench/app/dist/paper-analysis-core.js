@@ -27,15 +27,21 @@
     if(typeof fileHash!=='string'||!HEX64.test(fileHash)||typeof file!=='string'||!file)fail('원본 PDF를 확인할 수 없어 사전분석을 요청하지 않았습니다.');
     return {schema:REQUEST,fileHash,file,patches:list.map(p=>({id:p.id,pageIndex:p.pageIndex,before:p.before,after:p.after}))};}
   // Exact summary or nothing: fixed keys, bounded counts, the bound source hash, the requested ids in order and allow-listed reasons only.
+  function validateInventory(i,o){
+    if(!exact(i,INVENTORY)||!count(i.pages,MAX_PAGES)||!['textLines','images','vectors'].every(k=>count(i[k],MAX_COUNT))||typeof i.truncated!=='boolean')fail(SHAPE);
+    if(!exact(o,OBJECTS)||!OBJECTS.slice(0,6).every(k=>count(o[k],MAX_COUNT))||typeof o.complete!=='boolean'||o.sharedImages>o.images||o.inspected+o.ambiguous>o.images+o.inlineImages+o.vectors)fail(SHAPE);
+  }
+  function validateStructureAndLayout(res,s,ids){
+    if(!exact(s,['status','reason'])||s.status!=='unavailable'||s.reason!=='conversion_unconfigured')fail(SHAPE);
+    if(!Array.isArray(res.limits)||res.limits.length!==LIMITS.length||res.limits.some((x,k)=>x!==LIMITS[k]))fail(SHAPE);
+    if(!Array.isArray(res.layout)||!(res.layout.length===ids.length||res.status==='unavailable'&&res.layout.length===0))fail(SHAPE);
+  }
   function summary(res,expected){
     if(!exact(res,TOP)||res.schema!==SUMMARY||typeof res.sourceSha256!=='string'||!HEX64.test(res.sourceSha256)||!STATUSES.includes(res.status))fail(SHAPE);
     if(res.sourceSha256!==expected.sourceSha256)fail('사전분석 결과가 현재 원본 PDF와 맞지 않아 버렸습니다.');
     const i=res.inventory,o=res.objects,s=res.structure,ids=expected.ids;
-    if(!exact(i,INVENTORY)||!count(i.pages,MAX_PAGES)||!['textLines','images','vectors'].every(k=>count(i[k],MAX_COUNT))||typeof i.truncated!=='boolean')fail(SHAPE);
-    if(!exact(o,OBJECTS)||!OBJECTS.slice(0,6).every(k=>count(o[k],MAX_COUNT))||typeof o.complete!=='boolean'||o.sharedImages>o.images||o.inspected+o.ambiguous>o.images+o.inlineImages+o.vectors)fail(SHAPE);
-    if(!exact(s,['status','reason'])||s.status!=='unavailable'||s.reason!=='conversion_unconfigured')fail(SHAPE);
-    if(!Array.isArray(res.limits)||res.limits.length!==LIMITS.length||res.limits.some((x,k)=>x!==LIMITS[k]))fail(SHAPE);
-    if(!Array.isArray(res.layout)||!(res.layout.length===ids.length||res.status==='unavailable'&&res.layout.length===0))fail(SHAPE);
+    validateInventory(i,o);
+    validateStructureAndLayout(res,s,ids);
     const layout=res.layout.map((l,k)=>{
       if(!exact(l,['id','status','reason'])||l.id!==ids[k])fail(SHAPE);
       if(l.status==='fits'?l.reason!==null:l.status==='overflow'?!Object.hasOwn(OVERFLOW,l.reason):l.status==='unsupported'?!Object.hasOwn(UNSUPPORTED,l.reason):true)fail(SHAPE);

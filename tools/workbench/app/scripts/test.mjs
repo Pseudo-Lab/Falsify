@@ -1,4 +1,40 @@
 import {spawnSync} from 'node:child_process';
+import {readFileSync, readdirSync} from 'node:fs';
+// Browser harnesses require manual setup; font checks run separately in Pages CI.
+const exemptions = new Map(Object.entries({
+  'cleanup-browser.spec.cjs': 'manual browser harness',
+  'document-blue-browser.spec.cjs': 'manual browser harness',
+  'document-import-pdf.spec.cjs': 'manual browser harness',
+  'document-import.spec.cjs': 'manual browser harness',
+  'document-red-browser.spec.cjs': 'manual browser harness',
+  'harness-ledger.spec.cjs': 'manual browser harness',
+  'independent-runs.spec.cjs': 'manual browser harness',
+  'ledger-import.spec.cjs': 'manual browser harness',
+  'paper-navigation.spec.cjs': 'manual browser harness',
+  'browser-fonts.spec.mjs': 'Pages font contracts',
+  'browser-pdf-fonts.spec.mjs': 'Pages font contracts',
+  'bundled-fonts.spec.mjs': 'Pages font contracts',
+  'paragraph-fonts.spec.mjs': 'Pages font contracts',
+}));
+const discovered = readdirSync(new URL('../tests/', import.meta.url)).filter(f => /\.(?:spec|test)\.(?:mjs|cjs)$/.test(f));
+const runnerSource = readFileSync(new URL(import.meta.url), 'utf8');
+const registeredSource = runnerSource.slice(runnerSource.lastIndexOf('// BEGIN REGISTERED TESTS'));
+const registered = new Set([...registeredSource.matchAll(/[\w.-]+\.(?:spec|test)\.(?:mjs|cjs)/g)].map(m => m[0]));
+const ccn15Tests = discovered.filter(file => /^ccn15-(?:src|ui)-.+\.spec\.(?:mjs|cjs)$/.test(file));
+for (const file of ccn15Tests) registered.add(file);
+const missing = discovered.filter(f => !registered.has(f) && !exemptions.has(f));
+const stale = [...exemptions.keys()].filter(f => !discovered.includes(f) || registered.has(f));
+if (missing.length || stale.length) throw new Error(`Test registration mismatch: missing=${missing.join(', ')} stale exemptions=${stale.join(', ')}`);
+if (process.argv.includes('--check-registration')) { console.log(`Test registration: ${discovered.length} discovered, ${exemptions.size} explicit exemptions`); process.exit(0); }
+// BEGIN REGISTERED TESTS
+if (ccn15Tests.length) {
+  const result = spawnSync(process.execPath, ['--test', ...ccn15Tests.map(file => 'tests/' + file)], {stdio: 'inherit'});
+  if (result.error || result.status !== 0) process.exit(result.status || 1);
+}
+const buildEquivalence = spawnSync(process.execPath, ['--test','tests/recomposition-build-equivalence.spec.mjs','tests/paper-visual-codec.spec.mjs','tests/w3-policy-observations.spec.mjs'], {stdio:'inherit'});
+if(buildEquivalence.error || buildEquivalence.status!==0)process.exit(buildEquivalence.status||1);
+const shape = spawnSync(process.execPath, ['--test','tests/chart-shape-core.spec.mjs','tests/chart-shape-editor.spec.mjs','tests/chart-mark-editor.spec.mjs'], {stdio:'inherit'});
+if(shape.error || shape.status!==0)process.exit(shape.status||1);
 const visual = spawnSync(process.execPath, ['--test','tests/paper-chart-redraw.spec.cjs','tests/paper-chart-correction-ui.spec.cjs','tests/paper-visual-edit-ui.spec.cjs','tests/paper-visual-integration.spec.cjs'], {stdio:'inherit'});
 if(visual.error || visual.status!==0)process.exit(visual.status||1);
 const plottracer = spawnSync(process.execPath, ['--test','tests/plottracer-vendor.spec.mjs','tests/paper-plottracer-ui.spec.cjs'], {stdio:'inherit'});
@@ -13,7 +49,7 @@ const layoutAudit = spawnSync(process.execPath, ['--test','tests/latex-layout-au
 if(layoutAudit.error || layoutAudit.status!==0)process.exit(layoutAudit.status||1);
 const layoutAgent = spawnSync(process.execPath, ['--test','tests/paper-layout-outcome.spec.mjs','tests/paper-layout-resume.spec.mjs','tests/paper-layout-run-store.spec.mjs','tests/latex-draft-store.spec.mjs','tests/paper-layout-preview.spec.mjs','tests/paper-layout-targets.spec.mjs','tests/paper-layout-reliability.spec.mjs','tests/paper-layout-agent.spec.mjs','tests/paper-layout-agent-ui.spec.mjs','tests/paper-layout-structure.spec.mjs','tests/paper-layout-toolkit.spec.mjs','tests/paper-layout-document-tools.spec.mjs','tests/paper-layout-pagination.spec.mjs','tests/paper-layout-edit-tools.spec.mjs','tests/paper-layout-asset-tools.spec.mjs','tests/paper-layout-region.spec.mjs','tests/layout-agent-skill.spec.mjs'], {stdio:'inherit'});
 if(layoutAgent.error || layoutAgent.status!==0)process.exit(layoutAgent.status||1);
-const reconstruction = spawnSync(process.execPath, ['--test','tests/pdf-latex-evidence.spec.mjs','tests/pdf-latex-regions.spec.mjs','tests/pdf-latex-serialize.spec.mjs','tests/pdf-latex-unicode.spec.mjs','tests/pdf-latex-baseline.spec.mjs','tests/pdf-latex-reader.spec.mjs','tests/pdf-latex-preview-lifecycle.spec.mjs','tests/latex-source-export.spec.mjs','tests/paper-typography-profile.spec.mjs','tests/pdf-latex-flow-serialize.spec.mjs','tests/pdf-latex-fonts.spec.mjs'], {stdio:'inherit'});
+const reconstruction = spawnSync(process.execPath, ['--test','tests/browser-pdf-loader.spec.mjs','tests/pdf-latex-layout.spec.mjs','tests/pdf-latex-evidence.spec.mjs','tests/pdf-latex-regions.spec.mjs','tests/pdf-latex-serialize.spec.mjs','tests/pdf-latex-unicode.spec.mjs','tests/pdf-latex-baseline.spec.mjs','tests/pdf-latex-reader.spec.mjs','tests/pdf-latex-preview-lifecycle.spec.mjs','tests/latex-source-export.spec.mjs','tests/paper-typography-profile.spec.mjs','tests/pdf-latex-flow-serialize.spec.mjs','tests/pdf-latex-fonts.spec.mjs'], {stdio:'inherit'});
 if(reconstruction.error || reconstruction.status!==0)process.exit(reconstruction.status||1);
 const marker = spawnSync(process.execPath, ['--test','tests/paragraph-pdf-content-operators.spec.mjs','tests/paragraph-pdf-marker-surgery.spec.mjs','tests/paragraph-pdf-marker-path.spec.mjs'], {stdio:'inherit'});
 if(marker.error || marker.status!==0)process.exit(marker.status||1);

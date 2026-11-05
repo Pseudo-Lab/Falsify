@@ -42,14 +42,14 @@ export function remapBindings(original, prepared, selections) {
   const bad=()=>fail('source-binding','Cannot map the original selection exactly after footer cleanup');
   if(original.pages.length!==prepared.pages.length) bad();
   const out=[];
-  for(const selection of selections) {
+  function mapSelection(selection) {
     const parts=[];
-    for(const p of selection.parts || []) {
+    function mapPart(p) {
       const ob=original.blocks.find(b=>b.id===p.blockId), op=original.pages[p.pageIndex], np=prepared.pages[p.pageIndex];
       if(!ob || !op || !np || JSON.stringify([op.width,op.height,op.geometry])!==JSON.stringify([np.width,np.height,np.geometry]) || ob.source.pageIndex!==p.pageIndex || ob.text.slice(p.start-ob.source.range.start,p.end-ob.source.range.start)!==p.before) bad();
       const selected=ob.source.characters.filter(c=>c.start>=p.start && c.end<=p.end);
       if(!selected.length || selected[0].start!==p.start || selected.at(-1).end!==p.end || selected.some((c,i)=>i && selected[i-1].end!==c.start)) bad();
-      for(const c of selected) {
+      function mapCharacter(c) {
         const scalar=ob.text.slice(c.start-ob.source.range.start,c.end-ob.source.range.start);
         if([...scalar].length!==1 || !Array.isArray(c.bbox) || c.bbox.length!==4 || !c.bbox.every(Number.isFinite)) bad();
         const matching=(doc)=>doc.blocks.filter(b=>b.text && b.source.pageIndex===p.pageIndex).flatMap(b=>(b.source.characters||[]).filter(x=>JSON.stringify(x.bbox)===JSON.stringify(c.bbox) && b.text.slice(x.start-b.source.range.start,x.end-b.source.range.start)===scalar).map(x=>({b,x})));
@@ -59,22 +59,48 @@ export function remapBindings(original, prepared, selections) {
         if(last && last.blockId===b.id && last.end===x.start) {last.end=x.end;last.before+=scalar;}
         else parts.push({blockId:b.id,pageIndex:p.pageIndex,start:x.start,end:x.end,before:scalar});
       }
+      for(const c of selected)mapCharacter(c);
     }
+    for(const p of selection.parts || [])mapPart(p);
     if(!parts.length) bad();
     out.push({...selection,sourceSha256:prepared.sourceSha256,parts});
   }
+  for(const selection of selections)mapSelection(selection);
   return out;
 }
 
-export async function runRequest(request, deps={}) {
-  const layoutMode=request.layoutMode;
-  if(layoutMode !== undefined && layoutMode !== 'measured-continuous') fail('invalid','Unknown layout mode');
-  const input=request.file instanceof Uint8Array?request.file:request.file instanceof ArrayBuffer?new Uint8Array(request.file):request.file?.bytes instanceof Uint8Array?request.file.bytes:new Uint8Array(await request.file.arrayBuffer());
-  const original=Uint8Array.from(input), originalHash=await digest(original);
-  const snapshot=Array.isArray(request.edits)?{edits:request.edits}:structuredClone(request.edits);
+function validateRequestSource(request,snapshot,originalHash) {
   if(!snapshot || !Array.isArray(snapshot.edits)) fail('invalid','Expected edits');
   if(request.fileHash == null && snapshot.fileHash == null) fail('stale-source','Original source hash is required');
   for(const h of [request.fileHash,snapshot.fileHash].filter(x=>x!==undefined && x!==null)) if(!hashOK(h) || h.toLowerCase()!==originalHash) fail('stale-source','Original source hash mismatch');
+}
+function partitionBindings(bindings,snapshot,originalHash,preparedHash) {
+    const originalBindings=bindings.filter(b=>b.sourceSha256===originalHash), cleanedBindings=bindings.filter(b=>b.sourceSha256===preparedHash);
+    if(originalBindings.length+cleanedBindings.length!==bindings.length) fail('stale-source','Explicit selection source hash mismatch');
+    const covered=new Set(bindings.map(b=>b.id != null ? `id:${b.id}` : `index:${b.index}`));
+    const unbound=snapshot.edits.map((e,i)=>({e,i})).filter(({e,i})=>e.enabled!==false && !covered.has(`id:${e.id}`) && !covered.has(`index:${i}`));
+  return {originalBindings,cleanedBindings,unbound};
+}
+function inputBytes(request) {
+  return request.file instanceof Uint8Array?request.file:request.file instanceof ArrayBuffer?new Uint8Array(request.file):request.file?.bytes instanceof Uint8Array?request.file.bytes:null;
+}
+function validateLayoutMode(layoutMode) {
+  if(layoutMode !== undefined && layoutMode !== 'measured-continuous') fail('invalid','Unknown layout mode');
+}
+function configurePdfWorker(pdfjs) {
+  if(pdfjs.GlobalWorkerOptions) pdfjs.GlobalWorkerOptions.workerSrc=new URL('./vendor/pdf.worker.mjs',import.meta.url).href;
+}
+function selectCompiler(deps,facade,module) {
+  return deps.compile || createTypstCompile({...facade,getModule:()=>module});
+}
+export async function runRequest(request, deps={}) {
+  const layoutMode=request.layoutMode;
+  validateLayoutMode(layoutMode);
+  const immediate=inputBytes(request);
+  const input=immediate ?? new Uint8Array(await request.file.arrayBuffer());
+  const original=Uint8Array.from(input), originalHash=await digest(original);
+  const snapshot=Array.isArray(request.edits)?{edits:request.edits}:structuredClone(request.edits);
+  validateRequestSource(request,snapshot,originalHash);
   const clean=deps.clean || (await import('../dist/blind-pdf.mjs')).prepare;
   const cleaned=await clean({file:{bytes:original.slice()}}), bytes=cleaned.file?.bytes instanceof Uint8Array?Uint8Array.from(cleaned.file.bytes):new Uint8Array(await cleaned.file.arrayBuffer()), preparedHash=await digest(bytes);
   if(cleaned.sha256!==preparedHash) fail('source-binding','Cleaned source hash mismatch');
@@ -83,13 +109,10 @@ export async function runRequest(request, deps={}) {
   if(cleaned.changed) {
     const read=deps.readDocument || readDocument;
     const old=await read({file:original,fileHash:originalHash}), now=await read({file:bytes,fileHash:preparedHash});
-    const originalBindings=bindings.filter(b=>b.sourceSha256===originalHash), cleanedBindings=bindings.filter(b=>b.sourceSha256===preparedHash);
-    if(originalBindings.length+cleanedBindings.length!==bindings.length) fail('stale-source','Explicit selection source hash mismatch');
-    const covered=new Set(bindings.map(b=>b.id != null ? `id:${b.id}` : `index:${b.index}`));
-    const unbound=snapshot.edits.map((e,i)=>({e,i})).filter(({e,i})=>e.enabled!==false && !covered.has(`id:${e.id}`) && !covered.has(`index:${i}`));
+    const {originalBindings,cleanedBindings,unbound}=partitionBindings(bindings,snapshot,originalHash,preparedHash);
     if(unbound.length) {
       pdfjs ||= await import(new URL('./vendor/pdf.mjs',import.meta.url).href);
-      if(pdfjs.GlobalWorkerOptions) pdfjs.GlobalWorkerOptions.workerSrc=new URL('./vendor/pdf.worker.mjs',import.meta.url).href;
+      configurePdfWorker(pdfjs);
       const spaced=await recoverSourceSpaces({bytes:original,document:old,pdfjs});
       const resolved=bindEdits(spaced.document,buildPaperFlow(spaced.document),unbound.map(x=>x.e));
       for(const [j,b] of resolved.bindings.entries()) originalBindings.push({index:unbound[j].i,sourceSha256:originalHash,parts:b.parts});
@@ -99,9 +122,9 @@ export async function runRequest(request, deps={}) {
   const assets=deps.assets || await loadAssets(new URL('./recomposition-vendor/manifest.json',import.meta.url).href);
   const facade=deps.facade || await import(assets.compilerURL);
   const module=deps.compile ? null : await WebAssembly.compile(assets.wasm);
-  const compile=deps.compile || createTypstCompile({...facade,getModule:()=>module});
+  const compile=selectCompiler(deps,facade,module);
   pdfjs ||= await import(new URL('./vendor/pdf.mjs',import.meta.url).href);
-  if(pdfjs.GlobalWorkerOptions) pdfjs.GlobalWorkerOptions.workerSrc=new URL('./vendor/pdf.worker.mjs',import.meta.url).href;
+  configurePdfWorker(pdfjs);
   const result=await (deps.recompose || recompose)({file:bytes,fileHash:preparedHash,edits:{...snapshot,fileHash:preparedHash,revision:request.revision},bindings,revision:request.revision,layoutMode},{compile,fonts:assets.fonts,mupdf,pdfjs,runningFurniture:true});
   return {...result,sourceBinding:{...result.sourceBinding,originalSha256:originalHash,preparedSha256:preparedHash,cleanup:cleaned.verification}};
 }

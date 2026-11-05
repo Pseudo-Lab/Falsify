@@ -12,8 +12,7 @@
   const clone=x=>JSON.parse(JSON.stringify(x));
   const script=document.currentScript;
 
-  function el(tag,props,...kids){
-    const e=document.createElement(tag);
+  function setProperties(e,props){
     for(const [k,v] of Object.entries(props||{})){
       if(v===undefined||v===null) continue;
       if(k==='dataset') Object.assign(e.dataset,v);
@@ -22,6 +21,10 @@
       else if(k==='checked'||k==='disabled'||k==='hidden'||k==='value'||k==='id'||k==='type') e[k]=v;
       else e.setAttribute(k, String(v));
     }
+  }
+  function el(tag,props,...kids){
+    const e=document.createElement(tag);
+    setProperties(e,props);
     for(const kid of kids) if(kid!==null&&kid!==undefined&&kid!==false) e.append(kid);
     return e;
   }
@@ -38,6 +41,14 @@
       if(kind==='refresh') return '연결 갱신 응답을 확인하지 못했습니다. 보관은 보내지 않았고 자동으로 다시 시도하지 않습니다. 로컬 기록은 그대로입니다.';
       return 'Confluence 게이트웨이 응답을 확인하지 못했습니다. 자동으로 다시 시도하지 않습니다. 로컬 기록은 그대로입니다.';
     }
+    return httpFailure(e);
+  }
+  function serviceFailure(code){
+    if(code==='parent_restricted'||code==='wrong_parent'||code==='wrong_space'||code==='wrong_site') return '팀 보관 부모 페이지나 공간이 허용된 Falsify 위치가 아닙니다. 운영자 설정이 필요합니다. 다른 곳에 올리지 않았습니다.';
+    if(code==='partial_archive'||code==='incomplete'||code==='unconfigured') return code==='unconfigured'?'운영자가 Atlassian OAuth 연결을 마쳐야 팀 보관을 쓸 수 있습니다. 이 브라우저는 로컬 기록만 사용합니다.':'미완성 보관입니다. 성공으로 보지 않으며 자동으로 다시 보내지 않습니다. 팀 기록 불러오기로 확인하세요.';
+    return '';
+  }
+  function httpFailure(e){
     const s=e?.status, code=e?.errorCode;
     if(code==='write_unknown') return '팀 보관이 저장되었는지 확인하지 못했습니다. 자동으로 다시 보내지 않습니다. Confluence의 Workbench 실험 기록에서 먼저 확인하세요. 로컬 기록은 그대로입니다.';
     if(code==='write_partial') return '팀 보관을 끝내지 못해 미완성 상태일 수 있습니다. 자동으로 다시 보내지 않습니다. Confluence의 Workbench 실험 기록에서 먼저 확인하세요. 로컬 기록은 그대로입니다.';
@@ -48,8 +59,7 @@
     if(s===410) return '이전 계정 보관은 더 이상 쓰지 않습니다. Confluence 팀 보관만 사용합니다. 로컬 기록은 그대로입니다.';
     if(s===413||code==='payload_too_large') return '보관이 서버 크기 한도를 넘습니다. 잘라서 보내지 않았습니다. 로컬 기록은 그대로입니다.';
     if(s===429) return '요청이 너무 많습니다. 잠시 뒤 다시 시도하세요. 자동으로 다시 보내지 않습니다.';
-    if(code==='parent_restricted'||code==='wrong_parent'||code==='wrong_space'||code==='wrong_site') return '팀 보관 부모 페이지나 공간이 허용된 Falsify 위치가 아닙니다. 운영자 설정이 필요합니다. 다른 곳에 올리지 않았습니다.';
-    if(code==='partial_archive'||code==='incomplete'||code==='unconfigured') return code==='unconfigured'?'운영자가 Atlassian OAuth 연결을 마쳐야 팀 보관을 쓸 수 있습니다. 이 브라우저는 로컬 기록만 사용합니다.':'미완성 보관입니다. 성공으로 보지 않으며 자동으로 다시 보내지 않습니다. 팀 기록 불러오기로 확인하세요.';
+    const detail=serviceFailure(code); if(detail) return detail;
     if(s>=500) return '게이트웨이 오류입니다. 자동으로 다시 보내지 않습니다. 로컬 기록은 그대로입니다.';
     return '게이트웨이 응답을 해석하지 못했습니다. 자동으로 다시 시도하지 않습니다. 로컬 기록은 그대로입니다.';
   }
@@ -93,7 +103,9 @@
       if(!state.expiring&&teamExpired()) void expireTemp();
       const connected=!!state.session&&Date.parse(state.session.expiresAt)>Date.now();
       const blocked=state.busy||state.expiring;
-      for(const p of panels){
+      for(const p of panels) paintPanel(p,connected,blocked);
+    }
+    function paintPanel(p,connected,blocked){
         if(p.tempNotice){p.tempNotice.hidden=!state.temp;p.tempNotice.textContent=state.temp?'임시 열람 중 · 새 검수는 팀에 저장한 뒤 닫아주세요. 새로고침·연결 해제·최대 12시간 후 임시 내용이 사라집니다.':'';}
         p.connection.textContent=misconfigured?'팀 보관 설정 필요':connected?'팀 연결됨':'내 브라우저에만 보관 중';
         p.connect.disabled=blocked||misconfigured;
@@ -103,12 +115,18 @@
         p.more.hidden=!state.cursor;
         p.more.disabled=blocked||!state.cursor;
         if(p.closeTemp){p.closeTemp.hidden=!state.temp; p.closeTemp.disabled=blocked||!state.temp;}
+        paintConsent(p,connected,blocked);
+    }
+
+    function paintConsent(p,connected,blocked){
         const key=consentIdentity(p.mode);
         if(p.prepare)p.prepare.disabled=blocked||misconfigured||!key;
-        if(p.target){const selected=document.querySelector('#evaluation-run')?.selectedOptions?.[0];p.target.textContent=p.mode==='harness'?(state.harnessTarget?.name||'선택한 '+(harnessPick?.value==='red'?'RED':'BLUE')+' 도구'):(selected?.textContent||'검수할 기록을 먼저 고르세요.');}
+        paintTarget(p);
         p.share.disabled=blocked||misconfigured||!connected||!p.consent.checked||!key||key!==p.consentFor;
         p.consent.disabled=blocked||misconfigured||!connected;
-      }
+    }
+    function paintTarget(p){
+        if(p.target){const selected=document.querySelector('#evaluation-run')?.selectedOptions?.[0];p.target.textContent=p.mode==='harness'?(state.harnessTarget?.name||'선택한 '+(harnessPick?.value==='red'?'RED':'BLUE')+' 도구'):(selected?.textContent||'검수할 기록을 먼저 고르세요.');}
     }
     function targetId(mode){
       if(mode==='harness'&&state.harnessTarget)return state.harnessTarget.role+':'+state.harnessTarget.hash;
@@ -167,7 +185,7 @@
       }catch{try{storage.removeItem(SESSION_KEY);}catch{} state.session=null;}
       paint();
     }
-    function dropSession(){state.session=null; try{storage.removeItem(SESSION_KEY);}catch{} paint();}
+    function dropSession(){clearCachedSession(); paint();}
     function clearPending(){if(state.pending?.timer) clearInterval(state.pending.timer); state.pending=null;}
     function closePopup(popup){try{if(popup&&popup.closed!==true&&typeof popup.close==='function') popup.close();}catch{}}
     function forgetPopup(popup){
@@ -191,11 +209,15 @@
       finally{clearTimeout(timer);}
       const replacement=header(res,SESSION_HEADER);
       if(replacement&&stamp===state.stamp){const exp=header(res,EXPIRES_HEADER)||state.session?.expiresAt; if(exp) await remember(replacement, exp, stamp);}
+      return parseResponse(res,text,stamp);
+    }
+    function parseResponse(res,text,stamp){
       if(!res.ok){const errorCode=safeErrorCode(text); if(res.status===401&&stamp===state.stamp) dropSession(); throw Object.assign(Error('http'),{code:'http',status:res.status,errorCode});}
       if(!text) return {};
       try{const data=JSON.parse(text); if(data&&typeof data==='object'&&!Array.isArray(data)) return data;}catch{}
       throw Object.assign(Error('response'),{code:'response',status:res.status});
     }
+
     async function loadCaps(stamp){
       const data=await api('GET','/v1/confluence/capabilities',{stamp});
       if(stamp!==state.stamp) return null;
@@ -222,6 +244,11 @@
       const hash=name==='review'?'#review':name==='agents'?'#harness':'';
       if(!hash) return;
       try{
+        clickViewButton(name);
+      }catch{}
+      try{if(loc&&loc.hash!==hash) loc.hash=hash;}catch{}
+    }
+    function clickViewButton(name){
         const all=typeof document.querySelectorAll==='function'?document.querySelectorAll('[data-view="'+name+'"]'):[];
         let button=null;
         for(const node of all){
@@ -231,8 +258,6 @@
         }
         if(!button&&all.length) button=all[0];
         if(button&&typeof button.click==='function') button.click();
-      }catch{}
-      try{if(loc&&loc.hash!==hash) loc.hash=hash;}catch{}
     }
     async function connect(){
       if(state.busy||misconfigured) return;
@@ -250,10 +275,7 @@
         const data=await api('POST','/v1/confluence/auth/start',{body:{nonce,returnOrigin:loc.origin},stamp,phase:'connect'});
         if(stamp!==state.stamp){forgetPopup(popup); return;}
         const url=checkAuthorizeUrl(data.authorizeUrl);
-        if(popup.closed) throw local('연결을 취소했습니다. 세션을 만들지 않았습니다. 로컬 기록은 그대로입니다.');
-        if(popup.opener==null||popup.opener!==win) throw local('로그인 창이 이 페이지와 연결되어 있지 않아 세션을 받을 수 없습니다. 세션은 만들지 않았습니다.');
-        if(!popup.location||typeof popup.location!=='object') throw local('로그인 창으로 이동하지 못했습니다. 세션은 만들지 않았습니다.');
-        popup.location.href=url;
+        navigatePopup(popup,url);
         const timer=setInterval(()=>{
           if(state.stamp!==stamp||state.pending?.nonce!==nonce){clearInterval(timer); return;}
           if(popup.closed){clearInterval(timer); if(state.pending?.nonce===nonce){state.pending=null; if(state.inflight===popup) state.inflight=null; release(); say('연결을 취소했습니다. 세션을 만들지 않았습니다. 로컬 기록은 그대로입니다.');}}
@@ -263,22 +285,35 @@
       }catch(e){forgetPopup(popup); if(stamp===state.stamp) say(failure(e,'connect'), true);}
       finally{if(!waiting&&stamp===state.stamp) release(); else paint();}
     }
+    function navigatePopup(popup,url){
+        if(popup.closed) throw local('연결을 취소했습니다. 세션을 만들지 않았습니다. 로컬 기록은 그대로입니다.');
+        if(popup.opener==null||popup.opener!==win) throw local('로그인 창이 이 페이지와 연결되어 있지 않아 세션을 받을 수 없습니다. 세션은 만들지 않았습니다.');
+        if(!popup.location||typeof popup.location!=='object') throw local('로그인 창으로 이동하지 못했습니다. 세션은 만들지 않았습니다.');
+        popup.location.href=url;
+    }
+    function messagePending(event){
+      const pending=state.pending; if(!pending) return null;
+      if(event.origin!==gatewayOrigin||event.source!==pending.popup) return null;
+      const data=event.data; if(!data||data.type!=='falsify.confluence.session.v1'||data.nonce!==pending.nonce||pending.stamp!==state.stamp) return null;
+      return {pending,data};
+    }
+    function validSession(token,exp){return typeof token==='string'&&token.length>=16&&token.length<=8192&&Date.parse(exp)>Date.now();}
+    function clearCachedSession(){state.session=null; try{storage.removeItem(SESSION_KEY);}catch{}}
     async function onMessage(event){
-      const pending=state.pending; if(!pending) return;
-      if(event.origin!==gatewayOrigin||event.source!==pending.popup) return;
-      const data=event.data; if(!data||data.type!=='falsify.confluence.session.v1'||data.nonce!==pending.nonce||pending.stamp!==state.stamp) return;
+      const message=messagePending(event); if(!message) return;
+      const {pending,data}=message;
       const stamp=pending.stamp, popup=pending.popup;
       clearPending(); if(state.inflight===popup) state.inflight=null; closePopup(popup);
       try{
         const token=data.session, exp=data.expiresAt;
-        if(typeof token!=='string'||token.length<16||token.length>8192||!(Date.parse(exp)>Date.now())){if(stamp===state.stamp) say('로그인 응답이 맞지 않아 세션을 저장하지 않았습니다. 로컬 기록은 그대로입니다.', true); return;}
+        if(!validSession(token,exp)){if(stamp===state.stamp) say('로그인 응답이 맞지 않아 세션을 저장하지 않았습니다. 로컬 기록은 그대로입니다.', true); return;}
         let ok=false;
         try{ok=await remember(token, exp, stamp);}
-        catch{state.session=null; try{storage.removeItem(SESSION_KEY);}catch{} ok=false;}
+        catch{clearCachedSession(); ok=false;}
         if(stamp!==state.stamp) return;
         if(ok&&state.session) say('Falsify Confluence 팀 공간에 연결했습니다. 고른 기록은 동의 뒤에만 팀 전체에 공유됩니다. 로컬 원장은 올리지 않았습니다.');
         else say(CACHE_FAILURE, true);
-      }catch{state.session=null; try{storage.removeItem(SESSION_KEY);}catch{} if(stamp===state.stamp) say(CACHE_FAILURE, true);}
+      }catch{clearCachedSession(); if(stamp===state.stamp) say(CACHE_FAILURE, true);}
       finally{if(stamp===state.stamp){release();if(state.session&&state.browseAfterAuth){state.browseAfterAuth=false;void loadList(false);}}}
     }
     async function closeTemporary(){
@@ -312,138 +347,164 @@
       if(!state.session) throw local('세션이 끝나 보관하지 않았습니다. 로컬 기록은 그대로입니다.');
       return true;
     }
-    async function share(mode){
-      if(state.busy||misconfigured) return;
-      const id=targetId(mode), panel=panels.find(p=>p.mode===mode);
-      if(!state.session){say('먼저 Confluence에 연결하세요. 연결 전에는 아무것도 올리지 않습니다.', true); return;}
-      if(!id||!panel||!panel.consent.checked||panel.consentFor!==consentIdentity(mode)){say('Falsify 팀 전체 공개에 동의한 뒤, 지금 고른 기록만 올릴 수 있습니다. 아직 보내지 않았습니다.', true); return;}
-      state.busy=true; panel.consent.checked=false; panel.consentFor=''; const stamp=state.stamp; paint();
-      try{
-        const caps=await loadCaps(stamp); if(stamp!==state.stamp) return;
-        if(!caps?.configured){say('운영자가 Atlassian OAuth 연결을 마쳐야 팀 보관을 쓸 수 있습니다. 올리지 않았습니다. 로컬 기록은 그대로입니다.', true); return;}
-        await refreshSession(stamp); if(stamp!==state.stamp) return;
-        const c=await codec();
-        let built;
-        if(mode==='harness'){
-          if(typeof lab?.cloudSnapshot!=='function') throw local('이 작업대는 로컬 Harness 읽기를 지원하지 않습니다. 올리지 않았습니다.');
-          const snapshot=await lab.cloudSnapshot(); if(stamp!==state.stamp) return;
+    function checkArchiveSize(archiveChars,body,caps){
+      const bytes=new TextEncoder().encode(JSON.stringify(body)).length, cap=caps.maxArchiveBytes||MAX_BYTES;
+      if(archiveChars>MAX_CHARS) throw local('보관 글자 수가 로컬 기록 한도(450만 자)를 넘습니다. 잘라서 보내지 않았습니다. 로컬 기록은 그대로입니다.');
+      if(bytes>cap||bytes>MAX_BYTES) throw local('보관이 UTF-8 크기 한도를 넘습니다. 잘라서 보내지 않았고 자동으로 다시 보내지 않습니다. 로컬 기록은 그대로입니다.');
+    }
+    function checkStored(data,hash){
+      if(data.stored!==true||typeof data.pageId!=='string'||!PAGE_ID.test(data.pageId)||data.archiveSha256!==hash) throw local('보관을 마쳤는지 확인하지 못했습니다. 자동으로 다시 보내지 않습니다. 팀 기록 불러오기로 읽어 확인하세요. 로컬 기록은 그대로입니다.');
+    }
+    function checkArchiveKind(archive,hash,kind,message){
+      if(!archive||archive.kind!==kind||archive.schema!=='falsify.confluence-archive.v1'||typeof hash!=='string'||!/^[a-f0-9]{64}$/.test(hash)) throw local(message);
+    }
+    function sharedHarness(snapshot,id,c){
           const role=id.slice(0,id.indexOf(':')), hash=id.slice(role.length+1);
           const record=(snapshot.harnesses||[]).find(h=>h&&h.hash===hash&&h.config&&h.config.role===role);
           if(!record) throw local('선택한 등록 Harness를 로컬 기록에서 찾지 못했습니다. 올리지 않았습니다.');
           if(typeof c.buildHarnessArchive!=='function') throw local('Harness 보관 형식을 만들지 못했습니다. 올리지 않았습니다.');
+      return record;
+    }
+    function shareAllowed(id,panel,mode){
+      if(!state.session){say('먼저 Confluence에 연결하세요. 연결 전에는 아무것도 올리지 않습니다.', true); return false;}
+      if(!id||!panel||!panel.consent.checked||panel.consentFor!==consentIdentity(mode)){say('Falsify 팀 전체 공개에 동의한 뒤, 지금 고른 기록만 올릴 수 있습니다. 아직 보내지 않았습니다.', true); return false;}
+      return true;
+    }
+    function requireHarnessSnapshot(){if(typeof lab?.cloudSnapshot!=='function') throw local('이 작업대는 로컬 Harness 읽기를 지원하지 않습니다. 올리지 않았습니다.');}
+    function requireReviewSnapshot(){if(typeof lab?.reviewSnapshot!=='function') throw local('검수 화면의 임시 기록을 읽지 못해 올리지 않았습니다. 로컬 기록은 그대로입니다.');}
+    function requireExperimentBuilder(c){if(typeof c.buildExperimentArchive!=='function') throw local('실험 보관 형식을 만들지 못했습니다. 올리지 않았습니다.');}
+    function requireArchiveValidation(c){if(typeof c.validateArchive!=='function'||typeof c.archiveHash!=='function') throw local('보관 검증을 마치지 못해 올리지 않았습니다.');}
+    function requireArchiveHash(hash){if(typeof hash!=='string'||!/^[a-f0-9]{64}$/.test(hash)) throw local('보관 해시가 없어 올리지 않았습니다.');}
+    function closeConfirmation(panel){if(panel.confirmation){panel.confirmation.open=false;panel.confirmation.hidden=true;}}
+    function shareConfigured(caps,stamp){if(stamp!==state.stamp) return false; if(caps?.configured) return true; say('운영자가 Atlassian OAuth 연결을 마쳐야 팀 보관을 쓸 수 있습니다. 올리지 않았습니다. 로컬 기록은 그대로입니다.', true); return false;}
+    function prepareShare(mode){
+      if(state.busy||misconfigured) return null;
+      const id=targetId(mode), panel=panels.find(p=>p.mode===mode);
+      if(!shareAllowed(id,panel,mode)) return null;
+      return {id,panel};
+    }
+    async function share(mode){
+      const target=prepareShare(mode); if(!target) return;
+      const {id,panel}=target;
+      state.busy=true; panel.consent.checked=false; panel.consentFor=''; const stamp=state.stamp; paint();
+      try{
+        const caps=await loadCaps(stamp);
+        if(!shareConfigured(caps,stamp)) return;
+        await refreshSession(stamp); if(stamp!==state.stamp) return;
+        const c=await codec();
+        let built;
+        if(mode==='harness'){
+          requireHarnessSnapshot();
+          const snapshot=await lab.cloudSnapshot(); if(stamp!==state.stamp) return;
+          const record=sharedHarness(snapshot,id,c);
           built=await c.buildHarnessArchive(clone(record), validators());
         }else{
-          if(typeof lab?.reviewSnapshot!=='function') throw local('검수 화면의 임시 기록을 읽지 못해 올리지 않았습니다. 로컬 기록은 그대로입니다.');
+          requireReviewSnapshot();
           const snapshot=await lab.reviewSnapshot(id); if(stamp!==state.stamp) return;
-          if(typeof c.buildExperimentArchive!=='function') throw local('실험 보관 형식을 만들지 못했습니다. 올리지 않았습니다.');
+          requireExperimentBuilder(c);
           built=await c.buildExperimentArchive(clone(snapshot), id, validators());
         }
         if(stamp!==state.stamp) return;
-        if(typeof c.validateArchive!=='function'||typeof c.archiveHash!=='function') throw local('보관 검증을 마치지 못해 올리지 않았습니다.');
+        requireArchiveValidation(c);
         const archive=await c.validateArchive(built, validators());
         const hash=await c.archiveHash(archive);
-        if(typeof hash!=='string'||!/^[a-f0-9]{64}$/.test(hash)) throw local('보관 해시가 없어 올리지 않았습니다.');
+        requireArchiveHash(hash);
         const body={archive,teamShare:true};
-        const archiveChars=JSON.stringify(archive).length, bytes=new TextEncoder().encode(JSON.stringify(body)).length, cap=caps.maxArchiveBytes||MAX_BYTES;
-        if(archiveChars>MAX_CHARS) throw local('보관 글자 수가 로컬 기록 한도(450만 자)를 넘습니다. 잘라서 보내지 않았습니다. 로컬 기록은 그대로입니다.');
-        if(bytes>cap||bytes>MAX_BYTES) throw local('보관이 UTF-8 크기 한도를 넘습니다. 잘라서 보내지 않았고 자동으로 다시 보내지 않습니다. 로컬 기록은 그대로입니다.');
+        const archiveChars=JSON.stringify(archive).length;
+        checkArchiveSize(archiveChars,body,caps);
         if(stamp!==state.stamp) return;
         const data=await api('POST','/v1/confluence/archives',{auth:true,body,stamp,phase:'write'});
         if(stamp!==state.stamp) return;
-        if(data.stored!==true||typeof data.pageId!=='string'||!PAGE_ID.test(data.pageId)||data.archiveSha256!==hash) throw local('보관을 마쳤는지 확인하지 못했습니다. 자동으로 다시 보내지 않습니다. 팀 기록 불러오기로 읽어 확인하세요. 로컬 기록은 그대로입니다.');
+        checkStored(data,hash);
         say((data.alreadyExisted?'같은 보관이 이미 Falsify 팀 공간에 있습니다. 새로 실행하지 않았습니다. ':'Falsify 팀 공간에 JSON 보관을 올렸습니다. ')+'원본 PDF 파일을 저장한 것은 아닙니다. 팀 전원이 읽을 수 있습니다. 로컬 기록은 그대로입니다.');
-        if(panel.confirmation){panel.confirmation.open=false;panel.confirmation.hidden=true;}
+        closeConfirmation(panel);
       }catch(e){if(stamp===state.stamp) say(failure(e,'write'), true);}
       finally{if(stamp===state.stamp) release();}
     }
-    async function publishPaperEdit(record, options={}){
-      if(!options||options.teamShare!==true) throw local('Falsify 팀 전체 공개에 동의한 수동 편집만 올릴 수 있습니다. 아직 보내지 않았습니다.');
-      if(state.busy||state.expiring||misconfigured) throw local('지금은 수동 편집을 보내지 않습니다. 자동으로 다시 보내지 않습니다.');
+    function checkPublication(options,consentMessage,busyMessage){
+      if(!options||options.teamShare!==true) throw local(consentMessage);
+      if(state.busy||state.expiring||misconfigured) throw local(busyMessage);
       if(!state.session) throw local('먼저 Confluence에 연결하세요. 연결 전에는 아무것도 올리지 않습니다.');
+    }
+    function checkPublicationCodec(c,method,message){
+      if(typeof c[method]!=='function'||typeof c.validateArchive!=='function'||typeof c.archiveHash!=='function') throw local(message);
+    }
+    async function publishPaperEdit(record, options={}){
+      checkPublication(options,'Falsify 팀 전체 공개에 동의한 수동 편집만 올릴 수 있습니다. 아직 보내지 않았습니다.','지금은 수동 편집을 보내지 않습니다. 자동으로 다시 보내지 않습니다.');
       state.busy=true; const stamp=state.stamp; paint();
       try{
         const caps=await loadCaps(stamp); if(stamp!==state.stamp) return {cancelled:true};
         if(!caps?.configured) throw local('운영자가 Atlassian OAuth 연결을 마쳐야 팀 보관을 쓸 수 있습니다. 올리지 않았습니다.');
         await refreshSession(stamp); if(stamp!==state.stamp) return {cancelled:true};
         const c=await codec();
-        if(typeof c.buildPaperEditArchive!=='function'||typeof c.validateArchive!=='function'||typeof c.archiveHash!=='function') throw local('수동 편집 보관 형식을 만들지 못했습니다. 올리지 않았습니다.');
+        checkPublicationCodec(c,'buildPaperEditArchive','수동 편집 보관 형식을 만들지 못했습니다. 올리지 않았습니다.');
         const built=await c.buildPaperEditArchive(clone(record));
         if(stamp!==state.stamp) return {cancelled:true};
         const archive=await c.validateArchive(built, validators());
         const hash=await c.archiveHash(archive);
-        if(!archive||archive.kind!=='paper-edit'||archive.schema!=='falsify.confluence-archive.v1'||typeof hash!=='string'||!/^[a-f0-9]{64}$/.test(hash)) throw local('수동 편집 보관이 아니어서 올리지 않았습니다.');
+        checkArchiveKind(archive,hash,'paper-edit','수동 편집 보관이 아니어서 올리지 않았습니다.');
         const encoded=JSON.stringify(archive);
         if(encoded.includes('%PDF-')||/"(?:pdf|pdfBytes|sourcePdf|sourcePDF|binary|bytes|contentBase64|gold|harness|attestation)"\s*:/.test(encoded)) throw local('원본 PDF·gold·Harness는 수동 편집 보관에 넣지 않습니다. 올리지 않았습니다.');
         const body={archive,teamShare:true};
-        const bytes=new TextEncoder().encode(JSON.stringify(body)).length, cap=caps.maxArchiveBytes||MAX_BYTES;
-        if(encoded.length>MAX_CHARS) throw local('보관 글자 수가 로컬 기록 한도(450만 자)를 넘습니다. 잘라서 보내지 않았습니다. 로컬 기록은 그대로입니다.');
-        if(bytes>cap||bytes>MAX_BYTES) throw local('보관이 UTF-8 크기 한도를 넘습니다. 잘라서 보내지 않았고 자동으로 다시 보내지 않습니다. 로컬 기록은 그대로입니다.');
+        checkArchiveSize(encoded.length,body,caps);
         if(stamp!==state.stamp) return {cancelled:true};
         const data=await api('POST','/v1/confluence/archives',{auth:true,body,stamp,phase:'write'});
         if(stamp!==state.stamp) return {cancelled:true};
-        if(data.stored!==true||typeof data.pageId!=='string'||!PAGE_ID.test(data.pageId)||data.archiveSha256!==hash) throw local('보관을 마쳤는지 확인하지 못했습니다. 자동으로 다시 보내지 않습니다. 팀 기록 불러오기로 읽어 확인하세요. 로컬 기록은 그대로입니다.');
+        checkStored(data,hash);
         say((data.alreadyExisted?'같은 수동 편집 보관이 이미 Falsify 팀 공간에 있습니다. ':'수동 편집 JSON을 Falsify 팀 공간에 올렸습니다. ')+'텍스트와 편집만이며 원본 PDF 바이너리는 올리지 않았습니다. 팀 전원이 읽을 수 있습니다. 로컬 AI 기록은 그대로입니다.');
         return {stored:true,pageId:data.pageId,archiveSha256:hash,alreadyExisted:data.alreadyExisted===true};
       }catch(e){if(stamp!==state.stamp) throw local('연결이 바뀌어 수동 편집 보관을 확인하지 못했습니다. 자동으로 다시 보내지 않습니다.'); throw e?.code==='local'?e:local(failure(e,'write'));}
       finally{if(stamp===state.stamp) release();}
     }
     async function publishAttempt(record, options={}){
-      if(!options||options.teamShare!==true) throw local('Falsify 팀 전체 공개에 동의한 실행 시도만 올릴 수 있습니다. 아직 보내지 않았습니다.');
-      if(state.busy||state.expiring||misconfigured) throw local('지금은 실행 시도을 보내지 않습니다. 자동으로 다시 보내지 않습니다.');
-      if(!state.session) throw local('먼저 Confluence에 연결하세요. 연결 전에는 아무것도 올리지 않습니다.');
+      checkPublication(options,'Falsify 팀 전체 공개에 동의한 실행 시도만 올릴 수 있습니다. 아직 보내지 않았습니다.','지금은 실행 시도을 보내지 않습니다. 자동으로 다시 보내지 않습니다.');
       state.busy=true; const stamp=state.stamp; paint();
       try{
         const caps=await loadCaps(stamp); if(stamp!==state.stamp) return {cancelled:true};
         if(!caps?.configured) throw local('운영자가 Atlassian OAuth 연결을 마쳐야 팀 보관을 쓸 수 있습니다. 올리지 않았습니다.');
         await refreshSession(stamp); if(stamp!==state.stamp) return {cancelled:true};
         const c=await codec();
-        if(typeof c.buildAttemptArchive!=='function'||typeof c.validateArchive!=='function'||typeof c.archiveHash!=='function') throw local('실행 시도 보관 형식을 만들지 못했습니다. 올리지 않았습니다.');
+        checkPublicationCodec(c,'buildAttemptArchive','실행 시도 보관 형식을 만들지 못했습니다. 올리지 않았습니다.');
         const built=await c.buildAttemptArchive(clone(record), validators());
         if(stamp!==state.stamp) return {cancelled:true};
         const archive=await c.validateArchive(built, validators());
         const hash=await c.archiveHash(archive);
-        if(!archive||archive.kind!=='attempt'||archive.schema!=='falsify.confluence-archive.v1'||typeof hash!=='string'||!/^[a-f0-9]{64}$/.test(hash)) throw local('실행 시도 보관이 아니어서 올리지 않았습니다.');
+        checkArchiveKind(archive,hash,'attempt','실행 시도 보관이 아니어서 올리지 않았습니다.');
         const encoded=JSON.stringify(archive);
         if(encoded.includes('%PDF-')||/"(?:pdf|pdfBytes|sourcePdf|sourcePDF|binary|bytes|contentBase64|gold|harness|attestation|response|segments|request)"\s*:/.test(encoded)) throw local('원본 PDF·gold·Harness는 실행 시도 보관에 넣지 않습니다. 올리지 않았습니다.');
         const body={archive,teamShare:true};
-        const bytes=new TextEncoder().encode(JSON.stringify(body)).length, cap=caps.maxArchiveBytes||MAX_BYTES;
-        if(encoded.length>MAX_CHARS) throw local('보관 글자 수가 로컬 기록 한도(450만 자)를 넘습니다. 잘라서 보내지 않았습니다. 로컬 기록은 그대로입니다.');
-        if(bytes>cap||bytes>MAX_BYTES) throw local('보관이 UTF-8 크기 한도를 넘습니다. 잘라서 보내지 않았고 자동으로 다시 보내지 않습니다. 로컬 기록은 그대로입니다.');
+        checkArchiveSize(encoded.length,body,caps);
         if(stamp!==state.stamp) return {cancelled:true};
         const data=await api('POST','/v1/confluence/archives',{auth:true,body,stamp,phase:'write'});
         if(stamp!==state.stamp) return {cancelled:true};
-        if(data.stored!==true||typeof data.pageId!=='string'||!PAGE_ID.test(data.pageId)||data.archiveSha256!==hash) throw local('보관을 마쳤는지 확인하지 못했습니다. 자동으로 다시 보내지 않습니다. 팀 기록 불러오기로 읽어 확인하세요. 로컬 기록은 그대로입니다.');
+        checkStored(data,hash);
         say((data.alreadyExisted?'같은 실행 시도 보관이 이미 Falsify 팀 공간에 있습니다. ':'실행 시도 JSON을 Falsify 팀 공간에 올렸습니다. ')+'시도 메타데이터만 올렸습니다. 팀 전원이 읽을 수 있습니다. 로컬 AI 기록은 그대로입니다.');
         return {stored:true,pageId:data.pageId,archiveSha256:hash,alreadyExisted:data.alreadyExisted===true};
       }catch(e){if(stamp!==state.stamp) throw local('연결이 바뀌어 실행 시도 보관을 확인하지 못했습니다. 자동으로 다시 보내지 않습니다.'); throw e?.code==='local'?e:local(failure(e,'write'));}
       finally{if(stamp===state.stamp) release();}
     }
     async function publishExternalResponse(record, reviews=[], options={}){
-      if(!options||options.teamShare!==true) throw local('Falsify 팀 전체 공개에 동의한 외부 응답만 올릴 수 있습니다. 아직 보내지 않았습니다.');
-      if(state.busy||state.expiring||misconfigured) throw local('지금은 외부 응답을 보내지 않습니다. 자동으로 다시 보내지 않습니다.');
-      if(!state.session) throw local('먼저 Confluence에 연결하세요. 연결 전에는 아무것도 올리지 않습니다.');
+      checkPublication(options,'Falsify 팀 전체 공개에 동의한 외부 응답만 올릴 수 있습니다. 아직 보내지 않았습니다.','지금은 외부 응답을 보내지 않습니다. 자동으로 다시 보내지 않습니다.');
       state.busy=true; const stamp=state.stamp; paint();
       try{
         const caps=await loadCaps(stamp); if(stamp!==state.stamp) return {cancelled:true};
         if(!caps?.configured) throw local('운영자가 Atlassian OAuth 연결을 마쳐야 팀 보관을 쓸 수 있습니다. 올리지 않았습니다.');
         await refreshSession(stamp); if(stamp!==state.stamp) return {cancelled:true};
         const c=await codec();
-        if(typeof c.buildExternalResponseArchive!=='function'||typeof c.validateArchive!=='function'||typeof c.archiveHash!=='function') throw local('외부 응답 보관 형식을 만들지 못했습니다. 올리지 않았습니다.');
+        checkPublicationCodec(c,'buildExternalResponseArchive','외부 응답 보관 형식을 만들지 못했습니다. 올리지 않았습니다.');
         const built=await c.buildExternalResponseArchive(clone(record), clone(reviews));
         if(stamp!==state.stamp) return {cancelled:true};
         const archive=await c.validateArchive(built, validators());
         const hash=await c.archiveHash(archive);
-        if(!archive||archive.kind!=='external-response'||archive.schema!=='falsify.confluence-archive.v1'||typeof hash!=='string'||!/^[a-f0-9]{64}$/.test(hash)) throw local('외부 응답 보관이 아니어서 올리지 않았습니다.');
+        checkArchiveKind(archive,hash,'external-response','외부 응답 보관이 아니어서 올리지 않았습니다.');
         const encoded=JSON.stringify(archive);
         if(encoded.includes('%PDF-')) throw local('원본 PDF·gold·Harness는 외부 응답 보관에 넣지 않습니다. 올리지 않았습니다.');
         const body={archive,teamShare:true};
-        const bytes=new TextEncoder().encode(JSON.stringify(body)).length, cap=caps.maxArchiveBytes||MAX_BYTES;
-        if(encoded.length>MAX_CHARS) throw local('보관 글자 수가 로컬 기록 한도(450만 자)를 넘습니다. 잘라서 보내지 않았습니다. 로컬 기록은 그대로입니다.');
-        if(bytes>cap||bytes>MAX_BYTES) throw local('보관이 UTF-8 크기 한도를 넘습니다. 잘라서 보내지 않았고 자동으로 다시 보내지 않습니다. 로컬 기록은 그대로입니다.');
+        checkArchiveSize(encoded.length,body,caps);
         if(stamp!==state.stamp) return {cancelled:true};
         const data=await api('POST','/v1/confluence/archives',{auth:true,body,stamp,phase:'write'});
         if(stamp!==state.stamp) return {cancelled:true};
-        if(data.stored!==true||typeof data.pageId!=='string'||!PAGE_ID.test(data.pageId)||data.archiveSha256!==hash) throw local('보관을 마쳤는지 확인하지 못했습니다. 자동으로 다시 보내지 않습니다. 팀 기록 불러오기로 읽어 확인하세요. 로컬 기록은 그대로입니다.');
+        checkStored(data,hash);
         say((data.alreadyExisted?'같은 외부 응답 보관이 이미 Falsify 팀 공간에 있습니다. ':'외부 응답 JSON을 Falsify 팀 공간에 올렸습니다. ')+'원문 추출 텍스트와 응답을 포함합니다. 팀 전원이 읽을 수 있습니다. 로컬 AI 기록은 그대로입니다.');
         return {stored:true,pageId:data.pageId,archiveSha256:hash,alreadyExisted:data.alreadyExisted===true};
       }catch(e){if(stamp!==state.stamp) throw local('연결이 바뀌어 외부 응답 보관을 확인하지 못했습니다. 자동으로 다시 보내지 않습니다.'); throw e?.code==='local'?e:local(failure(e,'write'));}
@@ -461,34 +522,99 @@
       return row;
     }
     function renderItems(){for(const p of panels){p.list.replaceChildren(...(state.items.length?state.items.map(itemView):[el('p',{className:'muted',textContent:state.items.loaded?'팀 서랍이 비어 있습니다.':'팀 기록을 열어보세요.'})]));if(p.drawer){p.drawer.hidden=!state.items.loaded;p.drawer.open=!!state.items.loaded;}}}
+    function classifyListItems(raw){
+        const good=[], skipped=[];
+        for(const item of raw){if(item&&typeof item.pageId==='string'&&PAGE_ID.test(item.pageId)&&typeof item.title==='string') good.push({pageId:item.pageId,title:item.title,updatedAt:typeof item.updatedAt==='string'?item.updatedAt:'',webUrl:typeof item.webUrl==='string'?item.webUrl:''}); else skipped.push(item);}
+      return {good,skipped};
+    }
+    function updateListCursor(data){
+        if(typeof data.nextCursor==='string'&&data.nextCursor){if(!CURSOR.test(data.nextCursor)){state.cursor=null; renderItems(); throw local('다음 목록 주소가 허용된 형식이 아니어서 따라가지 않았습니다. 이미 받은 목록은 그대로 둡니다.');} state.cursor=data.nextCursor;} else state.cursor=null;
+    }
+    function appendListCursor(path){
+      if(!state.cursor||!CURSOR.test(state.cursor)) throw local('다음 목록 주소가 허용된 형식이 아니어서 따라가지 않았습니다.');
+      return path+'?cursor='+encodeURIComponent(state.cursor);
+    }
+    function listAllowed(){
+      if(state.busy||misconfigured) return false;
+      if(!state.session){say('팀 기록을 보려면 먼저 Confluence에 연결하세요. 목록은 업로드하지 않습니다.', true); return false;}
+      return true;
+    }
     async function loadList(append){
-      if(state.busy||misconfigured) return;
-      if(!state.session){say('팀 기록을 보려면 먼저 Confluence에 연결하세요. 목록은 업로드하지 않습니다.', true); return;}
+      if(!listAllowed()) return;
       state.busy=true; const stamp=state.stamp; paint(); say('팀 보관 목록을 불러오는 중… 업로드하거나 모델을 실행하지 않습니다.');
       try{
         const caps=await loadCaps(stamp); if(stamp!==state.stamp) return;
         if(!caps?.configured){say('운영자가 Atlassian OAuth 연결을 마쳐야 팀 목록을 볼 수 있습니다. 로컬 기록은 그대로입니다.', true); return;}
         let path='/v1/confluence/archives';
-        if(append){if(!state.cursor||!CURSOR.test(state.cursor)) throw local('다음 목록 주소가 허용된 형식이 아니어서 따라가지 않았습니다.'); path+='?cursor='+encodeURIComponent(state.cursor);}
+        if(append) path=appendListCursor(path);
         const data=await api('GET',path,{auth:true,stamp}); if(stamp!==state.stamp) return;
         const raw=Array.isArray(data.items)?data.items:[];
         if(raw.length>100) throw local('목록 한 응답이 100건을 넘습니다. 초과분을 조용히 버리지 않았습니다. 페이지를 나눠 다시 불러오세요.');
-        const good=[], skipped=[];
-        for(const item of raw){if(item&&typeof item.pageId==='string'&&PAGE_ID.test(item.pageId)&&typeof item.title==='string') good.push({pageId:item.pageId,title:item.title,updatedAt:typeof item.updatedAt==='string'?item.updatedAt:'',webUrl:typeof item.webUrl==='string'?item.webUrl:''}); else skipped.push(item);}
+        const {good,skipped}=classifyListItems(raw);
         if(!append) state.items=[];
         for(const item of good){state.items=state.items.filter(x=>x.pageId!==item.pageId); state.items.push(item);}
         state.items.loaded=true;
         armTeamTimer();
-        if(typeof data.nextCursor==='string'&&data.nextCursor){if(!CURSOR.test(data.nextCursor)){state.cursor=null; renderItems(); throw local('다음 목록 주소가 허용된 형식이 아니어서 따라가지 않았습니다. 이미 받은 목록은 그대로 둡니다.');} state.cursor=data.nextCursor;} else state.cursor=null;
+        updateListCursor(data);
         renderItems();
         say('팀 기록 '+state.items.length+'개'+(state.cursor?' · 다음 기록도 있습니다.':'')+(skipped.length?' · 형식이 맞지 않는 '+skipped.length+'건 제외':''));
       }catch(e){if(stamp===state.stamp) say(failure(e,'read'), true);}
       finally{if(stamp===state.stamp) release();}
     }
+    function openExperiment(normalized,opened,pageId){
+          if(!opened||opened.kind!=='experiment'||typeof opened.runId!=='string'||!opened.runId) throw local('실험 임시 열람 결과가 아니어서 검수로 열지 않았습니다. 로컬 기록은 그대로입니다.');
+          state.temp={pageId,kind:'experiment',id:opened.runId,expiresAt:Date.now()+TEMP_MS};
+          armTeamTimer();
+          clearConsent('review'); clearConsent('harness');
+          showView('review');
+          say('팀 보관을 임시 열람으로 열었습니다. 검수 화면으로 이동했습니다. 로컬 기록에 합치지 않았고 모델을 부르지 않았습니다. 보내지 않은 사람 검수는 Confluence에 팀 공유를 누르기 전에는 저장되지 않습니다. JSON이며 원본 PDF가 아닙니다.');
+    }
+    function openHarness(normalized,opened,pageId){
+          const config=normalized.data&&normalized.data.config, hashId=normalized.data&&normalized.data.hash;
+          const role=config&&(config.role==='red'||config.role==='blue')?config.role:'';
+          if(!opened||opened.kind!=='harness'||opened.hash!==hashId) throw local('Harness 임시 열람 결과가 아니어서 열지 않았습니다. 등록하거나 실행하지 않았습니다.');
+          state.temp={pageId,kind:'harness',id:role?role+':'+hashId:hashId,expiresAt:Date.now()+TEMP_MS};
+          armTeamTimer();
+          clearConsent('harness');
+          showView('agents');
+          say('Harness를 임시 열람으로 열었습니다. Harness 화면으로 이동했습니다. 등록하거나 실행하지 않았고 로컬 기록에 넣지 않았습니다. 원본 PDF가 아닙니다.');
+    }
+    function openAttempt(normalized,opened,pageId){
+          if(!opened||opened.kind!=='attempt'||opened.id!==normalized.id)throw local('시도 임시 열람을 열지 못했습니다.');
+          state.temp={pageId,kind:'attempt',id:opened.id,expiresAt:Date.now()+TEMP_MS};armTeamTimer();showView('results');
+          say('팀 시도를 메모리에서 12시간 동안 임시 열람합니다. 로컬 기록에 합치지 않았습니다.');
+    }
+    function openExternalResponse(normalized,opened,pageId){
+          if(!opened||opened.kind!=='external-response'||opened.id!==normalized.id)throw local('외부 응답 임시 열람을 열지 못했습니다.');
+          state.temp={pageId,kind:'external-response',id:opened.id,expiresAt:Date.now()+TEMP_MS};armTeamTimer();showView('review');
+          say('외부 응답을 메모리에서 12시간 동안 열람합니다. 로컬 기록에 합치지 않았습니다.');
+    }
+    function openPaperEdit(normalized,opened,pageId){
+          if(!opened||opened.kind!=='paper-edit'||typeof opened.id!=='string'||!opened.id) throw local('수동 편집 임시 열람 결과가 아니어서 검수로 열지 않았습니다. 로컬 기록은 그대로입니다.');
+          state.temp={pageId,kind:'paper-edit',id:opened.id,expiresAt:Date.now()+TEMP_MS};
+          armTeamTimer();
+          clearConsent('review'); clearConsent('harness');
+          showView('review');
+          say('수동 편집 보관을 임시 열람으로 열었습니다. 검수 화면으로 이동했습니다. 로컬 AI 기록에 합치지 않았고 모델을 부르지 않았습니다. 텍스트와 편집만이며 원본 PDF 바이너리는 포함되지 않습니다. 12시간이 지나거나 닫으면 이 브라우저의 임시 열람은 사라집니다.');
+    }
+    function requireOpenArchive(){if(typeof lab?.openArchive!=='function') throw local('이 작업대는 임시 열람을 지원하지 않습니다. 로컬 기록에 넣지 않았습니다.');}
+    function openByKind(normalized,opened,pageId){
+        if(normalized.kind==='experiment') openExperiment(normalized,opened,pageId);
+        else if(normalized.kind==='harness') openHarness(normalized,opened,pageId);
+        else if(normalized.kind==='attempt') openAttempt(normalized,opened,pageId);
+        else if(normalized.kind==='external-response') openExternalResponse(normalized,opened,pageId);
+        else if(normalized.kind==='paper-edit') openPaperEdit(normalized,opened,pageId);
+        else throw local('알 수 없는 보관 종류입니다. 넣지 않았습니다.');
+    }
+    function openAllowed(pageId){
+      if(state.busy) return false;
+      if(!PAGE_ID.test(pageId||'')){say('페이지 식별자가 맞지 않아 열지 않았습니다.', true); return false;}
+      if(!state.session){say('보관을 열려면 Confluence에 연결하세요.', true); return false;}
+      return true;
+    }
+    function openError(e){return e?.code==='local'||e?.code==='http'||e?.code==='timeout'||e?.code==='network'||e?.code==='response'?failure(e,'read'):(typeof e?.message==='string'&&e.message&&e.message.length<=300&&!e.message.includes('<')?e.message+' 로컬 기록은 그대로입니다. 자동으로 다시 시도하지 않습니다.':'검수로 열지 못했습니다. 자동으로 다시 시도하지 않습니다. 로컬 기록은 그대로입니다.');}
     async function openArchive(pageId){
-      if(state.busy) return;
-      if(!PAGE_ID.test(pageId||'')){say('페이지 식별자가 맞지 않아 열지 않았습니다.', true); return;}
-      if(!state.session){say('보관을 열려면 Confluence에 연결하세요.', true); return;}
+      if(!openAllowed(pageId)) return;
       state.busy=true; const stamp=state.stamp; paint(); say('팀 보관 하나를 확인하는 중… 업로드하거나 모델을 실행하지 않습니다.');
       try{
         const data=await api('GET','/v1/confluence/archives/'+encodeURIComponent(pageId),{auth:true,stamp});
@@ -501,42 +627,11 @@
         const normalized=await c.validateArchive(archive, validators());
         if(await c.archiveHash(normalized)!==hash) throw local('검증 결과가 해시와 달라 넣지 않았습니다. 로컬 기록은 그대로입니다.');
         if(stamp!==state.stamp) return;
-        if(typeof lab?.openArchive!=='function') throw local('이 작업대는 임시 열람을 지원하지 않습니다. 로컬 기록에 넣지 않았습니다.');
+        requireOpenArchive();
         const opened=await lab.openArchive(clone(normalized));
         if(stamp!==state.stamp) return;
-        if(normalized.kind==='experiment'){
-          if(!opened||opened.kind!=='experiment'||typeof opened.runId!=='string'||!opened.runId) throw local('실험 임시 열람 결과가 아니어서 검수로 열지 않았습니다. 로컬 기록은 그대로입니다.');
-          state.temp={pageId,kind:'experiment',id:opened.runId,expiresAt:Date.now()+TEMP_MS};
-          armTeamTimer();
-          clearConsent('review'); clearConsent('harness');
-          showView('review');
-          say('팀 보관을 임시 열람으로 열었습니다. 검수 화면으로 이동했습니다. 로컬 기록에 합치지 않았고 모델을 부르지 않았습니다. 보내지 않은 사람 검수는 Confluence에 팀 공유를 누르기 전에는 저장되지 않습니다. JSON이며 원본 PDF가 아닙니다.');
-        }else if(normalized.kind==='harness'){
-          const config=normalized.data&&normalized.data.config, hashId=normalized.data&&normalized.data.hash;
-          const role=config&&(config.role==='red'||config.role==='blue')?config.role:'';
-          if(!opened||opened.kind!=='harness'||opened.hash!==hashId) throw local('Harness 임시 열람 결과가 아니어서 열지 않았습니다. 등록하거나 실행하지 않았습니다.');
-          state.temp={pageId,kind:'harness',id:role?role+':'+hashId:hashId,expiresAt:Date.now()+TEMP_MS};
-          armTeamTimer();
-          clearConsent('harness');
-          showView('agents');
-          say('Harness를 임시 열람으로 열었습니다. Harness 화면으로 이동했습니다. 등록하거나 실행하지 않았고 로컬 기록에 넣지 않았습니다. 원본 PDF가 아닙니다.');
-        }else if(normalized.kind==='attempt'){
-          if(!opened||opened.kind!=='attempt'||opened.id!==normalized.id)throw local('시도 임시 열람을 열지 못했습니다.');
-          state.temp={pageId,kind:'attempt',id:opened.id,expiresAt:Date.now()+TEMP_MS};armTeamTimer();showView('results');
-          say('팀 시도를 메모리에서 12시간 동안 임시 열람합니다. 로컬 기록에 합치지 않았습니다.');
-        }else if(normalized.kind==='external-response'){
-          if(!opened||opened.kind!=='external-response'||opened.id!==normalized.id)throw local('외부 응답 임시 열람을 열지 못했습니다.');
-          state.temp={pageId,kind:'external-response',id:opened.id,expiresAt:Date.now()+TEMP_MS};armTeamTimer();showView('review');
-          say('외부 응답을 메모리에서 12시간 동안 열람합니다. 로컬 기록에 합치지 않았습니다.');
-        }else if(normalized.kind==='paper-edit'){
-          if(!opened||opened.kind!=='paper-edit'||typeof opened.id!=='string'||!opened.id) throw local('수동 편집 임시 열람 결과가 아니어서 검수로 열지 않았습니다. 로컬 기록은 그대로입니다.');
-          state.temp={pageId,kind:'paper-edit',id:opened.id,expiresAt:Date.now()+TEMP_MS};
-          armTeamTimer();
-          clearConsent('review'); clearConsent('harness');
-          showView('review');
-          say('수동 편집 보관을 임시 열람으로 열었습니다. 검수 화면으로 이동했습니다. 로컬 AI 기록에 합치지 않았고 모델을 부르지 않았습니다. 텍스트와 편집만이며 원본 PDF 바이너리는 포함되지 않습니다. 12시간이 지나거나 닫으면 이 브라우저의 임시 열람은 사라집니다.');
-        }else throw local('알 수 없는 보관 종류입니다. 넣지 않았습니다.');
-      }catch(e){if(stamp===state.stamp) say(e?.code==='local'||e?.code==='http'||e?.code==='timeout'||e?.code==='network'||e?.code==='response'?failure(e,'read'):(typeof e?.message==='string'&&e.message&&e.message.length<=300&&!e.message.includes('<')?e.message+' 로컬 기록은 그대로입니다. 자동으로 다시 시도하지 않습니다.':'검수로 열지 못했습니다. 자동으로 다시 시도하지 않습니다. 로컬 기록은 그대로입니다.'), true);}
+        openByKind(normalized,opened,pageId);
+      }catch(e){if(stamp===state.stamp) say(openError(e), true);}
       finally{if(stamp===state.stamp) release();}
     }
 

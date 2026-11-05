@@ -11,16 +11,23 @@
     function valid(item){
       const needle=role==='blue'?(item.sourceQuote||item.quote):item.before;if(!item.anchor||typeof needle!=='string'||!needle)return false;
       const s=source.find(x=>x.id===item.segmentId),a=item.anchor;
-      if(!s||!Number.isInteger(a.start)||!Number.isInteger(a.end)||a.start<0||a.end<=a.start||a.end>s.text.length||s.text.slice(a.start,a.end)!==needle)return false;
+      if(!validRange(s,a,needle))return false;
       if(Number.isInteger(s.pageIndex)&&s.pageIndex!==item.pageIndex)return false;
       let count=0,at=-1;while((at=s.text.indexOf(needle,at+1))>=0&&at<a.start)count++;
       if(a.occurrence!=null&&a.occurrence!==count)return false;
       return Number.isInteger(item.pageIndex)&&item.pageIndex>=0;
     }
+    function validRange(s,a,needle){
+      if(!s||!Number.isInteger(a.start)||!Number.isInteger(a.end)||a.start<0||a.end<=a.start||a.end>s.text.length||s.text.slice(a.start,a.end)!==needle)return false;
+      return true;
+    }
     const overlap=(a,b)=>a.segmentId===b.segmentId&&a.anchor.start<b.anchor.end&&b.anchor.start<a.anchor.end;
     const find=id=>{const item=items.find(x=>x.id===id);if(!item)throw Error('Unknown proposal');return item;};
+    function applicable(item){
+      return item.kind==='change'&&item.matchStatus==='matched'&&valid(item)&&typeof item.after==='string'&&item.after!==item.before&&(item.after===''||!!item.after.trim());
+    }
     function enable(item,on){
-      if(on&&role==='red'&&(item.kind!=='change'||item.matchStatus!=='matched'||!valid(item)||typeof item.after!=='string'||item.after===item.before||(item.after!==''&&!item.after.trim())))throw Error('Proposal is not applicable');
+      if(on&&role==='red'&&!applicable(item))throw Error('Proposal is not applicable');
       if(on&&role==='red')for(const other of items)if(other!==item&&other.enabled&&other.anchor&&overlap(item,other))other.enabled=false;
       item.enabled=!!on;
     }
@@ -57,10 +64,20 @@
       const parents=ids.map(find),item={...clone(fields),id:'p'+next++,kind:'change',origin:'human',parentIds:ids.slice(),sourceRefs:parents.flatMap(p=>clone(p.sourceRefs)),enabled:false};
       item.matchStatus=valid(item)?'matched':'missing';items.push(item);emit();return item.id;
     }
+    function validateRestoredItem(item,seen){
+      if(typeof item.id!=='string'||seen.has(item.id)||!Array.isArray(item.sourceRefs))throw Error('Invalid proposal');
+      seen.add(item.id);
+      if(item.matchStatus==='matched'&&!valid(item))throw Error('Invalid source range');
+      if(item.enabled&&role==='red'&&(item.matchStatus!=='matched'||!valid(item)||typeof item.after!=='string'||(item.after!==''&&!item.after.trim())))throw Error('Invalid selected proposal');
+    }
+    function validateRestoredOverlap(restored){
+      const active=restored.filter(x=>x.enabled&&role==='red');
+      for(let i=0;i<active.length;i++)for(let j=i+1;j<active.length;j++)if(overlap(active[i],active[j]))throw Error('Overlapping selections');
+    }
     function restore(value){
       const s=clone(value);if(s.schema!==SCHEMA||s.fileHash!==fileHash||s.role!==role||!Array.isArray(s.batches)||!Array.isArray(s.items))throw Error('Snapshot does not match document');
-      const seen=new Set();for(const item of s.items){if(typeof item.id!=='string'||seen.has(item.id)||!Array.isArray(item.sourceRefs))throw Error('Invalid proposal');seen.add(item.id);if(item.matchStatus==='matched'&&!valid(item))throw Error('Invalid source range');if(item.enabled&&role==='red'&&(item.matchStatus!=='matched'||!valid(item)||typeof item.after!=='string'||(item.after!==''&&!item.after.trim())))throw Error('Invalid selected proposal');}
-      const active=s.items.filter(x=>x.enabled&&role==='red');for(let i=0;i<active.length;i++)for(let j=i+1;j<active.length;j++)if(overlap(active[i],active[j]))throw Error('Overlapping selections');
+      const seen=new Set();for(const item of s.items)validateRestoredItem(item,seen);
+      validateRestoredOverlap(s.items);
       batches=s.batches;items=s.items;next=Math.max(0,...items.map(x=>/^p\d+$/.test(x.id)?Number(x.id.slice(1)):0))+1;return emit();
     }
     function edits(){return clone(items.filter(x=>role==='red'&&x.enabled&&x.kind==='change'&&x.matchStatus==='matched'&&valid(x)&&x.after!==x.before).map(x=>({id:x.id,enabled:true,before:x.before,after:x.after,segmentId:x.segmentId,pageIndex:x.pageIndex,anchor:x.anchor,origin:x.origin||'external-ai-import',sourceRefs:x.sourceRefs})));}

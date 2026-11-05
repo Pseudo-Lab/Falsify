@@ -690,6 +690,21 @@ function withCors(response, origin, allowed) {
   return new Response(response.body, { status: response.status, headers });
 }
 
+async function dispatchApiRequest(request, env, url, matched, config) {
+  if (!matched) throw fail(404, 'not_found');
+  const methods = ROUTES[matched.template];
+  if (request.method === 'OPTIONS') {
+    return new Response(null, {
+      status: 204,
+      headers: { 'Access-Control-Allow-Methods': ALLOW_METHODS, 'Access-Control-Allow-Headers': ALLOW_HEADERS, 'Access-Control-Max-Age': '600', 'Cache-Control': 'no-store' },
+    });
+  }
+  if (!Object.hasOwn(methods, request.method)) throw fail(405, 'method_not_allowed', { Allow: Object.keys(methods).join(', ') });
+  if (confluenceOnly(env) && LEGACY_WRITES.has(`${request.method} ${matched.template}`)) throw fail(410, 'storage_moved');
+  if (matched.id !== null && !UUID.test(matched.id)) throw fail(404, 'not_found');
+  return methods[request.method]({ request, env, url, id: matched.id, settings: config });
+}
+
 export default {
   async fetch(request, env) {
     const started = Date.now();
@@ -706,23 +721,8 @@ export default {
       if (!(confluence?.template === '/v1/confluence/auth/callback') && origin !== null && !allowed) throw fail(403, 'origin_not_allowed');
       if (confluence) {
         response = await handleConfluence({ request, env, url, match: confluence, settings: config });
-      } else if (!matched) {
-        throw fail(404, 'not_found');
       } else {
-        const methods = ROUTES[matched.template];
-        if (request.method === 'OPTIONS') {
-          response = new Response(null, {
-            status: 204,
-            headers: { 'Access-Control-Allow-Methods': ALLOW_METHODS, 'Access-Control-Allow-Headers': ALLOW_HEADERS, 'Access-Control-Max-Age': '600', 'Cache-Control': 'no-store' },
-          });
-        } else if (!Object.hasOwn(methods, request.method)) {
-          throw fail(405, 'method_not_allowed', { Allow: Object.keys(methods).join(', ') });
-        } else if (confluenceOnly(env) && LEGACY_WRITES.has(`${request.method} ${matched.template}`)) {
-          throw fail(410, 'storage_moved');
-        } else {
-          if (matched.id !== null && !UUID.test(matched.id)) throw fail(404, 'not_found');
-          response = await methods[request.method]({ request, env, url, id: matched.id, settings: config });
-        }
+        response = await dispatchApiRequest(request, env, url, matched, config);
       }
     } catch (error) {
       if (!(error instanceof ApiError)) {

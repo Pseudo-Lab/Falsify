@@ -53,3 +53,8 @@ test('expired-draft cleanup racing a newer draft keeps the newer one; legacy row
   const legacy={archive:'legacy',consent:true,savedAt:clock};idb.dbs.get(DB).get('drafts').rows.set('current',legacy);
   clock+=LAYOUT_RUN_TTL_MS;assert.equal(await createLatexDraftStore({indexedDB:idb,now}).get(),null);assert.equal(current(idb),undefined);
 });
+
+test('request success followed by transaction abort does not report persistence and reuses one connection',async()=>{
+  let opens=0,closes=0,abort=true;const idb={open(){opens++;const req={};queueMicrotask(()=>{req.result={objectStoreNames:{contains:()=>true},close(){closes++;},transaction(){const tx={objectStore(){return {put(){const q={};queueMicrotask(()=>{q.onsuccess?.();setTimeout(()=>abort?tx.onabort?.():tx.oncomplete?.(),0);});return q;}};}};return tx;}};req.onsuccess();});return req;}};
+  const store=createLatexDraftStore({indexedDB:idb});assert.equal((await store.put('a',{consent:true})).persisted,false);abort=false;assert.equal((await store.put('b',{consent:true})).persisted,true);assert.equal(opens,1);store.dispose();await Promise.resolve();assert.equal(closes,1);
+});

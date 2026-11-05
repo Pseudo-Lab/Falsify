@@ -23,6 +23,7 @@ function extractPng(asset){
   if(bytes.length<24||!pngSignature.every((v,i)=>bytes[i]===v))fail('crop-format');
   return bytes;
 }
+function invalidPageFrame(p,i,transform,bounds,rotation,mb,cb){return !p||p.pageIndex!==i||p.frame!=='mupdf-display'||!same(p.transform,transform)||!same(bounds,[0,0,p.width,p.height])||rotation%360!==0||!same(mb,[0,0,p.width,p.height])||!same(cb,mb);}
 function pageProof(bytes,model,mupdf){
   if(!mupdf?.Document)fail('reader-unavailable');
   const doc=mupdf.Document.openDocument(bytes,'application/pdf').asPDF();
@@ -37,14 +38,28 @@ function pageProof(bytes,model,mupdf){
         const media=obj.getInheritable('MediaBox'), crop=obj.getInheritable('CropBox');
         const arr=x=>x?.isArray()&&x.length===4?[0,1,2,3].map(n=>x.get(n).asNumber()):null;
         const mb=arr(media), cb=arr(crop)||mb, rotation=obj.getInheritable('Rotate').asNumber()||0;
-        if(!p||p.pageIndex!==i||p.frame!=='mupdf-display'||!same(p.transform,transform)||!same(bounds,[0,0,p.width,p.height])||rotation%360!==0||!same(mb,[0,0,p.width,p.height])||!same(cb,mb))fail('unsupported-page-frame');
+        if(invalidPageFrame(p,i,transform,bounds,rotation,mb,cb))fail('unsupported-page-frame');
       } finally {page.destroy();}
     }
   } finally {doc.destroy();}
 }
 function ref(hash,pageIndex,bbox,extra={}){return {sourceSha256:hash,pageIndex,frame:'mupdf-display',bbox:[...bbox],...extra};}
+function hasCellRules(table,pg){
+  for(const c of table.cells){const [x0,y0,x1,y1]=c.bbox,eps=1.5;
+    const horizontal=y=>pg.rules.some(r=>Math.abs((r.bbox[1]+r.bbox[3])/2-y)<=eps&&r.bbox[0]<=x0+eps&&r.bbox[2]>=x1-eps);
+    const vertical=x=>pg.rules.some(r=>Math.abs((r.bbox[0]+r.bbox[2])/2-x)<=eps&&r.bbox[1]<=y0+eps&&r.bbox[3]>=y1-eps);
+    if(!horizontal(y0)||!horizontal(y1)||!vertical(x0)||!vertical(x1))return false;
+  }
+  return true;
+}
+function invalidTableShape(table){return !table?.ruled||!table.rows||!table.cols||table.rows*table.cols!==table.cells.length||table.rows*table.cols>400;}
+function duplicateIdentities(model){return model.items.some(i=>!i?.id)||new Set(model.items.map(i=>i.id)).size!==model.items.length||model.assets.some(a=>!a?.id)||new Set(model.assets.map(a=>a.id)).size!==model.assets.length;}
+function publicationCropRejected(cropBox,box,candidate,output,pi){return cropBox[0]<box[0]-12||cropBox[2]>box[2]+12||cropBox[3]>box[3]+4||cropBox[1]<candidate.caption.bbox[1]-2||output.items.some(i=>i.assetId&&i.evidence.some(e=>e.pageIndex===pi&&overlap(e.bbox,cropBox)));}
+function invalidModelCollections(model){return !Array.isArray(model.pages)||!Array.isArray(model.items)||!Array.isArray(model.assets)||!Array.isArray(model.diagnostics);}
+function invalidRegion(region,ids,f){return !region||!valid(region.bbox)||ids.has(region.id)||region.pageIndex!==f.source.pageIndex||!same(region.bbox,f.source.bbox,1);}
+function regionOutsideBudget(page,region,planned){return !page||!within(region.bbox,[0,0,page.width,page.height],0)||9*(region.bbox[2]-region.bbox[0])*(region.bbox[3]-region.bbox[1])>MAX_PIXELS||planned.length>=MAX_REGIONS;}
 function safeTable(table, inventory, document, region, hash, revision, rulePages){
-  if(!table?.ruled||!table.rows||!table.cols||table.rows*table.cols!==table.cells.length||table.rows*table.cols>400) return null;
+  if(invalidTableShape(table)) return null;
   const pg=rulePages[table.pageIndex];
   const rows=Array.from({length:table.rows},()=>Array(table.cols));
   for(const cell of table.cells){
@@ -60,11 +75,7 @@ function safeTable(table, inventory, document, region, hash, revision, rulePages
   if(new Set(used).size!==used.length||region.blockIds.some(id=>!used.includes(id)))return null;
   // Detector's ruled classification alone is not proof: require all four sides
   // of every cell to be covered by an observed straight rule.
-  for(const c of table.cells){const [x0,y0,x1,y1]=c.bbox,eps=1.5;
-    const horizontal=y=>pg.rules.some(r=>Math.abs((r.bbox[1]+r.bbox[3])/2-y)<=eps&&r.bbox[0]<=x0+eps&&r.bbox[2]>=x1-eps);
-    const vertical=x=>pg.rules.some(r=>Math.abs((r.bbox[0]+r.bbox[2])/2-x)<=eps&&r.bbox[1]<=y0+eps&&r.bbox[3]>=y1-eps);
-    if(!horizontal(y0)||!horizontal(y1)||!vertical(x0)||!vertical(x1))return null;
-  }
+  if(!hasCellRules(table,pg))return null;
   return {rows};
 }
 
@@ -74,9 +85,9 @@ export async function enrichReconstructionRegions({model,bytes,mupdf,revision,si
   if(!(bytes instanceof Uint8Array)||!bytes.length||bytes.length>MAX_BYTES)fail('invalid-source');
   const snapshot=bytes.slice(),hash=hex(snapshot);
   if(!model||model.schema!=='falsify.pdf-latex-reconstruction.v1'||model.sourceSha256!==hash)fail('stale-source');
-  if(!Array.isArray(model.pages)||!Array.isArray(model.items)||!Array.isArray(model.assets)||!Array.isArray(model.diagnostics))fail('invalid-model');
+  if(invalidModelCollections(model))fail('invalid-model');
   if(typeof revision!=='string'||!revision||revision.length>200)fail('invalid-revision');
-  if(model.items.some(i=>!i?.id)||new Set(model.items.map(i=>i.id)).size!==model.items.length||model.assets.some(a=>!a?.id)||new Set(model.assets.map(a=>a.id)).size!==model.assets.length)fail('duplicate-identity');
+  if(duplicateIdentities(model))fail('duplicate-identity');
   pageProof(snapshot,model,mupdf);abort(signal);
   const document=await readDocument({file:snapshot,fileHash:hash,signal});
   const source=await readSourceAssets({bytes:snapshot,document,signal});
@@ -87,24 +98,33 @@ export async function enrichReconstructionRegions({model,bytes,mupdf,revision,si
   let tables=null, rulePages=[];
   try {tables=await detectSourceTables({sourceBytes:snapshot,sourceSha256:hash,revision,mupdf});rulePages=readMuPdfTablePages(snapshot,mupdf);}catch(e){if(e?.name==="AbortError")throw e;abort(signal);output.diagnostics.push({code:"table-inventory-unavailable",severity:"warning"});}
   const planned=[],ids=new Set();
-  for(const item of output.items){
-    abort(signal);
-    if(!['figure','table','unknown'].includes(item.kind)||item.kind==='unknown'&&!item.extensions?.regionId)continue;
-    const f=flow.items.find(x=>x.id===item.extensions?.flowId);
-    if(!f||!sameIds(f.blockIds,item.extensions?.blockIds)||!sameIds(f.assetIds,item.extensions?.assetIds)){item.status='unsupported';diag('region-source-mismatch',item);continue;}
+  function findFlowRegion(f){
     let region=f.renderAssetId?flow.regions.find(x=>x.id===f.renderAssetId):null;
     if(!region && f.assetIds?.length===1){const a=document.assets.find(x=>x.id===f.assetIds[0]);if(a&&valid(a.source.bbox))region={id:`crop-${a.id}`,pageIndex:a.source.pageIndex,bbox:a.source.bbox,blockIds:f.blockIds,assetIds:f.assetIds};}
-    if(!region||!valid(region.bbox)||ids.has(region.id)||region.pageIndex!==f.source.pageIndex||!same(region.bbox,f.source.bbox,1)){item.status='unsupported';diag('region-unavailable',item);continue;}
+    return region;
+  }
+  function planRegion(item){
+    abort(signal);
+    if(!['figure','table','unknown'].includes(item.kind)||item.kind==='unknown'&&!item.extensions?.regionId)return;
+    const f=flow.items.find(x=>x.id===item.extensions?.flowId);
+    if(!f||!sameIds(f.blockIds,item.extensions?.blockIds)||!sameIds(f.assetIds,item.extensions?.assetIds)){item.status='unsupported';diag('region-source-mismatch',item);return;}
+    const region=findFlowRegion(f);
+    if(invalidRegion(region,ids,f)){item.status='unsupported';diag('region-unavailable',item);return;}
     const page=output.pages[region.pageIndex];
-    if(!page||!within(region.bbox,[0,0,page.width,page.height],0)||9*(region.bbox[2]-region.bbox[0])*(region.bbox[3]-region.bbox[1])>MAX_PIXELS||planned.length>=MAX_REGIONS){item.status='unsupported';diag('region-budget-or-bounds',item);continue;}
+    if(regionOutsideBudget(page,region,planned)){item.status='unsupported';diag('region-budget-or-bounds',item);return;}
     // Every intersecting source text/image occurrence must be owned by this flow item.
     const colliding=flow.items.filter(other=>other.id!==f.id&&other.source?.pageIndex===region.pageIndex&&valid(other.source.bbox)&&overlap(other.source.bbox,region.bbox));
     const missing=f.blockIds.some(id=>!allBlocks.has(id)) || region.blockIds.some(id=>!f.blockIds.includes(id));
-    if(colliding.length||missing||planned.some(x=>x.region.pageIndex===region.pageIndex&&overlap(x.region.bbox,region.bbox))){item.status='unsupported';diag('region-ownership-ambiguous',item);continue;}
+    if(colliding.length||missing||planned.some(x=>x.region.pageIndex===region.pageIndex&&overlap(x.region.bbox,region.bbox))){item.status='unsupported';diag('region-ownership-ambiguous',item);return;}
     ids.add(region.id);planned.push({item,region,f});
   }
-  if(planned.length){
-    abort(signal);const crops=await readSourceAssets({bytes:snapshot,document,regions:planned.map(({region:r})=>({...r,blockIds:r.blockIds||[],assetIds:r.assetIds||[]})),signal});
+  function planRegions(){
+  for(const item of output.items){
+    planRegion(item);
+  }
+  }
+  planRegions();
+  function applyPlannedCrops(crops){
     for(const {item,region} of planned){
       abort(signal);const crop=crops.assets.find(a=>a.id===region.id);const png=extractPng(crop),assetId=`latex-${region.id}`;
       if(output.assets.some(a=>a.id===assetId))fail('duplicate-asset');
@@ -119,8 +139,13 @@ export async function enrichReconstructionRegions({model,bytes,mupdf,revision,si
       }
     }
   }
+  if(planned.length){
+    abort(signal);const crops=await readSourceAssets({bytes:snapshot,document,regions:planned.map(({region:r})=>({...r,blockIds:r.blockIds||[],assetIds:r.assetIds||[]})),signal});
+    applyPlannedCrops(crops);
+  }
   // A ruled table may appear as separate flow paragraphs. Only consolidate
   // them into a crop with diagnostics; editable cells require full proof.
+  async function consolidateRuledTables(){
   for(const t of tables?.tables||[]){
     abort(signal);if(!t.ruled||planned.some(x=>x.region.pageIndex===t.pageIndex&&overlap(x.region.bbox,t.bbox)))continue;
     const owners=flow.items.filter(f=>f.source?.pageIndex===t.pageIndex&&valid(f.source.bbox)&&overlap(f.source.bbox,t.bbox));
@@ -140,8 +165,11 @@ export async function enrichReconstructionRegions({model,bytes,mupdf,revision,si
     if(!table){delete item.table;item.reason='table-structure-unproved';diag('table-structure-unproved',item);}
     output.items.splice(first,0,item);output.items=output.items.filter(i=>!memberIds.has(i.id));
   }
+  }
+  await consolidateRuledTables();
   // Preserve horizontally ruled academic tables as complete source regions.
   // Cell observations accompany the crop; no PDF-writer authority is granted.
+  async function preservePublicationTables(){
   for(const candidate of findPublicationTables(rulePages,source.drawings)){
     abort(signal);const pi=candidate.pageIndex,box=candidate.bbox;
     if(output.items.some(i=>i.assetId&&i.evidence.some(e=>e.pageIndex===pi&&overlap(e.bbox,box))))continue;
@@ -150,7 +178,7 @@ export async function enrichReconstructionRegions({model,bytes,mupdf,revision,si
     if(!members.length)continue;
     const boxes=members.flatMap(i=>i.evidence.filter(e=>e.pageIndex===pi).map(e=>e.bbox));
     const cropBox=[Math.min(box[0],...boxes.map(b=>b[0])),Math.min(box[1],...boxes.map(b=>b[1])),Math.max(box[2],...boxes.map(b=>b[2])),Math.max(box[3],...boxes.map(b=>b[3]))];
-    if(cropBox[0]<box[0]-12||cropBox[2]>box[2]+12||cropBox[3]>box[3]+4||cropBox[1]<candidate.caption.bbox[1]-2||output.items.some(i=>i.assetId&&i.evidence.some(e=>e.pageIndex===pi&&overlap(e.bbox,cropBox))))continue;
+    if(publicationCropRejected(cropBox,box,candidate,output,pi))continue;
     const region={id:`publication-table-${pi}-${hex(new TextEncoder().encode(JSON.stringify(box))).slice(0,16)}`,pageIndex:pi,bbox:cropBox,blockIds:[...new Set(members.flatMap(i=>i.extensions?.blockIds||[]))],assetIds:[]};
     if(9*(cropBox[2]-cropBox[0])*(cropBox[3]-cropBox[1])>MAX_PIXELS)continue;
     const inventory=await readSourceAssets({bytes:snapshot,document,regions:[region],signal}),png=extractPng(inventory.assets.find(a=>a.id===region.id)),assetId=`latex-${region.id}`;
@@ -172,6 +200,8 @@ export async function enrichReconstructionRegions({model,bytes,mupdf,revision,si
     output.items.splice(first,0,item);output.items=output.items.filter(i=>!ids.has(i.id));output.relations=output.relations.filter(r=>!ids.has(r.from)&&!ids.has(r.to));
     diag('source-table-region-preserved',item);
   }
+  }
+  await preservePublicationTables();
   abort(signal);return output;
 }
 function sameIds(a,b){return Array.isArray(a)&&Array.isArray(b)&&a.length===b.length&&a.every((v,i)=>v===b[i]);}

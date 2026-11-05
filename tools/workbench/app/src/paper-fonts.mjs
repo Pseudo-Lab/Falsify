@@ -31,6 +31,24 @@ function fontFamily(bytes) {
   } catch {} return null;
 }
 
+function candidateCoverage(detail, glyphCodepoints, glyphs) {
+  return detail ? {status:'unavailable', missing:[], detail} : {status:glyphCodepoints.every(cp => glyphs.get(cp)) ? 'covered' : 'missing', missing:glyphCodepoints.filter(cp => !glyphs.get(cp))};
+}
+
+function summarizeFontPlan(candidates, codepoints, layoutControls) {
+  const selected = candidates.find(c => c.coverage.status === 'covered') || null;
+  const fallback = codepoints.map(codepoint => {
+    if (isLayoutControl(codepoint)) return Object.freeze({codepoint, kind:'layout-control', fontId:null, family:null});
+    const candidate = selected || candidates.find(c => c.hasGlyph(codepoint) === true);
+    return Object.freeze({codepoint, kind:'glyph', fontId:candidate?.id ?? null, family:candidate?.family ?? null});
+  });
+  const missing = fallback.filter(x => x.kind === 'glyph' && x.fontId === null).map(x => x.codepoint);
+  const unavailable = missing.length > 0 && candidates.some(c => c.coverage.status === 'unavailable') || candidates.length === 0;
+  const status = unavailable ? 'unavailable' : missing.length ? 'missing' : 'covered';
+  return Object.freeze({status, selected, candidates:Object.freeze(candidates), codepoints:Object.freeze(codepoints), layoutControls:Object.freeze(layoutControls), missing:Object.freeze(missing), fallback:Object.freeze(fallback),
+    hasGlyph: cp => isScalar(cp) && codepoints.includes(cp) && !isLayoutControl(cp) ? (fallback.find(x => x.codepoint === cp).fontId !== null ? true : unavailable ? null : false) : null});
+}
+
 // The supplied text must be the union of all comparison variants.
 export async function createFontPlan({text, fonts = []}, {mupdf} = {}) {
   if (typeof text !== 'string' || !Array.isArray(fonts)) throw new TypeError('Expected text and fonts array');
@@ -70,20 +88,10 @@ export async function createFontPlan({text, fonts = []}, {mupdf} = {}) {
     } finally {
       try { font?.destroy(); } finally { buffer?.destroy(); }
     }
-    const coverage = detail ? {status:'unavailable', missing:[], detail} : {status:glyphCodepoints.every(cp => glyphs.get(cp)) ? 'covered' : 'missing', missing:glyphCodepoints.filter(cp => !glyphs.get(cp))};
+    const coverage = candidateCoverage(detail, glyphCodepoints, glyphs);
     candidates.push(Object.freeze({id, family, sha256, coverage: Object.freeze({...coverage, missing:Object.freeze(coverage.missing)}),
       getBytes: () => bytes?.slice() ?? null,
       hasGlyph: cp => isScalar(cp) && glyphs.has(cp) ? glyphs.get(cp) : null}));
   }
-  const selected = candidates.find(c => c.coverage.status === 'covered') || null;
-  const fallback = codepoints.map(codepoint => {
-    if (isLayoutControl(codepoint)) return Object.freeze({codepoint, kind:'layout-control', fontId:null, family:null});
-    const candidate = selected || candidates.find(c => c.hasGlyph(codepoint) === true);
-    return Object.freeze({codepoint, kind:'glyph', fontId:candidate?.id ?? null, family:candidate?.family ?? null});
-  });
-  const missing = fallback.filter(x => x.kind === 'glyph' && x.fontId === null).map(x => x.codepoint);
-  const unavailable = missing.length > 0 && candidates.some(c => c.coverage.status === 'unavailable') || candidates.length === 0;
-  const status = unavailable ? 'unavailable' : missing.length ? 'missing' : 'covered';
-  return Object.freeze({status, selected, candidates:Object.freeze(candidates), codepoints:Object.freeze(codepoints), layoutControls:Object.freeze(layoutControls), missing:Object.freeze(missing), fallback:Object.freeze(fallback),
-    hasGlyph: cp => isScalar(cp) && codepoints.includes(cp) && !isLayoutControl(cp) ? (fallback.find(x => x.codepoint === cp).fontId !== null ? true : unavailable ? null : false) : null});
+  return summarizeFontPlan(candidates, codepoints, layoutControls);
 }

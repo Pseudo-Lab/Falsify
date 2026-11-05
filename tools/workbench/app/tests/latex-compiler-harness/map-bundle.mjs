@@ -390,20 +390,36 @@ function parseSynctex(bytes, { project } = {}) {
   let page = 0, content = false, unit = 1, mag = 1e3, xOffset = 0, yOffset = 0;
   const paths = new Set((project?.files || []).map((f) => f.path));
   const normalize = (p) => p.replaceAll("\\", "/").replace(/^\.\//, "");
+  function collectBox(raw) {
+    const m = /^[h(\[](-?\d+),(-?\d+)(?:,(-?\d+))?:(-?\d+),(-?\d+):(-?\d+),(-?\d+),(-?\d+)/.exec(raw);
+    if (!m) return;
+    const source = inputs.get(+m[1]);
+    if (!source) return;
+    const matches = paths.has(source) ? [source] : [...paths].filter((p) => source.endsWith("/" + p));
+    if (matches.length !== 1) return;
+    const scale = unit * (mag / 1e3) / 65536 * 72 / 72.27;
+    const x2 = (+m[4] + xOffset) * scale, baseline = (+m[5] + yOffset) * scale;
+    const width = +m[6] * scale, height = +m[7] * scale, depth = +m[8] * scale;
+    if (width <= 0 || height + depth <= 0) return;
+    boxes.push({ path: matches[0], line: +m[2], pageIndex: page - 1, box: { x: x2, y: baseline - height, width, height: height + depth } });
+  }
+  function readPreamble(raw) {
+    const m = /^(Unit|Magnification|X Offset|Y Offset):\s*(-?\d+)/.exec(raw);
+    if (m) {
+      if (m[1] === "Unit") unit = +m[2];
+      else if (m[1] === "Magnification") mag = +m[2];
+      else if (m[1] === "X Offset") xOffset = +m[2];
+      else yOffset = +m[2];
+    }
+  }
   for (const raw of text.split(/\r?\n/)) {
     if (raw.startsWith("Input:")) {
-      const m2 = /^Input:(\d+):(.*)$/.exec(raw);
-      if (m2) inputs.set(+m2[1], normalize(m2[2].trim()));
+      const m = /^Input:(\d+):(.*)$/.exec(raw);
+      if (m) inputs.set(+m[1], normalize(m[2].trim()));
       continue;
     }
     if (!content) {
-      const m2 = /^(Unit|Magnification|X Offset|Y Offset):\s*(-?\d+)/.exec(raw);
-      if (m2) {
-        if (m2[1] === "Unit") unit = +m2[2];
-        else if (m2[1] === "Magnification") mag = +m2[2];
-        else if (m2[1] === "X Offset") xOffset = +m2[2];
-        else yOffset = +m2[2];
-      }
+      readPreamble(raw);
       if (raw === "Content:") content = true;
       continue;
     }
@@ -417,17 +433,7 @@ function parseSynctex(bytes, { project } = {}) {
       continue;
     }
     if (!page || !["h", "(", "["].includes(raw[0])) continue;
-    const m = /^[h(\[](-?\d+),(-?\d+)(?:,(-?\d+))?:(-?\d+),(-?\d+):(-?\d+),(-?\d+),(-?\d+)/.exec(raw);
-    if (!m) continue;
-    const source = inputs.get(+m[1]);
-    if (!source) continue;
-    const matches = paths.has(source) ? [source] : [...paths].filter((p) => source.endsWith("/" + p));
-    if (matches.length !== 1) continue;
-    const scale = unit * (mag / 1e3) / 65536 * 72 / 72.27;
-    const x2 = (+m[4] + xOffset) * scale, baseline = (+m[5] + yOffset) * scale;
-    const width = +m[6] * scale, height = +m[7] * scale, depth = +m[8] * scale;
-    if (width <= 0 || height + depth <= 0) continue;
-    boxes.push({ path: matches[0], line: +m[2], pageIndex: page - 1, box: { x: x2, y: baseline - height, width, height: height + depth } });
+    collectBox(raw);
   }
   return { schema: "falsify.synctex-map.v1", projectId: project?.id, boxes };
 }

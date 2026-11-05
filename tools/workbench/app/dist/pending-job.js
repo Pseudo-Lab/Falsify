@@ -85,18 +85,32 @@
   function valid(x){
     if(!x||x.schema!==SCHEMA||(x.role!=='red'&&x.role!=='blue'))return false;
     if(!REQUEST_ID.test(x.requestId)||!x.request||typeof x.request!=='object'||x.request.requestId!==x.requestId)return false;
-    if(!INSTANCE.test(x.companionInstance)||!HEX.test(x.requestFingerprint)||!HEX.test(x.requestBytesDigest)||!HEX.test(x.harnessHash)||!HEX.test(x.sourceHash)||!HEX.test(x.fileHash))return false;
-    if(!RECEIPTS.includes(x.postReceipt)||!DISPOSITIONS.includes(x.disposition)||!Number.isFinite(x.createdAt))return false;
-    const open=x.disposition==='open'||x.disposition==='running';
-    if(open){if(x.finishedAt!==null||x.expiresAt!==null)return false;}
-    else if(!Number.isFinite(x.finishedAt)||x.expiresAt!==x.finishedAt+RETENTION_MS)return false;
+    if(!validIdentityAndLifetime(x))return false;
+    if(!validDocumentFields(x))return false;
+    return validObservedFields(x);
+  }
+  function validDocumentFields(x){
     if(typeof x.revision!=='string'||x.revision.length<1||x.revision.length>160||x.revision!==x.request.revision||x.sourceHash!==x.request.sourceHash)return false;
     if(!segments(x.request.segments)||typeof x.name!=='string'||x.name.length>160||typeof x.format!=='string'||x.format.length>40)return false;
     if(x.role==='blue'&&Object.keys(x.request).some(k=>!BLUE_KEYS.includes(k)))return false;
+    return true;
+  }
+  function validObservedFields(x){
     // Optional, added only after a matched failure. Older records omit it and stay valid.
     if(Object.hasOwn(x,'serverFailure')&&(typeof x.serverFailure!=='string'||x.serverFailure.length<1||x.serverFailure.length>300||x.serverFailure!==safeFailure(x.serverFailure)))return false;
     if(Object.hasOwn(x,'adapterFailure')&&!structuredFailure(x.adapterFailure))return false;
     if(Object.hasOwn(x,'observedCalls')&&(!Number.isSafeInteger(x.observedCalls)||x.observedCalls<0))return false;
+    return true;
+  }
+  function validIdentityAndLifetime(x){
+    if(!INSTANCE.test(x.companionInstance)||!HEX.test(x.requestFingerprint)||!HEX.test(x.requestBytesDigest)||!HEX.test(x.harnessHash)||!HEX.test(x.sourceHash)||!HEX.test(x.fileHash))return false;
+    if(!RECEIPTS.includes(x.postReceipt)||!DISPOSITIONS.includes(x.disposition)||!Number.isFinite(x.createdAt))return false;
+    return validLifetime(x);
+  }
+  function validLifetime(x){
+    const open=x.disposition==='open'||x.disposition==='running';
+    if(open){if(x.finishedAt!==null||x.expiresAt!==null)return false;}
+    else if(!Number.isFinite(x.finishedAt)||x.expiresAt!==x.finishedAt+RETENTION_MS)return false;
     return true;
   }
   function blocking(found){
@@ -116,6 +130,31 @@
     const corrupt=why==='corrupt';
     return {ok:false,status:'blocked',blocked:why,record:found&&found.record,message:corrupt?'손상된 대기 기록이 있어 덮어쓰지 않았습니다. 확인 후 버리기 전에는 실행하지 않습니다.':'같은 역할의 끝나지 않은 대기 기록이 있어 덮어쓰지 않았습니다. 확인 후 버리기 전에는 실행하지 않습니다.'};
   }
+  function validateEvidence(body,doc){
+      if(body.paperEvidence!==undefined&&(body.paperEvidenceConsent!==true||!body.paperEvidence||Object.keys(body.paperEvidence).sort().join(',')!=='fileHash,paperId'||body.paperEvidence.fileHash!==doc.fileHash||body.fileHash!==doc.fileHash||typeof body.paperEvidence.paperId!=='string'||!body.paperEvidence.paperId.length||body.paperEvidence.paperId.length>160))fail('rejected','표·그림 근거와 현재 PDF가 일치하지 않습니다.');
+      validateVisualEvidence(body,doc);
+  }
+  function validateVisualEvidence(body,doc){
+      if(body.visualEvidence!==undefined && (body.visualConsent!==true || body.fileHash!==doc.fileHash || !Array.isArray(body.visualEvidence) || body.visualEvidence.length<1 || body.visualEvidence.length>2 || body.visualEvidence.some(v=>!v || Object.keys(v).sort().join(',')!==['base64','bbox','fileHash','height','mime','page','rotation','sha256','sourceHash','width'].sort().join(',') || v.fileHash!==doc.fileHash || v.sourceHash!==doc.sourceHash)))fail('rejected','시각 증거 동의 또는 문서 식별이 맞지 않습니다.');
+  }
+  function prepareRequest(request,doc,instance,role,options){
+      if(!INSTANCE.test(instance))fail('rejected','연결된 companion의 인스턴스 식별이 없어 실행하지 않았습니다.');
+      if(!request||typeof request!=='object'||!doc||typeof doc!=='object')fail('rejected','요청 식별이 없어 실행하지 않았습니다.');
+      if(typeof options.hashHarness!=='function')fail('rejected','harness 검증을 재사용하지 못해 실행하지 않았습니다.');
+      secrets(request,0);secrets(doc,0);
+      const body=clone(request),text=segments(body.segments);
+      if(!text||!REQUEST_ID.test(body.requestId))fail('rejected','요청 ID가 서버 규칙과 달라 실행하지 않았습니다.');
+      validateRequestDocument(body,doc,role);
+      body.segments=text;
+      return body;
+  }
+  function validateRequestDocument(body,doc,role){
+      if(role==='blue'&&Object.keys(body).some(k=>!BLUE_KEYS.includes(k)))fail('rejected','BLUE 대기 기록은 허용된 문서 필드만 보관합니다. RED 정답·파일명은 넣지 않습니다.');
+      validateEvidence(body,doc);
+      if(body.revision!==doc.revision||body.sourceHash!==doc.sourceHash||!HEX.test(doc.sourceHash)||!HEX.test(doc.fileHash))fail('hash-mismatch','문서 식별이 요청과 달라 실행하지 않았습니다.');
+      if(typeof doc.revision!=='string'||doc.revision.length<1||doc.revision.length>160)fail('rejected','문서 리비전이 올바르지 않습니다.');
+      if(!body.harness||typeof body.harness!=='object')fail('rejected','harness가 없어 실행하지 않았습니다.');
+  }
   async function hold(options={}){
     const role=options.role;
     if(role!=='red'&&role!=='blue')return {ok:false,status:'rejected',message:'역할이 올바르지 않습니다.'};
@@ -126,19 +165,7 @@
       const found=read(role,storage),why=blocking(found);
       if(why)return blockedResult(why,found);
       if(found.status==='record')captureAttempt(found.record,storage);
-      if(!INSTANCE.test(instance))fail('rejected','연결된 companion의 인스턴스 식별이 없어 실행하지 않았습니다.');
-      if(!request||typeof request!=='object'||!doc||typeof doc!=='object')fail('rejected','요청 식별이 없어 실행하지 않았습니다.');
-      if(typeof options.hashHarness!=='function')fail('rejected','harness 검증을 재사용하지 못해 실행하지 않았습니다.');
-      secrets(request,0);secrets(doc,0);
-      const body=clone(request),text=segments(body.segments);
-      if(!text||!REQUEST_ID.test(body.requestId))fail('rejected','요청 ID가 서버 규칙과 달라 실행하지 않았습니다.');
-      if(role==='blue'&&Object.keys(body).some(k=>!BLUE_KEYS.includes(k)))fail('rejected','BLUE 대기 기록은 허용된 문서 필드만 보관합니다. RED 정답·파일명은 넣지 않습니다.');
-      if(body.paperEvidence!==undefined&&(body.paperEvidenceConsent!==true||!body.paperEvidence||Object.keys(body.paperEvidence).sort().join(',')!=='fileHash,paperId'||body.paperEvidence.fileHash!==doc.fileHash||body.fileHash!==doc.fileHash||typeof body.paperEvidence.paperId!=='string'||!body.paperEvidence.paperId.length||body.paperEvidence.paperId.length>160))fail('rejected','표·그림 근거와 현재 PDF가 일치하지 않습니다.');
-      if(body.visualEvidence!==undefined && (body.visualConsent!==true || body.fileHash!==doc.fileHash || !Array.isArray(body.visualEvidence) || body.visualEvidence.length<1 || body.visualEvidence.length>2 || body.visualEvidence.some(v=>!v || Object.keys(v).sort().join(',')!==['base64','bbox','fileHash','height','mime','page','rotation','sha256','sourceHash','width'].sort().join(',') || v.fileHash!==doc.fileHash || v.sourceHash!==doc.sourceHash)))fail('rejected','시각 증거 동의 또는 문서 식별이 맞지 않습니다.');
-      if(body.revision!==doc.revision||body.sourceHash!==doc.sourceHash||!HEX.test(doc.sourceHash)||!HEX.test(doc.fileHash))fail('hash-mismatch','문서 식별이 요청과 달라 실행하지 않았습니다.');
-      if(typeof doc.revision!=='string'||doc.revision.length<1||doc.revision.length>160)fail('rejected','문서 리비전이 올바르지 않습니다.');
-      if(!body.harness||typeof body.harness!=='object')fail('rejected','harness가 없어 실행하지 않았습니다.');
-      body.segments=text;
+      const body=prepareRequest(request,doc,instance,role,options);
       const harnessHash=await options.hashHarness(body.harness);
       if(typeof harnessHash!=='string'||!HEX.test(harnessHash))fail('rejected','harness 해시가 올바르지 않습니다.');
       const wire=JSON.stringify(body);
@@ -157,6 +184,20 @@
       return put(role,record,storage);
     });}catch(e){return {ok:false,status:e.status||'rejected',message:e.message||'대기 기록을 만들지 못했습니다.'};}
   }
+  function applyNoteFields(next,patch){
+    if(Object.hasOwn(patch,'postReceipt')){if(!RECEIPTS.includes(patch.postReceipt))return {ok:false,status:'rejected',message:'접수 상태가 올바르지 않습니다.'};next.postReceipt=patch.postReceipt;}
+    if(Object.hasOwn(patch,'disposition')){if(!DISPOSITIONS.includes(patch.disposition))return {ok:false,status:'rejected',message:'대기 상태가 올바르지 않습니다.'};next.disposition=patch.disposition;}
+    if(Object.hasOwn(patch,'serverFailure')){const safe=safeFailure(patch.serverFailure);if(!safe)return {ok:false,status:'rejected',message:'서버 실패 문구를 보관하지 못했습니다. 기록은 바꾸지 않았습니다.'};next.serverFailure=safe;}
+    if(Object.hasOwn(patch,'observedCalls')){if(!Number.isSafeInteger(patch.observedCalls)||patch.observedCalls<0)return {ok:false,status:'rejected',message:'관찰한 호출 수가 올바르지 않습니다.'};next.observedCalls=patch.observedCalls;}
+    if(Object.hasOwn(patch,'adapterFailure')){const f=structuredFailure(patch.adapterFailure);if(!f)return {ok:false,status:'rejected',message:'실패 정보 형식이 올바르지 않습니다.'};next.adapterFailure=f;}
+    return null;
+  }
+  function applyNoteTime(next,patch,repeated){
+    if(next.disposition==='open'||next.disposition==='running'){next.finishedAt=null;next.expiresAt=null;}
+    else if(Object.hasOwn(patch,'finishedAt')&&!repeated){if(!Number.isFinite(patch.finishedAt))return {ok:false,status:'rejected',message:'완료 시각이 올바르지 않습니다.'};next.finishedAt=patch.finishedAt;next.expiresAt=patch.finishedAt+RETENTION_MS;}
+    else if(next.finishedAt==null)return {ok:false,status:'rejected',message:'끝난 작업의 시각이 없습니다. 기록은 바꾸지 않았습니다.'};
+    return null;
+  }
   async function note(record,patch={},storage,lockProvider){
     if(!record||(record.role!=='red'&&record.role!=='blue'))return {ok:false,status:'rejected',message:'대기 기록이 없습니다.'};
     const locks=lockProvider || (root.navigator && root.navigator.locks);
@@ -169,14 +210,8 @@
     const terminal=['completed','failed','cancelled'];
     if(terminal.includes(next.disposition)&&Object.hasOwn(patch,'disposition')&&patch.disposition!==next.disposition)return {ok:false,status:'integrity-error',message:'이미 관찰한 종료 상태와 다른 상태입니다. 기존 대기 기록은 그대로입니다.'};
     const repeated=terminal.includes(next.disposition)&&(!Object.hasOwn(patch,'disposition')||patch.disposition===next.disposition);
-    if(Object.hasOwn(patch,'postReceipt')){if(!RECEIPTS.includes(patch.postReceipt))return {ok:false,status:'rejected',message:'접수 상태가 올바르지 않습니다.'};next.postReceipt=patch.postReceipt;}
-    if(Object.hasOwn(patch,'disposition')){if(!DISPOSITIONS.includes(patch.disposition))return {ok:false,status:'rejected',message:'대기 상태가 올바르지 않습니다.'};next.disposition=patch.disposition;}
-    if(Object.hasOwn(patch,'serverFailure')){const safe=safeFailure(patch.serverFailure);if(!safe)return {ok:false,status:'rejected',message:'서버 실패 문구를 보관하지 못했습니다. 기록은 바꾸지 않았습니다.'};next.serverFailure=safe;}
-    if(Object.hasOwn(patch,'observedCalls')){if(!Number.isSafeInteger(patch.observedCalls)||patch.observedCalls<0)return {ok:false,status:'rejected',message:'관찰한 호출 수가 올바르지 않습니다.'};next.observedCalls=patch.observedCalls;}
-    if(Object.hasOwn(patch,'adapterFailure')){const f=structuredFailure(patch.adapterFailure);if(!f)return {ok:false,status:'rejected',message:'실패 정보 형식이 올바르지 않습니다.'};next.adapterFailure=f;}
-    if(next.disposition==='open'||next.disposition==='running'){next.finishedAt=null;next.expiresAt=null;}
-    else if(Object.hasOwn(patch,'finishedAt')&&!repeated){if(!Number.isFinite(patch.finishedAt))return {ok:false,status:'rejected',message:'완료 시각이 올바르지 않습니다.'};next.finishedAt=patch.finishedAt;next.expiresAt=patch.finishedAt+RETENTION_MS;}
-    else if(next.finishedAt==null)return {ok:false,status:'rejected',message:'끝난 작업의 시각이 없습니다. 기록은 바꾸지 않았습니다.'};
+    const patchError=applyNoteFields(next,patch);if(patchError)return patchError;
+    const timeError=applyNoteTime(next,patch,repeated);if(timeError)return timeError;
     if(!valid(next))return {ok:false,status:'rejected',message:'대기 기록 검사가 통과하지 않아 덮어쓰지 않았습니다.'};
     const saved=put(record.role,next,storage);
     if(saved.ok && !['open','running'].includes(next.disposition)){const historyError=captureAttempt(next,storage);if(historyError)saved.historyError=historyError;}
@@ -206,6 +241,12 @@
     if(body.companionInstance!==record.companionInstance)return 'server-restarted';
     return null;
   }
+  function recoveryPreflight(options,record){
+    const current=options.currentDoc;
+    if(current&&(current.sourceHash!==record.sourceHash||current.fileHash!==record.fileHash||current.revision!==record.revision))return {status:'hash-mismatch',record,gets:0};
+    if(typeof options.getJob!=='function')return {status:'unavailable',record,gets:0};
+    return null;
+  }
   async function recover(options={}){
     const role=options.role,found=read(role,options.storage);
     if(found.status!=='record')return {...found,gets:0};
@@ -218,11 +259,12 @@
     try{fingerprint=await sha256(canonical(record.request));bytesDigest=await sha256(JSON.stringify(record.request));harnessHash=await options.hashHarness(record.request.harness);}
     catch{return {status:'corrupt',record,gets:0};}
     if(fingerprint!==record.requestFingerprint||bytesDigest!==record.requestBytesDigest||harnessHash!==record.harnessHash)return {status:'hash-mismatch',record,gets:0};
-    const current=options.currentDoc;
-    if(current&&(current.sourceHash!==record.sourceHash||current.fileHash!==record.fileHash||current.revision!==record.revision))return {status:'hash-mismatch',record,gets:0};
-    if(typeof options.getJob!=='function')return {status:'unavailable',record,gets:0};
+    const preflight=recoveryPreflight(options,record);if(preflight)return preflight;
     let job;
     try{job=await options.getJob(record.requestId);}catch{return {status:record.postReceipt==='accepted'?'unavailable':'receipt-unknown',record,gets:1};}
+    return recoveredJob(options,record,now,job);
+  }
+  function recoveredJob(options,record,now,job){
     const http=job&&job.httpStatus,body=job&&job.body;
     if(http===401||http===403)return {status:'auth-refused',record,gets:1};
     if(http===404){
@@ -232,6 +274,9 @@
     if(http!==200)return {status:record.postReceipt==='accepted'?'unavailable':'receipt-unknown',record,gets:1};
     const mismatch=bound(record,body);
     if(mismatch)return {status:mismatch,record,gets:1};
+    return recoveredBody(options,record,body);
+  }
+  function recoveredBody(options,record,body){
     const doc=docFrom(record);
     if(body.state==='running')return {status:'still-running',record,gets:1,job:body,doc};
     if(body.state==='failed')return {status:'failed',record,gets:1,job:body,doc,error:safeFailure(body.error)||'실패',failure:structuredFailure(body.failure)};

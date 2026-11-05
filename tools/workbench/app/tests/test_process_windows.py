@@ -2,6 +2,7 @@
 import os
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -15,6 +16,80 @@ import pairing
 
 
 class ProcessWindowTests(unittest.TestCase):
+    def test_pairing_native_output_in_utf8_parent(self):
+        # Exercise real subprocess pipes, including both output streams, without
+        # depending on the host's account name or Windows display language.
+        script = r'''
+import subprocess, sys
+from unittest.mock import patch
+sys.path.insert(0, sys.argv[1])
+import pairing
+real_run = subprocess.run
+failure = False
+def fake_command(args, **kwargs):
+    if args[0] == 'whoami':
+        payload = b'"account-\xc6","S-1-5-21-1-2-3-1001"\r\n'
+    else:
+        payload = b'localized-\xc6\r\n'
+    code = "import sys; sys.stdout.buffer.write(%r); sys.stderr.buffer.write(b'\\xc6'); sys.exit(%d)" % (payload, failure)
+    return real_run([sys.executable, '-c', code], **kwargs)
+with patch('subprocess.run', side_effect=fake_command):
+    pairing._run_icacls(['file', '/Q'])
+    assert pairing._windows_user_sid() == 'S-1-5-21-1-2-3-1001'
+    failure = True
+    for fn in (lambda: pairing._run_icacls(['file']), pairing._windows_user_sid):
+        try:
+            fn()
+        except pairing.PairingError as error:
+            assert error.code == 'pairing_store_permissions'
+        else:
+            raise AssertionError('permission failure accepted')
+'''
+        env = os.environ.copy()
+        env['PYTHONUTF8'] = '1'
+        result = subprocess.run([sys.executable, '-c', script, str(ROOT / 'app' / 'local')],
+                                capture_output=True, env=env)
+        self.assertEqual(result.returncode, 0, result.stderr.decode('utf-8', 'replace'))
+        self.assertEqual(result.stderr, b'')
+
+    def test_pairing_native_timeout_reaps_child_and_next_check_works(self):
+        real_run = subprocess.run
+        real_popen = subprocess.Popen
+        children = []
+
+        def sleeping_command(args, **kwargs):
+            return real_run([sys.executable, '-c', 'import time; time.sleep(30)'], **kwargs)
+
+        def track_child(*args, **kwargs):
+            child = real_popen(*args, **kwargs)
+            children.append(child)
+            return child
+
+        for check in (lambda: pairing._run_icacls(['file']), pairing._windows_user_sid):
+            with self.subTest(check=check):
+                with patch.object(pairing, '_WINDOWS_COMMAND_TIMEOUT_SECONDS', 0.5), \
+                     patch('subprocess.run', side_effect=sleeping_command), \
+                     patch('subprocess.Popen', side_effect=track_child):
+                    with self.assertRaises(pairing.PairingError) as error:
+                        check()
+                self.assertEqual(error.exception.code, 'pairing_store_permissions')
+                self.assertIsNotNone(children[-1].returncode)
+                self.assertIsNotNone(children[-1].poll())
+                if os.name == 'nt':
+                    # An independent real permission operation still succeeds after the timeout.
+                    with tempfile.TemporaryDirectory() as tmp:
+                        path = Path(tmp) / 'private'
+                        path.write_bytes(b'synthetic')
+                        pairing._restrict_new(path, False)
+                        pairing._assert_private(path, False)
+
+    def test_pairing_rejects_non_ascii_sid(self):
+        response = SimpleNamespace(returncode=0, stdout=b'"account","S-1-5-21-\xc6"\r\n')
+        with patch('subprocess.run', return_value=response):
+            with self.assertRaises(pairing.PairingError) as error:
+                pairing._windows_user_sid()
+        self.assertEqual(error.exception.code, 'pairing_store_permissions')
+
     def test_transport_flags_and_streaming(self):
         real_popen = subprocess.Popen
         with patch.object(selfplay_codex.subprocess, 'Popen', wraps=real_popen) as popen:
@@ -59,7 +134,7 @@ class ProcessWindowTests(unittest.TestCase):
 
     @unittest.skipUnless(os.name == 'nt', 'Windows ACL commands')
     def test_pairing_commands_have_no_window_flag(self):
-        response = SimpleNamespace(returncode=0, stdout='"user","S-1-5-21-1-2-3-1001"\n')
+        response = SimpleNamespace(returncode=0, stdout=b'"user","S-1-5-21-1-2-3-1001"\n')
         with patch('subprocess.run', return_value=response) as run:
             pairing._run_icacls(['file', '/Q'])
             self.assertEqual(run.call_args.args[0], ['icacls', 'file', '/Q'])

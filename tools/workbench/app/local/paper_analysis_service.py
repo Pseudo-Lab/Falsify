@@ -71,15 +71,18 @@ def _utf8(text):
     except UnicodeEncodeError: return False
     return True
 
+def _validate_patch(p):
+    if not isinstance(p, dict) or set(p) != set(PATCH_KEYS) or not isinstance(p['id'], str) or not _ID.fullmatch(p['id']) \
+            or type(p['pageIndex']) is not int or not 0 <= p['pageIndex'] < LIMITS['maxPages']: raise ValueError('invalid_patches')
+    for k in ('before', 'after'):
+        if not isinstance(p[k], str) or not p[k].strip() or len(p[k]) > LIMITS['maxTextChars'] or not _utf8(p[k]):
+            raise ValueError('invalid_patches')
+
 def _patches(value):
     if not isinstance(value, list) or len(value) > LIMITS['maxPatches']: raise ValueError('invalid_patches')
     out = []
     for p in value:
-        if not isinstance(p, dict) or set(p) != set(PATCH_KEYS) or not isinstance(p['id'], str) or not _ID.fullmatch(p['id']) \
-                or type(p['pageIndex']) is not int or not 0 <= p['pageIndex'] < LIMITS['maxPages']: raise ValueError('invalid_patches')
-        for k in ('before', 'after'):
-            if not isinstance(p[k], str) or not p[k].strip() or len(p[k]) > LIMITS['maxTextChars'] or not _utf8(p[k]):
-                raise ValueError('invalid_patches')
+        _validate_patch(p)
         out.append({k: p[k] for k in PATCH_KEYS})
     if len({p['id'] for p in out}) != len(out): raise ValueError('invalid_patches')
     return out
@@ -126,6 +129,16 @@ def _section(value, keys, caps):
     if not value['available'] and counts != _empty(keys): return None
     return value['available'], counts
 
+def _layout_entries(layout, patches):
+    entries = []
+    for got, p in zip(layout, patches):
+        if not isinstance(got, dict) or set(got) != {'id', 'status', 'reason'} or got['id'] != p['id']: return None
+        entries.append(_layout_entry(p['id'], got['status'], got['reason']))
+    return entries
+
+def _object_counts_consistent(o):
+    return not (o['sharedImages'] > o['images'] or o['ambiguous'] + o['inspected'] > o['images'] + o['inlineImages'] + o['vectors'])
+
 def _from_envelope(envelope, source_sha256, patches):
     """Fixed public summary from a child envelope bound to this source and these patches, else None."""
     if not isinstance(envelope, dict) or set(envelope) != {'schema', 'sourceSha256', 'inventory', 'objects', 'layout'} \
@@ -137,11 +150,9 @@ def _from_envelope(envelope, source_sha256, patches):
     layout = envelope['layout']
     if inventory is None or objects is None or not isinstance(layout, list) or len(layout) != len(patches): return None
     o = objects[1]
-    if o['sharedImages'] > o['images'] or o['ambiguous'] + o['inspected'] > o['images'] + o['inlineImages'] + o['vectors']: return None
-    entries = []
-    for got, p in zip(layout, patches):
-        if not isinstance(got, dict) or set(got) != {'id', 'status', 'reason'} or got['id'] != p['id']: return None
-        entries.append(_layout_entry(p['id'], got['status'], got['reason']))
+    if not _object_counts_consistent(o): return None
+    entries = _layout_entries(layout, patches)
+    if entries is None: return None
     ran = inventory[0] + objects[0]
     status = 'available' if ran == 2 and not inventory[1]['truncated'] and o['complete'] else 'partial' if ran else 'unavailable'
     return _summary(source_sha256, status, inventory[1], o, entries)

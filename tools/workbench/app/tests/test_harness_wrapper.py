@@ -152,6 +152,23 @@ class ParityTests(unittest.TestCase):
         self.assertEqual(parse_output(b'{"a":1.5e300,"b":-0.0,"c":12}','json'),{'a':1.5e300,'b':-0.0,'c':12})
 
 class RuntimeTests(unittest.TestCase):
+    def test_shared_invalid_schema_corpus(self):
+        from jsonschema import Draft202012Validator
+        from jsonschema.exceptions import ValidationError
+        schema = obj(value={'type':'number','minimum':0,'maximum':1})
+        adapter = {'type':'http','url':'https://example.com'}
+        wrapped = {'type':'wrapper','target':adapter,'input':{'mode':'invocation'},
+                   'output':{'source':'stdout','format':'json'}}
+        for value in (True, 'bad', 10, -1):
+            with self.subTest(value=value):
+                raw=json.dumps({'value':value}).encode()
+                with self.assertRaises(ValidationError): Draft202012Validator(schema).validate({'value':value})
+                with mock.patch.object(harness_adapter,'post_https',return_value=raw):
+                    for backend in (harness_adapter.AdapterBackend(harness_with(adapter),1),
+                                    WrapperBackend(harness_with(wrapped),1)):
+                        with self.assertRaises(harness_adapter.AdapterFailure) as caught: backend.infer('prompt',schema)
+                        self.assertEqual(caught.exception.code,'invalid_output')
+
     def test_invocation_mode_path_and_map(self):
         output={'source':'stdout','format':'json','path':'/result','map':{'role':{'$from':'/role'},'tag':{'$from':'/tag'},'call':{'$from':'/call'},
                 'prompt':{'$from':'/prompt'},'texts':{'$each':'/items','template':{'t':{'$from':'/text'}}},'fixed':'literal'}}

@@ -30,31 +30,60 @@ const patterns = [
 function sourceSignature(text, editStart=-1, editEnd=-1) {
   let out='', depth=0, math=false, comment=false, line='', safe=true;const groups=[];
   const literal=value=>value.replaceAll('<','<<');
-  for(let i=0;i<text.length;) {
+  let i=0,c;
+  function checkEditBoundary() {
     if ((i===editStart || i===editEnd) && (comment || groups.includes('argument') || math || /\\(?:def|gdef|edef|xdef|newcommand|renewcommand|providecommand|DeclareRobustCommand|catcode)\b/.test(line))) safe=false;
-    const c=text[i];
+  }
+  function consumeVerbatim() {
     if (!comment && !math && c==='\\') {
-      const verb=/^\\verb\*?([^A-Za-z\s])/.exec(text.slice(i));
-      const env=/^\\begin\s*\{(verbatim\*?|lstlisting|minted)\}/.exec(text.slice(i));
-      if (verb || env) {
-        const end=verb ? text.indexOf(verb[1],i+verb[0].length) : text.indexOf('\\end{'+env[1]+'}',i+env[0].length);
-        const stop=end<0 ? text.length : end+(verb?1:('\\end{'+env[1]+'}').length);
-        if(editStart<stop && editEnd>i) safe=false;
-        const segment=text.slice(i,stop); out+=literal(segment); line=segment.includes('\n')?segment.slice(segment.lastIndexOf('\n')+1):line+segment; i=stop; continue;
-      }
+    const verb=/^\\verb\*?([^A-Za-z\s])/.exec(text.slice(i));
+    const env=/^\\begin\s*\{(verbatim\*?|lstlisting|minted)\}/.exec(text.slice(i));
+    if (verb || env) {
+      const end=verb ? text.indexOf(verb[1],i+verb[0].length) : text.indexOf('\\end{'+env[1]+'}',i+env[0].length);
+      const stop=end<0 ? text.length : end+(verb?1:('\\end{'+env[1]+'}').length);
+      if(editStart<stop && editEnd>i) safe=false;
+      const segment=text.slice(i,stop); out+=literal(segment); line=segment.includes('\n')?segment.slice(segment.lastIndexOf('\n')+1):line+segment; i=stop; return true;
     }
-    if (comment) {out+=literal(c); i++; if(c==='\n'){comment=false;line='';} else line+=c; continue;}
-    if (c==='%' ) {comment=true;out+=literal(c);line+=c;i++;continue;}
+    }
+    return false;
+  }
+  function consumeComment() {
+    if (comment) {out+=literal(c); i++; if(c==='\n'){comment=false;line='';} else line+=c; return true;}
+    if (c==='%' ) {comment=true;out+=literal(c);line+=c;i++;return true;}
+    return false;
+  }
+  function consumeLayoutCommand() {
     if (c==='\\' && !math && !groups.includes('argument') && !/\\(?:def|gdef|edef|xdef|newcommand|renewcommand|providecommand|DeclareRobustCommand|catcode)\b/.test(line)) {
-      let found=false;
-      for(const [re,normal] of patterns) {const m=re.exec(text.slice(i)); if(m){ if(editStart>=0 && ((i<editStart && i+m[0].length>editStart)||(i<editEnd && i+m[0].length>editEnd))) safe=false; out+=normal(m);line+=m[0];i+=m[0].length;found=true;break; }}
-      if(found) continue;
+    let found=false;
+    for(const [re,normal] of patterns) {const m=re.exec(text.slice(i)); if(m){ if(editStart>=0 && ((i<editStart && i+m[0].length>editStart)||(i<editEnd && i+m[0].length>editEnd))) safe=false; out+=normal(m);line+=m[0];i+=m[0].length;found=true;break; }}
+    if(found) return true;
     }
-    if(c==='\\' && i+1<text.length && !/[A-Za-z@]/.test(text[i+1])) {const pair=text.slice(i,i+2); if(pair==='\\('||pair==='\\[')math=true;else if(pair==='\\)'||pair==='\\]')math=false;out+=literal(pair);line+=pair;i+=2;continue;}
+    return false;
+  }
+  function consumeEscapedSymbol() {
+    if(c==='\\' && i+1<text.length && !/[A-Za-z@]/.test(text[i+1])) {const pair=text.slice(i,i+2); if(pair==='\\('||pair==='\\[')math=true;else if(pair==='\\)'||pair==='\\]')math=false;out+=literal(pair);line+=pair;i+=2;return true;}
+    return false;
+  }
+  function updateNesting() {
     if(c==='$') math=!math;
     if(!math && c==='{'){depth++;groups.push(/\\[A-Za-z@]+\*?(?:\[[^\]]*\])?\s*$/.test(line)||line.trimEnd().endsWith('}')?'argument':'layout');}
     if(!math && c==='}'){depth--;groups.pop();}
     if(depth<0) safe=false;
+  }
+  for(;i<text.length;) {
+
+    checkEditBoundary();
+    c=text[i];
+
+    if (consumeVerbatim()) continue;
+
+    if (consumeComment()) continue;
+
+    if (consumeLayoutCommand()) continue;
+
+    if (consumeEscapedSymbol()) continue;
+
+    updateNesting();
     out+=literal(c);i++;line=c==='\n'?'':line+c;
   }
   return {signature:out,safe};
@@ -90,12 +119,18 @@ function deepFreeze(value){
   if(value===null||typeof value!=='object'||ArrayBuffer.isView(value)||Object.isFrozen(value))return value;
   Object.freeze(value);for(const v of Object.values(value))deepFreeze(v);return value;
 }
+function sameProjectIdentity(canonical,p) {
+  return !(canonical.files.length!==p.files.length||canonical.mainFile!==(p.mainFile??null)||canonical.engine!==p.engine||canonical.origin!==p.origin||canonical.files.some(f=>!p.files.some(g=>g.path===f.path&&g.sha256===f.sha256)));
+}
+function verifyProjectFiles(p,label) {
+  for(const f of p.files)if(!isObject(f)||!(f.bytes instanceof Uint8Array)||typeof f.sha256!=='string'||digest(f.bytes)!==f.sha256)throw stateError(label+' file hash');
+}
 async function verifyStateProject(p,cache,label){
   if(!isObject(p)||typeof p.id!=='string'||!Array.isArray(p.files)||!p.files.length)throw stateError(label+' project');
-  for(const f of p.files)if(!isObject(f)||!(f.bytes instanceof Uint8Array)||typeof f.sha256!=='string'||digest(f.bytes)!==f.sha256)throw stateError(label+' file hash');
+  verifyProjectFiles(p,label);
   let canonical=cache.get(p.id);
   if(!canonical){canonical=await createLatexProject(p);if(canonical.id!==p.id)throw stateError(label+' project identity');cache.set(p.id,canonical);}
-  else if(canonical.files.length!==p.files.length||canonical.mainFile!==(p.mainFile??null)||canonical.engine!==p.engine||canonical.origin!==p.origin||canonical.files.some(f=>!p.files.some(g=>g.path===f.path&&g.sha256===f.sha256)))throw stateError(label+' project identity');
+  else if(!sameProjectIdentity(canonical,p))throw stateError(label+' project identity');
   if((canonical.sourcePdfHash??null)!==(p.sourcePdfHash??null))throw stateError(label+' source PDF identity');
   const bytes=new Map(p.files.map(f=>[f.path,f.bytes]));
   return {...canonical,revision:Number.isSafeInteger(p.revision)&&p.revision>=0?p.revision:0,files:canonical.files.map(f=>({path:f.path,bytes:bytes.get(f.path),sha256:f.sha256}))};
@@ -107,12 +142,20 @@ function verifyStatePair(a,p,label){
 const sameSource=(p,base)=>p.origin===base.origin&&p.engine===base.engine&&(p.sourcePdfHash??null)===(base.sourcePdfHash??null)&&base.files.every(f=>editablePath(f.path)||p.files.some(g=>g.path===f.path&&g.sha256===f.sha256));
 
 /** Validate a saved falsify.layout-run-state.v1 snapshot. Never calls a model or tool. */
-export async function validateLayoutRunState(state){
+function validateCheckpoint(c,ids) {
+    if(!isObject(c)||typeof c.revisionId!=='string'||!/^r\d{1,4}$/.test(c.revisionId)||ids.has(c.revisionId)||typeof c.label!=='string'||c.label.length>200)throw stateError('checkpoint');
+}
+
+function validateStateMetadata(state) {
   if(!isObject(state)||state.schema!==LAYOUT_RUN_STATE_SCHEMA)throw stateError('schema');
   if(typeof state.runId!=='string'||!RUN_ID.test(state.runId))throw stateError('runId');
   if(state.parentRunId!=null&&(typeof state.parentRunId!=='string'||!RUN_ID.test(state.parentRunId)))throw stateError('parentRunId');
   if(!Number.isSafeInteger(state.stepCount)||state.stepCount<0)throw stateError('stepCount');
   if(!RUN_STATES.has(state.runState)||!LEGACY_STATUS.has(state.status))throw stateError('status');
+}
+
+export async function validateLayoutRunState(state){
+  validateStateMetadata(state);
   const cache=new Map(),baselineProject=await verifyStateProject(state.baselineProject,cache,'baseline');
   const member=async(p,label)=>{const v=await verifyStateProject(p,cache,label);if(!sameSource(v,baselineProject))throw stateError(label+' engine or source identity differs from baseline');return v;};
   const pair=async(c,label,required)=>{if(!isObject(c))throw stateError(label);const project=await member(c.project,label);if(c.artifact==null&&!required)return {project,artifact:null};return {project,artifact:verifyStatePair(c.artifact,project,label)};};
@@ -123,7 +166,7 @@ export async function validateLayoutRunState(state){
   if(!Array.isArray(state.checkpoints)||state.checkpoints.length>MAX_CHECKPOINTS)throw stateError('checkpoints');
   const ids=new Set(),checkpoints=[];
   for(const c of state.checkpoints){
-    if(!isObject(c)||typeof c.revisionId!=='string'||!/^r\d{1,4}$/.test(c.revisionId)||ids.has(c.revisionId)||typeof c.label!=='string'||c.label.length>200)throw stateError('checkpoint');
+    validateCheckpoint(c,ids);
     ids.add(c.revisionId);const p=await pair(c,'checkpoint '+c.revisionId,false);checkpoints.push({revisionId:c.revisionId,label:c.label,...p});
   }
   if(!Array.isArray(state.trace)||state.trace.length>MAX_TRACE)throw stateError('trace');
@@ -134,32 +177,55 @@ export async function validateLayoutRunState(state){
 
 /** Model decisions select injected app tools. No model action executes host commands. */
 export async function runPaperLayoutAgent({project, artifact=null, decide, compile, inspect, render, reference=null,readReference,renderReference,restructure,handlers={},signal, onProgress, maxSteps=12, runId, resumeState=null, onState}={}) {
-  if (!Number.isSafeInteger(maxSteps) || maxSteps < 1 || maxSteps > 32 || ![decide,compile,inspect,render].every(f=>typeof f==='function')) throw new TypeError('Invalid layout agent configuration');
-  if ((runId!==undefined&&(typeof runId!=='string'||!RUN_ID.test(runId)))||(onState!==undefined&&onState!==null&&typeof onState!=='function')) throw new TypeError('Invalid layout agent configuration');
+  function validateConfiguration() {
+    if (!Number.isSafeInteger(maxSteps) || maxSteps < 1 || maxSteps > 32 || ![decide,compile,inspect,render].every(f=>typeof f==='function')) throw new TypeError('Invalid layout agent configuration');
+    if ((runId!==undefined&&(typeof runId!=='string'||!RUN_ID.test(runId)))||(onState!==undefined&&onState!==null&&typeof onState!=='function')) throw new TypeError('Invalid layout agent configuration');
+  }
+  validateConfiguration();
   // An explicit continuation restores the saved baseline, candidate and checkpoints.
   const resumed = resumeState==null ? null : await validateLayoutRunState(resumeState);
-  if (resumed) {
+  function validateContinuation() {
+    if (resumed) {
     if (project && project.id !== resumed.baselineProject.id) throw new Error('Resume state does not match project');
     if (artifact && artifact.pdfHash !== resumed.baselineArtifact?.pdfHash) throw new Error('Resume state does not match artifact');
     if (runId === resumed.runId) throw new TypeError('A continuation needs a fresh runId');
+    }
   }
+  validateContinuation();
   const verified = resumed ? resumed.baselineProject : await createLatexProject(project);
-  if (!resumed && (verified.id !== project.id || project.files.some(f => hex(f.bytes) !== f.sha256))) throw new Error('Stale project identity');
-  if (!resumed && artifact && !validArtifact(artifact, verified)) throw new Error('Stale artifact identity');
-  if(reference&&(!/^[a-f0-9]{64}$/.test(reference.sourcePdfHash||'')||reference.sourcePdfHash!==verified.sourcePdfHash||typeof readReference!=='function'||typeof renderReference!=='function'))throw new Error('Original PDF reference does not match project');
-  const run={runId:runId??(globalThis.crypto?.randomUUID?.()||'run-'+Date.now().toString(36)+Math.random().toString(36).slice(2,10)),parentRunId:resumed?.runId??null,carriedStepCount:resumed?.stepCount??0};
-  let current = resumed ? resumed.currentProject : verified, lastProject = resumed ? resumed.candidate.project : verified, lastArtifact = resumed ? resumed.candidate.artifact : artifact, inspected = null, rendered = null;
-  // A saved PDF paired with the current source is a compiled fact; observations are not carried.
-  let compiled = resumed && lastArtifact && lastProject.id === current.id ? current.id : null;
-  let observations = [], images = [], trace = resumed ? [...resumed.trace] : [], coverage = null,referenceImages=[],referenceRead=false,referenceSeen=false,candidateSeen=null,compared=null,stepsTaken=0;
+  function verifyInitialInputs() {
+    if (!resumed && (verified.id !== project.id || project.files.some(f => hex(f.bytes) !== f.sha256))) throw new Error('Stale project identity');
+    if (!resumed && artifact && !validArtifact(artifact, verified)) throw new Error('Stale artifact identity');
+    if(reference&&(!/^[a-f0-9]{64}$/.test(reference.sourcePdfHash||'')||reference.sourcePdfHash!==verified.sourcePdfHash||typeof readReference!=='function'||typeof renderReference!=='function'))throw new Error('Original PDF reference does not match project');
+  }
+  verifyInitialInputs();
+  function makeRunIdentity() {
+    return {runId:runId??(globalThis.crypto?.randomUUID?.()||'run-'+Date.now().toString(36)+Math.random().toString(36).slice(2,10)),parentRunId:resumed?.runId??null,carriedStepCount:resumed?.stepCount??0};
+  }
+  const run=makeRunIdentity();
+  function initialCandidate() {
+    const current = resumed ? resumed.currentProject : verified, lastProject = resumed ? resumed.candidate.project : verified, lastArtifact = resumed ? resumed.candidate.artifact : artifact;
+    // A saved PDF paired with the current source is a compiled fact; observations are not carried.
+    const compiled = resumed && lastArtifact && lastProject.id === current.id ? current.id : null;
+    return {current,lastProject,lastArtifact,compiled};
+  }
+  let {current,lastProject,lastArtifact,compiled}=initialCandidate();
+  let inspected=null,rendered=null;
+  let observations = [], images = [], trace = initialTrace(), coverage = null,referenceImages=[],referenceRead=false,referenceSeen=false,candidateSeen=null,compared=null,stepsTaken=0;
+  function initialTrace(){return resumed ? [...resumed.trace] : [];}
   const referencePages={read:new Set(),rendered:new Set(),observed:new Set()};
   const observedOriginal=new Set(),observedCandidates=new Map(),viewHistory=[];
   const viewKey=i=>JSON.stringify([i.pageIndex,i.bbox||null]);
   const candidateViews=()=>{const hash=lastArtifact?.pdfHash;if(!observedCandidates.has(hash))observedCandidates.set(hash,new Set());return observedCandidates.get(hash);};
   const alreadyObserved=i=>(i.document==='original'?observedOriginal:candidateViews()).has(viewKey(i));
   const observe=i=>{const views=i.document==='original'?observedOriginal:candidateViews(),key=viewKey(i);if(!views.has(key)){views.add(key);viewHistory.push({document:i.document||'candidate',pdfHash:i.document==='original'?reference?.sourcePdfHash:lastArtifact?.pdfHash,pageIndex:i.pageIndex,...(i.bbox?{bbox:i.bbox}:{})});}if(i.document==='original'&&!i.bbox)referencePages.observed.add(i.pageIndex);};
-  let previousCandidate=resumed?.previousCandidate??null;
-  const baselineProject=verified,baselineArtifact=resumed?resumed.baselineArtifact:artifact,checkpoints=new Map((resumed?.checkpoints||[]).map(c=>[c.revisionId,{label:c.label,project:c.project,artifact:c.artifact}]));
+  function initialHistory(){
+    const previousCandidate=resumed?.previousCandidate??null;
+    const baselineArtifact=resumed?resumed.baselineArtifact:artifact,checkpoints=new Map((resumed?.checkpoints||[]).map(c=>[c.revisionId,{label:c.label,project:c.project,artifact:c.artifact}]));
+    return {previousCandidate,baselineArtifact,checkpoints};
+  }
+  let {previousCandidate,baselineArtifact,checkpoints}=initialHistory();
+  const baselineProject=verified;
   const nextRevisionId=()=>'r'+(Math.max(0,...[...checkpoints.keys()].map(id=>Number(id.slice(1))))+1);
   const resetChecks=()=>{compiled=inspected=rendered=candidateSeen=compared=null;images=[];coverage=null;};
   const coverageOut=()=>({...(coverage||{status:'partial',visualQualityVerified:false}),observedViews:structuredClone(viewHistory),...(reference?{reference:{sourcePdfHash:reference.sourcePdfHash,readPages:[...referencePages.read],renderedPages:[...referencePages.rendered],observedPages:[...referencePages.observed],renderedRegions:trace.filter(e=>e.action==='render_region'&&e.result?.status==='ok').flatMap(e=>e.result.coverage?.regions||[]).filter(r=>r.document==='original'),observedRegions:viewHistory.filter(v=>v.document==='original'&&v.bbox)}}:{})});
@@ -201,16 +267,17 @@ export async function runPaperLayoutAgent({project, artifact=null, decide, compi
     try { onProgress?.(entry); } catch { /* observers cannot alter the run */ }
     if(entry.result?.status==='ok'||entry.result?.code==='invalid_action')emit(()=>snapshot('running','running'));
   };
-  emit(()=>snapshot('running','running'));
-  const cancelled = () => signal?.aborted;
-  for (let step=0; step<maxSteps; step++) {
-    if (cancelled()) return result('cancelled','Layout run cancelled.');
-    let a;
-    try {
-      const sourceFiles=current.files.filter(f=>/\.tex$/i.test(f.path)),previewSize=Math.min(3000,Math.floor(16000/Math.max(1,sourceFiles.length)));
-      let structure=null;try{const s=readLayoutStructure(current);structure={schema:s.schema,sourcePdfHash:s.sourcePdfHash,plan:s.plan,unitCount:s.units.length,units:s.units.slice(0,24).map(({id,pageIndex,bbox,kind,role,span})=>({id,pageIndex,bbox,kind,role,span})),unitsTruncated:s.units.length>24};}catch{}
-      const priority=list=>[...list.filter(i=>!alreadyObserved(i)),...list.filter(alreadyObserved)];
-      const attached=referenceImages.length&&images.length?[...priority(referenceImages).slice(0,2),...priority(images).slice(0,2)]:priority([...referenceImages,...images]).slice(0,4);
+  function saveCheckpoint(a,action) {
+        if(checkpoints.size>=12){record(action,{status:'rejected',reason:'Twelve revisions are saved. Restore a revision to continue.'});return;}
+        const revisionId=nextRevisionId(),paired=lastProject.id===current.id&&validArtifact(lastArtifact,current)?lastArtifact:null;
+        checkpoints.set(revisionId,{label:a.args.label||revisionId,project:current,artifact:paired});record(action,{status:'ok',revisionId,label:a.args.label||revisionId,hasPdf:!!paired});return;
+  }
+  function restoreCheckpoint(a,action) {
+        const saved=checkpoints.get(a.args.revisionId);if(!saved){record(action,{status:'rejected',reason:'Choose a revision ID from execution.checkpoints.'});return;}
+        if(!saved.artifact&&lastArtifact)previousCandidate={project:lastProject,artifact:lastArtifact};
+        current=saved.project;resetChecks();lastProject=current;lastArtifact=saved.artifact;if(saved.artifact)compiled=current.id;record(action,{status:'ok',revisionId:a.args.revisionId,hasPdf:!!saved.artifact});return;
+  }
+  function buildExecution(step,attached) {
       const observedRead=referenceRead||observations.some(e=>e.action==='read_reference'&&e.result?.status==='ok'),originalVisible=referenceSeen||attached.some(i=>i.document==='original'),candidateVisible=candidateSeen===lastArtifact?.pdfHash||attached.some(i=>i.document!=='original');
       const execution={compiledCurrent:compiled===current.id,inspectedCurrent:inspected===lastArtifact?.pdfHash,renderedCurrent:rendered===lastArtifact?.pdfHash,originalRead:observedRead,originalVisible,candidateVisible,pdfHash:lastProject.id===current.id?lastArtifact?.pdfHash:null,remainingSteps:maxSteps-step,completedActions:trace.map(e=>({tool:e.action,status:e.result?.status})),checkpoints:[...checkpoints].map(([revisionId,c])=>({revisionId,label:c.label,projectId:c.project.id,pdfHash:c.artifact?.pdfHash||null}))};
       const visible=i=>alreadyObserved(i)||attached.some(a=>a.document===i.document&&viewKey(a)===viewKey(i));
@@ -220,120 +287,252 @@ export async function runPaperLayoutAgent({project, artifact=null, decide, compi
       execution.run={runId:run.runId,parentRunId:run.parentRunId,carriedStepCount:run.carriedStepCount};
       execution.comparisonRequired=typeof handlers.compare_document==='function'&&current.id!==baselineProject.id;
       execution.canFinish=execution.compiledCurrent&&execution.inspectedCurrent&&execution.renderedCurrent&&candidateVisible&&(!reference||observedRead&&originalVisible)&&execution.pendingViews.length===0&&(!execution.comparisonRequired||execution.comparedCurrent);
-      const availableTools=layoutToolCatalog.filter(t=>legacyTools.has(t.name)||['checkpoint','restore_revision'].includes(t.name)||typeof handlers[t.name]==='function').filter(t=>!['read_reference','render_reference_pages'].includes(t.name)||reference).filter(t=>t.name!=='restructure_source'||structure&&typeof restructure==='function');
-      stepsTaken=step+1;
-      a = await decide({protocol:'v2',projectId:current.id, step, maxSteps, execution,instruction:instruction, tools:structuredClone(availableTools), observations:structuredClone(observations), images:structuredClone(attached), sourceFiles:sourceFiles.map(f=>({path:f.path,text:dec.decode(f.bytes).slice(0,previewSize)})),...(reference?{reference:structuredClone(reference)}:{}),...(structure?{structure}: {})});
-      attached.forEach(observe);
-      if(attached.some(i=>i.document==='original'))referenceSeen=true;
-      if(observations.some(e=>e.action==='read_reference'&&e.result?.status==='ok'))referenceRead=true;
-      if(attached.some(i=>i.document!=='original')&&compiled===current.id)candidateSeen=lastArtifact?.pdfHash;
-      if (cancelled()) return result('cancelled','Layout run cancelled.');
-      a=normalizeLayoutAction(a);
-      if (!a||!availableTools.some(t=>t.name===a.tool)) { record('invalid_action',{status:'rejected',reason:'Choose an available tool and its listed arguments.'}); return result('unresolved','Malformed agent action.','failed'); }
-      const action = a.tool;
-      if(action==='checkpoint'){
-        if(checkpoints.size>=12){record(action,{status:'rejected',reason:'Twelve revisions are saved. Restore a revision to continue.'});continue;}
-        const revisionId=nextRevisionId(),paired=lastProject.id===current.id&&validArtifact(lastArtifact,current)?lastArtifact:null;
-        checkpoints.set(revisionId,{label:a.args.label||revisionId,project:current,artifact:paired});record(action,{status:'ok',revisionId,label:a.args.label||revisionId,hasPdf:!!paired});continue;
-      }
-      if(action==='restore_revision'){
-        const saved=checkpoints.get(a.args.revisionId);if(!saved){record(action,{status:'rejected',reason:'Choose a revision ID from execution.checkpoints.'});continue;}
-        if(!saved.artifact&&lastArtifact)previousCandidate={project:lastProject,artifact:lastArtifact};
-        current=saved.project;resetChecks();lastProject=current;lastArtifact=saved.artifact;if(saved.artifact)compiled=current.id;record(action,{status:'ok',revisionId:a.args.revisionId,hasPdf:!!saved.artifact});continue;
-      }
-      if(typeof handlers[action]==='function'){
-        try{
-          const activeArtifact=lastProject.id===current.id&&validArtifact(lastArtifact,current)?lastArtifact:null;
-          const output=await handlers[action]({project:structuredClone(current),artifact:activeArtifact?structuredClone(activeArtifact):null,baselineProject:structuredClone(baselineProject),baselineArtifact:baselineArtifact?structuredClone(baselineArtifact):null,args:structuredClone(a.args),signal});
-          if(cancelled())return result('cancelled','Layout run cancelled.');
-          if(output?.project){const next=await createLatexProject(output.project);if(next.id!==output.project.id||next.origin!==current.origin||next.engine!==current.engine||next.sourcePdfHash!==current.sourcePdfHash||current.files.some(f=>!(/\.tex$/i.test(f.path)||/^falsify-(?:layout-structure|reconstruction)\.json$/.test(f.path))&&!next.files.some(g=>g.path===f.path&&g.sha256===f.sha256)))throw Object.assign(new Error('Tool returned a different source or changed an existing asset.'),{code:'SOURCE_CHANGED'});current=next;resetChecks();}
+    return execution;
+  }
+  function finishRun(a,action) {
+        if([...referenceImages,...images].some(i=>!alreadyObserved(i))){record(action,{status:'rejected',reason:'View the remaining rendered pages or regions before finishing.'});return null;}
+        if(typeof handlers.compare_document==='function'&&current.id!==baselineProject.id&&compared!==lastArtifact?.pdfHash){record(action,{status:'rejected',reason:'Run compare_document for the current PDF before finishing.'});return null;}
+        const complete = compiled === current.id && inspected === lastArtifact?.pdfHash && rendered === lastArtifact?.pdfHash && lastProject.id === current.id&&candidateSeen===lastArtifact?.pdfHash&&(!reference||referenceRead&&referenceSeen);
+        record(action,{status:complete?'complete':'rejected',message:a.message});
+        return result(complete?'complete':'unresolved',complete ? a.message : 'Current PDF has not been compiled, inspected and rendered.');
+  }
+  function acceptHandlerImages(output,activeArtifact) {
           if(output?.images){
             if(!Array.isArray(output.images)||!output.images.length||output.images.length>4||output.images.some(i=>!Number.isSafeInteger(i.pageIndex)||i.mime!=='image/png'||!i.base64?.startsWith('iVBORw0KGgo')||i.base64.length>699052||!['original','candidate'].includes(i.document)))throw Object.assign(new Error('Region renderer returned an invalid image.'),{code:'INVALID_REGION'});
             if(output.images.some(i=>i.document==='original'))referenceImages=output.images.filter(i=>i.document==='original');
             if(output.images.some(i=>i.document==='candidate')){if(!activeArtifact)throw Error('Compile the current project first.');images=output.images.filter(i=>i.document==='candidate');rendered=activeArtifact.pdfHash;coverage={status:'partial',render:output.coverage||{regions:images.map(({pageIndex,bbox})=>({pageIndex,bbox}))},visualQualityVerified:false};}
           }
-          const observation=output?.observation??output?.summary??(output?.project?{}:output);
-          if(action==='compare_document'&&observation?.schema==='falsify.layout-document-comparison.v1'&&observation.outputHash===activeArtifact?.pdfHash&&bounded({status:'ok',observation}).status!=='truncated')compared=activeArtifact.pdfHash;
-          record(action,{status:'ok',observation,...(output?.coverage?{coverage:output.coverage}:{})});
-        }catch(error){if(cancelled())return result('cancelled','Layout run cancelled.');record(action,{status:'rejected',code:typeof error.code==='string'?error.code.slice(0,80):'TOOL_INPUT',reason:typeof error.message==='string'?error.message.slice(0,500):'Read the target block and adjust the arguments.'});}
-        continue;
-      }
-      if (action === 'finish') {
-        if([...referenceImages,...images].some(i=>!alreadyObserved(i))){record(action,{status:'rejected',reason:'View the remaining rendered pages or regions before finishing.'});continue;}
-        if(typeof handlers.compare_document==='function'&&current.id!==baselineProject.id&&compared!==lastArtifact?.pdfHash){record(action,{status:'rejected',reason:'Run compare_document for the current PDF before finishing.'});continue;}
-        const complete = compiled === current.id && inspected === lastArtifact?.pdfHash && rendered === lastArtifact?.pdfHash && lastProject.id === current.id&&candidateSeen===lastArtifact?.pdfHash&&(!reference||referenceRead&&referenceSeen);
-        record(action,{status:complete?'complete':'rejected',message:a.message});
-        return result(complete?'complete':'unresolved',complete ? a.message : 'Current PDF has not been compiled, inspected and rendered.');
-      }
-      if(action==='read_reference'){
-        if(!reference){record(action,{status:'rejected',reason:'No original PDF reference'});continue;}
-        const output=await readReference({pages:[...a.pages],offset:a.args.offset??(/^\d+$/.test(a.before)?Number(a.before):0),textOffset:a.args.textOffset,unitOffset:a.args.unitOffset,signal});if(cancelled())return result('cancelled','Layout run cancelled.');
-        if(output?.sourcePdfHash!==reference.sourcePdfHash||!Array.isArray(output.pages)||!output.pages.length||output.pages.some(p=>!Number.isSafeInteger(p.pageIndex)||p.pageIndex<0)||bounded({status:'ok',reference:output})?.status==='truncated'){record(action,{status:'rejected',reason:'Original reference is unavailable, too large, or has another hash'});continue;}
-        for(const page of output.pages)referencePages.read.add(page.pageIndex);record(action,{status:'ok',reference:output});continue;
-      }
-      if(action==='render_reference_pages'){
-        if(!reference){record(action,{status:'rejected',reason:'No original PDF reference'});continue;}
-        const output=await renderReference({pages:[...a.pages],signal});if(cancelled())return result('cancelled','Layout run cancelled.');
-        if(output?.sourcePdfHash!==reference.sourcePdfHash||!Array.isArray(output.images)||!output.images.length||output.images.length>4||output.images.some(i=>!Number.isSafeInteger(i.pageIndex)||i.pageIndex<0||i.mime!=='image/png'||typeof i.base64!=='string'||!i.base64.startsWith('iVBORw0KGgo')||i.base64.length>699052)||a.pages.length&&a.pages.some(p=>!output.images.some(i=>i.pageIndex===p))){record(action,{status:'rejected',reason:'Original page render does not match reference'});continue;}
-        referenceImages=output.images.map(i=>({...i,document:'original'}));for(const i of referenceImages)referencePages.rendered.add(i.pageIndex);record(action,{status:'ok',sourcePdfHash:reference.sourcePdfHash,pages:referenceImages.map(i=>i.pageIndex),coverage:output.coverage});continue;
-      }
-      if(action==='restructure_source'){
-        if(typeof restructure!=='function'){record(action,{status:'rejected',reason:'No structural editor for this source'});continue;}
-        let plan;try{plan=JSON.parse(a.after);}catch{record(action,{status:'rejected',reason:'after must be a layout plan JSON object'});continue;}
-        let output;try{output=await restructure({project:structuredClone(current),plan,signal});}catch{record(action,{status:'rejected',reason:'Structure plan must preserve all units, assets and source identity; use current structure.plan with every unit exactly once'});continue;}
-        if(cancelled())return result('cancelled','Layout run cancelled.');
-        const next=await createLatexProject(output.project);
-        if(next.id!==output.project?.id||next.origin!==current.origin||next.engine!==current.engine||next.sourcePdfHash!==current.sourcePdfHash||current.files.some(f=>!(/\.tex$/i.test(f.path)||/^falsify-(?:layout-structure|reconstruction)\.json$/.test(f.path))&&!next.files.some(g=>g.path===f.path&&g.sha256===f.sha256))){record(action,{status:'rejected',reason:'Structural tool returned an unrelated project or changed source assets'});continue;}
-        current=next;compiled=inspected=rendered=candidateSeen=null;images=[];coverage=null;record(action,{status:'ok',summary:output.summary});continue;
-      }
-      if (action === 'read_source' || action === 'replace_source') {
-        const file = current.files.find(f=>f.path===a.path && /\.tex$/i.test(f.path));
-        if (!file) { record(action,{status:'rejected',reason:'Unsupported path'}); continue; }
-        const text = dec.decode(file.bytes);
-        if (action === 'read_source') {
+  }
+  function validReferenceRead(output) {
+    return !(output?.sourcePdfHash!==reference.sourcePdfHash||!Array.isArray(output.pages)||!output.pages.length||output.pages.some(p=>!Number.isSafeInteger(p.pageIndex)||p.pageIndex<0)||bounded({status:'ok',reference:output})?.status==='truncated');
+  }
+  function validReferenceRender(output,a) {
+    return !(output?.sourcePdfHash!==reference.sourcePdfHash||!Array.isArray(output.images)||!output.images.length||output.images.length>4||output.images.some(i=>!Number.isSafeInteger(i.pageIndex)||i.pageIndex<0||i.mime!=='image/png'||typeof i.base64!=='string'||!i.base64.startsWith('iVBORw0KGgo')||i.base64.length>699052)||a.pages.length&&a.pages.some(p=>!output.images.some(i=>i.pageIndex===p)));
+  }
+  function validateHandlerProject(next,output) {
+    if(next.id!==output.project.id||next.origin!==current.origin||next.engine!==current.engine||next.sourcePdfHash!==current.sourcePdfHash||current.files.some(f=>!(/\.tex$/i.test(f.path)||/^falsify-(?:layout-structure|reconstruction)\.json$/.test(f.path))&&!next.files.some(g=>g.path===f.path&&g.sha256===f.sha256)))throw Object.assign(new Error('Tool returned a different source or changed an existing asset.'),{code:'SOURCE_CHANGED'});
+  }
+  function validRestructureProject(next,output) {
+    return !(next.id!==output.project?.id||next.origin!==current.origin||next.engine!==current.engine||next.sourcePdfHash!==current.sourcePdfHash||current.files.some(f=>!(/\.tex$/i.test(f.path)||/^falsify-(?:layout-structure|reconstruction)\.json$/.test(f.path))&&!next.files.some(g=>g.path===f.path&&g.sha256===f.sha256)));
+  }
+  function validInspection(output) {
+    return !(!output || output.schema !== 'falsify.layout-quality.v1' || !['ok','partial'].includes(output.status) || output.pdfHash !== lastArtifact.pdfHash || !Array.isArray(output.issues) || !output.coverage || typeof output.coverage !== 'object' || Array.isArray(output.coverage) || ['truncated','unavailable'].includes(bounded({status:'ok',observation:output})?.status));
+  }
+  function validCandidateImages(output) {
+    return !(!output || !Array.isArray(output.images) || !output.images.length || output.images.length > 4 || output.images.some(i=>!Number.isSafeInteger(i.pageIndex)||i.pageIndex<0||i.mime!=='image/png'||typeof i.base64!=='string'||!i.base64.startsWith('iVBORw0KGgo')||i.base64.length>699052));
+  }
+  function matchesRequestedPages(output,a) {
+    return !(new Set(output.images.map(i=>i.pageIndex)).size !== output.images.length || (a.pages.length && (output.images.length !== a.pages.length || a.pages.some(p=>!output.images.some(i=>i.pageIndex===p)))));
+  }
+  function readSourceChunk(a,action,file,text) {
           const match=a.before?text.indexOf(a.before):-1,offset=match>=0?Math.max(0,match-500):(a.pages[0]||0)*8000;
-          if(offset>=text.length&&text.length){record(action,{status:'rejected',reason:'Source chunk is outside this file',totalChunks:Math.ceil(text.length/8000)});continue;}
-          record(action,{status:'ok',path:file.path,text:text.slice(offset,offset+8000),offset,totalCharacters:text.length,totalChunks:Math.ceil(text.length/8000)});continue;
-        }
+          if(offset>=text.length&&text.length){record(action,{status:'rejected',reason:'Source chunk is outside this file',totalChunks:Math.ceil(text.length/8000)});return;}
+          record(action,{status:'ok',path:file.path,text:text.slice(offset,offset+8000),offset,totalCharacters:text.length,totalChunks:Math.ceil(text.length/8000)});return;
+  }
+  function validateSourceEdit(a,action,file,text) {
         const start=text.indexOf(a.before);
         // A layout operation must not occur within a commented line or a macro definition.
         const lineStart=text.lastIndexOf('\n',start-1)+1, prefix=text.slice(lineStart,start);
         if (start<0 || text.indexOf(a.before,start+1)!==-1 || !safeReplacement(text,start,a.before,a.after) || /(^|[^\\])%/.test(prefix) || /\\(?:def|gdef|edef|xdef|newcommand|renewcommand|catcode)\b/.test(prefix)) {
-          record(action,{status:'rejected',reason:'Use a unique exact match and change only supported literal layout values; preserve prose, comments, definitions and structure. Include keepaspectratio when setting both graphic width and height. Example: \\setlength{\\parskip}{4pt} -> \\setlength{\\parskip}{6pt}.',path:file.path}); continue;
+          record(action,{status:'rejected',reason:'Use a unique exact match and change only supported literal layout values; preserve prose, comments, definitions and structure. Include keepaspectratio when setting both graphic width and height. Example: \\setlength{\\parskip}{4pt} -> \\setlength{\\parskip}{6pt}.',path:file.path}); return null;
         }
-        const files=current.files.map(f=>({path:f.path,bytes:f.path===file.path?enc.encode(text.slice(0,start)+a.after+text.slice(start+a.before.length)):f.bytes}));
-        const next=await createLatexProject({...current,files});
-        if (cancelled()) return result('cancelled','Layout run cancelled.');
-        next.revision=(current.revision||0)+1; current=next; compiled=inspected=rendered=null; images=[]; coverage=null;
-        record(action,{status:'ok',path:file.path,before:a.before,after:a.after}); continue;
-      }
-      if (action === 'compile_pdf') {
-        const output=await compile({project:structuredClone(current),signal});
-        if (cancelled()) return result('cancelled','Layout run cancelled.');
-        if (!validArtifact(output,current)) { compiled=inspected=rendered=null; record(action,{status:'failed',diagnostics:output?.diagnostics||[]}); continue; }
+        return start;
+  }
+  function recordDecisionViews(attached) {
+      attached.forEach(observe);
+      if(attached.some(i=>i.document==='original'))referenceSeen=true;
+      if(observations.some(e=>e.action==='read_reference'&&e.result?.status==='ok'))referenceRead=true;
+      if(attached.some(i=>i.document!=='original')&&compiled===current.id)candidateSeen=lastArtifact?.pdfHash;
+  }
+  function recordHandlerOutput(action,output,activeArtifact) {
+          const observation=output?.observation??output?.summary??(output?.project?{}:output);
+          if(action==='compare_document'&&observation?.schema==='falsify.layout-document-comparison.v1'&&observation.outputHash===activeArtifact?.pdfHash&&bounded({status:'ok',observation}).status!=='truncated')compared=activeArtifact.pdfHash;
+          record(action,{status:'ok',observation,...(output?.coverage?{coverage:output.coverage}:{})});
+  }
+  function recordHandlerError(action,error) {
+    record(action,{status:'rejected',code:typeof error.code==='string'?error.code.slice(0,80):'TOOL_INPUT',reason:typeof error.message==='string'?error.message.slice(0,500):'Read the target block and adjust the arguments.'});
+  }
+  function acceptReferenceRead(action,output) {
+        for(const page of output.pages)referencePages.read.add(page.pageIndex);record(action,{status:'ok',reference:output});
+  }
+  function acceptReferenceRender(action,output) {
+        referenceImages=output.images.map(i=>({...i,document:'original'}));for(const i of referenceImages)referencePages.rendered.add(i.pageIndex);record(action,{status:'ok',sourcePdfHash:reference.sourcePdfHash,pages:referenceImages.map(i=>i.pageIndex),coverage:output.coverage});
+  }
+  function acceptCompile(action,output) {
+        if (!validArtifact(output,current)) { compiled=inspected=rendered=null; record(action,{status:'failed',diagnostics:output?.diagnostics||[]}); return; }
         lastProject=current; lastArtifact={...output,pdfBytes:new Uint8Array(output.pdfBytes)}; compiled=current.id; inspected=rendered=null; images=[]; coverage=null;
-        record(action,{status:'ok',diagnostics:output.diagnostics||[]}); continue;
-      }
-      if (compiled !== current.id || lastProject.id !== current.id || !validArtifact(lastArtifact,current)) { record(action,{status:'rejected',reason:'Compile current project first'}); continue; }
-      if (action === 'inspect_pdf') {
-        const output=await inspect({project:structuredClone(current),artifact:structuredClone(lastArtifact),signal});
-        if (cancelled()) return result('cancelled','Layout run cancelled.');
-        if (!output || output.schema !== 'falsify.layout-quality.v1' || !['ok','partial'].includes(output.status) || output.pdfHash !== lastArtifact.pdfHash || !Array.isArray(output.issues) || !output.coverage || typeof output.coverage !== 'object' || Array.isArray(output.coverage) || ['truncated','unavailable'].includes(bounded({status:'ok',observation:output})?.status)) { inspected=null; record(action,{status:'failed',observation:output}); continue; }
-        inspected=lastArtifact.pdfHash; record(action,{status:'ok',observation:output}); continue;
-      }
-      const output=await render({project:structuredClone(current),artifact:structuredClone(lastArtifact),pages:[...a.pages],signal});
-      if (cancelled()) return result('cancelled','Layout run cancelled.');
-      if (!output || !Array.isArray(output.images) || !output.images.length || output.images.length > 4 || output.images.some(i=>!Number.isSafeInteger(i.pageIndex)||i.pageIndex<0||i.mime!=='image/png'||typeof i.base64!=='string'||!i.base64.startsWith('iVBORw0KGgo')||i.base64.length>699052)) { rendered=null; record(action,{status:'failed',reason:'No valid rendered pages'}); continue; }
-      if (new Set(output.images.map(i=>i.pageIndex)).size !== output.images.length || (a.pages.length && (output.images.length !== a.pages.length || a.pages.some(p=>!output.images.some(i=>i.pageIndex===p))))) { rendered=null; record(action,{status:'failed',reason:'Rendered pages do not match request'}); continue; }
+        record(action,{status:'ok',diagnostics:output.diagnostics||[]}); return;
+  }
+  function acceptInspection(action,output) {
+        if (!validInspection(output)) { inspected=null; record(action,{status:'failed',observation:output}); return; }
+        inspected=lastArtifact.pdfHash; record(action,{status:'ok',observation:output}); return;
+  }
+  function acceptCandidateRender(action,output,a) {
+      if (!validCandidateImages(output)) { rendered=null; record(action,{status:'failed',reason:'No valid rendered pages'}); return; }
+      if (!matchesRequestedPages(output,a)) { rendered=null; record(action,{status:'failed',reason:'Rendered pages do not match request'}); return; }
       images=output.images.map(i=>({pageIndex:i.pageIndex,mime:i.mime,base64:i.base64})); coverage={status:'partial',render:bounded(output.coverage ?? null),visualQualityVerified:false}; rendered=lastArtifact.pdfHash;
       record(action,{status:'ok',pages:images.map(i=>i.pageIndex),coverage});
-    } catch (error) {
-      if (cancelled()) return result('cancelled','Layout run cancelled.');
+  }
+  function activeCandidate() { return lastProject.id===current.id&&validArtifact(lastArtifact,current)?lastArtifact:null; }
+  function handlerInput(a,activeArtifact) {
+    return {project:structuredClone(current),artifact:activeArtifact?structuredClone(activeArtifact):null,baselineProject:structuredClone(baselineProject),baselineArtifact:baselineArtifact?structuredClone(baselineArtifact):null,args:structuredClone(a.args),signal};
+  }
+  function referenceReadInput(a) {
+    return {pages:[...a.pages],offset:a.args.offset??(/^\d+$/.test(a.before)?Number(a.before):0),textOffset:a.args.textOffset,unitOffset:a.args.unitOffset,signal};
+  }
+  function prepareRestructure(a,action) {
+    if(typeof restructure!=='function'){record(action,{status:'rejected',reason:'No structural editor for this source'});return {ok:false};}
+    return parseLayoutPlan(a,action);
+  }
+  function parseLayoutPlan(a,action) {
+    try{return {ok:true,plan:JSON.parse(a.after)};}catch{record(action,{status:'rejected',reason:'after must be a layout plan JSON object'});return {ok:false};}
+  }
+  function acceptSourceEdit(next,action,a,file) {
+        next.revision=(current.revision||0)+1; current=next; compiled=inspected=rendered=null; images=[]; coverage=null;
+        record(action,{status:'ok',path:file.path,before:a.before,after:a.after});
+  }
+  function handleStepFailure(error,a) {
       const failure=layoutFailureDetails(error);
       if(error?.disposition==='cancelled'){record(a?.tool || 'decide',{status:'failed',...failure});return result('cancelled','이 단계는 취소되어 끝났습니다. 이어서 진행하려면 새 실행을 시작하세요. '+failure.reason);}
-      if(!a&&failure.code==='invalid_action'){record('invalid_action',{status:'rejected',...failure,reason:failure.reason+' Choose an offered tool and use exactly its listed arguments. No edit was applied.'});continue;}
+      if(!a&&failure.code==='invalid_action'){record('invalid_action',{status:'rejected',...failure,reason:failure.reason+' Choose an offered tool and use exactly its listed arguments. No edit was applied.'});return null;}
       record(a?.tool || 'decide',{status:'failed',...failure});
       return result('unresolved',failure.reason,'failed');
+  }
+  function requestReference(action,a) {
+    return action==='read_reference' ? readReference(referenceReadInput(a)) : renderReference({pages:[...a.pages],signal});
+  }
+  function acceptReference(action,output,a) {
+    if(action==='read_reference') {
+      if(!validReferenceRead(output)){record(action,{status:'rejected',reason:'Original reference is unavailable, too large, or has another hash'});return;}
+      acceptReferenceRead(action,output);
+    } else {
+      if(!validReferenceRender(output,a)){record(action,{status:'rejected',reason:'Original page render does not match reference'});return;}
+      acceptReferenceRender(action,output);
+    }
+  }
+  function canRunPdfOperation(action) {
+    if(action==='compile_pdf')return true;
+    if(compiled !== current.id || lastProject.id !== current.id || !validArtifact(lastArtifact,current)) {
+      record(action,{status:'rejected',reason:'Compile current project first'}); return false;
+    }
+    return true;
+  }
+  function requestPdfOperation(action,a) {
+    if(action==='compile_pdf')return compile({project:structuredClone(current),signal});
+    if(action==='inspect_pdf')return inspect({project:structuredClone(current),artifact:structuredClone(lastArtifact),signal});
+    return render({project:structuredClone(current),artifact:structuredClone(lastArtifact),pages:[...a.pages],signal});
+  }
+  function acceptPdfOperation(action,output,a) {
+    if(action==='compile_pdf')acceptCompile(action,output);
+    else if(action==='inspect_pdf')acceptInspection(action,output);
+    else acceptCandidateRender(action,output,a);
+  }
+  function handleLocalAction(a,action) {
+    if(action==='checkpoint'){saveCheckpoint(a,action);return {handled:true};}
+    if(action==='restore_revision'){restoreCheckpoint(a,action);return {handled:true};}
+    return {handled:false};
+  }
+  function prepareSourceAction(a,action) {
+    const file=current.files.find(f=>f.path===a.path && /\.tex$/i.test(f.path));
+    if(!file){record(action,{status:'rejected',reason:'Unsupported path'});return null;}
+    const text=dec.decode(file.bytes);
+    if(action==='read_source'){readSourceChunk(a,action,file,text);return null;}
+    const start=validateSourceEdit(a,action,file,text);
+    return start===null?null:{file,text,start};
+  }
+  function validAction(action,availableTools) {
+    const normalized=normalizeLayoutAction(action);
+    if(!normalized||!availableTools.some(t=>t.name===normalized.tool)) {
+      record('invalid_action',{status:'rejected',reason:'Choose an available tool and its listed arguments.'}); return null;
+    }
+    return normalized;
+  }
+  function acceptRestructure(next,output,action) {
+        if(!validRestructureProject(next,output)){record(action,{status:'rejected',reason:'Structural tool returned an unrelated project or changed source assets'});return;}
+        current=next;compiled=inspected=rendered=candidateSeen=null;images=[];coverage=null;record(action,{status:'ok',summary:output.summary});return;
+  }
+  async function executeHandler(a,action) {
+    try{
+      const activeArtifact=activeCandidate();
+      const output=await handlers[action](handlerInput(a,activeArtifact));
+      if(cancelled())return result('cancelled','Layout run cancelled.');
+      if(output?.project){const next=await createLatexProject(output.project);validateHandlerProject(next,output);current=next;resetChecks();}
+      acceptHandlerImages(output,activeArtifact);
+      recordHandlerOutput(action,output,activeArtifact);
+    }catch(error){if(cancelled())return result('cancelled','Layout run cancelled.');recordHandlerError(action,error);}
+    return null;
+  }
+  async function executeReference(a,action) {
+    if(!reference){record(action,{status:'rejected',reason:'No original PDF reference'});return null;}
+    const output=await requestReference(action,a);
+    if(cancelled())return result('cancelled','Layout run cancelled.');
+    acceptReference(action,output,a); return null;
+  }
+  async function executeRestructure(a,action) {
+    const parsed=prepareRestructure(a,action); if(!parsed.ok)return null; const plan=parsed.plan;
+    let output;try{output=await restructure({project:structuredClone(current),plan,signal});}catch{record(action,{status:'rejected',reason:'Structure plan must preserve all units, assets and source identity; use current structure.plan with every unit exactly once'});return null;}
+    if(cancelled())return result('cancelled','Layout run cancelled.');
+    const next=await createLatexProject(output.project);
+    acceptRestructure(next,output,action);return null;
+  }
+  async function executeSourceEdit(a,action,file,text,start) {
+    const files=current.files.map(f=>({path:f.path,bytes:f.path===file.path?enc.encode(text.slice(0,start)+a.after+text.slice(start+a.before.length)):f.bytes}));
+    const next=await createLatexProject({...current,files});
+    if (cancelled()) return result('cancelled','Layout run cancelled.');
+    acceptSourceEdit(next,action,a,file); return null;
+  }
+  async function executePdfOperation(a,action) {
+    if(!canRunPdfOperation(action))return null;
+    const output=await requestPdfOperation(action,a);
+    if(cancelled())return result('cancelled','Layout run cancelled.');
+    acceptPdfOperation(action,output,a);
+
+    return null;
+  }
+  async function executeAction(a) {
+    const action = a.tool;
+    const local=handleLocalAction(a,action);
+    if(local.handled) return null;
+    if(typeof handlers[action]==='function')return executeHandler(a,action);
+    if(action==='finish')return finishRun(a,action);
+    if(action==='read_reference'||action==='render_reference_pages')return executeReference(a,action);
+    if(action==='restructure_source')return executeRestructure(a,action);
+    if (action === 'read_source' || action === 'replace_source') {
+    const prepared=prepareSourceAction(a,action); if(!prepared)return null;
+    const {file,text,start}=prepared;
+    return executeSourceEdit(a,action,file,text,start);
+    }
+    return executePdfOperation(a,action);
+  }
+  function buildDecision(step) {
+      const sourceFiles=current.files.filter(f=>/\.tex$/i.test(f.path)),previewSize=Math.min(3000,Math.floor(16000/Math.max(1,sourceFiles.length)));
+      let structure=null;try{const s=readLayoutStructure(current);structure={schema:s.schema,sourcePdfHash:s.sourcePdfHash,plan:s.plan,unitCount:s.units.length,units:s.units.slice(0,24).map(({id,pageIndex,bbox,kind,role,span})=>({id,pageIndex,bbox,kind,role,span})),unitsTruncated:s.units.length>24};}catch{}
+      const priority=list=>[...list.filter(i=>!alreadyObserved(i)),...list.filter(alreadyObserved)];
+      const attached=referenceImages.length&&images.length?[...priority(referenceImages).slice(0,2),...priority(images).slice(0,2)]:priority([...referenceImages,...images]).slice(0,4);
+      const execution=buildExecution(step,attached);
+      const availableTools=layoutToolCatalog.filter(t=>legacyTools.has(t.name)||['checkpoint','restore_revision'].includes(t.name)||typeof handlers[t.name]==='function').filter(t=>!['read_reference','render_reference_pages'].includes(t.name)||reference).filter(t=>t.name!=='restructure_source'||structure&&typeof restructure==='function');
+      stepsTaken=step+1;
+    return {decisionInput:{protocol:'v2',projectId:current.id, step, maxSteps, execution,instruction:instruction, tools:structuredClone(availableTools), observations:structuredClone(observations), images:structuredClone(attached), sourceFiles:sourceFiles.map(f=>({path:f.path,text:dec.decode(f.bytes).slice(0,previewSize)})),...(reference?{reference:structuredClone(reference)}:{}),...(structure?{structure}: {})},attached,availableTools};
+  }
+  emit(()=>snapshot('running','running'));
+  const cancelled = () => signal?.aborted;
+  for (let step=0; step<maxSteps; step++) {
+    if (cancelled()) return result('cancelled','Layout run cancelled.');
+    let a;
+    try {
+      const {decisionInput,attached,availableTools}=buildDecision(step);
+      a = await decide(decisionInput);
+      recordDecisionViews(attached);
+      if (cancelled()) return result('cancelled','Layout run cancelled.');
+      a=validAction(a,availableTools);
+      if(!a) return result('unresolved','Malformed agent action.','failed');
+      const outcome=await executeAction(a);
+      if(outcome)return outcome;
+    } catch (error) {
+      if (cancelled()) return result('cancelled','Layout run cancelled.');
+      const failureResult=handleStepFailure(error,a);
+      if(failureResult) return failureResult;
+      continue;
     }
   }
   return result('unresolved','Layout agent reached its step limit.');

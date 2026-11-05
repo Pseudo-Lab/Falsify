@@ -1,0 +1,26 @@
+{
+  "name": "ml-peak-shape-generator",
+  "version": "5.6.0",
+  "repository": "https://github.com/mljs/peak-shape-generator",
+  "commit": "5a87af23408aedf00e35e43ca6648a20cf6455bd",
+  "license": "MIT",
+  "needed": "Unmodified 1D Gaussian evaluator. Falsify uses gaussianFct as the local deform profile and applies its own compact window; the upstream function has infinite tails. Split, Lorentzian, pseudo-Voigt, and 2D shapes are not part of this pin.",
+  "files": [
+    {
+      "path": "LICENSE",
+      "sha256": "6a8196d639023fe0ef6f532f892d831eaa7583df5d2ff9676e8715e16964220a"
+    },
+    {
+      "path": "src/util/constants.ts",
+      "sha256": "72b1cd2bb65b6dd2d5a9a1b55b8f0f0d966c9c3e68bca2d80b25e37a57b92588"
+    },
+    {
+      "path": "src/util/erfinv.ts",
+      "sha256": "9aff604bf9426e660db6a51fcefe6dbb07ee17de7f8279c2cf84907fd633275a"
+    },
+    {
+      "path": "src/shapes/1d/gaussian/Gaussian.ts",
+      "sha256": "3f91afb791a87a6189afc7188a2742edf7e5d7c01e854c0650741ff7aca8b0d6"
+    }
+  ]
+}

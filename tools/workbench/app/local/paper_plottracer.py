@@ -19,6 +19,51 @@ def _finite(v):
     return type(v) in (int, float) and math.isfinite(v)
 
 
+def _validate_axis_points(points, axis):
+    for point in points:
+        if not isinstance(point, dict) or set(point) != {'pixel', 'value'} or not all(_finite(v) for v in point.values()):
+            raise ValueError('digitizer_axis_invalid')
+        if point['pixel'] < 0 or axis['scale'] == 'log' and point['value'] <= 0:
+            raise ValueError('digitizer_axis_invalid')
+
+
+def _validate_calibration(calibration):
+    for axis in calibration.values():
+        if not isinstance(axis, dict) or set(axis) != {'scale', 'points'} or axis['scale'] not in ('linear', 'log'):
+            raise ValueError('digitizer_axis_invalid')
+        points = axis['points']
+        if not isinstance(points, list) or len(points) != 2:
+            raise ValueError('digitizer_axis_invalid')
+        _validate_axis_points(points, axis)
+        if points[0]['pixel'] == points[1]['pixel'] or points[0]['value'] == points[1]['value']:
+            raise ValueError('digitizer_axis_invalid')
+
+
+def _validate_series_item(item, seen):
+    if not isinstance(item, dict) or set(item) - {'id', 'color', 'name'}:
+        raise ValueError('chart_series_invalid')
+    ident, color, name = item.get('id'), item.get('color'), item.get('name', '')
+    if not isinstance(ident, str) or not 1 <= len(ident) <= 80 or ident in seen or any(ord(c) < 32 for c in ident):
+        raise ValueError('chart_series_invalid')
+    seen.add(ident)
+    if not isinstance(color, str) or len(color) != 7 or color[0] != '#' or any(c not in '0123456789abcdefABCDEF' for c in color[1:]):
+        raise ValueError('chart_series_invalid')
+    if not isinstance(name, str) or len(name) > 160:
+        raise ValueError('chart_series_invalid')
+
+
+def _validate_series(series):
+    seen = set()
+    for item in series:
+        _validate_series_item(item, seen)
+
+
+def _validate_plot_bbox(options):
+    box = options.get('plotBbox')
+    if box is not None and (not isinstance(box, list) or len(box) != 4 or not all(_finite(v) for v in box) or box[0] < 0 or box[1] < 0 or box[2] <= box[0] or box[3] <= box[1]):
+        raise ValueError('chart_region_invalid')
+
+
 def validate_options(options):
     if not isinstance(options, dict) or set(options) - {'imageSha256', 'calibration', 'series', 'plotBbox'}:
         raise ValueError('chart_options_invalid')
@@ -28,37 +73,12 @@ def validate_options(options):
     calibration = options.get('calibration')
     if not isinstance(calibration, dict) or set(calibration) != {'x', 'y'}:
         raise ValueError('digitizer_axis_invalid')
-    for axis in calibration.values():
-        if not isinstance(axis, dict) or set(axis) != {'scale', 'points'} or axis['scale'] not in ('linear', 'log'):
-            raise ValueError('digitizer_axis_invalid')
-        points = axis['points']
-        if not isinstance(points, list) or len(points) != 2:
-            raise ValueError('digitizer_axis_invalid')
-        for point in points:
-            if not isinstance(point, dict) or set(point) != {'pixel', 'value'} or not all(_finite(v) for v in point.values()):
-                raise ValueError('digitizer_axis_invalid')
-            if point['pixel'] < 0 or axis['scale'] == 'log' and point['value'] <= 0:
-                raise ValueError('digitizer_axis_invalid')
-        if points[0]['pixel'] == points[1]['pixel'] or points[0]['value'] == points[1]['value']:
-            raise ValueError('digitizer_axis_invalid')
+    _validate_calibration(calibration)
     series = options.get('series')
     if not isinstance(series, list) or not 1 <= len(series) <= 8:
         raise ValueError('chart_series_invalid')
-    seen = set()
-    for item in series:
-        if not isinstance(item, dict) or set(item) - {'id', 'color', 'name'}:
-            raise ValueError('chart_series_invalid')
-        ident, color, name = item.get('id'), item.get('color'), item.get('name', '')
-        if not isinstance(ident, str) or not 1 <= len(ident) <= 80 or ident in seen or any(ord(c) < 32 for c in ident):
-            raise ValueError('chart_series_invalid')
-        seen.add(ident)
-        if not isinstance(color, str) or len(color) != 7 or color[0] != '#' or any(c not in '0123456789abcdefABCDEF' for c in color[1:]):
-            raise ValueError('chart_series_invalid')
-        if not isinstance(name, str) or len(name) > 160:
-            raise ValueError('chart_series_invalid')
-    box = options.get('plotBbox')
-    if box is not None and (not isinstance(box, list) or len(box) != 4 or not all(_finite(v) for v in box) or box[0] < 0 or box[1] < 0 or box[2] <= box[0] or box[3] <= box[1]):
-        raise ValueError('chart_region_invalid')
+    _validate_series(series)
+    _validate_plot_bbox(options)
     return options
 
 
@@ -121,6 +141,192 @@ def _plain_axis(axis):
     return {'scale': axis['scale'], 'points': [{'pixel': float(point['pixel']), 'value': float(point['value'])} for point in axis['points']]}
 
 
+def _manual_setup(manual, result, width, height):
+    validate_options(manual)
+    if manual['imageSha256'] != result['image']['sha256']:
+        raise ValueError('chart_image_mismatch')
+    from paper_digitizer import _axis
+    _axis(manual['calibration']['x'], width)
+    _axis(manual['calibration']['y'], height)
+    # Upstream calibrationBoxRegion's default: the window between ticks.
+    xp = [p['pixel'] for p in manual['calibration']['x']['points']]
+    yp = [p['pixel'] for p in manual['calibration']['y']['points']]
+    box = manual.get('plotBbox', [min(xp), min(yp), max(xp), max(yp)])
+    if box[2] > width or box[3] > height:
+        raise ValueError('chart_region_invalid')
+    xcal, ycals = manual['calibration']['x'], {'left': manual['calibration']['y']}
+    colors = [{'id': s['id'], 'name': s.get('name', s['id']), 'rgb': [int(s['color'][i:i+2], 16) for i in (1, 3, 5)], 'axisBinding': 'left'} for s in manual['series']]
+    result['calibrationSource'] = 'caller-selected'
+    result['axes'] = {'x': xcal, 'left': ycals['left']}
+    return box, xcal, ycals, colors
+
+
+def _fit_ocr_axes(ticks, frame, bgr, cv, np, geometry, result):
+    left, top, right, bottom = frame
+    for side in ('x', 'left', 'right'):
+        axis = geometry.fit_axis(ticks[side], right-left if side == 'x' else bottom-top)
+        if axis:
+            hues = [geometry._hue_color(bgr, t['bbox'], cv, np) for t in axis['usedTicks']]
+            colors_found = [h for h in hues if h is not None]
+            axis['hue'] = float(np.median(colors_found)) if colors_found else None
+            result['axes'][side] = axis
+            if axis['rejectedTicks']:
+                result['issues'].append('axis-ocr-outlier-'+side)
+
+
+def _detect_colors(pixels, bgr, frame, axes, ycals, cv, np):
+    left, top, right, bottom = frame
+    hsv = cv.cvtColor(bgr, cv.COLOR_BGR2HSV)
+    roi = hsv[top+2:bottom-1, left+2:right-1]
+    colored = (roi[:, :, 1] > 90) & (roi[:, :, 2] > 70)
+    counts = np.bincount(roi[:, :, 0][colored], minlength=180)
+    selected = []
+    for hue in np.argsort(counts)[::-1].tolist():
+        if counts[hue] < 20 or any(min(abs(hue-h), 180-abs(hue-h)) < 9 for h in selected):
+            continue
+        selected.append(hue)
+        if len(selected) == 8:
+            break
+    colors = []
+    rgb_roi = pixels[top+2:bottom-1, left+2:right-1]
+    for hue in [*selected, None]:
+        if hue is None:
+            mask = (roi[:, :, 1] < 50) & (roi[:, :, 2] < 125)
+            mask[(mask.sum(axis=1) > (right-left)*.75), :] = False
+            mask[:, (mask.sum(axis=0) > (bottom-top)*.75)] = False
+        else:
+            delta = np.abs(roi[:, :, 0].astype(int)-hue)
+            mask = colored & ((delta < 6) | (delta > 174))
+        if mask.sum() < 20:
+            continue
+        rgb = np.median(rgb_roi[mask], axis=0).astype(int).tolist()
+        binding = next(iter(ycals)) if len(ycals) == 1 else 'ambiguous'
+        if len(ycals) == 2 and hue is not None:
+            matches = [s for s in ycals if axes[s].get('hue') is not None and min(abs(hue-axes[s]['hue']), 180-abs(hue-axes[s]['hue'])) < 10]
+            if len(matches) == 1:
+                binding = matches[0]
+        colors.append({'id': 'color-'+str(len(colors)+1), 'rgb': rgb, 'axisBinding': binding, 'hue': hue})
+    return colors
+
+
+def _automatic_setup(png_bytes, image, ocr_lines, result, width, height):
+    import cv2 as cv
+    import numpy as np
+    import paper_chart_geometry as geometry
+    pixels = np.array(image.convert('RGB'))
+    bgr = cv.cvtColor(pixels, cv.COLOR_RGB2BGR)
+    frame = geometry._frame(cv.cvtColor(bgr, cv.COLOR_BGR2GRAY), cv, np)
+    if frame is None:
+        result['issues'] = ['cartesian-axes-not-found', 'axis-calibration-required']
+        return None
+    box = list(frame)
+    if ocr_lines is None:
+        import paper_ocr
+        issues = []
+        ok, ocr_lines, _ = paper_ocr._default_lines(png_bytes, 'en', issues, {})
+        if not ok:
+            result['issues'] = ['axis-ocr-unavailable', 'axis-calibration-required', *issues]
+            return None
+    ticks = geometry._ticks(ocr_lines, frame, width, height, bgr, cv, np)
+    left, top, right, bottom = frame
+    _fit_ocr_axes(ticks, frame, bgr, cv, np, geometry, result)
+    axes = result['axes']
+    if 'x' not in axes or not any(s in axes for s in ('left', 'right')):
+        result['plotBbox'] = box
+        result['issues'].append('axis-calibration-required')
+        return None
+    xcal = _calibration(axes['x'])
+    ycals = {s: _calibration(axes[s]) for s in ('left', 'right') if s in axes}
+    colors = _detect_colors(pixels, bgr, frame, axes, ycals, cv, np)
+    box = [left+2, top+2, right-1, bottom-1]
+    result['calibrationSource'] = 'ocr-ticks'
+    return box, xcal, ycals, colors
+
+
+def _trace_candidates(colors, raw):
+    candidates = []
+    for source, traced in zip(colors, raw.get('series', [])):
+        if 'accepted' in traced:
+            # Topology stays on findLines. Isolated curves use WPD or the
+            # measured column runs. Nearest-neighbour order is not a fallback.
+            # Short supported branches are already in accepted; do not drop
+            # them again with a width fraction.
+            accepted = [line for line in traced['accepted'] if len(line.get('points', [])) >= 2]
+        else:
+            lines = [line for line in traced.get('lines', []) if len(line.get('points', [])) >= 2]
+            pixels = traced.get('pixels', [])
+            accepted = lines or ([{'points': pixels, 'roles': [], 'gaps': [], 'colorTraceFallback': True}] if len(pixels) >= 2 else [])
+        for line in accepted:
+            candidates.append((source, line, traced))
+    return candidates
+
+
+def _trace_points(path, indices, converted, binding, intervals, roles, origins, ink_support):
+    points = []
+    for index, (xp, yp) in enumerate(path):
+        src = indices[index]
+        values = {side: values[index][1] for side, values in converted.items()}
+        role = roles[src] if src < len(roles) and roles[src] else 'measured'
+        origin = origins[src] if src < len(origins) and origins[src] else ('curve-interpolated' if role == 'bridged' else 'pixel-calibrated')
+        point = {'xPixel': xp, 'yPixel': yp, 'x': next(iter(converted.values()))[index][0], 'valueCandidates': values,
+                 'origin': origin, 'role': role}
+        if src < len(ink_support):
+            point['inkSupport'] = bool(ink_support[src])
+        if binding != 'ambiguous':
+            point['y'] = values[binding]
+            point['pixelInterval'] = sorted(v[1] for v in intervals[index*2:index*2+2])
+        points.append(point)
+    return points
+
+
+def _add_trace_metadata(series, traced, line, requested, effective):
+    if traced.get('route'):
+        series['traceRoute'] = traced['route']
+        series['requestedColor'] = _hex(requested)
+        series['effectiveColor'] = _hex(effective)
+    if line.get('algorithm'):
+        series['traceAlgorithm'] = line['algorithm']
+    if traced.get('unresolved'):
+        series['unresolvedEvidence'] = traced['unresolved']
+    if traced.get('diagnostics'):
+        series['traceDiagnostics'] = traced['diagnostics']
+    if line.get('closed'):
+        series['traceClosed'] = True
+
+
+def _build_trace_series(result, source, line, traced, binding, points, roles, reduction):
+    ambiguous = bool(traced.get('ambiguous')) or bool(traced.get('unresolved')) or binding == 'ambiguous'
+    sampling = {'observedColumns': len(line['points']), 'returnedPoints': len(points), 'tolerancePixels': .75, 'maxDeviationPixels': reduction.get('maxDeviationPixels') if reduction else 0}
+    requested = traced.get('requestedRgb') or source['rgb']
+    effective = traced.get('effectiveRgb') or source['rgb']
+    series = {'id': 'series-'+str(len(result['series'])+1), 'name': source.get('name'),
+        'color': _hex(effective), 'hue': source.get('hue'),
+        'axisBinding': binding, 'points': points, 'gapsPixels': line.get('gaps', []), 'segments': [],
+        'traceAmbiguous': ambiguous, 'sampling': sampling, 'pointKind': 'curve-sample',
+        'upstreamRoles': list(dict.fromkeys(role for role in roles if role))}
+    _add_trace_metadata(series, traced, line, requested, effective)
+    return series
+
+
+def _append_trace_series(result, source, line, traced, core, xcal, ycals, budget):
+    path, reduction, indices = _sample_path(line['points'], budget)
+    if len(path) < 2:
+        return
+    converted = {side: core.convert({'x': xcal, 'y': cal}, path) for side, cal in ycals.items()}
+    binding = source['axisBinding']
+    intervals = core.convert({'x': xcal, 'y': ycals[binding]}, [[xp, y] for xp, yp in path for y in (yp-.5, yp+.5)]) if binding != 'ambiguous' else []
+    roles = line.get('roles') or []
+    origins = line.get('origins') or []
+    ink_support = line.get('inkSupport') or []
+    points = _trace_points(path, indices, converted, binding, intervals, roles, origins, ink_support)
+    series = _build_trace_series(result, source, line, traced, binding, points, roles, reduction)
+    result['series'].append(series)
+    if binding == 'ambiguous' and 'series-axis-ambiguous' not in result['issues']:
+        result['issues'].append('series-axis-ambiguous')
+    if reduction:
+        result['issues'].extend(code for code in reduction.get('issues', []) if code not in result['issues'])
+
+
 def trace_geometry(png_bytes, *, manual=None, ocr_lines=None):
     import hashlib
     from PIL import Image
@@ -138,90 +344,11 @@ def trace_geometry(png_bytes, *, manual=None, ocr_lines=None):
         image = opened.convert('RGBA')
     result['image'].update(width=width, height=height)
     if manual is not None:
-        validate_options(manual)
-        if manual['imageSha256'] != result['image']['sha256']:
-            raise ValueError('chart_image_mismatch')
-        from paper_digitizer import _axis
-        _axis(manual['calibration']['x'], width)
-        _axis(manual['calibration']['y'], height)
-        # Upstream calibrationBoxRegion's default: the window between ticks.
-        xp = [p['pixel'] for p in manual['calibration']['x']['points']]
-        yp = [p['pixel'] for p in manual['calibration']['y']['points']]
-        box = manual.get('plotBbox', [min(xp), min(yp), max(xp), max(yp)])
-        if box[2] > width or box[3] > height:
-            raise ValueError('chart_region_invalid')
-        xcal, ycals = manual['calibration']['x'], {'left': manual['calibration']['y']}
-        colors = [{'id': s['id'], 'name': s.get('name', s['id']), 'rgb': [int(s['color'][i:i+2], 16) for i in (1, 3, 5)], 'axisBinding': 'left'} for s in manual['series']]
-        result['calibrationSource'] = 'caller-selected'
-        result['axes'] = {'x': xcal, 'left': ycals['left']}
+        box, xcal, ycals, colors = _manual_setup(manual, result, width, height)
     else:
-        import cv2 as cv
-        import numpy as np
-        import paper_chart_geometry as geometry
-        pixels = np.array(image.convert('RGB'))
-        bgr = cv.cvtColor(pixels, cv.COLOR_RGB2BGR)
-        frame = geometry._frame(cv.cvtColor(bgr, cv.COLOR_BGR2GRAY), cv, np)
-        if frame is None:
-            result['issues'] = ['cartesian-axes-not-found', 'axis-calibration-required']
-            return result
-        box = list(frame)
-        if ocr_lines is None:
-            import paper_ocr
-            issues = []
-            ok, ocr_lines, _ = paper_ocr._default_lines(png_bytes, 'en', issues, {})
-            if not ok:
-                result['issues'] = ['axis-ocr-unavailable', 'axis-calibration-required', *issues]
-                return result
-        ticks = geometry._ticks(ocr_lines, frame, width, height, bgr, cv, np)
-        left, top, right, bottom = frame
-        for side in ('x', 'left', 'right'):
-            axis = geometry.fit_axis(ticks[side], right-left if side == 'x' else bottom-top)
-            if axis:
-                hues = [geometry._hue_color(bgr, t['bbox'], cv, np) for t in axis['usedTicks']]
-                colors_found = [h for h in hues if h is not None]
-                axis['hue'] = float(np.median(colors_found)) if colors_found else None
-                result['axes'][side] = axis
-                if axis['rejectedTicks']:
-                    result['issues'].append('axis-ocr-outlier-'+side)
-        axes = result['axes']
-        if 'x' not in axes or not any(s in axes for s in ('left', 'right')):
-            result['plotBbox'] = box
-            result['issues'].append('axis-calibration-required')
-            return result
-        xcal = _calibration(axes['x'])
-        ycals = {s: _calibration(axes[s]) for s in ('left', 'right') if s in axes}
-        hsv = cv.cvtColor(bgr, cv.COLOR_BGR2HSV)
-        roi = hsv[top+2:bottom-1, left+2:right-1]
-        colored = (roi[:, :, 1] > 90) & (roi[:, :, 2] > 70)
-        counts = np.bincount(roi[:, :, 0][colored], minlength=180)
-        selected = []
-        for hue in np.argsort(counts)[::-1].tolist():
-            if counts[hue] < 20 or any(min(abs(hue-h), 180-abs(hue-h)) < 9 for h in selected):
-                continue
-            selected.append(hue)
-            if len(selected) == 8:
-                break
-        colors = []
-        rgb_roi = pixels[top+2:bottom-1, left+2:right-1]
-        for hue in [*selected, None]:
-            if hue is None:
-                mask = (roi[:, :, 1] < 50) & (roi[:, :, 2] < 125)
-                mask[(mask.sum(axis=1) > (right-left)*.75), :] = False
-                mask[:, (mask.sum(axis=0) > (bottom-top)*.75)] = False
-            else:
-                delta = np.abs(roi[:, :, 0].astype(int)-hue)
-                mask = colored & ((delta < 6) | (delta > 174))
-            if mask.sum() < 20:
-                continue
-            rgb = np.median(rgb_roi[mask], axis=0).astype(int).tolist()
-            binding = next(iter(ycals)) if len(ycals) == 1 else 'ambiguous'
-            if len(ycals) == 2 and hue is not None:
-                matches = [s for s in ycals if axes[s].get('hue') is not None and min(abs(hue-axes[s]['hue']), 180-abs(hue-axes[s]['hue'])) < 10]
-                if len(matches) == 1:
-                    binding = matches[0]
-            colors.append({'id': 'color-'+str(len(colors)+1), 'rgb': rgb, 'axisBinding': binding, 'hue': hue})
-        box = [left+2, top+2, right-1, bottom-1]
-        result['calibrationSource'] = 'ocr-ticks'
+        setup = _automatic_setup(png_bytes, image, ocr_lines, result, width, height)
+        if setup is None: return result
+        box, xcal, ycals, colors = setup
     result['plotBbox'] = box
     region = {'x': float(box[0]), 'y': float(box[1]), 'width': float(box[2]-box[0]), 'height': float(box[3]-box[1]),
               'route': 'auto', 'manual': manual is not None}
@@ -235,71 +362,10 @@ def trace_geometry(png_bytes, *, manual=None, ocr_lines=None):
     core = Core()
     try:
         raw = core.trace(image.tobytes(), width, height, trace_colors, region, find_lines=manual is None)
-        candidates = []
-        for source, traced in zip(colors, raw.get('series', [])):
-            if 'accepted' in traced:
-                # Topology stays on findLines. Isolated curves use WPD or the
-                # measured column runs. Nearest-neighbour order is not a fallback.
-                # Short supported branches are already in accepted; do not drop
-                # them again with a width fraction.
-                accepted = [line for line in traced['accepted'] if len(line.get('points', [])) >= 2]
-            else:
-                lines = [line for line in traced.get('lines', []) if len(line.get('points', [])) >= 2]
-                pixels = traced.get('pixels', [])
-                accepted = lines or ([{'points': pixels, 'roles': [], 'gaps': [], 'colorTraceFallback': True}] if len(pixels) >= 2 else [])
-            for line in accepted:
-                candidates.append((source, line, traced))
+        candidates = _trace_candidates(colors, raw)
         budget = max(3, 480 // max(1, len(candidates)))
         for source, line, traced in candidates[:64]:
-            path, reduction, indices = _sample_path(line['points'], budget)
-            if len(path) < 2:
-                continue
-            converted = {side: core.convert({'x': xcal, 'y': cal}, path) for side, cal in ycals.items()}
-            binding = source['axisBinding']
-            intervals = core.convert({'x': xcal, 'y': ycals[binding]}, [[xp, y] for xp, yp in path for y in (yp-.5, yp+.5)]) if binding != 'ambiguous' else []
-            roles = line.get('roles') or []
-            origins = line.get('origins') or []
-            ink_support = line.get('inkSupport') or []
-            points = []
-            for index, (xp, yp) in enumerate(path):
-                src = indices[index]
-                values = {side: values[index][1] for side, values in converted.items()}
-                role = roles[src] if src < len(roles) and roles[src] else 'measured'
-                origin = origins[src] if src < len(origins) and origins[src] else ('curve-interpolated' if role == 'bridged' else 'pixel-calibrated')
-                point = {'xPixel': xp, 'yPixel': yp, 'x': next(iter(converted.values()))[index][0], 'valueCandidates': values,
-                         'origin': origin, 'role': role}
-                if src < len(ink_support):
-                    point['inkSupport'] = bool(ink_support[src])
-                if binding != 'ambiguous':
-                    point['y'] = values[binding]
-                    point['pixelInterval'] = sorted(v[1] for v in intervals[index*2:index*2+2])
-                points.append(point)
-            ambiguous = bool(traced.get('ambiguous')) or bool(traced.get('unresolved')) or binding == 'ambiguous'
-            sampling = {'observedColumns': len(line['points']), 'returnedPoints': len(points), 'tolerancePixels': .75, 'maxDeviationPixels': reduction.get('maxDeviationPixels') if reduction else 0}
-            requested = traced.get('requestedRgb') or source['rgb']
-            effective = traced.get('effectiveRgb') or source['rgb']
-            series = {'id': 'series-'+str(len(result['series'])+1), 'name': source.get('name'),
-                'color': _hex(effective), 'hue': source.get('hue'),
-                'axisBinding': binding, 'points': points, 'gapsPixels': line.get('gaps', []), 'segments': [],
-                'traceAmbiguous': ambiguous, 'sampling': sampling, 'pointKind': 'curve-sample',
-                'upstreamRoles': list(dict.fromkeys(role for role in roles if role))}
-            if traced.get('route'):
-                series['traceRoute'] = traced['route']
-                series['requestedColor'] = _hex(requested)
-                series['effectiveColor'] = _hex(effective)
-            if line.get('algorithm'):
-                series['traceAlgorithm'] = line['algorithm']
-            if traced.get('unresolved'):
-                series['unresolvedEvidence'] = traced['unresolved']
-            if traced.get('diagnostics'):
-                series['traceDiagnostics'] = traced['diagnostics']
-            if line.get('closed'):
-                series['traceClosed'] = True
-            result['series'].append(series)
-            if binding == 'ambiguous' and 'series-axis-ambiguous' not in result['issues']:
-                result['issues'].append('series-axis-ambiguous')
-            if reduction:
-                result['issues'].extend(code for code in reduction.get('issues', []) if code not in result['issues'])
+            _append_trace_series(result, source, line, traced, core, xcal, ycals, budget)
         if not result['series']:
             result['issues'].append('curves-not-found')
             return result

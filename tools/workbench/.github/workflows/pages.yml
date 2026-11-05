@@ -13,12 +13,24 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Production complexity ceiling and changed policy ratchet
+        env:
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          npm ci --prefix tools/quality --ignore-scripts
+          node --test tools/quality/complexity.test.mjs tools/quality/inventory.test.mjs
+          node tools/quality/inventory.mjs --check
+          base="$PUSH_BEFORE"
+          if [ -z "$base" ] || [[ "$base" =~ ^0+$ ]]; then base="$(git rev-parse HEAD^)"; fi
+          node tools/quality/check.mjs "$base"
       - name: Python dependencies
         run: python -m pip install -r app/local/requirements-paper-mcp.txt -r app/local/requirements-images.txt numpy==2.5.2 opencv-contrib-python==5.0.0.93
       - name: Isolated visual workflow browser dependencies
@@ -75,6 +87,19 @@ jobs:
         run: npm test
       - name: Broker and document contracts (no paid models)
         run: python -m unittest discover -s app/tests -p 'test_*.py'
+      - name: Package committed source and run ZIP acceptance
+        run: |
+          set -euo pipefail
+          git worktree add --detach "$RUNNER_TEMP/release-source" "$GITHUB_SHA"
+          node "$RUNNER_TEMP/release-source/scripts/package-release.mjs" --out-dir "$RUNNER_TEMP/release"
+          archive="$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["archive"])' "$RUNNER_TEMP/release/release-manifest.json")"
+          FALSIFY_RELEASE_ZIP="$RUNNER_TEMP/release/$archive" python app/tests/test_packaged_harness.py -v
+      - name: Preserve verified Pages assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: verified-app-dist
+          path: app/dist
+          if-no-files-found: error
   verify-windows-launcher:
     runs-on: windows-latest
     steps:
@@ -86,14 +111,17 @@ jobs:
         with:
           node-version: '24'
       - name: Adapter home and CLI directory propagation (no models)
-        run: python -m unittest discover -s app/tests -p test_adapter_environment.py -q
+        run: |
+          python -m unittest discover -s app/tests -p test_adapter_environment.py -q
+          python app/tests/test_paper_analysis_transport.py
       - name: Pinned PlotTracer embedded engine (no models)
         run: |
-          python -m pip install mini-racer==0.14.1 Pillow==12.3.0 opencv-contrib-python==5.0.0.93 PyMuPDF==1.28.2
+          python -m pip install -r app/local/requirements-paper-mcp.txt -r app/local/requirements-images.txt
           python app/tests/test_paper_plottracer.py
           python app/tests/test_paper_chart_vectors.py
           python app/tests/test_paper_chart_correction.py
           python app/tests/test_paper_visual_edit.py
+          python -m unittest discover -s app/tests -p "test_paper_chart_*.py"
       - name: Connection launcher dry-run contracts (PowerShell 7)
         shell: pwsh
         run: ./scripts/test-connection.ps1
@@ -113,8 +141,10 @@ jobs:
         shell: powershell
         run: ./scripts/test-companion-lifecycle.ps1
   verify-macos-arm:
-    runs-on: macos-26
+    runs-on: macos-15
     steps:
+      - name: Verify ARM64 runner
+        run: test "$(uname -m)" = arm64
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
@@ -123,16 +153,19 @@ jobs:
         with:
           python-version: '3.12'
       - name: Adapter home and CLI directory propagation (no models)
-        run: python -m unittest discover -s app/tests -p test_adapter_environment.py -q
+        run: |
+          python -m unittest discover -s app/tests -p test_adapter_environment.py -q
+          python app/tests/test_paper_analysis_transport.py
       - name: Portable POSIX connection tests
         run: bash scripts/test-posix-connection.sh
       - name: Pinned PlotTracer embedded engine (no models)
         run: |
-          python -m pip install mini-racer==0.14.1 Pillow==12.3.0 opencv-contrib-python==5.0.0.93 PyMuPDF==1.28.2
+          python -m pip install -r app/local/requirements-paper-mcp.txt -r app/local/requirements-images.txt
           python app/tests/test_paper_plottracer.py
           python app/tests/test_paper_chart_vectors.py
           python app/tests/test_paper_chart_correction.py
           python app/tests/test_paper_visual_edit.py
+          python -m unittest discover -s app/tests -p "test_paper_chart_*.py"
       - name: Run real macOS handler bundle test
         run: bash scripts/test-macos-handler.sh
   verify-macos-intel:
@@ -146,16 +179,19 @@ jobs:
         with:
           python-version: '3.12'
       - name: Adapter home and CLI directory propagation (no models)
-        run: python -m unittest discover -s app/tests -p test_adapter_environment.py -q
+        run: |
+          python -m unittest discover -s app/tests -p test_adapter_environment.py -q
+          python app/tests/test_paper_analysis_transport.py
       - name: Portable POSIX connection tests
         run: bash scripts/test-posix-connection.sh
       - name: Pinned PlotTracer embedded engine (no models)
         run: |
-          python -m pip install mini-racer==0.14.1 Pillow==12.3.0 opencv-contrib-python==5.0.0.93 PyMuPDF==1.28.2
+          python -m pip install -r app/local/requirements-paper-mcp.txt -r app/local/requirements-images.txt
           python app/tests/test_paper_plottracer.py
           python app/tests/test_paper_chart_vectors.py
           python app/tests/test_paper_chart_correction.py
           python app/tests/test_paper_visual_edit.py
+          python -m unittest discover -s app/tests -p "test_paper_chart_*.py"
       - name: Run real macOS handler bundle test
         run: bash scripts/test-macos-handler.sh
   deploy:
@@ -169,7 +205,10 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: verified-app-dist
+          path: app/dist
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

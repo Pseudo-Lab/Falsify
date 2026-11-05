@@ -35,6 +35,23 @@ function collectFonts(resources, pageIndex, path, fonts, seen, ancestors = new S
   });
 }
 
+function unsafeBlockRange(r,block,document) {
+  return r && (!Number.isSafeInteger(r.start) || !Number.isSafeInteger(r.end) || r.start < 0 || r.end < r.start || typeof block.text !== 'string' || r.end-r.start !== block.text.length || document.pages?.[block.source.pageIndex]?.text?.slice(r.start,r.end) !== block.text);
+}
+function validateSourceInventory(assets,regions,document) {
+  const ids = new Set(), occurrences = new Set();
+  for (const asset of assets) {
+    if (!asset.id || ids.has(asset.id)) throw new Error(`Duplicate or missing asset ID: ${asset.id}`);
+    ids.add(asset.id);
+    if (asset.source?.occurrence != null) { const key = `${asset.source.pageIndex}:${asset.source.occurrence}`; if (occurrences.has(key)) throw new Error(`Duplicate asset occurrence: ${key}`); occurrences.add(key); }
+  }
+  for (const region of regions) { if (!region?.id || ids.has(region.id)) throw new Error(`Duplicate or missing region ID: ${region?.id}`); ids.add(region.id); }
+  for (const block of document.blocks || []) { const r = block.source?.range; if (unsafeBlockRange(r,block,document)) throw new Error(`Unsafe source range for block: ${block.id}`); }
+}
+
+function validRegion(region,pdf) {
+  return !(!region || typeof region.id !== 'string' || !region.id || !Number.isInteger(region.pageIndex) || region.pageIndex<0 || region.pageIndex>=pdf.countPages() || !validBox(region.bbox) || !Array.isArray(region.blockIds));
+}
 /** Extract source-bound page crops and PDF font resources. Boxes use MuPDF display coordinates. */
 export async function readSourceAssets({bytes, document, regions=[], signal}={}) {
   abort(signal);
@@ -43,20 +60,13 @@ export async function readSourceAssets({bytes, document, regions=[], signal}={})
   document = structuredClone(document); regions = structuredClone(regions);
   if (document.sourceSha256 !== sourceSha256) throw new Error('Source hash mismatch');
   const assets = document.assets || [], fonts=[], diagnostics=[], drawings=[];
-  const ids = new Set(), occurrences = new Set();
-  for (const asset of assets) {
-    if (!asset.id || ids.has(asset.id)) throw new Error(`Duplicate or missing asset ID: ${asset.id}`);
-    ids.add(asset.id);
-    if (asset.source?.occurrence != null) { const key = `${asset.source.pageIndex}:${asset.source.occurrence}`; if (occurrences.has(key)) throw new Error(`Duplicate asset occurrence: ${key}`); occurrences.add(key); }
-  }
-  for (const region of regions) { if (!region?.id || ids.has(region.id)) throw new Error(`Duplicate or missing region ID: ${region?.id}`); ids.add(region.id); }
-  for (const block of document.blocks || []) { const r = block.source?.range; if (r && (!Number.isSafeInteger(r.start) || !Number.isSafeInteger(r.end) || r.start < 0 || r.end < r.start || typeof block.text !== 'string' || r.end-r.start !== block.text.length || document.pages?.[block.source.pageIndex]?.text?.slice(r.start,r.end) !== block.text)) throw new Error(`Unsafe source range for block: ${block.id}`); }
+  validateSourceInventory(assets,regions,document);
   let pdf;
   try {
     pdf = mupdf.Document.openDocument(snapshot, 'application/pdf').asPDF();
     if (!pdf || pdf.needsPassword()) throw new Error('Unsupported PDF');
     const seen = new Set();
-    for (let i=0; i<pdf.countPages(); i++) {
+    function collectPage(i) {
       abort(signal);
       const page = pdf.loadPage(i);
       try {
@@ -68,9 +78,10 @@ export async function readSourceAssets({bytes, document, regions=[], signal}={})
         try { page.run(dev,mupdf.Matrix.identity); dev.close(); } finally { dev.destroy(); }
       } finally { page.destroy(); }
     }
-    for (const region of regions) {
+    for (let i=0; i<pdf.countPages(); i++) collectPage(i);
+    function cropRegion(region) {
       abort(signal);
-      if (!region || typeof region.id !== 'string' || !region.id || !Number.isInteger(region.pageIndex) || region.pageIndex<0 || region.pageIndex>=pdf.countPages() || !validBox(region.bbox) || !Array.isArray(region.blockIds)) throw new TypeError('Invalid source region');
+      if (!validRegion(region,pdf)) throw new TypeError('Invalid source region');
       const page = pdf.loadPage(region.pageIndex); let device, pixmap;
       try {
         const bounds = page.getBounds(), b = region.bbox;
@@ -89,6 +100,7 @@ export async function readSourceAssets({bytes, document, regions=[], signal}={})
         assets.push({id:region.id,kind:'region',source:{pageIndex:region.pageIndex,bbox:[...b],blockIds:[...region.blockIds],assetIds:[...(region.assetIds || [])]},content:{representation:'mupdf-cropped-svg',encoding:'raster-png',dpi:216,bytes:new TextEncoder().encode(svg),width,height}});
       } finally { device?.destroy(); pixmap?.destroy(); page.destroy(); }
     }
+    for (const region of regions) cropRegion(region);
   } finally { pdf?.destroy(); }
   return {sourceSha256,assets,fonts,drawings,diagnostics};
 }

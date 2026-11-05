@@ -77,9 +77,7 @@
     return /[",\n\r]/.test(text)?'"'+text.replace(/"/g,'""')+'"':text;
   }
   function csvLine(cells){return cells.map(csvCell).join(',');}
-  function progressText(progress){
-    if(typeof progress==='string')return clip(progress,180)||'읽는 중입니다.';
-    if(finite(progress))return '읽는 중입니다. '+Math.round(Math.max(0,Math.min(1,progress))*100)+'%';
+  function progressObjectText(progress){
     if(progress&&typeof progress==='object'&&!Array.isArray(progress)){
       const done=progress.completed??progress.done, total=progress.total??progress.required;
       if(Number.isSafeInteger(done)&&Number.isSafeInteger(total)&&total>=0&&done>=0)return '읽는 중입니다. '+done+'/'+total;
@@ -87,6 +85,11 @@
       if(typeof progress.phase==='string'&&/^[a-z][a-z0-9_-]{0,31}$/.test(progress.phase))return '읽는 중입니다. · '+progress.phase;
     }
     return '읽는 중입니다.';
+  }
+  function progressText(progress){
+    if(typeof progress==='string')return clip(progress,180)||'읽는 중입니다.';
+    if(finite(progress))return '읽는 중입니다. '+Math.round(Math.max(0,Math.min(1,progress))*100)+'%';
+    return progressObjectText(progress);
   }
   function classify(error){
     if(error?.name==='AbortError')return 'abort';
@@ -140,16 +143,36 @@
     if(!bboxShape(value))return null;
     return value.map(roundPt);
   }
-  function normalizeOcr(data){
-    const extra=[];
-    let budget=500000;
-    const lines=[];
-    const sourceLines=Array.isArray(data.lines)?data.lines:[];
-    for(const raw of sourceLines){
-      if(lines.length>=4000||budget<=0){extra.push('화면: 글자 줄이 보관 한도를 넘어 이후는 생략했습니다.');break;}
-      if(!raw||typeof raw!=='object'||typeof raw.text!=='string'){extra.push('화면: 글자 줄 일부를 형식이 달라 건너뛰었습니다.');continue;}
-      const text=raw.text.length>8000?raw.text.slice(0,8000):raw.text;
-      budget-=text.length;
+  function normalizeOcrTable(raw,cells){
+      const table={cells};
+      if(Number.isSafeInteger(raw.rows)&&raw.rows>=0&&raw.rows<=10000)table.rows=raw.rows;
+      if(Number.isSafeInteger(raw.columns)&&raw.columns>=0&&raw.columns<=1000)table.columns=raw.columns;
+      const bbox=copyBBox(raw.bbox);
+      if(bbox)table.bbox=bbox;
+      const sourceBbox=copyBBox(raw.sourceBbox);if(sourceBbox)table.sourceBbox=sourceBbox;
+    return table;
+  }
+  function appendOcrCellGeometry(next,cell){
+        if(cell.confidence==null||finite(cell.confidence))next.confidence=finite(cell.confidence)?cell.confidence:null;
+        const bbox=copyBBox(cell.bbox);
+        if(bbox)next.bbox=bbox;
+        const sourceBbox=copyBBox(cell.sourceBbox);if(sourceBbox)next.sourceBbox=sourceBbox;
+  }
+  function normalizeOcrCell(cell,text,extra){
+        const rowSpan=cell.rowSpan==null?1:cell.rowSpan;
+        const columnSpan=cell.columnSpan==null?1:cell.columnSpan;
+        if(!Number.isSafeInteger(rowSpan)||!Number.isSafeInteger(columnSpan)||rowSpan<1||columnSpan<1){extra.push('화면: 병합 정보가 달라 그 칸은 한 칸으로 뒀습니다.');}
+        const next={row:cell.row,column:cell.column,rowSpan:Number.isSafeInteger(rowSpan)&&rowSpan>=1?rowSpan:1,columnSpan:Number.isSafeInteger(columnSpan)&&columnSpan>=1?columnSpan:1,text};
+        appendOcrCellGeometry(next,cell);
+    return next;
+  }
+  function appendOcrLineGeometry(line,raw){
+      const bbox=copyBBox(raw.bbox);
+      if(bbox)line.bbox=bbox;
+      const sourceBbox=copyBBox(raw.sourceBbox);if(sourceBbox)line.sourceBbox=sourceBbox;
+      if(Array.isArray(raw.polygon)&&raw.polygon.length<=16&&raw.polygon.every(p=>Array.isArray(p)&&p.length===2&&p.every(finite)))line.polygon=raw.polygon.map(p=>p.slice());
+  }
+  function normalizeOcrLine(raw,text,extra){
       let confidence=null;
       if(raw.confidence!=null){
         if(finite(raw.confidence))confidence=raw.confidence;
@@ -160,12 +183,29 @@
       if(raw.spacing&&Array.isArray(raw.spacing.methods))line.spacing={methods:raw.spacing.methods.filter(x=>typeof x==='string').slice(0,10),numericCuts:(raw.spacing.numericCuts||[]).filter(Number.isSafeInteger),nonWhitespacePreserved:true};
       if(Array.isArray(raw.tokens))line.tokens=raw.tokens.slice(0,8000).filter(t=>t&&typeof t.text==='string').map(t=>({text:t.text,bbox:copyBBox(t.bbox),sourceBbox:copyBBox(t.sourceBbox)}));
       if(typeof raw.id==='string'&&raw.id.length>=1&&raw.id.length<=160&&!/[\u0000-\u001f]/.test(raw.id))line.id=raw.id;
-      const bbox=copyBBox(raw.bbox);
-      if(bbox)line.bbox=bbox;
-      const sourceBbox=copyBBox(raw.sourceBbox);if(sourceBbox)line.sourceBbox=sourceBbox;
-      if(Array.isArray(raw.polygon)&&raw.polygon.length<=16&&raw.polygon.every(p=>Array.isArray(p)&&p.length===2&&p.every(finite)))line.polygon=raw.polygon.map(p=>p.slice());
+      appendOcrLineGeometry(line,raw);
+    return line;
+  }
+  function normalizeOcrLines(data,extra){
+    let budget=500000;
+    const lines=[];
+    const sourceLines=Array.isArray(data.lines)?data.lines:[];
+    for(const raw of sourceLines){
+      if(lines.length>=4000||budget<=0){extra.push('화면: 글자 줄이 보관 한도를 넘어 이후는 생략했습니다.');break;}
+      if(!raw||typeof raw!=='object'||typeof raw.text!=='string'){extra.push('화면: 글자 줄 일부를 형식이 달라 건너뛰었습니다.');continue;}
+      const text=raw.text.length>8000?raw.text.slice(0,8000):raw.text;
+      budget-=text.length;
+      const line=normalizeOcrLine(raw,text,extra);
       lines.push(line);
     }
+    return {lines,budget};
+  }
+  function validOcrCell(cell,extra){
+        if(!cell||typeof cell!=='object'||typeof cell.text!=='string'){extra.push('화면: 표 칸 일부를 형식이 달라 건너뛰었습니다.');return false;}
+        if(!Number.isSafeInteger(cell.row)||!Number.isSafeInteger(cell.column)||cell.row<0||cell.column<0||cell.row>10000||cell.column>1000){extra.push('화면: 표 칸 위치를 확인하지 못해 건너뛰었습니다.');return false;}
+    return true;
+  }
+  function normalizeOcrTables(data,extra,budget){
     const tables=[];
     const sourceTables=Array.isArray(data.tables)?data.tables:[];
     for(const raw of sourceTables.slice(0,20)){
@@ -173,29 +213,22 @@
       const cells=[];
       for(const cell of Array.isArray(raw.cells)?raw.cells:[]){
         if(cells.length>=4000||budget<=0){extra.push('화면: 표 칸이 보관 한도를 넘어 이후는 생략했습니다.');break;}
-        if(!cell||typeof cell!=='object'||typeof cell.text!=='string'){extra.push('화면: 표 칸 일부를 형식이 달라 건너뛰었습니다.');continue;}
-        if(!Number.isSafeInteger(cell.row)||!Number.isSafeInteger(cell.column)||cell.row<0||cell.column<0||cell.row>10000||cell.column>1000){extra.push('화면: 표 칸 위치를 확인하지 못해 건너뛰었습니다.');continue;}
+        if(!validOcrCell(cell,extra))continue;
         const text=cell.text.length>8000?cell.text.slice(0,8000):cell.text;
         budget-=text.length;
-        const rowSpan=cell.rowSpan==null?1:cell.rowSpan;
-        const columnSpan=cell.columnSpan==null?1:cell.columnSpan;
-        if(!Number.isSafeInteger(rowSpan)||!Number.isSafeInteger(columnSpan)||rowSpan<1||columnSpan<1){extra.push('화면: 병합 정보가 달라 그 칸은 한 칸으로 뒀습니다.');}
-        const next={row:cell.row,column:cell.column,rowSpan:Number.isSafeInteger(rowSpan)&&rowSpan>=1?rowSpan:1,columnSpan:Number.isSafeInteger(columnSpan)&&columnSpan>=1?columnSpan:1,text};
-        if(cell.confidence==null||finite(cell.confidence))next.confidence=finite(cell.confidence)?cell.confidence:null;
-        const bbox=copyBBox(cell.bbox);
-        if(bbox)next.bbox=bbox;
-        const sourceBbox=copyBBox(cell.sourceBbox);if(sourceBbox)next.sourceBbox=sourceBbox;
+        const next=normalizeOcrCell(cell,text,extra);
         cells.push(next);
       }
-      const table={cells};
-      if(Number.isSafeInteger(raw.rows)&&raw.rows>=0&&raw.rows<=10000)table.rows=raw.rows;
-      if(Number.isSafeInteger(raw.columns)&&raw.columns>=0&&raw.columns<=1000)table.columns=raw.columns;
-      const bbox=copyBBox(raw.bbox);
-      if(bbox)table.bbox=bbox;
-      const sourceBbox=copyBBox(raw.sourceBbox);if(sourceBbox)table.sourceBbox=sourceBbox;
+      const table=normalizeOcrTable(raw,cells);
       tables.push(table);
     }
     if(sourceTables.length>20)extra.push('화면: 표는 20개까지만 보관했습니다.');
+    return tables;
+  }
+  function normalizeOcr(data){
+    const extra=[];
+    const {lines,budget}=normalizeOcrLines(data,extra);
+    const tables=normalizeOcrTables(data,extra,budget);
     return {
       schema:'falsify.ocr-page.v1',
       status:data.status,
@@ -207,12 +240,22 @@
       issues:takeIssues(data.issues,extra)
     };
   }
-  function normalizeChart(data){
-    const extra=[];
-    if(!Array.isArray(data.columns)||data.columns.some(cell=>typeof cell!=='string'))return null;
-    if(!Array.isArray(data.rows))return null;
-    const columns=data.columns.slice(0,64).map(cell=>cell.length>500?cell.slice(0,500)+'…':cell);
-    if(data.columns.length>64)extra.push('화면: 열은 64개까지만 보관했습니다.');
+  function chartNumericCell(raw){
+      const cell={row:raw.row,column:raw.column,raw:clip(raw.raw,500),value:raw.value,unit:raw.unit==null?null:(typeof raw.unit==='string'?clip(raw.unit,40):null),origin:raw.origin==='model-estimate'?'model-estimate':(typeof raw.origin==='string'?clip(raw.origin,40):null)};
+    return cell;
+  }
+  function chartNumericCells(data,extra){
+    const numericCells=[];
+    for(const raw of Array.isArray(data.numericCells)?data.numericCells:[]){
+      if(numericCells.length>=5000)break;
+      if(!raw||typeof raw!=='object'||!Number.isSafeInteger(raw.row)||!Number.isSafeInteger(raw.column)||raw.row<0||raw.column<0)continue;
+      if(typeof raw.raw!=='string'||!finite(raw.value)){extra.push('화면: 유한하지 않은 추정 숫자는 빼 두었습니다.');continue;}
+      const cell=chartNumericCell(raw);
+      numericCells.push(cell);
+    }
+    return numericCells;
+  }
+  function chartRows(data,columns,extra){
     const rows=[];
     for(const raw of data.rows){
       if(rows.length>=500){extra.push('화면: 행은 500개까지만 보관했습니다.');break;}
@@ -225,14 +268,16 @@
         return null;
       }));
     }
-    const numericCells=[];
-    for(const raw of Array.isArray(data.numericCells)?data.numericCells:[]){
-      if(numericCells.length>=5000)break;
-      if(!raw||typeof raw!=='object'||!Number.isSafeInteger(raw.row)||!Number.isSafeInteger(raw.column)||raw.row<0||raw.column<0)continue;
-      if(typeof raw.raw!=='string'||!finite(raw.value)){extra.push('화면: 유한하지 않은 추정 숫자는 빼 두었습니다.');continue;}
-      const cell={row:raw.row,column:raw.column,raw:clip(raw.raw,500),value:raw.value,unit:raw.unit==null?null:(typeof raw.unit==='string'?clip(raw.unit,40):null),origin:raw.origin==='model-estimate'?'model-estimate':(typeof raw.origin==='string'?clip(raw.origin,40):null)};
-      numericCells.push(cell);
-    }
+    return rows;
+  }
+  function normalizeChart(data){
+    const extra=[];
+    if(!Array.isArray(data.columns)||data.columns.some(cell=>typeof cell!=='string'))return null;
+    if(!Array.isArray(data.rows))return null;
+    const columns=data.columns.slice(0,64).map(cell=>cell.length>500?cell.slice(0,500)+'…':cell);
+    if(data.columns.length>64)extra.push('화면: 열은 64개까지만 보관했습니다.');
+    const rows=chartRows(data,columns,extra);
+    const numericCells=chartNumericCells(data,extra);
     const axis=value=>{
       const item=value&&typeof value==='object'&&!Array.isArray(value)?value:{};
       const scale=['linear','log','multiple','unknown'].includes(item.scale)?item.scale:null;
@@ -259,13 +304,17 @@
       ...(data.geometry&&typeof data.geometry==='object'?{geometry:JSON.parse(JSON.stringify(data.geometry))}:{})
     };
   }
+  function validResultBinding(result,request){
+    if(!result||typeof result!=='object'||Array.isArray(result))return false;
+    if(result.paperId!==request.paperId||result.fileHash!==request.fileHash||result.kind!==request.kind)return false;
+    if(result.pageIndex!==request.pageIndex)return false;
+    if(typeof result.analysisId!=='string'||!AID.test(result.analysisId))return false;
+    if(request.kind==='chart'){if(!sameBox(request.bbox,result.bbox))return false;}
+    else if(!(result.bbox==null||bboxShape(result.bbox)))return false;
+    return true;
+  }
   function normalizeResult(result,request){
-    if(!result||typeof result!=='object'||Array.isArray(result))return null;
-    if(result.paperId!==request.paperId||result.fileHash!==request.fileHash||result.kind!==request.kind)return null;
-    if(result.pageIndex!==request.pageIndex)return null;
-    if(typeof result.analysisId!=='string'||!AID.test(result.analysisId))return null;
-    if(request.kind==='chart'){if(!sameBox(request.bbox,result.bbox))return null;}
-    else if(!(result.bbox==null||bboxShape(result.bbox)))return null;
+    if(!validResultBinding(result,request))return null;
     const inputImage=copyInputImage(result.inputImage);
     if(!inputImage)return null;
     const data=result.data;
@@ -481,6 +530,18 @@
       else sayRegion();
       syncDisabled();
     }
+    function validPreview(next,wanted){
+        if(!next||!next.canvas||!finite(next.width)||!finite(next.height)||next.width<=0||next.height<=0||!Number.isSafeInteger(next.page)||!Number.isSafeInteger(next.pages)||next.pages<1){
+          say(previewStatus,'PDF 미리보기를 열지 못했습니다.',true);return false;
+        }
+        if(next.page!==wanted){say(previewStatus,'쪽 번호를 확인하세요.',true);return false;}
+      return true;
+    }
+    function previewReady(src){
+      if(!details.open){sayRegion();return false;}
+      if(!src){say(previewStatus,readSource()?'파일 해시를 확인하세요.':'PDF를 선택하세요.',!!readSource());return false;}
+      return true;
+    }
     async function loadPreview(){
       reconcile(false);
       const mine=++previewSerial;
@@ -489,18 +550,14 @@
       stage.replaceChildren();
       view=null;overlay=null;pages=null;
       syncDisabled();
-      if(!details.open){sayRegion();return;}
-      if(!src){say(previewStatus,readSource()?'파일 해시를 확인하세요.':'PDF를 선택하세요.',!!readSource());return;}
+      if(!previewReady(src))return;
       const previewFn=root.FalsifyBlueVisual&&root.FalsifyBlueVisual.previewBluePage;
       if(typeof previewFn!=='function'){say(previewStatus,'시각 미리보기가 없습니다.',true);return;}
       say(previewStatus,'미리보기를 준비 중입니다.');
       try{
         const next=await previewFn({file:src.file,fileHash:src.fileHash,page:wanted});
         if(mine!==previewSerial||!details.open||currentHash()!==src.fileHash||page!==wanted)return;
-        if(!next||!next.canvas||!finite(next.width)||!finite(next.height)||next.width<=0||next.height<=0||!Number.isSafeInteger(next.page)||!Number.isSafeInteger(next.pages)||next.pages<1){
-          say(previewStatus,'PDF 미리보기를 열지 못했습니다.',true);return;
-        }
-        if(next.page!==wanted){say(previewStatus,'쪽 번호를 확인하세요.',true);return;}
+        if(!validPreview(next,wanted))return;
         view={canvas:next.canvas,width:next.width,height:next.height,page:next.page,pages:next.pages,fileHash:src.fileHash};
         pages=next.pages;
         pageState.textContent=next.page+' / '+next.pages+'쪽';
@@ -545,14 +602,7 @@
       table.append(body);
       parent.append(table);
     }
-    function renderOcrTable(parent,table){
-      const rows=table.rows,cols=table.columns;
-      if(!Number.isSafeInteger(rows)||!Number.isSafeInteger(cols)||rows<1||cols<1||rows>200||cols>40||rows*cols>4000){
-        parent.append(el('p','muted','표가 화면 한도를 넘어 칸 목록만 보존합니다. JSON에서 확인할 수 있습니다.'));
-        return;
-      }
-      const occupied=Array.from({length:rows},()=>Array(cols).fill(false));
-      const origin=Array.from({length:rows},()=>Array(cols).fill(null));
+    function markOcrCells(table,rows,cols,occupied,origin){
       for(const cell of table.cells){
         if(cell.row>=rows||cell.column>=cols)continue;
         const rs=Math.min(cell.rowSpan,rows-cell.row),cs=Math.min(cell.columnSpan,cols-cell.column);
@@ -562,6 +612,16 @@
         for(let i=0;i<rs;i++)for(let j=0;j<cs;j++)occupied[cell.row+i][cell.column+j]=true;
         origin[cell.row][cell.column]={text:cell.text,rs,cs};
       }
+    }
+    function renderOcrTable(parent,table){
+      const rows=table.rows,cols=table.columns;
+      if(!Number.isSafeInteger(rows)||!Number.isSafeInteger(cols)||rows<1||cols<1||rows>200||cols>40||rows*cols>4000){
+        parent.append(el('p','muted','표가 화면 한도를 넘어 칸 목록만 보존합니다. JSON에서 확인할 수 있습니다.'));
+        return;
+      }
+      const occupied=Array.from({length:rows},()=>Array(cols).fill(false));
+      const origin=Array.from({length:rows},()=>Array(cols).fill(null));
+      markOcrCells(table,rows,cols,occupied,origin);
       const grid=el('table');
       for(let r=0;r<rows;r++){
         const tr=el('tr');
@@ -576,22 +636,26 @@
       }
       parent.append(grid);
     }
-    function csvFor(payload){
-      if(payload.kind==='chart'){
+    function chartCsv(payload){
         const lines=[];
         if(payload.data.columns.length)lines.push(csvLine(payload.data.columns));
         for(const row of payload.data.rows)lines.push(csvLine(row));
         return '\uFEFF'+lines.join('\n');
+          }
+    function appendOcrTableCsv(payload,lines){
+      for(const table of payload.data.tables)for(const cell of table.cells){
+        const box=cell.bbox||[];
+        lines.push(csvLine(['cell',cell.text,cell.text,cell.confidence??'',cell.row,cell.column,cell.rowSpan,cell.columnSpan,box[0]??'',box[1]??'',box[2]??'',box[3]??'']));
       }
+    }
+    function csvFor(payload){
+      if(payload.kind==='chart')return chartCsv(payload);
       const lines=[csvLine(['record','rawText','text','confidence','row','column','rowSpan','columnSpan','x0','y0','x1','y1'])];
       for(const line of payload.data.lines){
         const box=line.bbox||[];
         lines.push(csvLine(['line',line.text,line.displayText||line.text,line.confidence,'' ,'' ,'' ,'' ,box[0]??'',box[1]??'',box[2]??'',box[3]??'']));
       }
-      for(const table of payload.data.tables)for(const cell of table.cells){
-        const box=cell.bbox||[];
-        lines.push(csvLine(['cell',cell.text,cell.text,cell.confidence??'',cell.row,cell.column,cell.rowSpan,cell.columnSpan,box[0]??'',box[1]??'',box[2]??'',box[3]??'']));
-      }
+      appendOcrTableCsv(payload,lines);
       return '\uFEFF'+lines.join('\n');
     }
     function parseValue(raw){
@@ -691,17 +755,27 @@
       if(x<-slack||y<-slack||x>img.width+slack||y>img.height+slack)return null;
       return {x:roundPt(Math.max(0,Math.min(img.width,x))),y:roundPt(Math.max(0,Math.min(img.height,y)))};
     }
-    function sampleColor(event){
-      const canvas=view?.canvas;
-      const rect=canvas?.getBoundingClientRect?.();
-      if(!canvas||!rect||!(rect.width>0)||!(rect.height>0)||typeof canvas.getContext!=='function')return null;
+    function samplePixel(event,rect,width,height){
+      const x=Math.floor((event.clientX-rect.left)/rect.width*width);
+      const y=Math.floor((event.clientY-rect.top)/rect.height*height);
+      if(x<0||y<0||x>=width||y>=height)return null;
+      return {x,y};
+    }
+    function sampleCanvas(canvas){
       const width=canvas.width,height=canvas.height;
       if(!Number.isSafeInteger(width)||!Number.isSafeInteger(height)||width<1||height<1)return null;
       const ctx=canvas.getContext('2d');
       if(!ctx||typeof ctx.getImageData!=='function')return null;
-      const x=Math.floor((event.clientX-rect.left)/rect.width*width);
-      const y=Math.floor((event.clientY-rect.top)/rect.height*height);
-      if(x<0||y<0||x>=width||y>=height)return null;
+      return {width,height,ctx};
+    }
+    function sampleColor(event){
+      const canvas=view?.canvas;
+      const rect=canvas?.getBoundingClientRect?.();
+      if(!canvas||!rect||!(rect.width>0)||!(rect.height>0)||typeof canvas.getContext!=='function')return null;
+      const sample=sampleCanvas(canvas);if(!sample)return null;
+      const {width,height,ctx}=sample;
+      const pixel=samplePixel(event,rect,width,height);if(!pixel)return null;
+      const {x,y}=pixel;
       let data;
       try{data=ctx.getImageData(x,y,1,1)?.data;}catch{return null;}
       if(!data||data.length<3)return null;
@@ -745,29 +819,18 @@
       showPixel(key);
       showArmed();
     }
-    function axisPair(a,b,scale,extent){
+    function axisIncomplete(a,b){
       if(!a||!b||!finite(a.pixel)||!finite(b.pixel)||!finite(a.value)||!finite(b.value))return {error:'X1, X2, Y1, Y2 위치와 값을 모두 지정하세요.'};
+      return null;
+    }
+    function axisPair(a,b,scale,extent){
+      const incomplete=axisIncomplete(a,b);if(incomplete)return incomplete;
       if(a.pixel<0||b.pixel<0||a.pixel>extent||b.pixel>extent)return {error:'집은 점이 선택한 그래프 영역 밖입니다.'};
       if(a.pixel===b.pixel||a.value===b.value)return {error:'같은 축의 두 점과 값은 달라야 합니다.'};
       if(scale==='log'&&(a.value<=0||b.value<=0))return {error:'로그 눈금에는 0보다 큰 값이 필요합니다.'};
       return {points:[{pixel:a.pixel,value:a.value},{pixel:b.pixel,value:b.value}]};
     }
-    function buildChartOptions(){
-      const src=sourceToken();
-      const payload=displayed;
-      const box=region&&src&&region.page===page&&region.fileHash===src.fileHash?region.bbox:null;
-      const boundOk=!cal.bound||(cal.bound.imageSha256===payload?.inputImage?.sha256&&cal.bound.fileHash===payload?.fileHash&&cal.bound.pageIndex===payload?.pageIndex&&sameBox(cal.bound.bbox,payload?.bbox));
-      if(!payload||payload.kind!=='chart'||!src||payload.fileHash!==src.fileHash||payload.pageIndex!==page-1||!box||!sameBox(box,payload.bbox)||!boundOk){
-        return {error:'다른 영역이나 파일의 이미지로는 보정하지 않습니다.'};
-      }
-      const xScale=cal.xScale==='log'?'log':'linear';
-      const yScale=cal.yScale==='log'?'log':'linear';
-      const x=axisPair(cal.points.x1,cal.points.x2,xScale,payload.inputImage.width);
-      if(x.error)return x;
-      const y=axisPair(cal.points.y1,cal.points.y2,yScale,payload.inputImage.height);
-      if(y.error)return y;
-      if(!cal.series.length)return {error:'곡선을 하나 이상 지정하세요.'};
-      if(cal.series.length>8)return {error:'곡선은 8개까지입니다.'};
+    function chartSeries(){
       const series=[];
       const seen=new Set();
       for(const item of cal.series){
@@ -778,6 +841,31 @@
         if(name)next.name=name;
         series.push(next);
       }
+      return {series};
+    }
+    function chartBindingError(payload,src,box,boundOk){
+      if(!payload||payload.kind!=='chart'||!src||payload.fileHash!==src.fileHash||payload.pageIndex!==page-1||!box||!sameBox(box,payload.bbox)||!boundOk){
+        return {error:'다른 영역이나 파일의 이미지로는 보정하지 않습니다.'};
+      }
+      return null;
+    }
+    function calibrationBound(payload){return !cal.bound||(cal.bound.imageSha256===payload?.inputImage?.sha256&&cal.bound.fileHash===payload?.fileHash&&cal.bound.pageIndex===payload?.pageIndex&&sameBox(cal.bound.bbox,payload?.bbox));}
+    function buildChartOptions(){
+      const src=sourceToken();
+      const payload=displayed;
+      const box=region&&src&&region.page===page&&region.fileHash===src.fileHash?region.bbox:null;
+      const boundOk=calibrationBound(payload);
+      const bindingError=chartBindingError(payload,src,box,boundOk);if(bindingError)return bindingError;
+      const xScale=cal.xScale==='log'?'log':'linear';
+      const yScale=cal.yScale==='log'?'log':'linear';
+      const x=axisPair(cal.points.x1,cal.points.x2,xScale,payload.inputImage.width);
+      if(x.error)return x;
+      const y=axisPair(cal.points.y1,cal.points.y2,yScale,payload.inputImage.height);
+      if(y.error)return y;
+      if(!cal.series.length)return {error:'곡선을 하나 이상 지정하세요.'};
+      if(cal.series.length>8)return {error:'곡선은 8개까지입니다.'};
+      const builtSeries=chartSeries();if(builtSeries.error)return builtSeries;
+      const series=builtSeries.series;
       return {options:{imageSha256:payload.inputImage.sha256,calibration:{x:{scale:xScale,points:x.points},y:{scale:yScale,points:y.points}},series}};
     }
     function reread(){
@@ -845,19 +933,7 @@
       showArmed();
       rebuildSeries();
     }
-    function paint(payload){
-      const dropCal=payload.kind!=='chart'||(cal.bound&&(cal.bound.imageSha256!==payload.inputImage.sha256||cal.bound.fileHash!==payload.fileHash||cal.bound.pageIndex!==payload.pageIndex||!sameBox(cal.bound.bbox,payload.bbox)));
-      calView=null;
-      if(dropCal)resetCalibration();
-      resultBox.replaceChildren();
-      resultBox.hidden=false;
-      const head=el('h3',null,(payload.pageIndex+1)+'쪽 · '+(payload.kind==='ocr'?'글자 읽기':'그래프')+(payload.data.status==='partial'?' · 일부만 읽힘':''));
-      const derivation=el('p','muted',DERIVATION);
-      const provenance=el('p','muted',provenanceLine(payload.data.provenance)+' · 입력 이미지 '+payload.inputImage.width+'×'+payload.inputImage.height+' px · '+payload.inputImage.dpi+' dpi');
-      const hash=el('code',null,payload.inputImage.sha256);
-      const sourceDetails=el('details','red-help');sourceDetails.append(el('summary',null,'출처·모델'),derivation,provenance,hash);
-      resultBox.append(head,el('p','muted',payload.kind==='ocr'?'이미지에서 읽은 글자입니다. 위 원본과 대조할 수 있습니다.':'그래프에서 읽은 추정값입니다. 위 원본과 대조할 수 있습니다.'));
-      if(payload.kind==='ocr'){
+    function paintOcr(payload){
         const raw=el('pre',null,payload.data.lines.map(line=>line.displayText||line.text).join('\n'));
         raw.style.whiteSpace='pre-wrap';
         raw.style.overflowWrap='anywhere';
@@ -879,7 +955,8 @@
           resultBox.append(more);
         }
         for(const table of payload.data.tables)renderOcrTable(resultBox,table);
-      }else{
+    }
+    function paintChart(payload,sourceDetails){
         if(payload.data.title)resultBox.append(el('p',null,'읽은 제목: '+payload.data.title));
         const axisText=side=>{
           const item=payload.data.axes[side];
@@ -914,7 +991,20 @@
           more.append(raw);
           resultBox.append(more);
         }
-      }
+    }
+    function paint(payload){
+      const dropCal=payload.kind!=='chart'||(cal.bound&&(cal.bound.imageSha256!==payload.inputImage.sha256||cal.bound.fileHash!==payload.fileHash||cal.bound.pageIndex!==payload.pageIndex||!sameBox(cal.bound.bbox,payload.bbox)));
+      calView=null;
+      if(dropCal)resetCalibration();
+      resultBox.replaceChildren();
+      resultBox.hidden=false;
+      const head=el('h3',null,(payload.pageIndex+1)+'쪽 · '+(payload.kind==='ocr'?'글자 읽기':'그래프')+(payload.data.status==='partial'?' · 일부만 읽힘':''));
+      const derivation=el('p','muted',DERIVATION);
+      const provenance=el('p','muted',provenanceLine(payload.data.provenance)+' · 입력 이미지 '+payload.inputImage.width+'×'+payload.inputImage.height+' px · '+payload.inputImage.dpi+' dpi');
+      const hash=el('code',null,payload.inputImage.sha256);
+      const sourceDetails=el('details','red-help');sourceDetails.append(el('summary',null,'출처·모델'),derivation,provenance,hash);
+      resultBox.append(head,el('p','muted',payload.kind==='ocr'?'이미지에서 읽은 글자입니다. 위 원본과 대조할 수 있습니다.':'그래프에서 읽은 추정값입니다. 위 원본과 대조할 수 있습니다.'));
+      if(payload.kind==='ocr')paintOcr(payload);else paintChart(payload,sourceDetails);
       const row=el('div','button-row');
       const jsonBtn=el('button','button secondary','JSON 다운로드');
       jsonBtn.type='button';
@@ -945,6 +1035,19 @@
       if(live(token,src,mineAttempt)&&payload.fileHash===currentHash())await emitResult(payload);
       return true;
     }
+    function validRunningPoll(data,polls){
+          if(ID.test(data.id)&&data.id!==held.id){held=null;say(progress,'작업 식별자가 달라 잇지 않았습니다.',true);errorCode='poll';return false;}
+
+          if(polls>=MAX_POLLS){say(progress,'아직 읽는 중입니다. 다시 누르면 같은 작업을 조회합니다.');errorCode='poll';return false;}
+      return true;
+    }
+    function pollRejected(error){if(classify(error)!=='rejected')return false;held=null;say(progress,'결과를 확인하지 못했습니다. 이전 결과는 그대로입니다.',true);errorCode='poll';return true;}
+    function pollRetriesExhausted(failures){if(failures<GET_TRIES)return false;say(progress,'진행을 확인하지 못했습니다. 자동으로 다시 보내지 않습니다. 다시 누르면 같은 작업을 조회합니다.',true);errorCode='poll';return true;}
+    function cancelStalePoll(data){
+          const job=held;
+          held=null;
+          if(data?.state==='running'&&job&&ID.test(job.id))void job.session.request(cancelPath(job.id),{}).catch(()=>{});
+    }
     async function watch(token,src,mineAttempt,signal){
       let failures=0,polls=0;
       while(held&&live(token,src,mineAttempt)){
@@ -952,23 +1055,20 @@
         try{data=await held.session.request(jobPath(held.id),null,{signal});failures=0;}
         catch(error){
           if(signal.aborted||!live(token,src,mineAttempt))return;
-          if(classify(error)==='rejected'){held=null;say(progress,'결과를 확인하지 못했습니다. 이전 결과는 그대로입니다.',true);errorCode='poll';return;}
+          if(pollRejected(error))return;
           failures++;
-          if(failures>=GET_TRIES){say(progress,'진행을 확인하지 못했습니다. 자동으로 다시 보내지 않습니다. 다시 누르면 같은 작업을 조회합니다.',true);errorCode='poll';return;}
+          if(pollRetriesExhausted(failures))return;
           await pause(POLL_MS,signal);
           continue;
         }
         if(!live(token,src,mineAttempt)){
-          const job=held;
-          held=null;
-          if(data?.state==='running'&&job&&ID.test(job.id))void job.session.request(cancelPath(job.id),{}).catch(()=>{});
+          cancelStalePoll(data);
           return;
         }
         if(data?.progress!=null)say(progress,progressText(data.progress));
         if(data?.state==='running'){
-          if(ID.test(data.id)&&data.id!==held.id){held=null;say(progress,'작업 식별자가 달라 잇지 않았습니다.',true);errorCode='poll';return;}
+          if(!validRunningPoll(data,polls+1))return;
           polls++;
-          if(polls>=MAX_POLLS){say(progress,'아직 읽는 중입니다. 다시 누르면 같은 작업을 조회합니다.');errorCode='poll';return;}
           await pause(POLL_MS,signal);
           continue;
         }
@@ -997,24 +1097,83 @@
         syncDisabled();
       }
     }
-    async function start(kind, chartOptions){
-      if(parentBusy||flight)return;
-      reconcile();
-      const src=sourceToken();
-      if(!src){say(progress,readSource()?'파일 해시를 확인하세요.':'PDF를 선택하세요.',!!readSource());errorCode='waiting';return;}
-      if(chartOptions!==undefined){
+    function freshChartOptions(src,chartOptions){
         const boxNow=region&&region.page===page&&region.fileHash===src.fileHash?region.bbox:null;
         const payload=displayed;
         const fresh=!!(payload&&payload.kind==='chart'&&payload.fileHash===src.fileHash&&payload.pageIndex===page-1&&boxNow&&sameBox(boxNow,payload.bbox)&&chartOptions&&chartOptions.imageSha256===payload.inputImage.sha256);
-        if(!fresh){say(progress,'다른 영역이나 파일의 이미지로는 보정하지 않습니다.',true);errorCode='stale';return;}
+        if(!fresh){say(progress,'다른 영역이나 파일의 이미지로는 보정하지 않습니다.',true);errorCode='stale';return false;}
+      return true;
+    }
+    function availableSession(session){
+      if(!session||typeof session.request!=='function'){say(progress,'PC 연결 후 다시 읽으세요.',true);errorCode='unavailable';return false;}
+      if(typeof getCapabilities==='function'&&!getCapabilities()?.paperEnrichment?.supported){say(progress,'PC 연결 프로그램을 최신 버전으로 업데이트하세요.',true);errorCode='unavailable';return false;}
+      return true;
+    }
+    function handlePostFailure(error){
+          const why=classify(error);
+          if(why==='path'){held=null;say(progress,'이 화면의 연결 모듈이 스캔·그래프 경로를 아직 허용하지 않습니다.',true);errorCode='path';return;}
+          if(why==='lost'){say(progress,'연결이 끊겼습니다. 다시 누르면 같은 작업의 결과를 확인합니다.',true);errorCode='lost';return;}
+          held=null;
+          say(progress,'요청이 접수되지 않았습니다. 이전 결과는 그대로입니다.',true);errorCode='rejected';
+          return;
+    }
+    function handlePostedTerminal(posted){
+        if(posted?.state==='cancelled'){held=null;say(progress,'읽기를 취소했습니다.');errorCode='cancelled';return;}
+        if(posted?.state==='failed'){held=null;say(progress,failureText(posted.error),true);errorCode='failed';return;}
+        say(progress,'접수 상태를 확인하지 못했습니다. 다시 누르면 같은 작업을 조회합니다.',true);errorCode='lost';
+    }
+    function startSourceReady(src){if(src)return true;say(progress,readSource()?'파일 해시를 확인하세요.':'PDF를 선택하세요.',!!readSource());errorCode='waiting';return false;}
+    function resumableJob(src){return held&&held.fileHash===src.fileHash&&held.revision===src.revision;}
+    function jobRegion(kind,src){return kind==='chart'?(region&&region.page===page&&region.fileHash===src.fileHash?region.bbox:null):null;}
+    function preparedForSource(prepared,src){if(prepared&&prepared.fileHash===src.fileHash&&paperIdOk(prepared.paperId))return true;say(progress,'원본 파일이 바뀌어 보내지 않았습니다. 이전 결과는 그대로입니다.',true);errorCode='stale';return false;}
+    function ignorePostFailure(signal,token,src,mineAttempt){return signal.aborted||!live(token,src,mineAttempt)||stopReason;}
+    function cancelStalePost(posted,session){
+          if(posted&&posted.state==='running'&&ID.test(posted.id))void session.request(cancelPath(posted.id),{}).catch(()=>{});
+    }
+    function finishFlight(mine){if(flight===mine){flight=0;controller=null;}syncDisabled();}
+    function prepareJobSwitch(src,chartOptions){
+      if(chartOptions!==undefined){
+        if(!freshChartOptions(src,chartOptions))return 'invalid';
         if(held)invalidate('switch');
-      }else if(held&&held.fileHash===src.fileHash&&held.revision===src.revision){await resume(src);return;}
+      }else if(resumableJob(src))return 'resume';
+      return 'continue';
+    }
+    function jobRegionReady(kind,box){if(kind!=='chart'||box)return true;say(progress,'그래프는 미리보기에서 영역을 드래그한 뒤 읽습니다.',true);errorCode='region';return false;}
+    function reportPrepareFailure(token,src,mineAttempt){if(live(token,src,mineAttempt)){say(progress,'논문을 준비하지 못했습니다. 이전 결과는 그대로입니다.',true);errorCode='prepare';}}
+    function ignoreStartFailure(error,token,src,mineAttempt){return error?.name==='AbortError'||!live(token,src,mineAttempt)||stopReason;}
+    function isRunningPost(posted){return posted?.state==='running'&&ID.test(posted.id);}
+    function prepareStart(kind,chartOptions){
+      if(parentBusy||flight)return null;
+      reconcile();
+      const src=sourceToken();
+      if(!startSourceReady(src))return null;
+      const preparation=prepareJobSwitch(src,chartOptions);
+      if(preparation==='invalid')return null;
+      if(preparation==='resume')return {src,resume:true};
       if(held)invalidate('switch');
-      const box=kind==='chart'?(region&&region.page===page&&region.fileHash===src.fileHash?region.bbox:null):null;
-      if(kind==='chart'&&!box){say(progress,'그래프는 미리보기에서 영역을 드래그한 뒤 읽습니다.',true);errorCode='region';return;}
+      const box=jobRegion(kind,src);
+      if(!jobRegionReady(kind,box))return null;
       const session=getSession();
-      if(!session||typeof session.request!=='function'){say(progress,'PC 연결 후 다시 읽으세요.',true);errorCode='unavailable';return;}
-      if(typeof getCapabilities==='function'&&!getCapabilities()?.paperEnrichment?.supported){say(progress,'PC 연결 프로그램을 최신 버전으로 업데이트하세요.',true);errorCode='unavailable';return;}
+      if(!availableSession(session))return null;
+      return {src,box,session};
+    }
+    function acceptPostReceipt(posted,session,src,request,token,mineAttempt){
+      if(!live(token,src,mineAttempt)){cancelStalePost(posted,session);return 'stale';}
+      if(posted?.progress!=null)say(progress,progressText(posted.progress));
+      if(posted?.state==='completed'){held=null;return 'completed';}
+      if(isRunningPost(posted)){
+        held={id:posted.id,session,fileHash:src.fileHash,revision:src.revision,body:request};
+        return 'running';
+      }
+      handlePostedTerminal(posted);
+      return 'terminal';
+    }
+    function reportPostFailure(error,signal,token,src,mineAttempt){if(!ignorePostFailure(signal,token,src,mineAttempt))handlePostFailure(error);}
+    async function start(kind, chartOptions){
+      const preflight=prepareStart(kind,chartOptions);
+      if(!preflight)return;
+      const {src,box,session}=preflight;
+      if(preflight.resume){await resume(src);return;}
       const mine=++flightGen;
       flight=mine;
       const token=epoch,mineAttempt=attempt;
@@ -1030,42 +1189,26 @@
       try{
         let prepared;
         try{prepared=await preparePaper();}
-        catch{if(live(token,src,mineAttempt)){say(progress,'논문을 준비하지 못했습니다. 이전 결과는 그대로입니다.',true);errorCode='prepare';}return;}
+        catch{reportPrepareFailure(token,src,mineAttempt);return;}
         if(!live(token,src,mineAttempt))return;
-        if(!prepared||prepared.fileHash!==src.fileHash||!paperIdOk(prepared.paperId)){say(progress,'원본 파일이 바뀌어 보내지 않았습니다. 이전 결과는 그대로입니다.',true);errorCode='stale';return;}
+        if(!preparedForSource(prepared,src))return;
         request.paperId=prepared.paperId;
         held={id:requestId,session,fileHash:src.fileHash,revision:src.revision,body:request};
         let posted;
         try{posted=await session.request(JOBS,request,{signal});}
         catch(error){
-          if(signal.aborted||!live(token,src,mineAttempt)||stopReason)return;
-          const why=classify(error);
-          if(why==='path'){held=null;say(progress,'이 화면의 연결 모듈이 스캔·그래프 경로를 아직 허용하지 않습니다.',true);errorCode='path';return;}
-          if(why==='lost'){say(progress,'연결이 끊겼습니다. 다시 누르면 같은 작업의 결과를 확인합니다.',true);errorCode='lost';return;}
-          held=null;
-          say(progress,'요청이 접수되지 않았습니다. 이전 결과는 그대로입니다.',true);errorCode='rejected';
+          reportPostFailure(error,signal,token,src,mineAttempt);
           return;
         }
-        if(!live(token,src,mineAttempt)){
-          if(posted&&posted.state==='running'&&ID.test(posted.id))void session.request(cancelPath(posted.id),{}).catch(()=>{});
-          return;
-        }
-        if(posted?.progress!=null)say(progress,progressText(posted.progress));
-        if(posted?.state==='completed'){held=null;await apply(token,src,mineAttempt,request,posted.result);return;}
-        if(posted?.state==='running'&&ID.test(posted.id)){
-          held={id:posted.id,session,fileHash:src.fileHash,revision:src.revision,body:request};
-          await watch(token,src,mineAttempt,signal);
-          return;
-        }
-        if(posted?.state==='cancelled'){held=null;say(progress,'읽기를 취소했습니다.');errorCode='cancelled';return;}
-        if(posted?.state==='failed'){held=null;say(progress,failureText(posted.error),true);errorCode='failed';return;}
-        say(progress,'접수 상태를 확인하지 못했습니다. 다시 누르면 같은 작업을 조회합니다.',true);errorCode='lost';
+        const receipt=acceptPostReceipt(posted,session,src,request,token,mineAttempt);
+        if(receipt==='completed'){await apply(token,src,mineAttempt,request,posted.result);return;}
+        if(receipt==='running'){await watch(token,src,mineAttempt,signal);return;}
+
       }catch(error){
-        if(error?.name==='AbortError'||!live(token,src,mineAttempt)||stopReason)return;
+        if(ignoreStartFailure(error,token,src,mineAttempt))return;
         say(progress,'읽기에 실패했습니다. 이전 결과는 그대로입니다.',true);errorCode='failed';
       }finally{
-        if(flight===mine){flight=0;controller=null;}
-        syncDisabled();
+        finishFlight(mine);
       }
     }
     function userCancel(){

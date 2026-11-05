@@ -275,6 +275,59 @@ class _Scanner:
         if self.page_ops > LIMITS['maxPageOperators'] or self.budget[0] > LIMITS['maxOperators']:
             raise _PageStop('scan-limit')
 
+    def _path_operator(self, op, operands, state):
+        if op == 're':
+            x, y, w, h = (_num(v) for v in operands)
+            if self.path['rect'] is None and not self.path['complex'] and _axis(state['ctm']):
+                self.path['rect'] = _rect_through(state['ctm'], x, y, x + w, y + h)
+            else:
+                self.path['complex'] = True
+        elif op in _PATH_OPS:
+            self.path['complex'] = True
+        elif op in ('W', 'W*'):
+            self.path['clip'] = True
+        elif op in _PAINT_OPS:
+            if self.path['clip']:
+                rect = None if self.path['complex'] else self.path['rect']
+                state['clip'] = 'complex' if rect is None or state['clip'] == 'complex' else \
+                    rect if state['clip'] is None else _intersect(state['clip'], rect)
+            self.path = {'rect': None, 'complex': False, 'clip': False}
+
+    def _xobject(self, operands, resources, state, prefix, depth, forms, ancestry, index, do_ordinal):
+        pk = self.pk
+        if len(operands) != 1 or not isinstance(operands[0], pk.Name): raise _PageStop('malformed-pdf')
+        name = operands[0]
+        ordinal = do_ordinal
+        xobj = _sub(pk, resources, '/XObject', name)
+        if not isinstance(xobj, pk.Stream): return
+        subtype = xobj.get('/Subtype')
+        if subtype == pk.Name('/Image'):
+            reason = _image_opaque_issue(pk, xobj)
+            self._event(state, 'xobject', prefix + [index], str(name), xobj.objgen,
+                int(xobj.get('/Width', 0)), int(xobj.get('/Height', 0)), reason,
+                {'stream': prefix[0], 'steps': ancestry + ((index, ordinal, str(name)),)}, xobj)
+        elif subtype == pk.Name('/Form'):
+            self._form(xobj, resources, state, prefix + [index], depth, forms,
+                ancestry + ((index, ordinal, str(name)),))
+
+    def _graphics_operator(self, op, operands, state):
+        if op == 'q':
+            if operands: raise _PageStop('malformed-pdf')
+            self.stack.append(dict(state))
+        elif op == 'Q':
+            if operands: raise _PageStop('malformed-pdf')
+            if not self.stack: raise _PageStop('malformed-pdf')
+            state = self.stack.pop()
+        elif op == 'cm':
+            m = tuple(_num(x) for x in operands)
+            if len(m) != 6: raise _PageStop('malformed-pdf')
+            state['ctm'] = _mul(m, state['ctm'])
+        return state
+
+    def _text_operator(self, op, operands, state):
+        if op == 'Tr': state['tr'] = int(operands[0])
+        elif state['tr'] >= 4: state['clip'] = 'complex'
+
     def _run(self, ops, resources, state, prefix, depth, forms, ancestry):
         pk = self.pk
         do_ordinal = 0
@@ -282,63 +335,34 @@ class _Scanner:
             self._tick()
             op = str(op)
             try:
-                if op == 'q':
-                    if operands: raise _PageStop('malformed-pdf')
-                    self.stack.append(dict(state))
-                elif op == 'Q':
-                    if operands: raise _PageStop('malformed-pdf')
-                    if not self.stack: raise _PageStop('malformed-pdf')
-                    state = self.stack.pop()
-                elif op == 'cm':
-                    m = tuple(_num(x) for x in operands)
-                    if len(m) != 6: raise _PageStop('malformed-pdf')
-                    state['ctm'] = _mul(m, state['ctm'])
-                elif op == 're':
-                    x, y, w, h = (_num(v) for v in operands)
-                    if self.path['rect'] is None and not self.path['complex'] and _axis(state['ctm']):
-                        self.path['rect'] = _rect_through(state['ctm'], x, y, x + w, y + h)
-                    else:
-                        self.path['complex'] = True
-                elif op in _PATH_OPS:
-                    self.path['complex'] = True
-                elif op in ('W', 'W*'):
-                    self.path['clip'] = True
-                elif op in _PAINT_OPS:
-                    if self.path['clip']:
-                        rect = None if self.path['complex'] else self.path['rect']
-                        state['clip'] = 'complex' if rect is None or state['clip'] == 'complex' else \
-                            rect if state['clip'] is None else _intersect(state['clip'], rect)
-                    self.path = {'rect': None, 'complex': False, 'clip': False}
+                if op in ('q', 'Q', 'cm'):
+                    state = self._graphics_operator(op, operands, state)
+                elif op == 're' or op in _PATH_OPS or op in ('W', 'W*') or op in _PAINT_OPS:
+                    self._path_operator(op, operands, state)
                 elif op == 'gs':
                     if _gs_transparency(pk, _sub(pk, resources, '/ExtGState', operands[0])): state['trans'] = True
-                elif op == 'Tr':
-                    state['tr'] = int(operands[0])
-                elif op in _TEXT_SHOW:
-                    if state['tr'] >= 4: state['clip'] = 'complex'
+                elif op == 'Tr' or op in _TEXT_SHOW:
+                    self._text_operator(op, operands, state)
                 elif op == 'INLINE IMAGE':
                     image = operands[0]
                     self._event(state, 'inline', prefix + [index], None, None, int(image.width), int(image.height),
                         'inline-image', None, None)
                 elif op == 'Do':
-                    if len(operands) != 1 or not isinstance(operands[0], pk.Name): raise _PageStop('malformed-pdf')
-                    name = operands[0]
-                    ordinal, do_ordinal = do_ordinal, do_ordinal + 1
-                    xobj = _sub(pk, resources, '/XObject', name)
-                    if not isinstance(xobj, pk.Stream): continue
-                    subtype = xobj.get('/Subtype')
-                    if subtype == pk.Name('/Image'):
-                        reason = _image_opaque_issue(pk, xobj)
-                        self._event(state, 'xobject', prefix + [index], str(name), xobj.objgen,
-                            int(xobj.get('/Width', 0)), int(xobj.get('/Height', 0)), reason,
-                            {'stream': prefix[0], 'steps': ancestry + ((index, ordinal, str(name)),)}, xobj)
-                    elif subtype == pk.Name('/Form'):
-                        self._form(xobj, resources, state, prefix + [index], depth, forms,
-                            ancestry + ((index, ordinal, str(name)),))
+                    self._xobject(operands, resources, state, prefix, depth, forms, ancestry, index, do_ordinal)
+                    do_ordinal += 1
             except _PageStop:
                 raise
             except Exception:
                 raise _PageStop('malformed-pdf') from None
         return state
+
+    def _mark_form_structure(self, form, ops, inner):
+        # A cloned Form needs a separately updated ParentTree/MCR graph when it
+        # owns structural/marked content. Likewise /OC can change hidden-layer
+        # semantics. Keep these outside the simple-Form replacement contract.
+        if any(key in form for key in ('/OC', '/StructParent', '/StructParents')) or any(
+                str(op) in ('BDC', 'BMC', 'EMC') for _, op in ops):
+            inner['structure_unsupported'] = True
 
     def _form(self, form, resources, state, prefix, depth, forms, ancestry):
         pk = self.pk
@@ -361,12 +385,7 @@ class _Scanner:
         saved_stack, saved_path = self.stack, self.path
         self.stack, self.path = [], {'rect': None, 'complex': False, 'clip': False}
         ops = self._parse(form)
-        # A cloned Form needs a separately updated ParentTree/MCR graph when it
-        # owns structural/marked content. Likewise /OC can change hidden-layer
-        # semantics. Keep these outside the simple-Form replacement contract.
-        if any(key in form for key in ('/OC', '/StructParent', '/StructParents')) or any(
-                str(op) in ('BDC', 'BMC', 'EMC') for _, op in ops):
-            inner['structure_unsupported'] = True
+        self._mark_form_structure(form, ops, inner)
         self._run(ops, res, inner, prefix + [list(key)], depth + 1, forms | {key}, ancestry)
         if self.stack: raise _PageStop('malformed-pdf')
         self.stack, self.path = saved_stack, saved_path
@@ -468,6 +487,38 @@ def _align(mu_page, page_events, mediabox):
 
 
 
+def _scan_page(pk, doc, scanner, pno, obj, sha, pages, occurrences):
+    complete = True
+    facts = {'maxImagePixels': 0, 'thumbs': False, 'mediabox': None}
+    pages.append(facts)
+    try:
+        reason, mediabox = _page_geometry(pk, obj)
+    except _PageStop:
+        return False
+    except Exception:
+        return False
+    facts['mediabox'] = mediabox
+    stop = None
+    try:
+        events = scanner.page(obj, pno, reason, mediabox)
+    except _PageStop as exc:
+        events, stop = scanner.events, exc.reason
+        complete = False
+    if stop:
+        for e in events:
+            if e['reason'] is None: e['reason'] = stop
+    elif reason is None:
+        _align(doc[pno], events, mediabox)
+    facts['maxImagePixels'] = max([e['width'] * e['height'] for e in events] + [0])
+    facts['thumbs'] = stop is None and reason is None
+    for e in events:
+        e['pageIndex'] = pno
+        e['bbox'] = _top_left(mediabox, e['pdfBox'])
+        e['id'] = _occ_id(sha, pno, e['kind'], e['path'])
+        occurrences.append(e)
+    return complete
+
+
 def _scan(pk, mu, source):
     """(source sha, occurrences with private fields, complete, per-page facts) of exact source bytes."""
     sha = _sha(source)
@@ -481,35 +532,8 @@ def _scan(pk, mu, source):
         occurrences, complete, budget, pages = [], True, [0], []
         scanner = _Scanner(pk, scratch, budget)
         for pno, obj in enumerate(page_dicts):
-            facts = {'maxImagePixels': 0, 'thumbs': False, 'mediabox': None}
-            pages.append(facts)
-            try:
-                reason, mediabox = _page_geometry(pk, obj)
-            except _PageStop:
-                complete = False
-                continue
-            except Exception:
-                complete = False
-                continue
-            facts['mediabox'] = mediabox
-            stop = None
-            try:
-                events = scanner.page(obj, pno, reason, mediabox)
-            except _PageStop as exc:
-                events, stop = scanner.events, exc.reason
-                complete = False
-            if stop:
-                for e in events:
-                    if e['reason'] is None: e['reason'] = stop
-            elif reason is None:
-                _align(doc[pno], events, mediabox)
-            facts['maxImagePixels'] = max([e['width'] * e['height'] for e in events] + [0])
-            facts['thumbs'] = stop is None and reason is None
-            for e in events:
-                e['pageIndex'] = pno
-                e['bbox'] = _top_left(mediabox, e['pdfBox'])
-                e['id'] = _occ_id(sha, pno, e['kind'], e['path'])
-                occurrences.append(e)
+            page_complete = _scan_page(pk, doc, scanner, pno, obj, sha, pages, occurrences)
+            if not page_complete: complete = False
         counts = {}
         for e in occurrences:
             if e['xref'] is not None: counts[e['xref']] = counts.get(e['xref'], 0) + 1
@@ -572,21 +596,7 @@ def list_occurrences(source):
 
 # ---- replacement PNG ----------------------------------------------------------------------------------------------
 
-def _png_header(data):
-    """(width, height) from the signature, a CRC-valid IHDR and the chunk table only; nothing is inflated or decoded.
-    Accepts 8-bit RGB or RGBA, no tRNS, no animation. Raises ValueError(fixed code)."""
-    if not isinstance(data, (bytes, bytearray)): raise ValueError('replacement-invalid')
-    data = bytes(data)
-    if len(data) > LIMITS['maxPngBytes']: raise ValueError('replacement-too-large')
-    if len(data) < 45 or not data.startswith(PNG_SIGNATURE) or data[8:16] != b'\x00\x00\x00\x0dIHDR' \
-            or zlib.crc32(data[12:29]) != int.from_bytes(data[29:33], 'big'):
-        raise ValueError('replacement-invalid')
-    width, height = int.from_bytes(data[16:20], 'big'), int.from_bytes(data[20:24], 'big')
-    depth, color, compression, filt, interlace = data[24:29]
-    if not (width and height): raise ValueError('replacement-invalid')
-    if width > LIMITS['maxPngSide'] or height > LIMITS['maxPngSide'] or width * height > LIMITS['maxPngPixels']:
-        raise ValueError('replacement-too-large')
-    if depth != 8 or color not in (2, 6) or compression or filt or interlace > 1: raise ValueError('replacement-invalid')
+def _validate_png_chunks(data):
     pos, seen_idat, end = 33, False, False
     while pos + 12 <= len(data):
         length = int.from_bytes(data[pos:pos + 4], 'big')
@@ -599,6 +609,28 @@ def _png_header(data):
         if kind == b'IEND':
             end = True; break
     if not (seen_idat and end): raise ValueError('replacement-invalid')
+
+
+def _validate_png_signature(data):
+    if len(data) < 45 or not data.startswith(PNG_SIGNATURE) or data[8:16] != b'\x00\x00\x00\x0dIHDR' \
+            or zlib.crc32(data[12:29]) != int.from_bytes(data[29:33], 'big'):
+        raise ValueError('replacement-invalid')
+
+
+def _png_header(data):
+    """(width, height) from the signature, a CRC-valid IHDR and the chunk table only; nothing is inflated or decoded.
+    Accepts 8-bit RGB or RGBA, no tRNS, no animation. Raises ValueError(fixed code)."""
+    if not isinstance(data, (bytes, bytearray)): raise ValueError('replacement-invalid')
+    data = bytes(data)
+    if len(data) > LIMITS['maxPngBytes']: raise ValueError('replacement-too-large')
+    _validate_png_signature(data)
+    width, height = int.from_bytes(data[16:20], 'big'), int.from_bytes(data[20:24], 'big')
+    depth, color, compression, filt, interlace = data[24:29]
+    if not (width and height): raise ValueError('replacement-invalid')
+    if width > LIMITS['maxPngSide'] or height > LIMITS['maxPngSide'] or width * height > LIMITS['maxPngPixels']:
+        raise ValueError('replacement-too-large')
+    if depth != 8 or color not in (2, 6) or compression or filt or interlace > 1: raise ValueError('replacement-invalid')
+    _validate_png_chunks(data)
     return width, height
 
 
@@ -687,6 +719,24 @@ def _rewrite(pk, source, target, rgb, size):
         image.ColorSpace, image.BitsPerComponent, image.Filter = pk.Name('/DeviceRGB'), 8, pk.Name('/FlateDecode')
         changed_forms = {}
 
+        def set_image_mask(original):
+            if alpha is None:
+                if original.get('/SMask') is not None: image.SMask = original.SMask
+            else:
+                mask = pdf.make_stream(zlib.compress(alpha, 9))
+                mask.Type, mask.Subtype = pk.Name('/XObject'), pk.Name('/Image')
+                mask.Width, mask.Height = size
+                mask.ColorSpace, mask.BitsPerComponent, mask.Filter = pk.Name('/DeviceGray'), 8, pk.Name('/FlateDecode')
+                image.SMask = mask
+
+        def verify_rewrite(data, rewritten, index, old_name, new_name):
+            before, after = _instructions(pk, scratch, data), _instructions(pk, scratch, rewritten)
+            expected_op = pk.unparse_content_stream([([pk.Name('/' + new_name)], pk.Operator('Do'))])
+            if not 0 <= index < len(before) or len(before) != len(after) or after[index] != expected_op \
+                    or any(a != b for i, (a, b) in enumerate(zip(before, after)) if i != index) \
+                    or before[index] != pk.unparse_content_stream([([pk.Name(old_name)], pk.Operator('Do'))]):
+                raise ValueError('malformed-pdf')
+
         def rewrite_stream(data, resources, level, positions, name_data):
             index, ordinal, old_name = steps[level]
             xobjects = resources.get('/XObject')
@@ -695,14 +745,7 @@ def _rewrite(pk, source, target, rgb, size):
             if not isinstance(original, pk.Stream): raise ValueError('malformed-pdf')
             if level + 1 == len(steps):
                 if original.get('/Subtype') != pk.Name.Image: raise ValueError('malformed-pdf')
-                if alpha is None:
-                    if original.get('/SMask') is not None: image.SMask = original.SMask
-                else:
-                    mask = pdf.make_stream(zlib.compress(alpha, 9))
-                    mask.Type, mask.Subtype = pk.Name('/XObject'), pk.Name('/Image')
-                    mask.Width, mask.Height = size
-                    mask.ColorSpace, mask.BitsPerComponent, mask.Filter = pk.Name('/DeviceGray'), 8, pk.Name('/FlateDecode')
-                    image.SMask = mask
+                set_image_mask(original)
                 replacement = image
             else:
                 if original.get('/Subtype') != pk.Name.Form: raise ValueError('malformed-pdf')
@@ -727,12 +770,7 @@ def _rewrite(pk, source, target, rgb, size):
             while pk.Name('/Im%d' % n) in xobjects or any(b'/Im%d' % n in d for d in name_data): n += 1
             new_name = 'Im%d' % n
             rewritten = _rename_do(pk, scratch, data, ordinal, new_name)
-            before, after = _instructions(pk, scratch, data), _instructions(pk, scratch, rewritten)
-            expected_op = pk.unparse_content_stream([([pk.Name('/' + new_name)], pk.Operator('Do'))])
-            if not 0 <= index < len(before) or len(before) != len(after) or after[index] != expected_op \
-                    or any(a != b for i, (a, b) in enumerate(zip(before, after)) if i != index) \
-                    or before[index] != pk.unparse_content_stream([([pk.Name(old_name)], pk.Operator('Do'))]):
-                raise ValueError('malformed-pdf')
+            verify_rewrite(data, rewritten, index, old_name, new_name)
             return rewritten, _isolated_resources(pk, resources, new_name, replacement)
 
         rewritten, resources = rewrite_stream(datas[k], _effective_resources(pk, page), 0, (), datas)
@@ -812,10 +850,7 @@ def _position(path):
     return [None if isinstance(p, list) else p for p in path]
 
 
-def _verify(pk, mu, Image, ImageChops, source, output, scan, target, expected_streams, size, control=None):
-    if len(output) > LIMITS['maxOutputBytes']: raise ValueError('output-too-large')
-    fail = ValueError('check-failed')
-    pno = target['pageIndex']
+def _verify_streams(pk, source, output, expected_streams, control, pno, fail):
     a_pdf, b_pdf = _open_pike(pk, source), _open_pike(pk, output)
     try:
         a_streams, b_streams = _page_streams(pk, a_pdf), _page_streams(pk, b_pdf)
@@ -829,64 +864,82 @@ def _verify(pk, mu, Image, ImageChops, source, output, scan, target, expected_st
         if b is None or b != (expected_streams['pageStreams'] if i == pno else a): raise fail
     # The opaque-alpha control uses the same replacement and selected Do chain. Its streams
     # must independently satisfy the same exact-operator proof before it can explain rounding.
-    if control is not None:
-        if len(control[0]) > LIMITS['maxOutputBytes'] or control[1] != expected_streams: raise fail
-        control_pdf = _open_pike(pk, control[0])
-        source_pdf = _open_pike(pk, source)
-        try:
-            cp, sp = _page_streams(pk, control_pdf), _page_streams(pk, source_pdf)
-            if len(cp) != len(sp) or any(x != (control[1]['pageStreams'] if i == pno else sp[i])
-                    for i, x in enumerate(cp)): raise fail
-            forms = _form_streams(pk, source_pdf)
-            forms.update({(pno,) + path: data for path, data in control[1]['formStreams'].items()})
-            if _form_streams(pk, control_pdf) != forms: raise fail
-        finally:
-            control_pdf.close(); source_pdf.close()
+    if control is not None: _verify_control_streams(pk, source, expected_streams, control, pno, fail)
+
+
+def _verify_control_streams(pk, source, expected_streams, control, pno, fail):
+    if len(control[0]) > LIMITS['maxOutputBytes'] or control[1] != expected_streams: raise fail
+    control_pdf = _open_pike(pk, control[0])
+    source_pdf = _open_pike(pk, source)
+    try:
+        cp, sp = _page_streams(pk, control_pdf), _page_streams(pk, source_pdf)
+        if len(cp) != len(sp) or any(x != (control[1]['pageStreams'] if i == pno else sp[i])
+                for i, x in enumerate(cp)): raise fail
+        forms = _form_streams(pk, source_pdf)
+        forms.update({(pno,) + path: data for path, data in control[1]['formStreams'].items()})
+        if _form_streams(pk, control_pdf) != forms: raise fail
+    finally:
+        control_pdf.close(); source_pdf.close()
+
+
+def _verify_control_render(mu, Image, ImageChops, a, c, i, pa, ra, m, ia, ib, roi, fail):
+    if c is None or c.page_count != a.page_count: raise fail
+    pc = c[i]
+    if (tuple(pc.mediabox), tuple(pc.cropbox), pc.rotation) != (tuple(pa.mediabox), tuple(pa.cropbox), pa.rotation) \
+            or pc.get_text('words', sort=False) != pa.get_text('words', sort=False): raise fail
+    rc = pc.get_pixmap(matrix=m, alpha=False, colorspace=mu.csRGB)
+    if (rc.width, rc.height) != (ra.width, ra.height): raise fail
+    ic = Image.frombytes('RGB', (rc.width, rc.height), rc.samples)
+    source_control = ImageChops.difference(ia, ic)
+    output_control = ImageChops.difference(ib, ic)
+    source_control.paste((0, 0, 0), roi)
+    output_control.paste((0, 0, 0), roi)
+    # Only renderer-path rounding proven by this control is allowed: <=2 per
+    # channel versus source, and exact equality to output outside the ROI.
+    if max(channel.getextrema()[1] for channel in source_control.split()) > 2 \
+            or output_control.getbbox() is not None: raise fail
+
+
+def _verify_page_render(mu, Image, ImageChops, a, b, c, i, pno, target, fail):
+    pa, pb = a[i], b[i]
+    if (tuple(pa.mediabox), tuple(pa.cropbox), pa.rotation) != (tuple(pb.mediabox), tuple(pb.cropbox), pb.rotation):
+        raise fail
+    if pa.get_text('words', sort=False) != pb.get_text('words', sort=False): raise fail
+    zoom = _zoom(pa.rect, LIMITS['checkTargetPixels'] if i == pno else LIMITS['checkPagePixels'])
+    m = mu.Matrix(zoom, zoom)
+    ra, rb = pa.get_pixmap(matrix=m, alpha=False, colorspace=mu.csRGB), \
+        pb.get_pixmap(matrix=m, alpha=False, colorspace=mu.csRGB)
+    if (ra.width, ra.height) != (rb.width, rb.height): raise fail
+    if i != pno:
+        if ra.samples != rb.samples: raise fail
+        return
+    ia = Image.frombytes('RGB', (ra.width, ra.height), ra.samples)
+    ib = Image.frombytes('RGB', (rb.width, rb.height), rb.samples)
+    diff = ImageChops.difference(ia, ib)
+    x0, y0, x1, y1 = _top_left(tuple(pa.mediabox), target['visibleBox'])
+    roi = (max(0, math.floor(x0 * zoom) - BLEED_PX), max(0, math.floor(y0 * zoom) - BLEED_PX),
+        min(ra.width, math.ceil(x1 * zoom) + BLEED_PX), min(ra.height, math.ceil(y1 * zoom) + BLEED_PX))
+    changed = diff.getbbox()
+    if changed is None: raise ValueError('no-op')
+    if not _contains(roi, changed):
+        _verify_control_render(mu, Image, ImageChops, a, c, i, pa, ra, m, ia, ib, roi, fail)
+    r, g, bl = diff.crop(roi).split()
+    peak = ImageChops.lighter(ImageChops.lighter(r, g), bl)
+    if sum(peak.point(lambda v: 255 if v > VISIBLE_DELTA else 0).histogram()[255:]) < MIN_VISIBLE_PIXELS:
+        raise ValueError('no-op')
+
+
+def _verify(pk, mu, Image, ImageChops, source, output, scan, target, expected_streams, size, control=None):
+    if len(output) > LIMITS['maxOutputBytes']: raise ValueError('output-too-large')
+    fail = ValueError('check-failed')
+    pno = target['pageIndex']
+    _verify_streams(pk, source, output, expected_streams, control, pno, fail)
     a, b = _open_mu(mu, source), _open_mu(mu, output)
     c = _open_mu(mu, control[0]) if control is not None else None
     try:
         if a.page_count != b.page_count: raise fail
         for i in range(a.page_count):
-            pa, pb = a[i], b[i]
-            if (tuple(pa.mediabox), tuple(pa.cropbox), pa.rotation) != (tuple(pb.mediabox), tuple(pb.cropbox), pb.rotation):
-                raise fail
-            if pa.get_text('words', sort=False) != pb.get_text('words', sort=False): raise fail
-            zoom = _zoom(pa.rect, LIMITS['checkTargetPixels'] if i == pno else LIMITS['checkPagePixels'])
-            m = mu.Matrix(zoom, zoom)
-            ra, rb = pa.get_pixmap(matrix=m, alpha=False, colorspace=mu.csRGB), \
-                pb.get_pixmap(matrix=m, alpha=False, colorspace=mu.csRGB)
-            if (ra.width, ra.height) != (rb.width, rb.height): raise fail
-            if i != pno:
-                if ra.samples != rb.samples: raise fail
-                continue
-            ia = Image.frombytes('RGB', (ra.width, ra.height), ra.samples)
-            ib = Image.frombytes('RGB', (rb.width, rb.height), rb.samples)
-            diff = ImageChops.difference(ia, ib)
-            x0, y0, x1, y1 = _top_left(tuple(pa.mediabox), target['visibleBox'])
-            roi = (max(0, math.floor(x0 * zoom) - BLEED_PX), max(0, math.floor(y0 * zoom) - BLEED_PX),
-                min(ra.width, math.ceil(x1 * zoom) + BLEED_PX), min(ra.height, math.ceil(y1 * zoom) + BLEED_PX))
-            changed = diff.getbbox()
-            if changed is None: raise ValueError('no-op')
-            if not _contains(roi, changed):
-                if c is None or c.page_count != a.page_count: raise fail
-                pc = c[i]
-                if (tuple(pc.mediabox), tuple(pc.cropbox), pc.rotation) != (tuple(pa.mediabox), tuple(pa.cropbox), pa.rotation) \
-                        or pc.get_text('words', sort=False) != pa.get_text('words', sort=False): raise fail
-                rc = pc.get_pixmap(matrix=m, alpha=False, colorspace=mu.csRGB)
-                if (rc.width, rc.height) != (ra.width, ra.height): raise fail
-                ic = Image.frombytes('RGB', (rc.width, rc.height), rc.samples)
-                source_control = ImageChops.difference(ia, ic)
-                output_control = ImageChops.difference(ib, ic)
-                source_control.paste((0, 0, 0), roi)
-                output_control.paste((0, 0, 0), roi)
-                # Only renderer-path rounding proven by this control is allowed: <=2 per
-                # channel versus source, and exact equality to output outside the ROI.
-                if max(channel.getextrema()[1] for channel in source_control.split()) > 2 \
-                        or output_control.getbbox() is not None: raise fail
-            r, g, bl = diff.crop(roi).split()
-            peak = ImageChops.lighter(ImageChops.lighter(r, g), bl)
-            if sum(peak.point(lambda v: 255 if v > VISIBLE_DELTA else 0).histogram()[255:]) < MIN_VISIBLE_PIXELS:
-                raise ValueError('no-op')
+            _verify_page_render(mu, Image, ImageChops, a, b, c, i, pno, target, fail)
     finally:
         a.close(); b.close()
         if c is not None: c.close()

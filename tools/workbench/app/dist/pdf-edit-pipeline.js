@@ -17,7 +17,7 @@ var FalsifyPdfEditPipeline = (() => {
   };
   var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
-  // app/src/pdf-edit-pipeline.mjs
+  // src/pdf-edit-pipeline.mjs
   var pdf_edit_pipeline_exports = {};
   __export(pdf_edit_pipeline_exports, {
     PdfEditPipelineError: () => PdfEditPipelineError,
@@ -63,6 +63,10 @@ var FalsifyPdfEditPipeline = (() => {
     if (typeof api?.prepare !== "function") fail("engine-unavailable");
     return (request) => api.prepare(request);
   }
+  function failedClassification(v, report, checks, invalid, allowedEdits, allowedChecks) {
+    if (v?.status === "failed" || invalid(v?.edits, allowedEdits) || invalid(report?.edits, allowedEdits) || invalid(v?.checks, allowedChecks) || report?.ok === false || report?.quality === "failed" || checks.some((c) => c.ok === false || !["passed", "warning"].includes(c.status) || Array.isArray(c.failures) && c.failures.length) || report?.status !== void 0 && !["self-check-passed", "applied", "passed", "warning", "noop"].includes(report.status) || ["removedBefore", "presentAfter", "untouchedText", "figures"].some((k) => v?.quality?.[k] === false)) return true;
+    return false;
+  }
   function classification(result) {
     const v = result.verification;
     if (v?.status === "draft" || v?.report?.draft === true || v?.report?.status === "draft") return "draft";
@@ -70,7 +74,7 @@ var FalsifyPdfEditPipeline = (() => {
     const invalid = (rows, allowed) => rows !== void 0 && (!Array.isArray(rows) || rows.some((row) => !allowed.has(row?.status)));
     const checks = [v?.selfCheck, v?.report?.selfCheck].filter(Boolean);
     const report = v?.report;
-    if (v?.status === "failed" || invalid(v?.edits, allowedEdits) || invalid(report?.edits, allowedEdits) || invalid(v?.checks, allowedChecks) || report?.ok === false || report?.quality === "failed" || checks.some((c) => c.ok === false || !["passed", "warning"].includes(c.status) || Array.isArray(c.failures) && c.failures.length) || report?.status !== void 0 && !["self-check-passed", "applied", "passed", "warning", "noop"].includes(report.status) || ["removedBefore", "presentAfter", "untouchedText", "figures"].some((k) => v?.quality?.[k] === false)) return "failed";
+    if (failedClassification(v, report, checks, invalid, allowedEdits, allowedChecks)) return "failed";
     return v?.status === "applied" || v?.status === "warning" ? v.status : "unverified";
   }
   async function verifyResult(result, inputHash, signal) {
@@ -106,6 +110,21 @@ var FalsifyPdfEditPipeline = (() => {
     const warnings = [...stages.flatMap((s) => s.warnings.map((w) => ({ ...w, stage: s.name }))), ...extra];
     return { ...result, originalSourceSha256: original, warnings, verification: { schema: "falsify.pdf-edit-pipeline.v1", engine: "table-first-composition", sourceSha256: original, outputSha256: stages.at(-1).outputSha256, status, independent: false, layoutVerified: false, stages, pendingEditIds: pending.map((e) => e.id ?? null), bodyPending: pending.length > 0, checks: stages.flatMap((s) => s.checks.map((c) => ({ ...c, stage: s.name }))), warnings } };
   }
+  function validateMixedEdits(enabled, tables, body) {
+    if (enabled.length > 24 || enabled.some((e) => !e || typeof e.before !== "string" || typeof e.after !== "string")) fail("invalid-edits");
+    disjoint(tables, body);
+  }
+  function validateDeclaredHash(declared, controls, envelope) {
+    if (typeof declared !== "string" || !HEX.test(declared) || controls.fileHash && envelope?.fileHash && controls.fileHash.toLowerCase() !== envelope.fileHash.toLowerCase()) fail("invalid-source-hash");
+  }
+  function rebindMixedEdits(tableEdits, bodyEdits) {
+    for (const e of tableEdits) if (e.anchor) delete e.anchor.occurrence;
+    const tablePages = new Set(tableEdits.map((e) => e.pageIndex));
+    for (const e of bodyEdits) if (tablePages.has(e.pageIndex) && validBox(e.anchor?.bbox)) delete e.anchor.occurrence;
+  }
+  function mixedStatus(a, b) {
+    return b.status === "unverified" ? "failed" : b.status === "applied" && a.status === "warning" ? "warning" : b.status;
+  }
   async function prepare(request = {}, { selectionPdf, paragraphPdf } = {}) {
     const raw = Array.isArray(request.edits) ? request.edits : request.edits?.edits;
     if (!Array.isArray(raw)) fail("invalid-edits");
@@ -116,17 +135,14 @@ var FalsifyPdfEditPipeline = (() => {
     const { file: capturedFile, signal, ...rest } = request;
     const { fontSnapshot, ...metadata } = rest;
     const controls = { ...copy(metadata), ...fontSnapshot ? { fontSnapshot: structuredClone(fontSnapshot) } : {}, file: capturedFile, signal };
-    if (enabled.length > 24 || enabled.some((e) => !e || typeof e.before !== "string" || typeof e.after !== "string")) fail("invalid-edits");
-    disjoint(tables, body);
+    validateMixedEdits(enabled, tables, body);
     const envelope = Array.isArray(request.edits) ? null : copy(request.edits);
     const tableEdits = copy(tables), bodyEdits = copy(body);
     const declared = controls.fileHash || envelope?.fileHash;
-    if (typeof declared !== "string" || !HEX.test(declared) || controls.fileHash && envelope?.fileHash && controls.fileHash.toLowerCase() !== envelope.fileHash.toLowerCase()) fail("invalid-source-hash");
+    validateDeclaredHash(declared, controls, envelope);
     const originalBytes = await read(capturedFile, signal), original = await hash(originalBytes, signal);
     if (original !== declared.toLowerCase()) fail("stale-source");
-    for (const e of tableEdits) if (e.anchor) delete e.anchor.occurrence;
-    const tablePages = new Set(tableEdits.map((e) => e.pageIndex));
-    for (const e of bodyEdits) if (tablePages.has(e.pageIndex) && validBox(e.anchor?.bbox)) delete e.anchor.occurrence;
+    rebindMixedEdits(tableEdits, bodyEdits);
     const scoped = (edits, file, fileHash) => ({ ...controls, ...controls.fontSnapshot ? { fontSnapshot: structuredClone(controls.fontSnapshot) } : {}, file, fileHash, signal, edits: envelope ? { ...copy(envelope), fileHash, edits } : edits });
     const stageA = await prepareOf(selectionPdf)(scoped(tableEdits, originalBytes.slice(), original));
     abort(signal);
@@ -138,7 +154,7 @@ var FalsifyPdfEditPipeline = (() => {
     const stageB = await prepareOf(paragraphPdf)(scoped(bodyEdits, aBytes, a.actual));
     abort(signal);
     const b = await verifyResult(stageB, a.actual, signal), second = descriptor("paragraph-flow", a.actual, b.result, b);
-    const status = b.status === "unverified" ? "failed" : b.status === "applied" && a.status === "warning" ? "warning" : b.status;
+    const status = mixedStatus(a, b);
     abort(signal);
     return composite(b.result, original, [first, second], [], status, status === "failed" || status === "draft" ? [{ code: "mixed-body-stage-not-passed", severity: "warning", draft: status === "draft" }] : []);
   }

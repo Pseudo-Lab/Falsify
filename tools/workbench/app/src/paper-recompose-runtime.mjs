@@ -1,6 +1,13 @@
 // Each request owns its worker and its byte buffer.
 let nextId = 0;
 const aborted = () => new DOMException('Recomposition cancelled', 'AbortError');
+function snapshotFile(file) {
+  if(file instanceof Uint8Array) file=Uint8Array.from(file);
+  else if(file instanceof ArrayBuffer) file=file.slice(0);
+  else if(file?.bytes instanceof Uint8Array) file={...file,bytes:Uint8Array.from(file.bytes)};
+  else if(!(typeof File !== 'undefined' && file instanceof File)) throw new TypeError('Expected a File or PDF bytes');
+  return file;
+}
 export function createRuntime({workerFactory = () => {
   const url=new URL('./paper-recompose-worker.mjs',import.meta.url);
   url.search=new URL(import.meta.url).search;
@@ -16,10 +23,7 @@ export function createRuntime({workerFactory = () => {
       layoutMode=request.layoutMode;
       if(layoutMode !== undefined && layoutMode !== 'measured-continuous') throw new TypeError('Unknown layout mode');
       if(request.revision != null && request.edits?.revision != null && request.revision!==request.edits.revision) throw new Error('Stale revision');
-      if(file instanceof Uint8Array) file=Uint8Array.from(file);
-      else if(file instanceof ArrayBuffer) file=file.slice(0);
-      else if(file?.bytes instanceof Uint8Array) file={...file,bytes:Uint8Array.from(file.bytes)};
-      else if(!(typeof File !== 'undefined' && file instanceof File)) throw new TypeError('Expected a File or PDF bytes');
+      file=snapshotFile(file);
     } catch(error) { return Promise.reject(error); }
     const id=++nextId;
     return new Promise((resolve,reject)=>{

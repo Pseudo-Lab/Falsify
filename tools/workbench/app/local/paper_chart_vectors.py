@@ -46,6 +46,27 @@ def _finite(value):
     return type(value) in (int, float) and math.isfinite(value)
 
 
+def _append_numeric_cells(numeric, values, point, row, index, ambiguous):
+    for column, value in enumerate(values, 2):
+        if value is None:
+            continue
+        origin = point.get('origin')
+        cell = {'row': index, 'column': column, 'raw': row[column], 'value': value, 'unit': None,
+                'origin': origin if isinstance(origin, str) and origin else 'pixel-calibrated',
+                'sourcePixel': [point['xPixel'], point['yPixel']]}
+        if column == 3 and not ambiguous:
+            cell['pixelInterval'] = point.get('pixelInterval')
+        for key in _CELL_META:
+            if key in point:
+                cell[key] = point[key]
+        if point.get('sourcePointSpace') == 'page-rect' and isinstance(point.get('sourcePoint'), list):
+            cell['sourcePoint'] = list(point['sourcePoint'])
+            cell['sourcePointSpace'] = 'page-rect'
+            native_point = point.get('sourcePagePoint')
+            if isinstance(native_point, list):
+                cell['sourcePagePoint'] = list(native_point)
+        numeric.append(cell)
+
 def rows_from_geometry(geometry):
     """Table rows for one chart geometry. Missing point.origin is pixel-calibrated."""
     ambiguous = any(series['axisBinding'] == 'ambiguous' for series in geometry['series'])
@@ -61,25 +82,7 @@ def rows_from_geometry(geometry):
             row = [series['id'], series['axisBinding']] + [None if value is None else format(value, '.8g') for value in values]
             index = len(rows)
             rows.append(row)
-            for column, value in enumerate(values, 2):
-                if value is None:
-                    continue
-                origin = point.get('origin')
-                cell = {'row': index, 'column': column, 'raw': row[column], 'value': value, 'unit': None,
-                        'origin': origin if isinstance(origin, str) and origin else 'pixel-calibrated',
-                        'sourcePixel': [point['xPixel'], point['yPixel']]}
-                if column == 3 and not ambiguous:
-                    cell['pixelInterval'] = point.get('pixelInterval')
-                for key in _CELL_META:
-                    if key in point:
-                        cell[key] = point[key]
-                if point.get('sourcePointSpace') == 'page-rect' and isinstance(point.get('sourcePoint'), list):
-                    cell['sourcePoint'] = list(point['sourcePoint'])
-                    cell['sourcePointSpace'] = 'page-rect'
-                    native_point = point.get('sourcePagePoint')
-                    if isinstance(native_point, list):
-                        cell['sourcePagePoint'] = list(native_point)
-                numeric.append(cell)
+            _append_numeric_cells(numeric, values, point, row, index, ambiguous)
     return columns, rows, numeric
 
 
@@ -118,18 +121,27 @@ def prefer_native_paths(source_bytes, *, page_index, crop, dpi, width, height, r
     return working
 
 
-def _can_attempt(raster, calibration, series, page_index, crop, dpi, width, height):
-    if not isinstance(raster, dict) or raster.get('schema') != 'falsify.chart-data.v1':
+def _valid_crop(crop):
+    if not isinstance(crop, (list, tuple)) or len(crop) != 4 or not all(_finite(v) for v in crop):
         return False
+    if not (crop[0] < crop[2] and crop[1] < crop[3]):
+        return False
+    return True
+
+
+def _valid_frame(page_index, crop, dpi, width, height):
     if type(page_index) is not int or page_index < 0:
         return False
     if isinstance(dpi, bool) or not _finite(dpi) or dpi <= 0:
         return False
     if type(width) is not int or type(height) is not int or width < 1 or height < 1:
         return False
-    if not isinstance(crop, (list, tuple)) or len(crop) != 4 or not all(_finite(v) for v in crop):
+    return _valid_crop(crop)
+
+def _can_attempt(raster, calibration, series, page_index, crop, dpi, width, height):
+    if not isinstance(raster, dict) or raster.get('schema') != 'falsify.chart-data.v1':
         return False
-    if not (crop[0] < crop[2] and crop[1] < crop[3]):
+    if not _valid_frame(page_index, crop, dpi, width, height):
         return False
     geometry = raster.get('geometry') if isinstance(raster.get('geometry'), dict) else None
     axes = geometry.get('axes') if isinstance(geometry, dict) else None
@@ -297,18 +309,9 @@ def _requested_color(item):
     return _hex(item.get('requestedColor')) or _hex(item.get('color'))
 
 
-def _candidates(geometry, series, converters):
-    pool = []
-    if isinstance(geometry, dict):
-        for item in geometry.get('series') or []:
-            if isinstance(item, dict) and item.get('axisBinding') in converters and _match_color(item):
-                pool.append(item)
-    pool_rgbs = [_hex_rgb(_match_color(item)) for item in pool]
+def _append_candidates(chosen, chosen_rgbs, blocked, series, converters):
     def crowded(rgb, group):
         return sum(_distance(rgb, other) <= _COLOR_DISTANCE for other in group) > 1
-    chosen = [item for item, rgb in zip(pool, pool_rgbs) if not crowded(rgb, pool_rgbs)]
-    blocked = [rgb for rgb in pool_rgbs if crowded(rgb, pool_rgbs)]
-    chosen_rgbs = [_hex_rgb(_match_color(item)) for item in chosen]
     pending = []
     if isinstance(series, list) and 'left' in converters:
         for item in series:
@@ -325,6 +328,20 @@ def _candidates(geometry, series, converters):
         chosen.append({'id': item['id'], 'name': item.get('name'), 'color': _hex(item.get('color')) or _match_color(item),
                        'requestedColor': _requested_color(item), 'effectiveColor': _match_color(item),
                        'axisBinding': 'left', 'points': []})
+
+def _candidates(geometry, series, converters):
+    pool = []
+    if isinstance(geometry, dict):
+        for item in geometry.get('series') or []:
+            if isinstance(item, dict) and item.get('axisBinding') in converters and _match_color(item):
+                pool.append(item)
+    pool_rgbs = [_hex_rgb(_match_color(item)) for item in pool]
+    def crowded(rgb, group):
+        return sum(_distance(rgb, other) <= _COLOR_DISTANCE for other in group) > 1
+    chosen = [item for item, rgb in zip(pool, pool_rgbs) if not crowded(rgb, pool_rgbs)]
+    blocked = [rgb for rgb in pool_rgbs if crowded(rgb, pool_rgbs)]
+    chosen_rgbs = [_hex_rgb(_match_color(item)) for item in chosen]
+    _append_candidates(chosen, chosen_rgbs, blocked, series, converters)
     return chosen
 
 
@@ -372,6 +389,10 @@ def _occluded(drawing, page):
             if log[index][0] == 'stroke-path':
                 end = index
                 break
+    return _later_paint_covers(log, end, rect, drawing, seq)
+
+
+def _later_paint_covers(log, end, rect, drawing, seq):
     for index in range(end + 1, len(log)):
         code, other = log[index]
         if code in ('fill-image', 'fill-imgmask'):
@@ -397,9 +418,21 @@ def _native_room(kept, original_series):
     return point_budget, series_room
 
 
-def _match_page(page, candidates, converters, crop, dpi, width, height, plot_bbox, original_series=()):
-    accepted, rejected, stack = {}, [], []
-    palette = [(item, _hex_rgb(_match_color(item))) for item in candidates]
+def _drawing_match(drawing, palette):
+    native = _rgb(drawing['color'])
+    if native is None:
+        return None
+    matched = [item for item, rgb in palette if rgb is not None and _distance(native, rgb) <= _COLOR_DISTANCE]
+    if len(matched) != 1:
+        return None
+    commands = _split(drawing['items'])
+    if not commands:
+        return None
+    return native, matched, commands
+
+
+def _drawing_candidates(page, palette, crop, rejected):
+    stack = []
     relevant = 0
     pending = []
     for drawing in page['drawings']:
@@ -413,15 +446,10 @@ def _match_page(page, candidates, converters, crop, dpi, width, height, plot_bbo
             continue
         if _rect_outside(drawing.get('rect'), page['matrix'], crop):
             continue
-        native = _rgb(drawing['color'])
-        if native is None:
+        match = _drawing_match(drawing, palette)
+        if match is None:
             continue
-        matched = [item for item, rgb in palette if rgb is not None and _distance(native, rgb) <= _COLOR_DISTANCE]
-        if len(matched) != 1:
-            continue
-        commands = _split(drawing['items'])
-        if not commands:
-            continue
+        native, matched, commands = match
         relevant += 1
         if relevant > _MAX_DRAWINGS:
             rejected.append(_rejection('drawing-budget', drawing, commands, page))
@@ -435,6 +463,10 @@ def _match_page(page, candidates, converters, crop, dpi, width, height, plot_bbo
             if _rectangle_frame(component, drawing['closePath']) or _too_small(component):
                 continue
             pending.append({'candidate': matched[0], 'component': component, 'drawing': drawing, 'native': native})
+    return pending
+
+
+def _filter_components(pending, page, crop, dpi, width, height, plot_bbox, rejected):
     kept = []
     for item in pending:
         samples, _gate = _samples(item['component'], page['matrix'], crop, dpi, 32, item['drawing']['closePath'])
@@ -447,6 +479,14 @@ def _match_page(page, candidates, converters, crop, dpi, width, height, plot_bbo
         if _grid_or_tick(item['component'], located, plot_bbox, item['candidate'], width, height):
             continue
         kept.append(item)
+    return kept
+
+
+def _match_page(page, candidates, converters, crop, dpi, width, height, plot_bbox, original_series=()):
+    accepted, rejected = {}, []
+    palette = [(item, _hex_rgb(_match_color(item))) for item in candidates]
+    pending = _drawing_candidates(page, palette, crop, rejected)
+    kept = _filter_components(pending, page, crop, dpi, width, height, plot_bbox, rejected)
     dropped = None
     point_budget, series_room = _native_room(kept, original_series)
     while kept and (len(kept) > series_room or point_budget < 2 * len(kept)):
@@ -589,6 +629,13 @@ def _on_line(located, candidate):
     return False
 
 
+def _on_plot_boundary(x0, y0, x1, y1, px0, py0, px1, py1):
+    on_boundary = (
+        (abs(y0 - py0) <= 2 and abs(y1 - py0) <= 2) or (abs(y0 - py1) <= 2 and abs(y1 - py1) <= 2)
+        or (abs(x0 - px0) <= 2 and abs(x1 - px0) <= 2) or (abs(x0 - px1) <= 2 and abs(x1 - px1) <= 2))
+    return on_boundary
+
+
 def _grid_or_tick(component, located, plot_bbox, candidate, width, height):
     """Drop boundary ticks, frame edges, and gridlines that are not the raster series."""
     if not _axis_aligned(component):
@@ -606,9 +653,11 @@ def _grid_or_tick(component, located, plot_bbox, candidate, width, height):
     wide, tall = x1 - x0, y1 - y0
     spans = wide >= 0.75 * span_x or tall >= 0.75 * span_y
     short = max(wide, tall) <= 0.12 * max(span_x, span_y)
-    on_boundary = (
-        (abs(y0 - py0) <= 2 and abs(y1 - py0) <= 2) or (abs(y0 - py1) <= 2 and abs(y1 - py1) <= 2)
-        or (abs(x0 - px0) <= 2 and abs(x1 - px0) <= 2) or (abs(x0 - px1) <= 2 and abs(x1 - px1) <= 2))
+    on_boundary = _on_plot_boundary(x0, y0, x1, y1, px0, py0, px1, py1)
+    return _is_grid_line(component, located, candidate, on_boundary, spans, short)
+
+
+def _is_grid_line(component, located, candidate, on_boundary, spans, short):
     if on_boundary and spans:
         return True
     if len(component) == 1 and short and on_boundary:
@@ -840,6 +889,28 @@ def _materialize(candidate, hits, converters, used, meta):
     return built
 
 
+def _trim_native_points(rebuilt, overflow):
+    changed = False
+    for series in reversed(list(rebuilt)):
+        if series.get('pointKind') != 'source-vector':
+            continue
+        points = list(series.get('points') or [])
+        extra = len(points) - 2
+        if extra <= 0:
+            continue
+        drop = min(overflow, extra)
+        series['points'] = points[:len(points) - drop - 1] + [points[-1]]
+        sampling = series.get('sampling')
+        if isinstance(sampling, dict):
+            sampling['withinTolerance'] = False
+            sampling['returnedPoints'] = len(series['points'])
+        overflow -= drop
+        changed = True
+        if overflow <= 0:
+            break
+    return changed
+
+
 def _fit_output(rebuilt):
     """Keep the final mixed series inside 64 series and 480 points. Raster points yield first."""
     changed = False
@@ -865,32 +936,12 @@ def _fit_output(rebuilt):
         if overflow <= 0:
             break
     if overflow > 0:
-        for series in reversed(list(rebuilt)):
-            if series.get('pointKind') != 'source-vector':
-                continue
-            points = list(series.get('points') or [])
-            extra = len(points) - 2
-            if extra <= 0:
-                continue
-            drop = min(overflow, extra)
-            series['points'] = points[:len(points) - drop - 1] + [points[-1]]
-            sampling = series.get('sampling')
-            if isinstance(sampling, dict):
-                sampling['withinTolerance'] = False
-                sampling['returnedPoints'] = len(series['points'])
-            overflow -= drop
-            changed = True
-            if overflow <= 0:
-                break
+        changed |= _trim_native_points(rebuilt, overflow)
     rebuilt[:] = [series for series in rebuilt if len(series.get('points') or []) >= 1]
     return changed
 
 
-def _apply(working, accepted, rejected, converters, calibration, meta):
-    geometry = working.get('geometry') if isinstance(working.get('geometry'), dict) else None
-    if geometry is None:
-        geometry = {'schema': 'falsify.chart-geometry.v1', 'issues': [], 'axes': {}, 'series': []}
-        working['geometry'] = geometry
+def _rebuild_series(geometry, accepted, converters, meta):
     original = list(geometry.get('series') or [])
     used, rebuilt, native, seen = {series.get('id') for series in original}, [], False, set()
     for series in original:
@@ -916,46 +967,69 @@ def _apply(working, accepted, rejected, converters, calibration, meta):
         if materialized:
             native = True
             rebuilt.extend(materialized)
+    return rebuilt, native
+
+
+def _native_limit_issues(rebuilt, rejected):
+    extra = []
+    if _fit_output(rebuilt):
+        extra.append('sampling-point-limit')
+    if any(item.get('pointKind') == 'source-vector' and item.get('sampling', {}).get('withinTolerance') is False for item in rebuilt):
+        extra.append('sampling-point-limit')
+    if any(item.get('reason') == 'drawing-budget' for item in rejected):
+        extra.append('vector-drawing-budget')
+    if any(item.get('reason') == 'series-cap' for item in rejected):
+        extra.append('vector-series-cap')
+    return extra
+
+
+def _native_geometry_issues(geometry, rebuilt, rejected):
+    extra = _native_limit_issues(rebuilt, rejected)
+    geometry['issues'] = [issue for issue in geometry.get('issues') or [] if issue not in _STALE_ISSUES]
+    for code in extra:
+        if code not in geometry['issues']:
+            geometry['issues'].append(code)
+    geometry['status'] = 'partial' if geometry['issues'] else 'ready'
+    if rebuilt and all(series.get('pointKind') == 'source-vector' for series in rebuilt):
+        geometry['pointKind'] = 'source-vector'
+    if rejected:
+        geometry['rejectedVectors'] = rejected
+    return extra
+
+
+def _publish_native(working, geometry, rebuilt, rejected, converters, meta):
+    if 'x' not in (geometry.get('axes') or {}) and 'left' in converters:
+        geometry['axes'] = {'x': converters['left']['xAxis'], 'left': converters['left']['yAxis']}
+        geometry['calibrationSource'] = geometry.get('calibrationSource') or 'caller-selected'
+    geometry['series'] = rebuilt
+    geometry['vectorSource'] = {'sha256': meta['sha256'], 'pageIndex': meta['pageIndex'], 'crop': list(meta['crop']),
+                                 'dpi': meta['dpi'], 'rotation': meta['rotation'], 'space': 'page-rect'}
+    extra = _native_geometry_issues(geometry, rebuilt, rejected)
+    columns, rows, numeric = rows_from_geometry(geometry)
+    provenance = dict(working.get('provenance') or {})
+    provenance['vector'] = 'pdf-native-path'
+    provenance['vectorReader'] = 'pymupdf-get-drawings-extended'
+    chart_issues = [issue for issue in working.get('issues') or [] if issue not in _STALE_ISSUES]
+    for code in extra:
+        if code not in chart_issues:
+            chart_issues.append(code)
+    working.update(columns=columns, rows=rows, numericCells=numeric, provenance=provenance, issues=chart_issues)
+    working['status'] = 'partial' if working['issues'] else 'ready'
+    if geometry.get('pointKind') == 'source-vector':
+        working['pointKind'] = 'source-vector'
+    _set_chart_axes(working, geometry)
+    if working.get('chartType') in (None, 'unknown'):
+        working['chartType'] = 'xy'
+
+
+def _apply(working, accepted, rejected, converters, calibration, meta):
+    geometry = working.get('geometry') if isinstance(working.get('geometry'), dict) else None
+    if geometry is None:
+        geometry = {'schema': 'falsify.chart-geometry.v1', 'issues': [], 'axes': {}, 'series': []}
+        working['geometry'] = geometry
+    rebuilt, native = _rebuild_series(geometry, accepted, converters, meta)
     if native:
-        if 'x' not in (geometry.get('axes') or {}) and 'left' in converters:
-            geometry['axes'] = {'x': converters['left']['xAxis'], 'left': converters['left']['yAxis']}
-            geometry['calibrationSource'] = geometry.get('calibrationSource') or 'caller-selected'
-        geometry['series'] = rebuilt
-        geometry['vectorSource'] = {'sha256': meta['sha256'], 'pageIndex': meta['pageIndex'], 'crop': list(meta['crop']),
-                                     'dpi': meta['dpi'], 'rotation': meta['rotation'], 'space': 'page-rect'}
-        extra = []
-        if _fit_output(rebuilt):
-            extra.append('sampling-point-limit')
-        if any(item.get('pointKind') == 'source-vector' and item.get('sampling', {}).get('withinTolerance') is False for item in rebuilt):
-            extra.append('sampling-point-limit')
-        if any(item.get('reason') == 'drawing-budget' for item in rejected):
-            extra.append('vector-drawing-budget')
-        if any(item.get('reason') == 'series-cap' for item in rejected):
-            extra.append('vector-series-cap')
-        geometry['issues'] = [issue for issue in geometry.get('issues') or [] if issue not in _STALE_ISSUES]
-        for code in extra:
-            if code not in geometry['issues']:
-                geometry['issues'].append(code)
-        geometry['status'] = 'partial' if geometry['issues'] else 'ready'
-        if rebuilt and all(series.get('pointKind') == 'source-vector' for series in rebuilt):
-            geometry['pointKind'] = 'source-vector'
-        if rejected:
-            geometry['rejectedVectors'] = rejected
-        columns, rows, numeric = rows_from_geometry(geometry)
-        provenance = dict(working.get('provenance') or {})
-        provenance['vector'] = 'pdf-native-path'
-        provenance['vectorReader'] = 'pymupdf-get-drawings-extended'
-        chart_issues = [issue for issue in working.get('issues') or [] if issue not in _STALE_ISSUES]
-        for code in extra:
-            if code not in chart_issues:
-                chart_issues.append(code)
-        working.update(columns=columns, rows=rows, numericCells=numeric, provenance=provenance, issues=chart_issues)
-        working['status'] = 'partial' if working['issues'] else 'ready'
-        if geometry.get('pointKind') == 'source-vector':
-            working['pointKind'] = 'source-vector'
-        _set_chart_axes(working, geometry)
-        if working.get('chartType') in (None, 'unknown'):
-            working['chartType'] = 'xy'
+        _publish_native(working, geometry, rebuilt, rejected, converters, meta)
         return
     if rejected:
         target = geometry if isinstance(working.get('geometry'), dict) else working

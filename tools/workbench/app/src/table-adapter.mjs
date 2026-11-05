@@ -19,39 +19,67 @@ const id=async(prefix,value)=>prefix+(await digest(new TextEncoder().encode(JSON
 const rect=b=>({x:b[0],y:b[1],width:b[2]-b[0],height:b[3]-b[1]});
 const publicBox=(r,h)=>[r.x,h-r.y-r.height,r.x+r.width,h-r.y];
 
+function validateTableInput(sourceBytes,revision){
+  if(!(sourceBytes instanceof Uint8Array)||sourceBytes.byteLength>TABLE_LIMITS.maxBytes||sourceBytes.byteLength<5)fail('invalid-source');
+  if(typeof revision!=='string'||!revision||revision.length>200)fail('invalid-revision');
+}
+
+function validateTablePage(page,p){
+  if(page.pageIndex!==p||!(page.width>0&&page.height>0)||![page.width,page.height].every(Number.isFinite)||page.coordinateSpace!=='top-left-page')fail('invalid-page');
+  if(!Array.isArray(page.runs)||page.runs.length>TABLE_LIMITS.maxRuns||!Array.isArray(page.rules)||page.rules.length>TABLE_LIMITS.maxRules)fail('snapshot-limit');
+}
+
+function numericCells(table,runs){
+    const numeric=table.cells.filter(c=>c.runIds.some(rid=>/^[\s$€£¥+−\-\d.,()%±:eE/]+$/.test(runs.find(r=>r.id===rid)?.text||'')&&/\d/.test(runs.find(r=>r.id===rid)?.text||''))).length;
+  return numeric;
+}
+
+function validateTableReader(sourceSha256,sha,readPages){
+  if(typeof sourceSha256!=='string'||sha!==sourceSha256)fail('stale-source');
+  if(readPages!==undefined&&typeof readPages!=='function')fail('invalid-reader');
+}
+
+function makePageModel(page,p,runs){
+  if(page.chars&&(!Array.isArray(page.chars)||page.chars.length>TABLE_LIMITS.maxChars))fail('character-limit');
+  const pm={pageIndex:p,width:page.width,height:page.height,rotation:page.rotation,runs,chars:page.chars?.map(c=>({c:c.c,bbox:[...c.bbox],lineId:c.lineId}))??null};
+  if(pm.chars&&pm.chars.some(c=>typeof c.c!=='string'||!boxOK(c.bbox)||!Number.isInteger(c.lineId)))fail('invalid-characters');
+  return pm;
+}
+
+function credibleTable(table,numeric){
+  return !(!table.pageRuled&&(table.rows<3||numeric<2));
+}
+
 /** readPages is a trusted engine adapter, not UI-supplied geometry. It must read
  * the supplied private byte copy. The default MuPDF reader opens those bytes.
  * Snapshot-only callers cannot obtain a verified model by passing pages. */
 export async function detectSourceTables({sourceBytes,sourceSha256,revision,mupdf,readPages}={}){
-  if(!(sourceBytes instanceof Uint8Array)||sourceBytes.byteLength>TABLE_LIMITS.maxBytes||sourceBytes.byteLength<5)fail('invalid-source');
-  if(typeof revision!=='string'||!revision||revision.length>200)fail('invalid-revision');
+  validateTableInput(sourceBytes,revision);
   const bytes=sourceBytes.slice(),sha=await digest(bytes);
-  if(typeof sourceSha256!=='string'||sha!==sourceSha256)fail('stale-source');
-  if(readPages!==undefined&&typeof readPages!=='function')fail('invalid-reader');
+  validateTableReader(sourceSha256,sha,readPages);
   const pages=await (readPages?readPages(bytes):readMuPdfTablePages(bytes,mupdf));
   if(await digest(bytes)!==sha)fail('reader-mutated-source');
   if(!Array.isArray(pages)||!pages.length||pages.length>TABLE_LIMITS.maxPages)fail('page-limit');
   const tables=[],pageModels=[];let charsTotal=0;
   for(let p=0;p<pages.length;p++){
     const page=pages[p];
-    if(page.pageIndex!==p||!(page.width>0&&page.height>0)||![page.width,page.height].every(Number.isFinite)||page.coordinateSpace!=='top-left-page')fail('invalid-page');
-    if(!Array.isArray(page.runs)||page.runs.length>TABLE_LIMITS.maxRuns||!Array.isArray(page.rules)||page.rules.length>TABLE_LIMITS.maxRules)fail('snapshot-limit');
-    const seen=new Set(),runs=page.runs.map(r=>{
+    validateTablePage(page,p);
+    const seen=new Set();
+    function normalizeRun(r){
       if(typeof r.id!=='string'||!r.id||seen.has(r.id)||typeof r.text!=='string'||!boxOK(r.bbox)||!contains([0,0,page.width,page.height],r.bbox,0.1))fail('invalid-run');
       seen.add(r.id);charsTotal+=r.text.length;if(charsTotal>TABLE_LIMITS.maxChars)fail('character-limit');
       return {id:r.id,text:r.text,bbox:[...r.bbox],horizontal:r.horizontal!==false};
-    });
+    }
+    const runs=page.runs.map(normalizeRun);
     const rules=page.rules.map(r=>{if(!boxOK(r.bbox))fail('invalid-rule');return rect([r.bbox[0],page.height-r.bbox[3],r.bbox[2],page.height-r.bbox[1]]);});
-    if(page.chars&&(!Array.isArray(page.chars)||page.chars.length>TABLE_LIMITS.maxChars))fail('character-limit');
-    const pm={pageIndex:p,width:page.width,height:page.height,rotation:page.rotation,runs,chars:page.chars?.map(c=>({c:c.c,bbox:[...c.bbox],lineId:c.lineId}))??null};
-    if(pm.chars&&pm.chars.some(c=>typeof c.c!=='string'||!boxOK(c.bbox)||!Number.isInteger(c.lineId)))fail('invalid-characters');
+    const pm=makePageModel(page,p,runs);
     pageModels.push(pm);if(page.rotation!==0)continue;
     const candidates=detectTables(runs.map(r=>({id:r.id,text:r.text,bounds:rect([r.bbox[0],page.height-r.bbox[3],r.bbox[2],page.height-r.bbox[1]]),locked:!r.horizontal})),p,{},rules);
     for(const table of candidates){
       // Aligned prose columns are common. Unruled candidates require repeated
       // numeric evidence, not alignment alone. This deliberately misses text-only tables.
-      const numeric=table.cells.filter(c=>c.runIds.some(rid=>/^[\s$€£¥+−\-\d.,()%±:eE/]+$/.test(runs.find(r=>r.id===rid)?.text||'')&&/\d/.test(runs.find(r=>r.id===rid)?.text||''))).length;
-      if(!table.pageRuled&&(table.rows<3||numeric<2))continue;
+      const numeric=numericCells(table,runs);
+      if(!credibleTable(table,numeric))continue;
       const bbox=publicBox(table.bounds,page.height),tableId=await id('tbl-',[sha,revision,p,bbox,table.rowEdges,table.colEdges]);
       const cells=[];
       for(const cell of table.cells){
@@ -80,6 +108,12 @@ export function selectTableCell(model,{tableId,cellId,sourceSha256,revision}={})
   if(page.runs.some(r=>r.id!==run.id&&r.text.trim()&&overlap(r.bbox,run.bbox)))return unsupported('overlapping-text');
   // Match the current browser writer's tolerance, including nearby duplicate
   // values. Never choose a page-global occurrence ordinal from detector order.
+  const matching=findMatchingQuotes(page,run,before);
+  if(matching.length!==1)return unsupported(matching.length?'ambiguous-quote':'quote-mismatch');
+  return frozen({status:'ready',tableId,cellId,sourceSha256,revision,before,pageIndex:table.pageIndex,runIds:[run.id],cellBbox:[...cell.bbox],anchor:{bbox:[...run.bbox],coordinateSpace:'top-left-page',origin:'top-left',yAxis:'down',unit:'pt'}});
+}
+
+function findMatchingQuotes(page,run,before){
   const needle=before.replace(/\s+/g,' ').trim(),matching=[];
   const consider=b=>{if(contains(b,run.bbox,Math.max(4,Math.min(8,(b[3]-b[1])/2))))matching.push(b);};
   if(page.chars){
@@ -90,8 +124,7 @@ export function selectTableCell(model,{tableId,cellId,sourceSha256,revision}={})
     // quotes are deliberately refused; substring hits within each run count.
     for(const r of page.runs){const text=r.text.replace(/\s+/g,' ').trim();let at=-1;while(matching.length<2&&(at=text.indexOf(needle,at+1))>=0)consider(r.bbox);if(matching.length===2)break;}
   }
-  if(matching.length!==1)return unsupported(matching.length?'ambiguous-quote':'quote-mismatch');
-  return frozen({status:'ready',tableId,cellId,sourceSha256,revision,before,pageIndex:table.pageIndex,runIds:[run.id],cellBbox:[...cell.bbox],anchor:{bbox:[...run.bbox],coordinateSpace:'top-left-page',origin:'top-left',yAxis:'down',unit:'pt'}});
+  return matching;
 }
 
 function normalizeChars(chars){let text='',map=[],gap=false,line=null;for(let i=0;i<chars.length;i++){const c=chars[i];if(line!==null&&c.lineId!==line)gap=true;line=c.lineId;if(!c.c.trim()){gap=true;continue;}if(gap&&text){text+=' ';map.push(null);}gap=false;text+=c.c;for(let k=0;k<c.c.length;k++)map.push(i);}return {text,map};}

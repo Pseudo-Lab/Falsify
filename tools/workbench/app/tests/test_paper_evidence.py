@@ -304,7 +304,7 @@ class EvidenceStoreTests(unittest.TestCase):
                 raise RuntimeError('synthetic page failure: do not leak')
             return real(page)
 
-        with patch('paper_evidence._find_tables', boom):
+        with patch('paper_evidence._find_tables', boom), patch('paper_native_worker.run', side_effect=lambda operation,args,**kwargs: self.store._extract(*args)):
             summary = self.store.prepare(data, sha(data))
         self.assertEqual(summary['status'], 'partial')
         self.assertIn('page_extract_failed:1', summary['limitations'])
@@ -343,7 +343,7 @@ class EvidenceStoreTests(unittest.TestCase):
             doc.new_page()
         raw = doc.tobytes()
         doc.close()
-        with patch.object(pe, 'MAX_PAGES', 2):
+        with patch.object(pe, 'MAX_PAGES', 2), patch('paper_native_worker.run', side_effect=lambda operation,args,**kwargs: self.store._extract(*args)):
             with self.assertRaises(ValueError) as caught:
                 self.store.prepare(raw, sha(raw))
             self.assertEqual(caught.exception.args[0], 'over_budget')

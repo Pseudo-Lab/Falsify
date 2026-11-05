@@ -158,18 +158,7 @@ def _header_flags(table, placed):
     return flags if any_true else unknown
 
 
-def _table_from_engine(table):
-    rows = table.rows
-    grid = [[None if cell is None else tuple(float(v) for v in cell) for cell in row.cells] for row in rows]
-    if not grid or not any(cell is not None for row in grid for cell in row):
-        return None
-    width = max(len(row) for row in grid)
-    grid = [row + [None] * (width - len(row)) for row in grid]
-    if len(grid) * width > MAX_CELLS:
-        raise RuntimeError('cells')
-    extract = table.extract()
-    placed = [(r, c, cell) for r, row in enumerate(grid) for c, cell in enumerate(row) if cell is not None]
-    headers = _header_flags(table, placed)
+def _table_cells(grid, placed, extract, headers):
     cells = []
     for r, c, box in placed:
         col_span = _col_span(grid, r, c, box)
@@ -179,6 +168,28 @@ def _table_from_engine(table):
             raise RuntimeError('bbox')
         cells.append({'row': r, 'column': c, 'rowSpan': row_span, 'columnSpan': col_span,
             'text': _cell_text(extract, r, c), 'bbox': rounded, 'header': headers[(r, c)]})
+    return cells
+
+
+def _table_grid(table):
+    rows = table.rows
+    grid = [[None if cell is None else tuple(float(v) for v in cell) for cell in row.cells] for row in rows]
+    if not grid or not any(cell is not None for row in grid for cell in row):
+        return None, None
+    width = max(len(row) for row in grid)
+    grid = [row + [None] * (width - len(row)) for row in grid]
+    if len(grid) * width > MAX_CELLS:
+        raise RuntimeError('cells')
+    return grid, width
+
+
+def _table_from_engine(table):
+    grid, width = _table_grid(table)
+    if grid is None: return None
+    extract = table.extract()
+    placed = [(r, c, cell) for r, row in enumerate(grid) for c, cell in enumerate(row) if cell is not None]
+    headers = _header_flags(table, placed)
+    cells = _table_cells(grid, placed, extract, headers)
     if not cells:
         return None
     return {'bbox': _round_box(pymupdf.Rect(table.bbox)) or _union(cell['bbox'] for cell in cells),
@@ -323,6 +334,27 @@ def _new_id(existing, prefix=''):
     raise RuntimeError('id')
 
 
+def _record_page_limitations(limitations, detected, index):
+    if detected['failed']:
+        limitations['failed'].append(index)
+    if detected['line_failed']:
+        limitations['lines'].append(index)
+    if detected['rotation']:
+        limitations['rotated'].append(index)
+    if detected['cropped']:
+        limitations['cropped'].append(index)
+
+
+def _validate_clip_bbox(bbox, page):
+    if not isinstance(bbox, (list, tuple)) or len(bbox) != 4 or not all(
+            type(v) in (int, float) and not isinstance(v, bool) and math.isfinite(v) for v in bbox):
+        raise ValueError('bbox')
+    if not (bbox[0] < bbox[2] and bbox[1] < bbox[3]):
+        raise ValueError('bbox')
+    if bbox[0] < page[0] - 1 or bbox[1] < page[1] - 1 or bbox[2] > page[2] + 1 or bbox[3] > page[3] + 1:
+        raise ValueError('bbox')
+
+
 class EvidenceStore:
     def __init__(self, ttl_seconds=43200, max_documents=4, *, clock=None):
         if type(ttl_seconds) not in (int, float) or isinstance(ttl_seconds, bool) or not math.isfinite(ttl_seconds) or ttl_seconds < 0:
@@ -337,9 +369,24 @@ class EvidenceStore:
         self._seq = 0
         self._lock = threading.Lock()
 
-    def prepare(self, pdf_bytes, file_hash):
+    def prepare(self, pdf_bytes, file_hash, *, cancelled=None):
+        from paper_native_worker import budget, check
+        deadline = budget()
         raw = self._validated_pdf(pdf_bytes, file_hash)
         with self._lock:
+            check(deadline, cancelled)
+            self._purge()
+            current = self._docs.get(self._by_hash.get(file_hash))
+            if current is not None:
+                current['expires_at'] = self._clock() + self._ttl
+                current['summary']['expiresAt'] = _iso(current['expires_at'])
+                return copy.deepcopy(current['summary'])
+        from paper_native_worker import run
+        record = run('evidence_extract', [raw, file_hash], cancelled=cancelled, deadline=deadline)
+        if record.get('file_hash') != file_hash or record.get('pdf') != raw:
+            raise ValueError('native_output_invalid')
+        with self._lock:
+            check(deadline, cancelled)
             self._purge()
             current = self._docs.get(self._by_hash.get(file_hash))
             if current is not None:
@@ -348,10 +395,27 @@ class EvidenceStore:
                 return copy.deepcopy(current['summary'])
             while len(self._docs) >= self._max:
                 self._drop(min(self._docs, key=lambda pid: (self._docs[pid]['expires_at'], self._docs[pid]['seq'])))
-            record = self._extract(raw, file_hash)
+            if record['paper_id'] in self._docs:
+                raise RuntimeError('id')
+            self._seq += 1
+            record['seq'] = self._seq
+            record['expires_at'] = self._clock() + self._ttl
+            record['summary']['expiresAt'] = _iso(record['expires_at'])
             self._docs[record['paper_id']] = record
             self._by_hash[file_hash] = record['paper_id']
             return copy.deepcopy(record['summary'])
+
+    def source_authority(self, paper_id, file_hash, raw):
+        """Hold source authority across a bounded publication critical section."""
+        from contextlib import contextmanager
+        @contextmanager
+        def authority():
+            with self._lock:
+                record = self._live(paper_id)
+                if record['file_hash'] != file_hash or record['pdf'] != raw:
+                    raise ValueError('paper_evidence_hash_mismatch')
+                yield
+        return authority()
 
     def source_bytes(self, paper_id, file_hash):
         """Internal immutable byte access for explicit copy exports; never an MCP tool."""
@@ -397,14 +461,16 @@ class EvidenceStore:
                     return body
         raise KeyError('item')
 
-    def render_region(self, paper_id, page_index, bbox=None, dpi=120):
-        return self._render(paper_id, page_index, bbox, dpi, MAX_PIXELS)
+    def render_region(self, paper_id, page_index, bbox=None, dpi=120, *, cancelled=None):
+        return self._render(paper_id, page_index, bbox, dpi, MAX_PIXELS, cancelled=cancelled)
 
-    def render_for_analysis(self, paper_id, page_index, bbox=None, dpi=200):
+    def render_for_analysis(self, paper_id, page_index, bbox=None, dpi=200, *, cancelled=None):
         """Higher resolution input for an isolated OCR/chart worker, not a new MCP image budget."""
-        return self._render(paper_id, page_index, bbox, dpi, 12_000_000)
+        return self._render(paper_id, page_index, bbox, dpi, 12_000_000, cancelled=cancelled)
 
-    def _render(self, paper_id, page_index, bbox, dpi, pixel_limit):
+    def _render(self, paper_id, page_index, bbox, dpi, pixel_limit, *, cancelled=None):
+        from paper_native_worker import budget, check
+        deadline = budget()
         if dpi is None:
             dpi = 120
         if type(page_index) is not int or page_index < 0:
@@ -418,22 +484,14 @@ class EvidenceStore:
             pages = record['summary']['pageCount']
         if page_index >= pages:
             raise ValueError('page_index')
-        doc = pymupdf.open(stream=raw, filetype='pdf')
-        try:
-            page = doc[page_index]
-            clip = self._clip(page.rect, bbox)
-            width, height = _pixel_size(clip, dpi)
-            if width * height > pixel_limit:
-                raise ValueError('pixels')
-            pix = page.get_pixmap(clip=pymupdf.Rect(clip), dpi=dpi, alpha=False)
-            if pix.width * pix.height > pixel_limit:
-                raise ValueError('pixels')
-            png, width, height = pix.tobytes('png'), pix.width, pix.height
-        finally:
-            doc.close()
-        return {'paperId': paper, 'fileHash': file_hash, 'pageIndex': page_index, 'bbox': clip,
+        from paper_native_worker import run
+        clip, png, width, height = run('evidence_render', [raw, page_index, bbox, dpi, pixel_limit], cancelled=cancelled, deadline=deadline)
+        result = {'paperId': paper, 'fileHash': file_hash, 'pageIndex': page_index, 'bbox': clip,
             'mimeType': 'image/png', 'data': base64.b64encode(png).decode('ascii'), 'sha256': _sha(png),
             'width': width, 'height': height}
+        with self.source_authority(paper, file_hash, raw):
+            check(deadline, cancelled)
+        return result
 
     def add_analysis(self, paper_id, result, fingerprint):
         """Retain a derived result separately; never rewrite native cells or source PDF bytes."""
@@ -517,14 +575,7 @@ class EvidenceStore:
                 except Exception:
                     limitations['failed'].append(index)
                     continue
-                if detected['failed']:
-                    limitations['failed'].append(index)
-                if detected['line_failed']:
-                    limitations['lines'].append(index)
-                if detected['rotation']:
-                    limitations['rotated'].append(index)
-                if detected['cropped']:
-                    limitations['cropped'].append(index)
+                _record_page_limitations(limitations, detected, index)
                 page_items = self._page_items(index, detected)
                 room = MAX_ITEMS - len(items)
                 if len(page_items) > room:
@@ -534,8 +585,7 @@ class EvidenceStore:
         finally:
             doc.close()
         now = self._clock()
-        paper_id = _new_id(self._docs)
-        self._seq += 1
+        paper_id = _new_id(())
         codes = []
         for name, key in (('page_extract_failed', 'failed'), ('caption_lines_failed', 'lines'),
                 ('page_over_budget', 'budget'), ('rotated_page', 'rotated'), ('cropped_or_offset_page', 'cropped')):
@@ -548,7 +598,7 @@ class EvidenceStore:
                 'figures': sum(item['meta']['type'] == 'figure' for item in items)},
             'engine': ENGINE, 'limitations': codes, 'expiresAt': _iso(now + self._ttl)}
         return {'paper_id': paper_id, 'file_hash': file_hash, 'pdf': raw, 'expires_at': now + self._ttl,
-            'seq': self._seq, 'summary': summary, 'items': items}
+            'seq': 0, 'summary': summary, 'items': items}
 
     def _page_items(self, index, detected):
         matrix = detected['matrix']
@@ -609,13 +659,7 @@ class EvidenceStore:
             raise ValueError('bbox')
         if bbox is None:
             return page
-        if not isinstance(bbox, (list, tuple)) or len(bbox) != 4 or not all(
-                type(v) in (int, float) and not isinstance(v, bool) and math.isfinite(v) for v in bbox):
-            raise ValueError('bbox')
-        if not (bbox[0] < bbox[2] and bbox[1] < bbox[3]):
-            raise ValueError('bbox')
-        if bbox[0] < page[0] - 1 or bbox[1] < page[1] - 1 or bbox[2] > page[2] + 1 or bbox[3] > page[3] + 1:
-            raise ValueError('bbox')
+        _validate_clip_bbox(bbox, page)
         clipped = _round_box(pymupdf.Rect(bbox) & pymupdf.Rect(page))
         if clipped is None:
             raise ValueError('bbox')

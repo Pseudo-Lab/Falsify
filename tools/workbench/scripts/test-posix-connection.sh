@@ -55,7 +55,7 @@ case "$1:$2" in
     case "$PROBE_MODE" in
       existing) echo "existing $$"; exit 0 ;;
       foreign) echo foreign; exit 2 ;;
-      start)
+      start|absent)
         case " $* " in *' --expected-pid '*) echo 'existing 1'; exit 0 ;; esac
         echo absent; exit 1 ;;
     esac ;;
@@ -73,6 +73,26 @@ if PROBE_MODE=existing CHILD_FILE="$launch_tmp/child" FALSIFY_CONNECT_APPROVAL=y
 else
   check 'reuses matching companion without starting child' 0
 fi
+port_link='falsify://connect?port=40123'
+for attempt in 1 2; do
+  if PROBE_MODE=existing CHILD_FILE="$launch_tmp/child" "$launch_tmp/open-connection.sh" "$port_link" >"$launch_tmp/out" 2>&1 && [ ! -e "$launch_tmp/child" ] && grep -q 'already running' "$launch_tmp/out"; then
+    check "port-only repeat $attempt reuses matching companion" 1
+  else
+    check "port-only repeat $attempt reuses matching companion" 0
+  fi
+done
+if PROBE_MODE=foreign CHILD_FILE="$launch_tmp/child" "$launch_tmp/open-connection.sh" "$port_link" >"$launch_tmp/out" 2>&1; then
+  check 'port-only foreign port refused' 0
+else
+  check 'port-only foreign port refused' "$(grep -q 'Port 40123 is occupied' "$launch_tmp/out" && [ ! -e "$launch_tmp/child" ] && echo 1 || echo 0)"
+fi
+PROBE_MODE=absent CHILD_FILE="$launch_tmp/child" "$launch_tmp/open-connection.sh" "$port_link" >"$launch_tmp/out" 2>&1 &
+launcher=$!
+for _ in 1 2 3 4 5; do [ -e "$launch_tmp/child" ] && break; sleep 0.2; done
+if [ -e "$launch_tmp/child" ] && kill -0 "$launcher" 2>/dev/null; then check 'port-only absent starts foreground server' 1; else check 'port-only absent starts foreground server' 0; fi
+kill "$launcher" 2>/dev/null || true
+wait "$launcher" 2>/dev/null || true
+rm -f "$launch_tmp/child"
 if PROBE_MODE=foreign CHILD_FILE="$launch_tmp/child" FALSIFY_CONNECT_APPROVAL=yes FALSIFY_PAIRING_DIR="$launch_tmp/private" "$launch_tmp/open-connection.sh" "$link" >"$launch_tmp/out" 2>&1; then
   check 'foreign port refused without starting child' 0
 else
@@ -157,6 +177,7 @@ fi
 if [ "\$1" = -f ] && [ "\$2" = %OLp ]; then
   if mode=\$($(printf '%q' "$real_stat") -c '%a' "\$3" 2>/dev/null); then
     printf '%s\\n' "\$mode"
+    exit 0
   else
     exec $(printf '%q' "$real_stat") -f '%OLp' "\$3"
   fi

@@ -75,7 +75,7 @@
 
     // Fold extracted text, never the real result or editing controls.
     const preview=$('#import-preview');if(preview){const d=disclosure('논문 내용 보기',[]);d.classList.add('visual-extraction');preview.before(d);d.append(preview);d.hidden=preview.hidden;new MutationObserver(()=>{d.hidden=preview.hidden;}).observe(preview,{attributes:true,attributeFilter:['hidden']});}
-    for(const [role,root] of [['red',$('#view-workbench')],['blue',$('#document-blue')]]){
+    function setupRole(role,root){
       const items=[...root.querySelectorAll(':scope > .role-step')];steps[role]=items;
       for(const [i,section] of items.entries()){
         section.classList.add('visual-step');const code=section.querySelector('.step-code');if(code)code.replaceChildren(icon(['file-up','play',role==='red'?'pencil':'search'][i]));
@@ -111,6 +111,7 @@
         native.addEventListener('change',paint);new MutationObserver(paint).observe(native,{childList:true,attributes:true,attributeFilter:['disabled'],subtree:true});paint();
       }
     }
+    for(const [role,root] of [['red',$('#view-workbench')],['blue',$('#document-blue')]])setupRole(role,root);
     function manualSign(){
       const title=$('#sign-title');
       if(!title||title.textContent!=='RED 실행 설정을 확인하세요')return;
@@ -127,61 +128,78 @@
       // Empty future steps stay as small destinations; no forced RED -> BLUE sequence.
       sections[1]?.classList.toggle('visual-waiting',!hasFile);sections[2]?.classList.toggle('visual-waiting',!hasResult&&!s.busy);
       sections[0]?.classList.toggle('visual-done',hasFile);sections[1]?.classList.toggle('visual-current',hasFile&&!hasResult);sections[2]?.classList.toggle('visual-current',hasResult);
+      renderNote(role,s,hasFile,progress);
+      manualSign();
+    }
+    function renderNote(role,s,hasFile,progress){
       const start=$(role==='red'?'#red-start':'#doc-blue-start'),connected=FalsifyLocalBridge?.state()?.connected;
+      let note=noteFor(role,s,hasFile,start,connected);
+      if(progress?.textContent.trim())note='';
+      if(s.note&&s.note.textContent!==note)s.note.textContent=note;
+      if(s.note)s.note.hidden=!note;
+      const connect=s.connect;
+      if(connect)connect.hidden=!hasFile||connected||s.busy||!!progress?.textContent.trim();
+    }
+    function noteFor(role,s,hasFile,start,connected){
       let note='';
       if(s.busy)note='검토 중';
       else if(!hasFile)note='먼저 논문을 놓아주세요.';
       else if(!connected)note=''; // The connection action below opens the existing PC panel.
       else if(!$(role==='red'?'#red-consent':'#doc-blue-consent')?.checked)note='논문 전송에 동의하면 검토를 시작할 수 있습니다.';
       else if(start?.disabled&&!FalsifyLab.allowed(role))note='선택한 도구의 실행 설정을 확인하세요.';
-      if(progress?.textContent.trim())note='';
-      if(s.note&&s.note.textContent!==note)s.note.textContent=note;
-      if(s.note)s.note.hidden=!note;
-      const connect=s.connect;
-      if(connect)connect.hidden=!hasFile||connected||s.busy||!!progress?.textContent.trim();
+      return note;
+    }
+    function observeRoleState(){
+      document.addEventListener('falsify:document-state',e=>render('red',e.detail));
+      document.addEventListener('falsify:blue-state',e=>render('blue',e.detail));
+      document.addEventListener('falsify:local-bridge',()=>{render('red');render('blue');});
+      for(const role of ['red','blue']){
+        const start=$(role==='red'?'#red-start':'#doc-blue-start');
+        const connect=button('plug','내 PC 연결',()=>{
+          const panel=$('.visual-connection-details');if(!panel)return;
+          panel.open=true;panel.scrollIntoView({block:'nearest'});panel.querySelector('summary')?.focus({preventScroll:true});
+        });connect.hidden=true;state[role].connect=connect;state[role].note?.after(connect);
+        if(start)new MutationObserver(()=>render(role)).observe(start,{attributes:true,attributeFilter:['disabled']});
+        const progress=$(role==='red'?'#red-progress':'#doc-blue-progress');
+        if(progress)new MutationObserver(()=>render(role)).observe(progress,{childList:true,characterData:true,subtree:true});
+        render(role);
+      }
       manualSign();
+      const signTitle=$('#sign-title');
+      if(signTitle)new MutationObserver(()=>manualSign()).observe(signTitle,{childList:true,characterData:true,subtree:true});
+      const signAction=$('#sign-action');
+      if(signAction)signAction.addEventListener('click',event=>{
+        if($('#sign-title')?.textContent!=='원본에서 직접 고치세요')return;
+        event.stopImmediatePropagation();
+        const target=$('#paper-before-stage')||$('#paper-workspace');
+        if(!target)return;
+        if(typeof target.scrollIntoView==='function')target.scrollIntoView({block:'center'});
+        if(typeof target.focus==='function')target.focus({preventScroll:true});
+      },true);
+
     }
-    document.addEventListener('falsify:document-state',e=>render('red',e.detail));
-    document.addEventListener('falsify:blue-state',e=>render('blue',e.detail));
-    document.addEventListener('falsify:local-bridge',()=>{render('red');render('blue');});
-    for(const role of ['red','blue']){
-      const start=$(role==='red'?'#red-start':'#doc-blue-start');
-      const connect=button('plug','내 PC 연결',()=>{
-        const panel=$('.visual-connection-details');if(!panel)return;
-        panel.open=true;panel.scrollIntoView({block:'nearest'});panel.querySelector('summary')?.focus({preventScroll:true});
-      });connect.hidden=true;state[role].connect=connect;state[role].note?.after(connect);
-      if(start)new MutationObserver(()=>render(role)).observe(start,{attributes:true,attributeFilter:['disabled']});
-      const progress=$(role==='red'?'#red-progress':'#doc-blue-progress');
-      if(progress)new MutationObserver(()=>render(role)).observe(progress,{childList:true,characterData:true,subtree:true});
-      render(role);
-    }
-    manualSign();
-    const signTitle=$('#sign-title');
-    if(signTitle)new MutationObserver(()=>manualSign()).observe(signTitle,{childList:true,characterData:true,subtree:true});
-    const signAction=$('#sign-action');
-    if(signAction)signAction.addEventListener('click',event=>{
-      if($('#sign-title')?.textContent!=='원본에서 직접 고치세요')return;
-      event.stopImmediatePropagation();
-      const target=$('#paper-before-stage')||$('#paper-workspace');
-      if(!target)return;
-      if(typeof target.scrollIntoView==='function')target.scrollIntoView({block:'center'});
-      if(typeof target.focus==='function')target.focus({preventScroll:true});
-    },true);
+    observeRoleState();
 
     // The PC connection is a compact appliance, with the unchanged setup available on demand.
-    const bridge=$('#local-bridge');if(bridge){
+    const bridge=$('#local-bridge');
+    function setupBridge(){
+      if(bridge){
       const pair=$('#bridge-pair'),head=bridge.querySelector('.step-head'),disclosure=el('details','visual-connection-details'),summary=el('summary');summary.append(icon('plug'),el('strong','','내 PC'),el('span','visual-pc-state'));
       const host=el('div','visual-connection-body');host.append(head,pair);disclosure.append(summary,host);bridge.append(disclosure);bridge.classList.add('visual-connection');
       function connection(){const s=FalsifyLocalBridge.state(),label=summary.querySelector('span');label.textContent=s.connected?'연결됨':'연결하기';summary.classList.toggle('connected',s.connected);if(s.connected)disclosure.open=false;}
       document.addEventListener('falsify:local-bridge',connection);connection();
       const instructions=pair.querySelector('.bridge-steps');if(instructions){const d=el('details','visual-details');d.append(el('summary','','처음 연결하는 PC'),instructions);pair.prepend(d);}
+      }
     }
+    setupBridge();
     function placeBridge(){if(!bridge)return;const current=document.querySelector('.rail [data-view][aria-current="page"]')?.dataset.view,role=current==='blue'?'blue':current==='workbench'?'red':null;bridge.hidden=!role;if(role&&advancedRoles[role])advancedRoles[role].append(bridge);}
     const rail=$('.rail');if(rail)new MutationObserver(placeBridge).observe(rail,{subtree:true,attributes:true,attributeFilter:['aria-current']});placeBridge();
     for(const [id,name] of [['red-download','download'],['doc-blue-record','check'],['red-record','check'],['evaluation-save','check'],['bridge-launch','plug'],['bridge-connect','plug'],['harness-register','plus'],['harness-download','download']])decorate($('#'+id),name);
 
     // Library first, code authoring on demand. Existing inputs/listeners stay intact.
-    const manager=$('#harness-manager');if(manager){
+    const manager=$('#harness-manager');
+    function setupLibrary(){
+      if(manager){
       const library=$('#harness-library'),imported=$('#harness-preview'),feedback=$('#harness-status'),heading=el('h3','','내 도구'),author=disclosure('새 도구 만들기 · 파일 가져오기',[]);author.id='visual-harness-author';
       const introduction=manager.querySelector('p');if(introduction)introduction.hidden=true;
       const libraryTools=$('#harness-library-tools');
@@ -197,7 +215,9 @@
       libraryActions();new MutationObserver(libraryActions).observe(library,{childList:true});
       function previewAction(){if(imported.hidden||imported.querySelector('[data-visual-register]'))return;const b=button('plus','내 도구에 추가',()=>$('#harness-register').click());b.dataset.visualRegister='true';imported.append(b);}
       new MutationObserver(previewAction).observe(imported,{childList:true,attributes:true,attributeFilter:['hidden']});previewAction();
+      }
     }
+    setupLibrary();
     const architecture=$('.connection-plan');if(architecture){const d=disclosure('실행 구조 · 고급 안내',[]);architecture.before(d);d.append(architecture);}
     // Symbolic human judgments delegate to the existing selects/validators. No
     // decision, reason, score or approval is inferred by this presentation layer.

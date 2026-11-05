@@ -3,18 +3,28 @@ import {hex} from './paragraph-pdf-crypto.mjs';
 const copy=value=>structuredClone(value);
 const abort=()=>Object.assign(new Error('취소했습니다.'),{name:'AbortError'});
 const same=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
+function verifyInitialArtifact(initialArtifact,original,baselineKey) {
+  const bytes=initialArtifact?.pdfBytes;
+  if(initialArtifact?.success!==true||!(bytes instanceof Uint8Array)||bytes.length<5||bytes[0]!==37||bytes[1]!==80||bytes[2]!==68||bytes[3]!==70||bytes[4]!==45||initialArtifact.projectId!==original.id||(initialArtifact.engine!=null&&initialArtifact.engine!==original.engine))throw Object.assign(new Error('초기 PDF가 원본 프로젝트와 일치하지 않습니다.'),{code:'invalid-initial-artifact'});
+  const owned=bytes.slice(),actual=hex(owned);
+  if(initialArtifact.pdfHash!==actual)throw Object.assign(new Error('초기 PDF 해시가 다릅니다.'),{code:'artifact-hash-mismatch'});
+  return Object.freeze({...copy(initialArtifact),pdfBytes:owned,pdfHash:actual,key:baselineKey,projectId:original.id});
+}
+function validateAppliedChanges(derived,enabled){
+  if(!derived?.project || !Array.isArray(derived.applied) || derived.diagnostics?.length || !same([...derived.applied].sort(),enabled.map(c=>c.id).sort()))throw Object.assign(new Error(derived?.diagnostics?.[0]?.message||'선택한 변경을 적용하지 못했습니다.'),{code:'source-patch-failed',diagnostics:derived?.diagnostics||[]});
+}
+function verifyGeneratedArtifact(result,derived,key){
+  if(!result?.success||!(result.pdfBytes instanceof Uint8Array)||!result.pdfBytes.length){const e=Object.assign(new Error(result?.diagnostics?.find(d=>d.severity==='error')?.message||'PDF를 만들지 못했습니다.'),{code:'latex-compile-failed',diagnostics:result?.diagnostics||[]});throw e;}
+  const bytes=result.pdfBytes.slice(),actual=hex(bytes);
+  if(result.pdfHash&&result.pdfHash!==actual)throw Object.assign(new Error('생성한 PDF 해시가 다릅니다.'),{code:'artifact-hash-mismatch'});
+  return Object.freeze({...result,pdfBytes:bytes,pdfHash:actual,key,projectId:(derived.project||derived).id});
+}
 export function createLatexSession({project,applyChanges,compiler,generationApi,engineManifest={},initialArtifact,onState=()=>{},onOutput=()=>{}}){
   if(!project?.id||typeof applyChanges!=='function'||!compiler?.compile||!generationApi?.create||typeof generationApi.key!=='function')throw new Error('LaTeX session dependencies required');
   const original=copy(project),history=[[]];let position=0,changes=[],disposed=false,busy=false,error=null,lastOutput=null,baseline=null,adoptedBaseline=null;
   const spec=()=>({fileHash:original.id,edits:copy(changes),changes:copy(changes),project:copy(original),exportSettings:{latex:{projectId:original.id,engine:original.engine,manifest:copy(engineManifest),sourceChanges:copy(changes)}}});
   const baselineKey=generationApi.key(spec());
-  if(initialArtifact!==undefined){
-    const bytes=initialArtifact?.pdfBytes;
-    if(initialArtifact?.success!==true||!(bytes instanceof Uint8Array)||bytes.length<5||bytes[0]!==37||bytes[1]!==80||bytes[2]!==68||bytes[3]!==70||bytes[4]!==45||initialArtifact.projectId!==original.id||(initialArtifact.engine!=null&&initialArtifact.engine!==original.engine))throw Object.assign(new Error('초기 PDF가 원본 프로젝트와 일치하지 않습니다.'),{code:'invalid-initial-artifact'});
-    const owned=bytes.slice(),actual=hex(owned);
-    if(initialArtifact.pdfHash!==actual)throw Object.assign(new Error('초기 PDF 해시가 다릅니다.'),{code:'artifact-hash-mismatch'});
-    baseline=Object.freeze({...copy(initialArtifact),pdfBytes:owned,pdfHash:actual,key:baselineKey,projectId:original.id});lastOutput=baseline;adoptedBaseline=baseline;
-  }
+  if(initialArtifact!==undefined){baseline=verifyInitialArtifact(initialArtifact,original,baselineKey);lastOutput=baseline;adoptedBaseline=baseline;}
   const publicOutput=value=>value?copy(value):null;
   const emit=()=>{if(!disposed)onState(snapshot());};
   function snapshot(){return {project:copy(original),changes:copy(changes),busy,error:error?{code:error.code||'compile-failed',message:error.message,diagnostics:copy(error.diagnostics||[])}:null,canUndo:position>0,canRedo:position<history.length-1,baseline:publicOutput(baseline),artifact:currentOutput(),lastArtifact:publicOutput(lastOutput)};}
@@ -26,13 +36,10 @@ export function createLatexSession({project,applyChanges,compiler,generationApi,
       const enabled=captured.changes.filter(c=>c.enabled!==false);
       const derived=await applyChanges(copy(captured.project),copy(enabled));
       if(signal.aborted||disposed)throw abort();
-      if(!derived?.project || !Array.isArray(derived.applied) || derived.diagnostics?.length || !same([...derived.applied].sort(),enabled.map(c=>c.id).sort()))throw Object.assign(new Error(derived?.diagnostics?.[0]?.message||'선택한 변경을 적용하지 못했습니다.'),{code:'source-patch-failed',diagnostics:derived?.diagnostics||[]});
+      validateAppliedChanges(derived,enabled);
       const result=await compiler.compile({project:derived.project||derived,key,signal,engineManifest:copy(engineManifest)});
       if(signal.aborted||disposed)throw abort();
-      if(!result?.success||!(result.pdfBytes instanceof Uint8Array)||!result.pdfBytes.length){const e=Object.assign(new Error(result?.diagnostics?.find(d=>d.severity==='error')?.message||'PDF를 만들지 못했습니다.'),{code:'latex-compile-failed',diagnostics:result?.diagnostics||[]});throw e;}
-      const bytes=result.pdfBytes.slice(),actual=hex(bytes);
-      if(result.pdfHash&&result.pdfHash!==actual)throw Object.assign(new Error('생성한 PDF 해시가 다릅니다.'),{code:'artifact-hash-mismatch'});
-      return Object.freeze({...result,pdfBytes:bytes,pdfHash:actual,key,projectId:(derived.project||derived).id});
+      return verifyGeneratedArtifact(result,derived,key);
     },
     onState(event){if(disposed)return;if(event.key===generationApi.key(spec())){busy=event.phase==='scheduled'||event.phase==='running';if(event.phase==='error')error=event.error;else if(event.phase==='scheduled'||event.phase==='running')error=null;emit();}},
     onResult(result){if(disposed||result.key!==generationApi.key(spec()))return;lastOutput=result;if(!changes.some(c=>c.enabled!==false)&&!baseline)baseline=result;error=null;busy=false;emit();onOutput(publicOutput(result));}

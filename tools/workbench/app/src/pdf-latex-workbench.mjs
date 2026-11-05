@@ -62,6 +62,17 @@ export function mountPdfLatexWorkbench(doc=globalThis.document){
   previous.onclick=()=>{pageIndex=Math.max(0,pageIndex-1);void render();};next.onclick=()=>{pageIndex++;void render();};
   function decisions(){return [...corrections.querySelectorAll('textarea')].filter(t=>t.value.trim()).map(t=>{const item=draft.model.items.find(i=>i.id===t.dataset.itemId);return {itemId:item.id,sourceSha256:draft.sourceSha256,tex:t.value,evidence:structuredClone(item.evidence)};});}
   function correctionInputs(){corrections.replaceChildren();for(const item of draft.model.items.filter(i=>['math','superscript','subscript','footnote','citation','unknown'].includes(i.kind)||i.status==='unsupported'||i.extensions?.candidates?.length)){const label=element('label',`${(item.evidence?.[0]?.pageIndex??0)+1}쪽 · ${item.kind}`),quote=element('p',item.text||'그림으로 보존한 영역'),input=element('textarea');input.rows=2;input.dataset.itemId=item.id;input.setAttribute('aria-label',`${item.id} LaTeX 보정`);label.append(quote,input);corrections.append(label);}}
+  function verifyCompiled(result){
+    if(!result.success)throw new Error(result.diagnostics?.find(d=>d.severity==='error')?.message||'PDF를 만들지 못했습니다.');
+    const bytes=result.pdfBytes.slice(),sha256=hex(bytes);if(result.pdfHash&&result.pdfHash!==sha256)throw new Error('생성 파일 해시가 다릅니다.');
+    return {bytes,sha256};
+  }
+  function showComparison(comparison,nextPrepared){
+      summary.textContent=`원본 ${comparison.sourcePages}쪽 → 기준본 ${comparison.baselinePages}쪽${comparison.structureAudit?.coverage?'':` · 숫자 토큰 차이 ${comparison.numbers.missing.length+comparison.numbers.added.length}개`}${nextPrepared.typography?` · ${nextPrepared.typography.page.columns}단 · Liberation Serif`:''}${comparison.layoutAudit?.status==='partial'?` · 겹침·잘림 지적 ${comparison.layoutAudit.findings.length}건`:comparison.layoutAudit?' · 배치 점검 미완료':''}`;
+      if(comparison.structureAudit?.coverage){const c=comparison.structureAudit.coverage;summary.textContent+=` · 원본 영역 ${c.sourceRegions}개 · 그림–캡션 ${c.captions}/${comparison.structureAudit.captions.length}개 연결 · 표 ${comparison.structureAudit.tables.filter(t=>t.status==='source-region-preserved').length}/${comparison.structureAudit.tables.length}개 보존`; }
+      report.textContent=JSON.stringify({comparison,diagnostics:prepared.diagnostics,regions:draft.model.items.filter(i=>i.assetId).map(i=>({kind:i.kind,page:(i.evidence?.[0]?.pageIndex??0)+1,editable:false}))},null,2);
+      status.textContent=prepared.status==='ready'?'편집할 기준본이 준비됐습니다.':'재구성본이 준비됐습니다. 원본과 차이를 확인하고 필요한 곳을 보정하세요.';
+  }
   async function compile(own){if(!stillCurrent(own)||!draft)return;const ownDraft=draft,ownDecisions=decisions(),signal=abort.signal,ownOriginal=originalBytes.slice(),layout=mode.value;busy=true;prepared=artifact=null;buttons();try{
       const options={layout};
       if(layout==='semantic-flow'){
@@ -69,15 +80,11 @@ export function mountPdfLatexWorkbench(doc=globalThis.document){
         options.fontFiles=await loadReconstructionFonts({fetch:(url,init)=>fetch(new URL(url,base),init),signal});if(!stillCurrent(own))return;
         options.profile=inferTypographyProfile(ownDraft.model,{fonts:{serif:'Liberation Serif'},packages:{needspace:false,luaWidowControl:false}});
       }
-      const nextPrepared=await createReconstructionProject(ownDraft,ownDecisions,options);if(!stillCurrent(own))return;prepared=nextPrepared;status.textContent='공격을 넣기 전 기준본을 만들고 있습니다.';compiler?.dispose();const ownCompiler=createLatexCompiler({assetBase:new URL('latex-compiler-vendor/',base).href});compiler=ownCompiler;const result=await ownCompiler.compile({project:nextPrepared.project,signal});if(!stillCurrent(own))return;if(!result.success)throw new Error(result.diagnostics?.find(d=>d.severity==='error')?.message||'PDF를 만들지 못했습니다.');
-      const bytes=result.pdfBytes.slice(),sha256=hex(bytes);if(result.pdfHash&&result.pdfHash!==sha256)throw new Error('생성 파일 해시가 다릅니다.');
+      const nextPrepared=await createReconstructionProject(ownDraft,ownDecisions,options);if(!stillCurrent(own))return;prepared=nextPrepared;status.textContent='공격을 넣기 전 기준본을 만들고 있습니다.';compiler?.dispose();const ownCompiler=createLatexCompiler({assetBase:new URL('latex-compiler-vendor/',base).href});compiler=ownCompiler;const result=await ownCompiler.compile({project:nextPrepared.project,signal});if(!stillCurrent(own))return;const {bytes,sha256}=verifyCompiled(result);
       const comparison=await reader.compare({sourceDocument:ownDraft.evidence.document,reconstructionModel:ownDraft.model,bytes,signal});if(!stillCurrent(own))return;const nextArtifact={...result,pdfBytes:bytes,pdfHash:sha256,comparison};
       const lineage=createReconstructionLineage({project:nextPrepared.project,artifact:nextArtifact,comparison,bindings:nextPrepared.bindings,decisions:ownDecisions});
       prepared={...nextPrepared,lineage};artifact=nextArtifact;busy=false;buttons();
-      summary.textContent=`원본 ${comparison.sourcePages}쪽 → 기준본 ${comparison.baselinePages}쪽${comparison.structureAudit?.coverage?'':` · 숫자 토큰 차이 ${comparison.numbers.missing.length+comparison.numbers.added.length}개`}${nextPrepared.typography?` · ${nextPrepared.typography.page.columns}단 · Liberation Serif`:''}${comparison.layoutAudit?.status==='partial'?` · 겹침·잘림 지적 ${comparison.layoutAudit.findings.length}건`:comparison.layoutAudit?' · 배치 점검 미완료':''}`;
-      if(comparison.structureAudit?.coverage){const c=comparison.structureAudit.coverage;summary.textContent+=` · 원본 영역 ${c.sourceRegions}개 · 그림–캡션 ${c.captions}/${comparison.structureAudit.captions.length}개 연결 · 표 ${comparison.structureAudit.tables.filter(t=>t.status==='source-region-preserved').length}/${comparison.structureAudit.tables.length}개 보존`; }
-      report.textContent=JSON.stringify({comparison,diagnostics:prepared.diagnostics,regions:draft.model.items.filter(i=>i.assetId).map(i=>({kind:i.kind,page:(i.evidence?.[0]?.pageIndex??0)+1,editable:false}))},null,2);
-      status.textContent=prepared.status==='ready'?'편집할 기준본이 준비됐습니다.':'재구성본이 준비됐습니다. 원본과 차이를 확인하고 필요한 곳을 보정하세요.';
+      showComparison(comparison,nextPrepared);
       const installed=await replaceReconstructionPreview({
         library:async()=>{const lib=pdfjs??await import('./vendor/pdf.mjs');pdfjs=lib;lib.GlobalWorkerOptions.workerSrc=new URL('vendor/pdf.worker.mjs',base).href;return lib;},
         isCurrent:()=>stillCurrent(own),dispose:disposePdfs,

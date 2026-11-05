@@ -12,11 +12,14 @@ const abort=signal=>{if(signal?.aborted)throw new DOMException('Cancelled','Abor
 const key=id=>Array.from(enc.encode(id),b=>b.toString(16).padStart(2,'0')).join('');
 function validate(project,artifact,{optionalArtifact=false}={}){
  if(project?.schema!=='falsify.latex-project.v1'||!Array.isArray(project.files))fail('INVALID_PROJECT');
+ validateProjectFiles(project);
+ if(optionalArtifact && artifact == null)return;
+ if(artifact?.schema!=='falsify.latex-artifact.v1'||artifact.success!==true||artifact.projectId!==project.id||artifact.engine!==project.engine||!(artifact.pdfBytes instanceof Uint8Array)||!artifact.pdfBytes.length||hex(artifact.pdfBytes)!==artifact.pdfHash)fail('INVALID_ARTIFACT');
+}
+function validateProjectFiles(project){
  const paths=new Set();for(const f of project.files){if(!f?.path||paths.has(f.path)||!(f.bytes instanceof Uint8Array)||hex(f.bytes)!==f.sha256)fail('STALE_PROJECT');paths.add(f.path);}
  const files=project.files.map(({path,sha256})=>[path,sha256]).sort((a,b)=>a[0]<b[0]?-1:a[0]>b[0]?1:0);
  if(hex(enc.encode(JSON.stringify({files,mainFile:project.mainFile,engine:project.engine,origin:project.origin})))!==project.id)fail('STALE_PROJECT');
- if(optionalArtifact && artifact == null)return;
- if(artifact?.schema!=='falsify.latex-artifact.v1'||artifact.success!==true||artifact.projectId!==project.id||artifact.engine!==project.engine||!(artifact.pdfBytes instanceof Uint8Array)||!artifact.pdfBytes.length||hex(artifact.pdfBytes)!==artifact.pdfHash)fail('INVALID_ARTIFACT');
 }
 function page(items,args={}){const offset=args.offset??0,limit=args.limit??20;if(!Number.isSafeInteger(offset)||offset<0||!Number.isSafeInteger(limit)||limit<1||limit>200)fail('INVALID_PAGINATION');return {total:items.length,offset,limit,nextOffset:offset+limit<items.length?offset+limit:null,items:items.slice(offset,offset+limit)};}
 const OBSERVATION_BUDGET=12000;
@@ -60,7 +63,7 @@ export async function getLayoutBlock({project,artifact,referenceBytes,args={},si
  const {units}=await inspect({project,artifact,referenceBytes,signal});const block=units.find(b=>b.id===args.blockId);if(!block)fail('BLOCK_NOT_FOUND');
  const offset=args.offset??0,limit=args.limit??2000;if(!Number.isSafeInteger(offset)||offset<0||!Number.isSafeInteger(limit)||limit<1||limit>4096)fail('INVALID_PAGINATION');
  const {sourceText,text,currentGeometry,assetPaths,...detail}=block;
- let start=offset;if(start>0&&(low(sourceText,start)&&high(sourceText,start-1)||low(text,start)&&high(text,start-1)))start--;
+ const start=windowStart(sourceText,text,offset);
  const maxLen=Math.max(sourceText.length,text.length),ceiling=snapEnd(sourceText,text,start,Math.min(maxLen,start+limit));
  const geometry=page(currentGeometry.candidates,{offset:args.geometryOffset??0,limit:2}),assets=page(assetPaths,{offset:args.assetOffset??0,limit:2});
  const build=end=>{
@@ -71,6 +74,13 @@ export async function getLayoutBlock({project,artifact,referenceBytes,args={},si
   const described={schema:'falsify.layout-block.v1',projectId:project.id,outputHash:artifact?.pdfHash??null,block:budgetBlock};
   return {bytes:observationBytes(described),value:{schema:described.schema,projectId:described.projectId,outputHash:described.outputHash,block:body}};
  };
+ return fitBlockWindow({start,maxLen,limit,ceiling,sourceText,text,build});
+}
+function windowStart(sourceText,text,offset){
+ let start=offset;if(start>0&&(low(sourceText,start)&&high(sourceText,start-1)||low(text,start)&&high(text,start-1)))start--;
+ return start;
+}
+function fitBlockWindow({start,maxLen,limit,ceiling,sourceText,text,build}){
  if(start>=maxLen)return build(start).value;
  let lo=start,hi=Math.min(maxLen,start+limit),best=start;
  while(lo<=hi){const mid=Math.floor((lo+hi)/2),end=Math.min(ceiling,snapEnd(sourceText,text,start,mid));if(build(end).bytes<=OBSERVATION_BUDGET){best=end;lo=mid+1;}else hi=mid-1;}
@@ -81,13 +91,17 @@ export async function getLayoutBlock({project,artifact,referenceBytes,args={},si
 function unwrapBlock(text){
  const m=/^% FALSIFY-BLOCK-OPTIONS ([A-Za-z0-9+/=]+)\n% FALSIFY-BLOCK-BEGIN\n([\s\S]*?)% FALSIFY-BLOCK-CONTENT\n([\s\S]*?)% FALSIFY-BLOCK-CONTENT-END\n([\s\S]*?)% FALSIFY-BLOCK-END\n$/.exec(text);if(!m)return text;
  let o;try{o=JSON.parse(dec.decode(Uint8Array.from(atob(m[1]),c=>c.charCodeAt(0))));}catch{return text;}
- const keys=['fontSizeBp','leadingBp','gapBeforeBp','gapAfterBp','indentBp','widthBp','pageBreakBefore','keepWithNext','align'];if(!o||typeof o!=='object'||Array.isArray(o)||Object.keys(o).some(k=>!keys.includes(k)))return text;
- for(const k of ['fontSizeBp','leadingBp','gapBeforeBp','gapAfterBp','indentBp','widthBp'])if(k in o&&(typeof o[k]!=='number'||!Number.isFinite(o[k])))return text;
- for(const k of ['pageBreakBefore','keepWithNext'])if(k in o&&typeof o[k]!=='boolean')return text;
- if('align'in o&&!['left','center','right','justify'].includes(o.align))return text;
+ if(!validBlockOptions(o))return text;
  let pre=(o.pageBreakBefore?'\\clearpage\n':'')+(o.gapBeforeBp?`\\vspace*{${o.gapBeforeBp}bp}\n`:'');pre+='\\begingroup\n';if(o.indentBp!==undefined)pre+=`\\setlength{\\parindent}{${o.indentBp}bp}\n`;if(o.widthBp!==undefined)pre+=`\\begin{minipage}{${o.widthBp}bp}\n`;if(o.align)pre+=({left:'\\raggedright',center:'\\centering',right:'\\raggedleft',justify:'\\normalfont'}[o.align])+'\n';
  const post=(o.widthBp!==undefined?'\\end{minipage}\n':'')+'\\endgroup\n'+(o.gapAfterBp?`\\vspace*{${o.gapAfterBp}bp}\n`:'')+(o.keepWithNext?'\\nopagebreak[4]\n':'');
  return m[2]===pre&&m[4]===post?m[3]:text;
+}
+function validBlockOptions(o){
+ const keys=['fontSizeBp','leadingBp','gapBeforeBp','gapAfterBp','indentBp','widthBp','pageBreakBefore','keepWithNext','align'];if(!o||typeof o!=='object'||Array.isArray(o)||Object.keys(o).some(k=>!keys.includes(k)))return false;
+ for(const k of ['fontSizeBp','leadingBp','gapBeforeBp','gapAfterBp','indentBp','widthBp'])if(k in o&&(typeof o[k]!=='number'||!Number.isFinite(o[k])))return false;
+ for(const k of ['pageBreakBefore','keepWithNext'])if(k in o&&typeof o[k]!=='boolean')return false;
+ if('align'in o&&!['left','center','right','justify'].includes(o.align))return false;
+ return true;
 }
 function protectUnknownArguments(text){
  const known=new Set(['textbf','textit','emph','textrm','textsf','texttt','textsc','fontsize','selectfont','bfseries','itshape','normalfont','centering','raggedright','raggedleft','begingroup','endgroup','noindent','nopagebreak','Needspace','needspace','vspace','hspace','par','setlength']);const saved=[];let out='',i=0;
@@ -99,12 +113,17 @@ function sourceContent(text){
  text=unwrapBlock(text);const parts=text.split(/(\$\$[\s\S]*?\$\$|(?<!\\)\$[^$\n]*?(?<!\\)\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|(?<!\\)%[^\n]*)/g);
  return parts.map((part,i)=>{if(i%2)return part;const protectedPart=protectUnknownArguments(part);part=protectedPart.text;let prior;do{prior=part;part=part.replace(/\\(?:textbf|textit|emph|textrm|textsf|texttt|textsc)\s*\{([^{}]*)\}/g,'$1');}while(part!==prior);return protectedPart.restore(part.replace(/\\setlength\s*\{\s*\\(?:baselineskip|parindent)\s*\}\s*\{\s*[\d.]+(?:bp|pt|mm|cm|in|em|ex)\s*\}/g,'').replace(/\\fontsize\s*\{[\d.]+(?:bp|pt)?\}\s*\{[\d.]+(?:bp|pt)?\}/g,'').replace(/\\(?:selectfont|bfseries|itshape|normalfont|centering|raggedright|raggedleft|begingroup|endgroup|noindent|nopagebreak)\b(?:\s*\[[^\]]*\])?/g,'').replace(/\\(?:Needspace|needspace|vspace|hspace)\*?\s*\{[\d.]+(?:bp|pt|mm|cm|in|em|ex)\}/g,'').replace(/\\par\b/g,'').replace(/\s+/g,' '));}).join('').trim();
 }
+function exactPreservation({baselineProject,project,a,b,byId,args}){
+ let preservation;
+ if(baselineProject.origin==='reconstructed-pdf'&&project.origin==='reconstructed-pdf'&&baselineProject.files.some(f=>f.path==='falsify-layout-structure.json')&&project.files.some(f=>f.path==='falsify-layout-structure.json')){const changes=a.filter(x=>byId.get(x.id)?.sourceText!==x.sourceText).map(x=>x.id);for(const x of b)if(!a.some(y=>y.id===x.id))changes.push(x.id);preservation={method:'exact-structure-unit-payload',unchanged:changes.length===0,changes:page(changes,args)};}else{const af=baselineProject.files.filter(f=>/\.tex$/i.test(f.path)),bf=new Map(project.files.filter(f=>/\.tex$/i.test(f.path)).map(f=>[f.path,f.sha256]));const changes=af.filter(f=>bf.get(f.path)!==f.sha256).map(f=>f.path);for(const f of project.files.filter(f=>/\.tex$/i.test(f.path)))if(!af.some(x=>x.path===f.path))changes.push(f.path);preservation={method:'exact-source-file-bytes',unchanged:changes.length===0,changes:page(changes,args)};}
+ return preservation;
+}
 /** Compare a captured pre-layout artifact with the candidate artifact. */
 export async function compareLayoutDocuments({project,artifact,baselineProject,baselineArtifact,args={},signal}={}){
  abort(signal);validate(project,artifact);validate(baselineProject,baselineArtifact);if(project.origin==='reconstructed-pdf'&&baselineProject.origin==='reconstructed-pdf'&&project.sourcePdfHash!==baselineProject.sourcePdfHash)fail('STALE_REFERENCE');const [before,after]=await Promise.all([readDocument({file:baselineArtifact.pdfBytes,fileHash:baselineArtifact.pdfHash,signal}),readDocument({file:artifact.pdfBytes,fileHash:artifact.pdfHash,signal})]);abort(signal);
  const comparison=compareReconstruction(before,after),diff={};for(const category of ['text','numbers']){diff[category]={};for(const side of ['missing','added'])diff[category][side]=page(comparison[category][side],args);}
  const a=blocks(baselineProject,baselineArtifact),b=blocks(project,artifact),byId=new Map(b.map(x=>[x.id,x]));let preservation;
- if(baselineProject.origin==='reconstructed-pdf'&&project.origin==='reconstructed-pdf'&&baselineProject.files.some(f=>f.path==='falsify-layout-structure.json')&&project.files.some(f=>f.path==='falsify-layout-structure.json')){const changes=a.filter(x=>byId.get(x.id)?.sourceText!==x.sourceText).map(x=>x.id);for(const x of b)if(!a.some(y=>y.id===x.id))changes.push(x.id);preservation={method:'exact-structure-unit-payload',unchanged:changes.length===0,changes:page(changes,args)};}else{const af=baselineProject.files.filter(f=>/\.tex$/i.test(f.path)),bf=new Map(project.files.filter(f=>/\.tex$/i.test(f.path)).map(f=>[f.path,f.sha256]));const changes=af.filter(f=>bf.get(f.path)!==f.sha256).map(f=>f.path);for(const f of project.files.filter(f=>/\.tex$/i.test(f.path)))if(!af.some(x=>x.path===f.path))changes.push(f.path);preservation={method:'exact-source-file-bytes',unchanged:changes.length===0,changes:page(changes,args)};}
+ preservation=exactPreservation({baselineProject,project,a,b,byId,args});
  const structured=preservation.method==='exact-structure-unit-payload';const sourceEntries=(p,units)=>structured?units.map(x=>({id:x.id,text:x.sourceText})):p.files.filter(f=>/\.tex$/i.test(f.path)).map(f=>({id:f.path,text:dec.decode(f.bytes)}));const oldSource=sourceEntries(baselineProject,a),newSource=sourceEntries(project,b),newById=new Map(newSource.map(x=>[x.id,x])),oldKeys=new Set(oldSource.map(x=>x.id)),normalizedChanges=[];for(const x of oldSource){const y=newById.get(x.id);if(!y||sourceContent(x.text)!==sourceContent(y.text))normalizedChanges.push(x.id);}for(const y of newSource)if(!oldKeys.has(y.id))normalizedChanges.push(y.id);const sourceNumbers=compareReconstruction({pages:[{text:oldSource.map(x=>sourceContent(x.text)).join(' ')}]},{pages:[{text:newSource.map(x=>sourceContent(x.text)).join(' ')}]}).numbers;
  const assets=p=>p.files.filter(f=>!(/\.(?:tex|json)$/i.test(f.path)));const old=assets(baselineProject),now=assets(project),paths=[...new Set([...old,...now].map(f=>f.path))].sort(),assetChanges=paths.map(path=>{const x=old.find(f=>f.path===path),y=now.find(f=>f.path===path);return {path,status:!x?'added':!y?'missing':x.sha256===y.sha256?'unchanged':'changed'};});
  const [oldLinks,newLinks]=await Promise.all([readSourceLinks({bytes:baselineArtifact.pdfBytes,document:before,signal}),readSourceLinks({bytes:artifact.pdfBytes,document:after,signal})]);abort(signal);const linkKey=l=>JSON.stringify({uri:l.uri,external:l.external,targetPage:l.target?.pageIndex??null});const difference=(x,y)=>{const counts=new Map();for(const v of y){const k=linkKey(v);counts.set(k,(counts.get(k)||0)+1);}return x.filter(v=>{const k=linkKey(v),n=counts.get(k)||0;if(n){counts.set(k,n-1);return false;}return true;}).map(v=>({uri:v.uri,external:v.external,targetPage:v.target?.pageIndex??null}));};

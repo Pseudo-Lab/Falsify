@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.0-alpha.49
+
+- Edit curve peaks, wells, width and position while retaining source axes, labels and page layout.
+- Drag native bar endpoints and scatter markers; keep precise coordinates in collapsed controls.
+- Share the pinned Gaussian geometry core between browser editing and RED MCP prepare/preview/export tools.
+- Preserve selected native path operands, shared Form occurrences, RGB profiles and image soft masks; patch only changed pixels in opaque raster figures.
+- Download directly from the editor, restore byte-identical originals after undo, and hand only the same PDF to BLUE.
+
 ## 0.2.0-alpha.48
 
 - Read original PDF line and cubic paths with PyMuPDF and retain source commands, style and page coordinates.

@@ -49,6 +49,8 @@ URI_MAX = 184
 REPO_ROOT = Path(__file__).resolve().parents[2]
 KEY_NAME = 'reconnect.key'
 REVOKE_NAME = 'revocations.json'
+# Bound native identity and ACL commands, including under transient system load.
+_WINDOWS_COMMAND_TIMEOUT_SECONDS = 10
 
 
 class PairingError(Exception):
@@ -164,6 +166,21 @@ _SDDL_ALIASES = {
 _ACE_RE = re.compile(r'\(([A-Z]+);([^;]*);([^;]*);([^;]*);([^;]*);([^)]+)\)')
 
 
+def _dacl_ace_matches(ace, user_sid, directory):
+    ace_type, ace_flags, rights, _obj, _inherit, sid = ace.groups()
+    if ace_type != 'A' or 'ID' in ace_flags:
+        return False
+    if sid != user_sid:
+        return False
+    if rights not in ('FA', '0x1f01ff', '0X1F01FF'):
+        return False
+    if directory and ('OI' not in ace_flags or 'CI' not in ace_flags):
+        return False
+    if not directory and ('OI' in ace_flags or 'CI' in ace_flags):
+        return False
+    return True
+
+
 def windows_dacl_is_current_user(sddl, user_sid, directory):
     """True only for one protected allow ACE granting the current user full control."""
     if not isinstance(sddl, str) or not isinstance(user_sid, str) or not user_sid.startswith('S-1-'):
@@ -180,18 +197,7 @@ def windows_dacl_is_current_user(sddl, user_sid, directory):
     aces = list(_ACE_RE.finditer(rest))
     if len(aces) != 1 or aces[0].end() != len(rest):
         return False
-    ace_type, ace_flags, rights, _obj, _inherit, sid = aces[0].groups()
-    if ace_type != 'A' or 'ID' in ace_flags:
-        return False
-    if sid != user_sid:
-        return False
-    if rights not in ('FA', '0x1f01ff', '0X1F01FF'):
-        return False
-    if directory and ('OI' not in ace_flags or 'CI' not in ace_flags):
-        return False
-    if not directory and ('OI' in ace_flags or 'CI' in ace_flags):
-        return False
-    return True
+    return _dacl_ace_matches(aces[0], user_sid, directory)
 
 
 def _sddl_aces(sddl):
@@ -209,25 +215,34 @@ def _sddl_aces(sddl):
 
 def _run_icacls(args):
     import subprocess
-    completed = subprocess.run(['icacls', *args], check=False, capture_output=True, text=True,
-                               **({'creationflags': subprocess.CREATE_NO_WINDOW} if os.name == 'nt' else {}))
+    try:
+        completed = subprocess.run(['icacls', *args], check=False, capture_output=True,
+                                   timeout=_WINDOWS_COMMAND_TIMEOUT_SECONDS,
+                                   **({'creationflags': subprocess.CREATE_NO_WINDOW} if os.name == 'nt' else {}))
+    except subprocess.TimeoutExpired:
+        raise PairingError('pairing_store_permissions') from None
     if completed.returncode != 0:
         raise PairingError('pairing_store_permissions')
-    return completed.stdout or ''
 
 
 def _windows_user_sid():
     import csv
     import subprocess
-    completed = subprocess.run(['whoami', '/user', '/fo', 'csv', '/nh'], check=False, capture_output=True, text=True,
-                               **({'creationflags': subprocess.CREATE_NO_WINDOW} if os.name == 'nt' else {}))
+    try:
+        completed = subprocess.run(['whoami', '/user', '/fo', 'csv', '/nh'], check=False, capture_output=True,
+                                   timeout=_WINDOWS_COMMAND_TIMEOUT_SECONDS,
+                                   **({'creationflags': subprocess.CREATE_NO_WINDOW} if os.name == 'nt' else {}))
+    except subprocess.TimeoutExpired:
+        raise PairingError('pairing_store_permissions') from None
     if completed.returncode != 0 or not completed.stdout.strip():
         raise PairingError('pairing_store_permissions')
     try:
-        row = next(csv.reader([completed.stdout.strip().splitlines()[-1]]))
-    except (StopIteration, csv.Error):
+        # Latin-1 preserves the command's arbitrary account-name bytes while the
+        # CSV delimiters and the machine-readable SID remain ASCII.
+        row = next(csv.reader([completed.stdout.strip().splitlines()[-1].decode('latin-1')]))
+        sid = row[-1].strip().encode('latin-1').decode('ascii') if row else ''
+    except (StopIteration, csv.Error, UnicodeError):
         raise PairingError('pairing_store_permissions') from None
-    sid = row[-1].strip() if row else ''
     if not sid.startswith('S-1-') or sid in _SDDL_ALIASES.values():
         raise PairingError('pairing_store_permissions')
     return sid
@@ -377,6 +392,22 @@ class PairingStore:
             self._pending[challenge] = {'state': state, 'proof': proof, 'origin': origin, 'port': port, 'exp': exp}
             return {'registered': True, 'expiresIn': self.pending_ttl}
 
+    def _validate_redemption(self, challenge, state, proof, origin, port, now):
+        current = self._pending.get(challenge)
+        if current and current['exp'] < now:
+            self._pending.pop(challenge, None)
+            raise PairingError('expired')
+        if not current:
+            raise PairingError('unknown_challenge')
+        if current['origin'] != origin:
+            raise PairingError('wrong_origin')
+        if current['port'] != port:
+            raise PairingError('port_mismatch')
+        if not hmac.compare_digest(current['proof'], proof_commitment(proof)):
+            raise PairingError('wrong_proof')
+        if not hmac.compare_digest(current['state'], state):
+            raise PairingError('wrong_state')
+
     def redeem(self, challenge, state, proof, origin, port, now=None):
         if self._key is None:
             raise PairingError('pairing_disabled')
@@ -389,20 +420,7 @@ class PairingStore:
             self._prune(now)
             if challenge in self._used:
                 raise PairingError('replay')
-            current = self._pending.get(challenge)
-            if current and current['exp'] < now:
-                self._pending.pop(challenge, None)
-                raise PairingError('expired')
-            if not current:
-                raise PairingError('unknown_challenge')
-            if current['origin'] != origin:
-                raise PairingError('wrong_origin')
-            if current['port'] != port:
-                raise PairingError('port_mismatch')
-            if not hmac.compare_digest(current['proof'], proof_commitment(proof)):
-                raise PairingError('wrong_proof')
-            if not hmac.compare_digest(current['state'], state):
-                raise PairingError('wrong_state')
+            self._validate_redemption(challenge, state, proof, origin, port, now)
             self._pending.pop(challenge, None)
             self._used[challenge] = now + self.pending_ttl
             credential, public = self._issue(origin, port, proof, now)
@@ -418,6 +436,20 @@ class PairingStore:
         public = {'expiresAt': expires, 'credentialId': credential_id, 'origin': origin, 'port': port}
         return 'rc1.' + body + '.' + mac, public
 
+    def _validate_credential_payload(self, payload, origin, port, now):
+        if not isinstance(payload, dict) or set(payload) != {'v', 'id', 'origin', 'exp', 'port', 'proof'}:
+            raise PairingError('wrong_proof')
+        if payload['v'] != 1 or not isinstance(payload['id'], str) or not re.fullmatch(r'[0-9a-f]{32}', payload['id']):
+            raise PairingError('wrong_proof')
+        if payload['origin'] != origin or payload['origin'] != FIXED_ORIGIN:
+            raise PairingError('wrong_origin')
+        if payload['port'] != port:
+            raise PairingError('port_mismatch')
+        if not isinstance(payload['exp'], int) or now >= payload['exp']:
+            raise PairingError('expired')
+        if payload['id'] in self._revoked:
+            raise PairingError('revoked')
+
     def _open_credential(self, credential, origin, port, now):
         if not isinstance(credential, str) or credential.count('.') != 2 or len(credential) > 512:
             raise PairingError('wrong_proof')
@@ -431,18 +463,7 @@ class PairingStore:
             payload = json.loads(_b64url_decode(body).decode('utf-8'), object_pairs_hook=_no_duplicates)
         except (UnicodeError, json.JSONDecodeError, ValueError, PairingError):
             raise PairingError('wrong_proof') from None
-        if not isinstance(payload, dict) or set(payload) != {'v', 'id', 'origin', 'exp', 'port', 'proof'}:
-            raise PairingError('wrong_proof')
-        if payload['v'] != 1 or not isinstance(payload['id'], str) or not re.fullmatch(r'[0-9a-f]{32}', payload['id']):
-            raise PairingError('wrong_proof')
-        if payload['origin'] != origin or payload['origin'] != FIXED_ORIGIN:
-            raise PairingError('wrong_origin')
-        if payload['port'] != port:
-            raise PairingError('port_mismatch')
-        if not isinstance(payload['exp'], int) or now >= payload['exp']:
-            raise PairingError('expired')
-        if payload['id'] in self._revoked:
-            raise PairingError('revoked')
+        self._validate_credential_payload(payload, origin, port, now)
         return {'via': 'reconnect', 'expiresAt': payload['exp'], 'credentialId': payload['id'], 'origin': origin, 'port': port}
 
     def status(self, credential, origin, port, now=None):
@@ -600,6 +621,19 @@ def approval_decision(origin, choice):
     return 'ask'
 
 
+def _descriptor_pid(descriptor, expected_server_path, expected_pid):
+    pid = descriptor.get('pid')
+    path = descriptor.get('serverPath')
+    if (descriptor.get('schema') != 'falsify-companion-lifecycle/1'
+            or isinstance(pid, bool) or not isinstance(pid, int) or pid <= 0
+            or (expected_pid is not None and pid != expected_pid)
+            or not isinstance(path, str) or not Path(path).is_absolute()
+            or Path(path).resolve() != Path(expected_server_path).resolve()
+            or descriptor.get('webOrigin') != FIXED_ORIGIN):
+        raise ValueError('descriptor mismatch')
+    return pid
+
+
 def _launcher_session(port, expected_server_path, expected_pid=None):
     """Bootstrap and check the server-reported descriptor; this is not OS attestation."""
     status, raw = _local_json(port, 'GET', '/api/session', {'Host': '127.0.0.1:%d' % port, 'Sec-Fetch-Site': 'same-origin'})
@@ -613,15 +647,7 @@ def _launcher_session(port, expected_server_path, expected_pid=None):
     descriptor = json.loads(raw.decode('utf-8')) if status == 200 else None
     if not isinstance(descriptor, dict):
         raise ValueError('invalid descriptor')
-    pid = descriptor.get('pid')
-    path = descriptor.get('serverPath')
-    if (descriptor.get('schema') != 'falsify-companion-lifecycle/1'
-            or isinstance(pid, bool) or not isinstance(pid, int) or pid <= 0
-            or (expected_pid is not None and pid != expected_pid)
-            or not isinstance(path, str) or not Path(path).is_absolute()
-            or Path(path).resolve() != Path(expected_server_path).resolve()
-            or descriptor.get('webOrigin') != FIXED_ORIGIN):
-        raise ValueError('descriptor mismatch')
+    pid = _descriptor_pid(descriptor, expected_server_path, expected_pid)
     return token, pid
 
 

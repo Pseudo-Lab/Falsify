@@ -12,12 +12,14 @@ Text-only BLUE review uses paper_evidence_blue.context_for_review. That
 helper is not a tool call. This server is the separate tool surface.
 """
 import argparse
+import asyncio
 import base64
 import hashlib
 import json
 import logging
 import re
 import sys
+import threading
 from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
@@ -36,6 +38,15 @@ INSTRUCTIONS = (
 _CODE = re.compile(r"[a-z0-9_]{1,80}\Z")
 _SHA = re.compile(r"[0-9a-fA-F]{64}\Z")
 _READONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+
+
+async def _cancellable_thread(action):
+    cancelled = threading.Event()
+    try:
+        return await asyncio.to_thread(action, cancelled)
+    except asyncio.CancelledError:
+        cancelled.set()
+        raise
 
 
 def _fixed(exc):
@@ -139,9 +150,9 @@ def build_server(store, paper_id, file_hash, enable_analysis=False):
         return result if isinstance(result, CallToolResult) else _ok(result)
 
     @server.tool(annotations=_READONLY)
-    def render_region(paperId: str, pageIndex: int, bbox: list[float] | None = None, dpi: int = 120) -> CallToolResult:
+    async def render_region(paperId: str, pageIndex: int, bbox: list[float] | None = None, dpi: int = 120) -> CallToolResult:
         """Render one PNG crop and its JSON record. Read-only. Does not write a file."""
-        result = _guard(paper_id, file_hash, paperId, lambda: store.render_region(paperId, pageIndex, bbox=bbox, dpi=dpi))
+        result = await _cancellable_thread(lambda cancelled: _guard(paper_id, file_hash, paperId, lambda: store.render_region(paperId, pageIndex, bbox=bbox, dpi=dpi, cancelled=cancelled)))
         return result if isinstance(result, CallToolResult) else _image_result(result)
 
     if enable_analysis:

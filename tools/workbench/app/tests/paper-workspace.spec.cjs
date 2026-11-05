@@ -126,7 +126,7 @@ function mount(opts={}){
   w.get('paper-before-stage').clientWidth=opts.width||640;w.get('paper-after-stage').clientWidth=opts.width||640;
   const edits=opts.edits===false?null:(opts.edits||editCore());
   const exporter=opts.exporter||null;
-  const sourceBlobs=opts.sourceBlobs||blobMemory();
+  const sourceBlobs=opts.sourceBlobs===null?undefined:(opts.sourceBlobs||blobMemory());
   const clock={value:opts.clock??1_700_000_000_000};
   const ws=api.create({document:w.document,preview:opts.preview===false?undefined:{pdfParams:Preview.pdfParams,fitScale:Preview.fitScale,defaultImport:async()=>lib},
     edits:edits||undefined,generation:opts.generation,fonts:opts.fonts,exporter:exporter||undefined,paragraphPdf:opts.paragraphPdf,tablePdf:opts.tablePdf,pipeline:opts.pipeline,recompositionPdf:opts.recompositionPdf,storage,sourceBlobs,urls:{createObjectURL(file){downloads.push(file);return 'blob:'+downloads.length;},revokeObjectURL(){}},
@@ -1304,6 +1304,18 @@ test('ui-audit-repair: table blur schedules the committed cell identity',async()
   await until(()=>v.canvas().length,'page');v.get('paper-mode-table').click();await until(()=>tableButtons(v).length,'table');
   tableButtons(v)[0].click();const editor=v.document.activeElement;editor.value='11';editor.dispatchEvent(new Event('input'));editor.dispatchEvent(new Event('blur'));
   assert.equal(instances.at(-1).specs.at(-1).edits[0].id,v.ws.getEditSnapshot().edits[0].id);assert.doesNotMatch(v.get('paper-generate-status').textContent,/겹/);
+});
+
+test('source blob writes wait for transaction completion and reuse their connection',async()=>{
+  const previous=globalThis.indexedDB;let opens=0,closes=0,abort=true;
+  globalThis.indexedDB={open(){opens++;const req={};setImmediate(()=>{req.result={objectStoreNames:{contains:()=>true},close(){closes++;},transaction(){const tx={objectStore(){return {openCursor(){const q={};setImmediate(()=>{q.result=null;q.onsuccess?.();setImmediate(()=>tx.oncomplete?.());});return q;},put(){const q={};setImmediate(()=>{q.onsuccess?.();setImmediate(()=>abort?tx.onabort?.():tx.oncomplete?.());});return q;}};}};return tx;}};req.onsuccess();});return req;}};
+  try{const v=mount({sourceBlobs:null});v.file(pdfFile(pdfBytes('MARKER-A')));await until(()=>v.ws.getSource(),'source');v.get('paper-draft-opt').checked=true;v.get('paper-draft-source').checked=true;v.get('paper-draft-save').click();await until(()=>/원본 PDF는 보관하지 못했습니다/.test(v.get('paper-draft-status').textContent),'abort');abort=false;v.get('paper-draft-save').click();await until(()=>/원본 PDF를 이 브라우저에만 저장했습니다/.test(v.get('paper-draft-status').textContent),'saved');assert.equal(opens,1);v.ws.dispose();await settle();assert.equal(closes,1);}finally{globalThis.indexedDB=previous;}
+});
+
+test('dispose and remount detach input listeners and reject stale source',async()=>{
+  const v=mount({hold:true});v.file(pdfFile(pdfBytes('MARKER-A')));await until(()=>v.log.tasks.length,'pending load');assert.equal(v.long.filter(Boolean).length,1);v.ws.dispose();assert.equal(v.long.filter(Boolean).length,0);assert.equal(v.ws.getSource(),null);
+  const next=api.create({document:v.document,edits:v.edits,storage:v.storage,sourceBlobs:v.sourceBlobs,subtle:crypto.subtle,timers:{setTimeout,clearTimeout},urls:URL,preview:{pdfParams:Preview.pdfParams,fitScale:Preview.fitScale,defaultImport:async()=>v.lib}});
+  v.file(pdfFile(pdfBytes('MARKER-B')));await until(()=>v.log.tasks.length>=2,'new load');v.log.tasks.at(-1).open();await until(()=>next.getSource()?.fileHash===sha(pdfBytes('MARKER-B')),'new source');assert.equal(v.ws.getSource(),null);assert.equal(v.log.tasks.length,2);next.dispose();
 });
 
 (async()=>{let passed=0;for(const [name,fn] of tests){try{await fn();passed++;console.log('PASS '+name);}catch(e){console.error('FAIL '+name+'\n'+(e.stack||e));process.exitCode=1;}}

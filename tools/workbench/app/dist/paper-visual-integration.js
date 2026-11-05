@@ -3,11 +3,7 @@
   'use strict';
   const hash=async bytes=>[...new Uint8Array(await root.crypto.subtle.digest('SHA-256',bytes))].map(x=>x.toString(16).padStart(2,'0')).join('');
   const b64=bytes=>{let raw='';for(let i=0;i<bytes.length;i+=32768)raw+=String.fromCharCode(...bytes.subarray(i,i+32768));return root.btoa(raw);};
-  function manualEdits(changes){
-    const edits=[];
-    for(const [index,change] of changes.entries()){
-      const base={id:('visual-'+String(change.id||index)).slice(0,65),enabled:true,pageIndex:change.pageIndex,origin:'human',anchor:Array.isArray(change.bbox)?{bbox:[...change.bbox]}:null};
-      if(Array.isArray(change.before?.series)&&Array.isArray(change.after?.series)){
+  function appendChartEdits(edits,base,change){
         const before=[],after=[];
         const old=change.before,next=change.after;
         const meta=value=>({kind:value.kind,title:value.title,xAxis:value.xAxis,yAxis:value.yAxis});
@@ -22,6 +18,13 @@
           }
         }
         for(let i=0;i<before.length;i+=25)edits.push({...base,id:base.id+'-'+i/25,before:JSON.stringify(before.slice(i,i+25)),after:JSON.stringify(after.slice(i,i+25))});
+  }
+  function manualEdits(changes){
+    const edits=[];
+    for(const [index,change] of changes.entries()){
+      const base={id:('visual-'+String(change.id||index)).slice(0,65),enabled:true,pageIndex:change.pageIndex,origin:'human',anchor:Array.isArray(change.bbox)?{bbox:[...change.bbox]}:null};
+      if(Array.isArray(change.before?.series)&&Array.isArray(change.after?.series)){
+        appendChartEdits(edits,base,change);
       }else edits.push({...base,before:describe(change.before),after:describe(change.after)});
     }
     return edits;

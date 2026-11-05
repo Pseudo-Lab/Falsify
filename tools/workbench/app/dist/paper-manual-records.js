@@ -52,10 +52,14 @@
   }
   function explain(error){
     if(error&&error.code==='mismatch') return error.message;
-    if(error&&error.code==='conflict'&&/Duplicate edit/.test(error.message||'')) return '편집 ID가 중복되어 기록하지 않았습니다.';
-    if(error&&error.code==='conflict'&&/Stale output/.test(error.message||'')) return '생성 파일 리비전이 현재 편집과 달라 다운로드 해시를 연결하지 않았습니다.';
+    const conflict=conflictExplanation(error);if(conflict)return conflict;
     if(error&&error.code==='malformed'&&/PDF/.test(error.message||'')) return '원본 PDF 바이너리는 수동 기록에 넣지 않습니다.';
     return error&&error.message?error.message:'수동 편집 기록을 만들지 못했습니다.';
+  }
+  function conflictExplanation(error){
+    if(error&&error.code==='conflict'&&/Duplicate edit/.test(error.message||'')) return '편집 ID가 중복되어 기록하지 않았습니다.';
+    if(error&&error.code==='conflict'&&/Stale output/.test(error.message||'')) return '생성 파일 리비전이 현재 편집과 달라 다운로드 해시를 연결하지 않았습니다.';
+    return null;
   }
   function publicOutput(output){
     if(!output||typeof output!=='object'||Array.isArray(output)) return null;
@@ -87,13 +91,16 @@
     const hits=hitsOf(segment.text, edit.before);
     const anchor=edit.anchor;
     if(anchor&&Number.isInteger(anchor.start)&&Number.isInteger(anchor.end)){
+      return anchoredEdit(segment,edit,anchor,hits);
+    }
+    if(hits.length!==1) return {status:'mismatch'};
+    return {status:'matched', start:hits[0], end:hits[0]+edit.before.length, occurrence:0, segmentId:segment.id};
+  }
+  function anchoredEdit(segment,edit,anchor,hits){
       if(segment.text.slice(anchor.start, anchor.end)!==edit.before) return {status:'mismatch'};
       const occurrence=Number.isInteger(anchor.occurrence)?anchor.occurrence:hits.indexOf(anchor.start);
       if(!Number.isInteger(occurrence)||occurrence<0||hits[occurrence]!==anchor.start) return {status:'mismatch'};
       return {status:'matched', start:anchor.start, end:anchor.end, occurrence, segmentId:segment.id};
-    }
-    if(hits.length!==1) return {status:'mismatch'};
-    return {status:'matched', start:hits[0], end:hits[0]+edit.before.length, occurrence:0, segmentId:segment.id};
   }
   function matchBlue(record, blue){
     const link=downloadLink(record);
@@ -124,6 +131,23 @@
     const place=locateEdit(record, edit);
     const segment=(record&&record.segments||[]).find(item=>item.id===edit.segmentId);
     const quote=typeof finding.quote==='string'?finding.quote:'';
+    const range=findingRange(segment,finding,quote);
+    if(place.status==='matched'&&range&&place.start===range.start&&place.end===range.end) return 'same-position';
+    if(sameLocation(edit,finding,segment)) return 'same-page';
+    return contextOverlap(edit,quote);
+  }
+  function sameLocation(edit,finding,segment){
+    const sameSegment=!!(edit.segmentId&&finding.segmentId&&edit.segmentId===finding.segmentId);
+    const samePage=!!(segment&&Number.isInteger(segment.pageIndex)&&Number.isInteger(finding.pageIndex)&&finding.pageIndex===segment.pageIndex);
+    return sameSegment||samePage;
+  }
+  function contextOverlap(edit,quote){
+    const before=typeof edit.before==='string'?edit.before:'';
+    const after=typeof edit.after==='string'?edit.after:'';
+    if(quote&&(before&&(quote.includes(before)||before.includes(quote))||after&&(quote.includes(after)||after.includes(quote)))) return 'context';
+    return null;
+  }
+  function findingRange(segment,finding,quote){
     let range=null;
     if(Number.isInteger(finding.start)&&Number.isInteger(finding.end)&&finding.end>finding.start){
       if(!segment||!quote||segment.text.slice(finding.start, finding.end)===quote) range={start:finding.start, end:finding.end};
@@ -131,14 +155,7 @@
       const hits=hitsOf(segment.text, quote);
       if(hits.length===1) range={start:hits[0], end:hits[0]+quote.length};
     }
-    if(place.status==='matched'&&range&&place.start===range.start&&place.end===range.end) return 'same-position';
-    const sameSegment=!!(edit.segmentId&&finding.segmentId&&edit.segmentId===finding.segmentId);
-    const samePage=!!(segment&&Number.isInteger(segment.pageIndex)&&Number.isInteger(finding.pageIndex)&&finding.pageIndex===segment.pageIndex);
-    if(sameSegment||samePage) return 'same-page';
-    const before=typeof edit.before==='string'?edit.before:'';
-    const after=typeof edit.after==='string'?edit.after:'';
-    if(quote&&(before&&(quote.includes(before)||before.includes(quote))||after&&(quote.includes(after)||after.includes(quote)))) return 'context';
-    return null;
+    return range;
   }
   function mapEdit(edit){
     const before=typeof edit.originalBefore==='string'?edit.originalBefore:edit.before;
@@ -185,18 +202,8 @@
     const api=await bundle();
     return api.normalizePaperEdit(record);
   }
-  async function capture(input){
-    const ticket=++captureEpoch;
-    const source=input&&input.source, snapshot=input&&input.snapshot;
-    if(!source||typeof source!=='object'||!snapshot||snapshot.schema!=='falsify.paper-edits.v1') throw Object.assign(Error('원문이나 편집 스냅샷이 없어 수동 기록을 만들지 않았습니다.'),{code:'missing'});
-    if(source.fileHash!==snapshot.fileHash) throw Object.assign(Error('원문 해시와 편집 스냅샷 해시가 달라 기록하지 않았습니다.'),{code:'mismatch'});
-    const requestedId=typeof input.recordId==='string'&&/^pvr-[A-Za-z0-9-]{1,80}$/.test(input.recordId)?input.recordId:null;
-    const existing=requestedId?locals.find(item=>item.id===requestedId):locals.find(item=>item.sourceFileHash===source.fileHash&&!item.id.startsWith('pvr-'));
-    const revision=snapshot.revision;
-    const incoming=publicOutput(input.output);
-    let output=null;
-    if(incoming&&incoming.revision===revision&&typeof incoming.sha256==='string'&&HEX.test(incoming.sha256)) output={sha256:incoming.sha256, revision:incoming.revision, verification:incoming.verification};
-    else if(existing&&existing.editRevision===revision&&existing.output) output=copy(existing.output);
+  function makeCaptureDraft(input,source,snapshot,requestedId,existing,revision){
+    const output=captureOutput(input,existing,revision);
     const draft={
       id:existing?existing.id:(requestedId||mintId()),
       createdAt:existing?existing.createdAt:new Date(input.now||Date.now()).toISOString(),
@@ -208,6 +215,24 @@
       output,
       reviews:carryReviews(existing, revision, output)
     };
+    return draft;
+  }
+  function captureOutput(input,existing,revision){
+    const incoming=publicOutput(input.output);
+    let output=null;
+    if(incoming&&incoming.revision===revision&&typeof incoming.sha256==='string'&&HEX.test(incoming.sha256)) output={sha256:incoming.sha256, revision:incoming.revision, verification:incoming.verification};
+    else if(existing&&existing.editRevision===revision&&existing.output) output=copy(existing.output);
+    return output;
+  }
+  async function capture(input){
+    const ticket=++captureEpoch;
+    const source=input&&input.source, snapshot=input&&input.snapshot;
+    if(!source||typeof source!=='object'||!snapshot||snapshot.schema!=='falsify.paper-edits.v1') throw Object.assign(Error('원문이나 편집 스냅샷이 없어 수동 기록을 만들지 않았습니다.'),{code:'missing'});
+    if(source.fileHash!==snapshot.fileHash) throw Object.assign(Error('원문 해시와 편집 스냅샷 해시가 달라 기록하지 않았습니다.'),{code:'mismatch'});
+    const requestedId=typeof input.recordId==='string'&&/^pvr-[A-Za-z0-9-]{1,80}$/.test(input.recordId)?input.recordId:null;
+    const existing=requestedId?locals.find(item=>item.id===requestedId):locals.find(item=>item.sourceFileHash===source.fileHash&&!item.id.startsWith('pvr-'));
+    const revision=snapshot.revision;
+    const draft=makeCaptureDraft(input,source,snapshot,requestedId,existing,revision);
     const data=await normalize(draft);
     if(ticket!==captureEpoch) return {captured:false, reason:'superseded'};
     const record=storeLocal(data);
@@ -327,23 +352,20 @@
       if(!app||typeof app.publishPaperEdit!=='function') throw Error('기존 팀 보관 연결이 없습니다. 다른 서비스로는 보내지 않습니다.');
       const result=await app.publishPaperEdit({...copy(view.record), reviews:copy(view.reviews)},{teamShare:true});
       if(generation!==shareEpoch) return {stored:false, cancelled:true};
-      if(result&&result.cancelled){setStatus('팀 공유가 끝나기 전에 연결이 바뀌어 결과를 성공으로 보지 않습니다. 자동으로 다시 보내지 않습니다.', true); return result;}
-      setStatus('수동 편집 JSON을 팀 공간에 올렸습니다. 텍스트와 편집만이며 원본 PDF 바이너리는 올리지 않았습니다.');
-      state.shareOpen=false;
-      render();
-      return result;
+      return finishShare(result);
     }catch(error){
       setStatus(error&&error.message?error.message:'팀 보관 결과를 확인하지 못했습니다. 자동으로 다시 보내지 않습니다.', true);
       return {stored:false, error:error&&error.message};
     }finally{sharing=false; paintShare();}
   }
-  async function addReview(key, input, extras){
-    sweep(extras&&extras.now);
-    if(!input||typeof input!=='object'||Object.prototype.hasOwnProperty.call(input,'gold')) throw Error('gold는 계산하거나 저장하지 않습니다. 사람이 적은 점수와 이유만 남깁니다.');
-    const view=views().find(item=>item.key===key);
-    if(!view) throw Error('검수할 수동 기록이 없습니다.');
-    const blue=extras&&extras.blue;
-    const matched=matchBlue(view.record, blue||null);
+  function finishShare(result){
+      if(result&&result.cancelled){setStatus('팀 공유가 끝나기 전에 연결이 바뀌어 결과를 성공으로 보지 않습니다. 자동으로 다시 보내지 않습니다.', true); return result;}
+      setStatus('수동 편집 JSON을 팀 공간에 올렸습니다. 텍스트와 편집만이며 원본 PDF 바이너리는 올리지 않았습니다.');
+      state.shareOpen=false;
+      render();
+      return result;
+  }
+  function reviewAlignment(input,blue,matched){
     let alignment=null;
     if(blue&&matched.status==='matched'){
       const notes=Array.isArray(input.findingNotes)?input.findingNotes:[];
@@ -353,6 +375,20 @@
         return {id:note.id, verdict:note.verdict, note:typeof note.note==='string'?note.note:''};
       })};
     }
+    return alignment;
+  }
+  function reviewView(key,input){
+    if(!input||typeof input!=='object'||Object.prototype.hasOwnProperty.call(input,'gold')) throw Error('gold는 계산하거나 저장하지 않습니다. 사람이 적은 점수와 이유만 남깁니다.');
+    const view=views().find(item=>item.key===key);
+    if(!view) throw Error('검수할 수동 기록이 없습니다.');
+    return view;
+  }
+  async function addReview(key, input, extras){
+    sweep(extras&&extras.now);
+    const view=reviewView(key,input);
+    const blue=extras&&extras.blue;
+    const matched=matchBlue(view.record, blue||null);
+    const alignment=reviewAlignment(input,blue,matched);
     const score=input.verdict==='uncertain'||input.score===''||input.score===undefined?null:input.score;
     const link=downloadLink(view.record);
     const review={id:crypto.randomUUID(), createdAt:new Date((extras&&extras.now)||Date.now()).toISOString(), reviewer:input.reviewer, caseLabel:input.caseLabel, verdict:input.verdict, score, note:input.note, alignment, editRevision:view.record.editRevision, outputHash:link?link.sha256:null, stale:false};
@@ -409,21 +445,10 @@
     const matched=record?matchBlue(record, blue):{status:'absent', findings:[]};
     const findings=matched.status==='matched'?matched.findings:[];
     ui.status=el('p',{id:'paper-manual-status', className:state.status.error?'paper-manual-status error':'paper-manual-status', role:'status', textContent:state.status.text});
-    const picker=el('select',{id:'paper-manual-record'});
-    const rows=views();
-    if(!rows.length) picker.append(el('option',{value:'', textContent:'아직 수동 편집 기록이 없습니다'}));
-    for(const row of rows) picker.append(el('option',{value:row.key, textContent:row.label}));
-    if(selectedKey) picker.value=selectedKey;
-    picker.addEventListener('change',()=>{selectedKey=picker.value; state.blueId=''; consentFor=''; render();});
-    const blueSelect=el('select',{id:'paper-manual-blue'});
-    blueSelect.append(el('option',{value:'', textContent:'BLUE 파일을 맞추지 않음 · 수동 검수만'}));
-    for(const item of blues) blueSelect.append(el('option',{value:item.id, textContent:(item.sourceName||'BLUE')+' · '+String(item.fileHash||'').slice(0,12)}));
-    if(state.blueId) blueSelect.value=state.blueId;
-    blueSelect.addEventListener('change',()=>{state.blueId=blueSelect.value; render();});
-    const blueStatus=matched.status==='matched'?'BLUE 파일 SHA-256이 생성 PDF와 같습니다. 타당함은 사람이 적습니다.':matched.status==='mismatch'?'고른 BLUE 파일 해시가 생성 PDF 해시와 다릅니다. 맞춘 것으로 표시하지 않습니다.':matched.status==='source-only'?'생성 PDF 해시가 없어 BLUE 파일과 맞추지 않습니다. 원문 해시만으로 맞추지 않습니다.':'BLUE 파일을 고르지 않았습니다. 수동 검수는 그대로 저장할 수 있습니다.';
-    const edits=el('div',{id:'paper-manual-edits'});
-    if(record) for(const edit of record.edits) edits.append(editArticle(record, edit, findings));
-    else edits.append(el('p',{className:'muted', textContent:'논문 작업대의 편집 스냅샷이 오면 Before와 After를 여기 남깁니다. 위치와 원문을 다시 입력하지 않아도 됩니다.'}));
+    const picker=recordPicker();
+    const blueSelect=bluePicker();
+    const blueStatus=blueStatusText(matched);
+    const edits=editList(record,findings);
     const history=el('div',{id:'paper-manual-history'});
     for(const review of (view&&view.reviews)||[]) history.append(reviewArticle(record, review));
     ui.consent=el('input',{type:'checkbox', id:'paper-manual-consent'});
@@ -435,6 +460,58 @@
     const shareBox=el('details',{id:'paper-manual-share', className:'paper-manual-share'});
     if(state.shareOpen) shareBox.setAttribute('open','');
     shareBox.append(el('summary',{textContent:'팀에 저장'}), el('p',{textContent:'Falsify 팀 전체 공개입니다. 텍스트와 편집, 사람이 적은 검수 메모만 JSON으로 올립니다. 원본 PDF 바이너리는 올리지 않습니다. 동의 전에는 보내지 않고, 응답을 모르면 자동으로 다시 보내지 않습니다.'}), el('label',{className:'check-row'}, ui.consent, el('span',{textContent:'이 수동 기록을 팀원 모두에게 공개합니다.'})), el('div',{className:'button-row'}, ui.publish, cancel));
+    const form=reviewForm(record,matched,findings);
+    const prepare=el('button',{type:'button', id:'paper-manual-prepare', className:'button secondary', textContent:'팀에 저장', disabled:!record});
+    prepare.addEventListener('click',()=>{if(selectedKey) openConsent(selectedKey);});
+    const refresh=el('button',{type:'button', id:'paper-manual-blue-refresh', className:'button secondary', textContent:'BLUE 파일 목록'});
+    refresh.addEventListener('click',()=>{void refreshBlue();});
+    const closeImportedButton=el('button',{type:'button', id:'paper-manual-close-import', className:'button secondary', textContent:'임시 열람 닫기', hidden:!imported});
+    closeImportedButton.addEventListener('click',()=>{closeImported(); setStatus('임시 열람을 닫았습니다. 로컬 수동 기록과 로컬 AI 기록은 그대로입니다.');});
+    root.replaceChildren(
+      el('div',{className:'paper-manual-kicker'}, el('span',{textContent:'H1'}), el('strong',{textContent:'수동 편집 검수'})),
+      el('p',{className:'muted', textContent:'모델 실행 기록과 별도입니다. Harness 증명이나 gold를 만들지 않습니다. Before, After, 쪽, 앵커, 출처, 사용 여부, 생성 PDF 해시와 리비전은 작업대 스냅샷에서 가져옵니다.'}),
+      ui.status,
+      el('label',{textContent:'수동 기록'}, picker),
+      el('p',{id:'paper-manual-output', textContent:link?'생성 PDF SHA-256 '+link.sha256+' · revision '+link.revision:'이 편집 리비전의 생성 PDF 해시가 없습니다. 이전 해시를 현재 파일로 연결하지 않습니다.'}),
+      edits,
+      el('label',{textContent:'BLUE 파일 해시'}, blueSelect),
+      refresh,
+      el('p',{id:'paper-manual-blue-status', textContent:blueStatus}),
+      form,
+      el('h3',{textContent:'사람 검수 이력'}),
+      history,
+      el('div',{className:'button-row'}, prepare, closeImportedButton),
+      shareBox
+    );
+    paintShare();
+  }
+  function blueStatusText(matched){
+    return matched.status==='matched'?'BLUE 파일 SHA-256이 생성 PDF와 같습니다. 타당함은 사람이 적습니다.':matched.status==='mismatch'?'고른 BLUE 파일 해시가 생성 PDF 해시와 다릅니다. 맞춘 것으로 표시하지 않습니다.':matched.status==='source-only'?'생성 PDF 해시가 없어 BLUE 파일과 맞추지 않습니다. 원문 해시만으로 맞추지 않습니다.':'BLUE 파일을 고르지 않았습니다. 수동 검수는 그대로 저장할 수 있습니다.';
+  }
+  function editList(record,findings){
+    const edits=el('div',{id:'paper-manual-edits'});
+    if(record) for(const edit of record.edits) edits.append(editArticle(record, edit, findings));
+    else edits.append(el('p',{className:'muted', textContent:'논문 작업대의 편집 스냅샷이 오면 Before와 After를 여기 남깁니다. 위치와 원문을 다시 입력하지 않아도 됩니다.'}));
+    return edits;
+  }
+  function recordPicker(){
+    const picker=el('select',{id:'paper-manual-record'});
+    const rows=views();
+    if(!rows.length) picker.append(el('option',{value:'', textContent:'아직 수동 편집 기록이 없습니다'}));
+    for(const row of rows) picker.append(el('option',{value:row.key, textContent:row.label}));
+    if(selectedKey) picker.value=selectedKey;
+    picker.addEventListener('change',()=>{selectedKey=picker.value; state.blueId=''; consentFor=''; render();});
+    return picker;
+  }
+  function bluePicker(){
+    const blueSelect=el('select',{id:'paper-manual-blue'});
+    blueSelect.append(el('option',{value:'', textContent:'BLUE 파일을 맞추지 않음 · 수동 검수만'}));
+    for(const item of blues) blueSelect.append(el('option',{value:item.id, textContent:(item.sourceName||'BLUE')+' · '+String(item.fileHash||'').slice(0,12)}));
+    if(state.blueId) blueSelect.value=state.blueId;
+    blueSelect.addEventListener('change',()=>{state.blueId=blueSelect.value; render();});
+    return blueSelect;
+  }
+  function reviewForm(record,matched,findings){
     const reviewer=el('input',{id:'paper-manual-reviewer', maxLength:120, placeholder:'이름 또는 식별자'});
     const caseLabel=el('input',{id:'paper-manual-case', maxLength:160, placeholder:'예: 수동 편집 / 인용 수치'});
     const verdict=el('select',{id:'paper-manual-verdict'});
@@ -461,29 +538,7 @@
       const body={reviewer:reviewer.value.trim(), caseLabel:caseLabel.value.trim(), verdict:verdict.value, score:score.value===''?null:Number(score.value), note:note.value.trim(), findingNotes};
       void addReview(selectedKey, body, {blue:chosenBlue()}).catch(error=>setStatus(error.message, true));
     });
-    const prepare=el('button',{type:'button', id:'paper-manual-prepare', className:'button secondary', textContent:'팀에 저장', disabled:!record});
-    prepare.addEventListener('click',()=>{if(selectedKey) openConsent(selectedKey);});
-    const refresh=el('button',{type:'button', id:'paper-manual-blue-refresh', className:'button secondary', textContent:'BLUE 파일 목록'});
-    refresh.addEventListener('click',()=>{void refreshBlue();});
-    const closeImportedButton=el('button',{type:'button', id:'paper-manual-close-import', className:'button secondary', textContent:'임시 열람 닫기', hidden:!imported});
-    closeImportedButton.addEventListener('click',()=>{closeImported(); setStatus('임시 열람을 닫았습니다. 로컬 수동 기록과 로컬 AI 기록은 그대로입니다.');});
-    root.replaceChildren(
-      el('div',{className:'paper-manual-kicker'}, el('span',{textContent:'H1'}), el('strong',{textContent:'수동 편집 검수'})),
-      el('p',{className:'muted', textContent:'모델 실행 기록과 별도입니다. Harness 증명이나 gold를 만들지 않습니다. Before, After, 쪽, 앵커, 출처, 사용 여부, 생성 PDF 해시와 리비전은 작업대 스냅샷에서 가져옵니다.'}),
-      ui.status,
-      el('label',{textContent:'수동 기록'}, picker),
-      el('p',{id:'paper-manual-output', textContent:link?'생성 PDF SHA-256 '+link.sha256+' · revision '+link.revision:'이 편집 리비전의 생성 PDF 해시가 없습니다. 이전 해시를 현재 파일로 연결하지 않습니다.'}),
-      edits,
-      el('label',{textContent:'BLUE 파일 해시'}, blueSelect),
-      refresh,
-      el('p',{id:'paper-manual-blue-status', textContent:blueStatus}),
-      form,
-      el('h3',{textContent:'사람 검수 이력'}),
-      history,
-      el('div',{className:'button-row'}, prepare, closeImportedButton),
-      shareBox
-    );
-    paintShare();
+    return form;
   }
   async function refreshBlue(){
     const lab=globalThis.FalsifyLab;

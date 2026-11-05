@@ -37,6 +37,19 @@ if [ "$pairing" = 0 ]; then
   if ! py=$(falsify_project_python "$root"); then
     exit 1
   fi
+  set +e
+  probe=$("$py" "$root/app/local/pairing.py" probe --port "$port" --expected-server-path "$root/app/local/server.py" 2>/dev/null)
+  probe_code=$?
+  set -e
+  case "$probe_code:$probe" in
+    0:existing\ *)
+      echo "Companion for this checkout is already running on port $port."
+      exit 0 ;;
+    1:absent) ;;
+    *)
+      echo "Port $port is occupied by an unrelated or incompatible service, or a companion from another checkout. Stop it or select another port; it was not stopped." >&2
+      exit 1 ;;
+  esac
   exec "$py" "$root/app/local/server.py" --port "$port" --web-origin "$(falsify_fixed_origin)"
 fi
 

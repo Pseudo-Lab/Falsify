@@ -107,16 +107,23 @@ def _path(value):
             and not any(ord(c) < 32 or c in '\\:' for c in value)
             and all(part not in ('', '.', '..') for part in value.split('/')))
 
-def validate_request(data):
+def _validate_request_identity(data):
     required = {'schema', 'consent', 'projectId', 'step', 'maxSteps', 'instruction', 'tools', 'observations', 'images', 'sourceFiles'}
     if type(data) is not dict or not required <= set(data) or set(data) - required - {'model', 'effort', 'reference', 'structure', 'execution', 'protocol'} \
             or data['schema'] != REQUEST_SCHEMA or data['consent'] is not True \
             or type(data['projectId']) is not str or not HEX.fullmatch(data['projectId']): raise ValueError('invalid_request')
+
+
+def _validate_request_envelope(data):
+    _validate_request_identity(data)
     if type(data['step']) is not int or type(data['maxSteps']) is not int or not 1 <= data['maxSteps'] <= 32 or not 0 <= data['step'] < data['maxSteps']: raise ValueError('invalid_request')
     _text(data['instruction'], 8000)
     if data.get('protocol', 'v1') not in ('v1', 'v2'): raise ValueError('invalid_request')
     if type(data['tools']) is not list or type(data['observations']) is not list or type(data['sourceFiles']) is not list: raise ValueError('invalid_request')
     if len(data['tools']) > 32 or len(data['observations']) > 64 or len(data['sourceFiles']) > 256: raise LayoutAgentError('request_limit', 400)
+
+
+def _validate_context_bindings(data):
     for key in ('reference', 'structure'):
         if key not in data: continue
         value = data[key]
@@ -125,19 +132,31 @@ def validate_request(data):
         except (TypeError, ValueError, RecursionError): raise ValueError('invalid_request') from None
         if size > 24000: raise LayoutAgentError('request_limit', 400)
     if 'reference' in data and 'structure' in data and data['reference']['sourcePdfHash'] != data['structure']['sourcePdfHash']: raise ValueError('invalid_request')
+
+
+def _validate_source_files(data):
     paths = set()
     for source in data['sourceFiles']:
         if type(source) is not dict or set(source) != {'path', 'text'} or not _path(source['path']) or source['path'] in paths: raise ValueError('invalid_request')
         paths.add(source['path']); _text(source['text'], 80000)
-    model, effort = data.get('model', 'gpt-6.1-sol'), data.get('effort', 'medium')
-    if type(model) is not str or not MODEL_PATTERN.fullmatch(model) or type(effort) is not str or effort not in EFFORTS: raise ValueError('invalid_request')
-    images = data['images']
+    return paths
+
+
+def _validate_image_bbox(item):
+    if 'bbox' in item and (type(item['bbox']) is not list or len(item['bbox']) != 4 or any(type(v) not in (int, float) or not -100000 < v < 100000 for v in item['bbox']) or item['bbox'][0] >= item['bbox'][2] or item['bbox'][1] >= item['bbox'][3]): raise ValueError('invalid_request')
+
+
+def _validate_image_location(item, pages):
+    if type(item) is not dict or not {'pageIndex', 'mime', 'base64'} <= set(item) or set(item)-{'pageIndex', 'mime', 'base64', 'document', 'bbox'} or type(item['pageIndex']) is not int or not 0 <= item['pageIndex'] < 500 or item.get('document','candidate') not in ('original','candidate') or (item.get('document','candidate'),item['pageIndex']) in pages or item['mime'] != 'image/png': raise ValueError('invalid_request')
+    _validate_image_bbox(item)
+
+
+def _validate_images(images):
     if type(images) is not list: raise ValueError('invalid_request')
     if len(images) > 4: raise LayoutAgentError('request_limit', 400)
     decoded, pages = [], set()
     for item in images:
-        if type(item) is not dict or not {'pageIndex', 'mime', 'base64'} <= set(item) or set(item)-{'pageIndex', 'mime', 'base64', 'document', 'bbox'} or type(item['pageIndex']) is not int or not 0 <= item['pageIndex'] < 500 or item.get('document','candidate') not in ('original','candidate') or (item.get('document','candidate'),item['pageIndex']) in pages or item['mime'] != 'image/png': raise ValueError('invalid_request')
-        if 'bbox' in item and (type(item['bbox']) is not list or len(item['bbox']) != 4 or any(type(v) not in (int, float) or not -100000 < v < 100000 for v in item['bbox']) or item['bbox'][0] >= item['bbox'][2] or item['bbox'][1] >= item['bbox'][3]): raise ValueError('invalid_request')
+        _validate_image_location(item, pages)
         pages.add((item.get('document','candidate'),item['pageIndex'])); encoded = _text(item['base64'], 699052)
         try:
             raw = base64.b64decode(encoded, validate=True)
@@ -148,6 +167,10 @@ def validate_request(data):
             validate_png(raw, width, height)
         except (ValueError, struct.error): raise ValueError('invalid_request') from None
         decoded.append(raw)
+    return decoded
+
+
+def _request_context(data, images):
     try:
         context = {k: data[k] for k in ('projectId', 'step', 'maxSteps', 'tools', 'observations', 'sourceFiles')}
         context.update({k: data[k] for k in ('reference', 'structure', 'execution') if k in data})
@@ -156,6 +179,18 @@ def validate_request(data):
         text.encode('utf-8')
     except (TypeError, ValueError, UnicodeEncodeError, RecursionError): raise ValueError('invalid_request') from None
     if len(text) > 85000: raise LayoutAgentError('request_limit', 400)
+    return text
+
+
+def validate_request(data):
+    _validate_request_envelope(data)
+    _validate_context_bindings(data)
+    paths = _validate_source_files(data)
+    model, effort = data.get('model', 'gpt-6.1-sol'), data.get('effort', 'medium')
+    if type(model) is not str or not MODEL_PATTERN.fullmatch(model) or type(effort) is not str or effort not in EFFORTS: raise ValueError('invalid_request')
+    images = data['images']
+    decoded = _validate_images(images)
+    text = _request_context(data, images)
     return {'data': data, 'images': decoded, 'text': text, 'model': model, 'effort': effort, 'paths': paths}
 
 def _skill():
@@ -167,38 +202,64 @@ def _skill():
             except UnicodeDecodeError: raise LayoutAgentError('skill_unavailable') from None
     raise LayoutAgentError('skill_unavailable')
 
+def _matches_object(value, schema):
+    return type(value) is dict and all(k in value for k in schema.get('required', [])) and all(k in schema.get('properties', {}) and _matches(v, schema['properties'][k]) for k,v in value.items())
+
+
+def _matches_array(value, schema):
+    return type(value) is list and len(value) >= schema.get('minItems', 0) and len(value) <= schema.get('maxItems', 5000) and all(_matches(v, schema['items']) for v in value) and (not schema.get('uniqueItems') or len({json.dumps(v, sort_keys=True) for v in value}) == len(value))
+
+
+def _matches_number(value, schema, kind):
+    return type(value) in ((int,) if kind == 'integer' else (int,float)) and math.isfinite(value) and schema.get('minimum', float('-inf')) <= value <= schema.get('maximum', float('inf'))
+
+
 def _matches(value, schema):
     if 'anyOf' in schema: return any(_matches(value, item) for item in schema['anyOf'])
     if 'const' in schema and value != schema['const']: return False
     if 'enum' in schema and value not in schema['enum']: return False
     kind = schema.get('type')
-    if kind == 'object': return type(value) is dict and all(k in value for k in schema.get('required', [])) and all(k in schema.get('properties', {}) and _matches(v, schema['properties'][k]) for k,v in value.items())
-    if kind == 'array': return type(value) is list and len(value) >= schema.get('minItems', 0) and len(value) <= schema.get('maxItems', 5000) and all(_matches(v, schema['items']) for v in value) and (not schema.get('uniqueItems') or len({json.dumps(v, sort_keys=True) for v in value}) == len(value))
+    if kind == 'object': return _matches_object(value, schema)
+    if kind == 'array': return _matches_array(value, schema)
     if kind == 'string': return type(value) is str and len(value) <= 20000 and '\0' not in value
     if kind == 'boolean': return type(value) is bool
-    return type(value) in ((int,) if kind == 'integer' else (int,float)) and math.isfinite(value) and schema.get('minimum', float('-inf')) <= value <= schema.get('maximum', float('inf'))
+    return _matches_number(value, schema, kind)
 
-def _action(value, paths):
-    if type(value) is dict and set(value) == {'tool','args','message'}:
-        if type(value.get('args')) is dict:
-            value = {**value, 'args':{k:v for k,v in value['args'].items() if v is not None}}
-        tool = TOOL_DEFINITIONS.get(value['tool']) if type(value.get('tool')) is str else None
-        if not tool or not _matches(value['args'], tool['parameters']): raise LayoutAgentError('invalid_action', 422)
-        try:
-            _text(value['message'], 4000)
-            _text(json.dumps(value['args'], ensure_ascii=False, allow_nan=False), 20000)
-        except (ValueError, LayoutAgentError): raise LayoutAgentError('invalid_action', 422) from None
-        if value['tool'] in ('read_source','replace_source') and value['args'].get('path') not in paths: raise LayoutAgentError('invalid_action', 422)
-        return value
-    if type(value) is not dict or set(value) != set(ACTION_SCHEMA['required']) or value['tool'] not in TOOLS: raise LayoutAgentError('invalid_action', 422)
+def _action_v2(value, paths):
+    if type(value.get('args')) is dict:
+        value = {**value, 'args':{k:v for k,v in value['args'].items() if v is not None}}
+    tool = TOOL_DEFINITIONS.get(value['tool']) if type(value.get('tool')) is str else None
+    if not tool or not _matches(value['args'], tool['parameters']): raise LayoutAgentError('invalid_action', 422)
+    try:
+        _text(value['message'], 4000)
+        _text(json.dumps(value['args'], ensure_ascii=False, allow_nan=False), 20000)
+    except (ValueError, LayoutAgentError): raise LayoutAgentError('invalid_action', 422) from None
+    if value['tool'] in ('read_source','replace_source') and value['args'].get('path') not in paths: raise LayoutAgentError('invalid_action', 422)
+    return value
+
+
+def _validate_action_fields(value, paths):
     for key, limit in (('path', 240), ('before', 20000), ('after', 20000), ('message', 4000)):
         try: _text(value[key], limit)
         except (ValueError, LayoutAgentError): raise LayoutAgentError('invalid_action', 422) from None
     if value['path'] and (not _path(value['path']) or value['path'] not in paths): raise LayoutAgentError('invalid_action', 422)
     if value['tool'] in ('read_source', 'replace_source') and value['path'] not in paths: raise LayoutAgentError('invalid_action', 422)
+
+
+def _action(value, paths):
+    if type(value) is dict and set(value) == {'tool','args','message'}:
+        return _action_v2(value, paths)
+    if type(value) is not dict or set(value) != set(ACTION_SCHEMA['required']) or value['tool'] not in TOOLS: raise LayoutAgentError('invalid_action', 422)
+    _validate_action_fields(value, paths)
     pages = value['pages']
     if type(pages) is not list or len(pages) > 4 or any(type(p) is not int or not 0 <= p < 500 for p in pages) or len(set(pages)) != len(pages): raise LayoutAgentError('invalid_action', 422)
     return value
+
+def _raise_model_failure(result):
+    code = result.get('error_code') if type(result) is dict else None
+    status = result.get('status') if type(result) is dict else None
+    raise LayoutAgentError('cli_login_required' if code == 'chatgpt_login_required' else 'model_timeout' if status == 'timeout' else 'model_tool_violation' if status == 'tool_violation' else 'model_failed')
+
 
 def decide(request, *, backend_factory=CodexBackend):
     skill, skill_hash = _skill()
@@ -214,9 +275,7 @@ def decide(request, *, backend_factory=CodexBackend):
         result = infer_visual(backend, prompt, schema, request['images']) if request['images'] else backend.infer(prompt, schema)
     except Exception: raise LayoutAgentError('model_failed') from None
     if type(result) is not dict or result.get('status') != 'ok':
-        code = result.get('error_code') if type(result) is dict else None
-        status = result.get('status') if type(result) is dict else None
-        raise LayoutAgentError('cli_login_required' if code == 'chatgpt_login_required' else 'model_timeout' if status == 'timeout' else 'model_tool_violation' if status == 'tool_violation' else 'model_failed')
+        _raise_model_failure(result)
     action = _action(result.get('response'), request['paths'])
     offered = {t if type(t) is str else t.get('name') for t in request['data']['tools'] if type(t) in (str,dict)}
     if action['tool'] not in offered: raise LayoutAgentError('invalid_action', 422)

@@ -112,6 +112,38 @@ class CapabilityTests(Base):
         probe=self.runner.calls[-1];self.assertEqual(probe['argv'][1:],[str(self.config.root/'src'/'web-bridge.mjs'),'--capabilities'])
         self.assertEqual(probe['env']['FALSIFY_EDITOR_CANDIDATE_MANIFEST'],str(self.config.manifest));self.assertNotIn('NODE_OPTIONS',probe['env'])
         svc.capability();self.assertEqual(len(self.runner.calls),2,'success cached')
+    def test_success_probe_expires_even_without_file_change(self):
+        now=[0.0]; runner=FakeRunner(); svc=es.PdfEditorService(self.config,runner=runner,clock=lambda:now[0])
+        svc.capability(); now[0]=16; svc.capability()
+        self.assertEqual(len(runner.calls),4)
+
+    def test_manifest_and_runtime_changes_reprobe(self):
+        svc=self.service(); svc.capability(); self.assertEqual(len(self.runner.calls),2)
+        self.config.manifest.write_text('{"changed":true}')
+        svc.capability(); self.assertEqual(len(self.runner.calls),4)
+        (self.config.manifest.parent/'editcore.wasm').write_bytes(b'new runtime')
+        svc.capability(); self.assertEqual(len(self.runner.calls),6)
+
+    def test_change_during_probe_is_not_cached(self):
+        runner=FakeRunner(); original=runner.__call__
+        def changing(argv, **kw):
+            result=original(argv, **kw)
+            if argv[2:]==['--capabilities']: self.config.manifest.write_text('{"changed":true}')
+            return result
+        svc=es.PdfEditorService(self.config,runner=changing)
+        self.assertFalse(svc.capability()['available'])
+        self.assertTrue(svc.capability()['available'])
+
+    def test_change_during_export_rejected_and_reprobed(self):
+        svc=self.service(); runner=self.runner
+        def changing(args):
+            self.config.manifest.write_text('{"changed":true}')
+            return SimpleNamespace(returncode=1,stdout=b'{"ok":false}')
+        runner.edit=changing
+        with self.assertRaisesRegex(ValueError, '작업 중 바뀌었습니다'): svc.export(payload())
+        runner.edit='ok'; self.assertTrue(svc.capability()['available'])
+        self.assertEqual(len([c for c in runner.calls if c['argv'][2:]==['--capabilities']]),2)
+
     def test_pagination_descriptor_must_be_bool_true(self):
         caps={'ok':True,'engine':'falsify-pdf-editor','version':'1','wasmSha256':WASM,'reflow':True,'pagination':{'supported':True}}
         self.assertIs(self.service(caps=caps).capability()['pagination'],False)

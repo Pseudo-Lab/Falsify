@@ -41,6 +41,7 @@ function pageRefs(c,map){
 function entries(c,obj){const list=[];obj.forEach((value,name)=>list.push([name,c.keep(value)]));return list.sort((a,b)=>String(a[0]).localeCompare(String(b[0]),'en'));}
 async function fingerprint(c,annotation,refs,full=false,budget={objects:0,streams:0,strings:0},omitGeneratedFlag=false){
   const seen=new Map();
+  function canonicalNumber(obj) {const n=obj.asNumber();if(!Number.isFinite(n))fail('annotation-object-invalid');return ['number',n];}
   function canonical(obj,depth,root=false){
     if(depth>ANNOTATION_LIMITS.depth||++budget.objects>ANNOTATION_LIMITS.objects)fail('annotation-object-limit');
     if(obj.isNull())return ['null'];
@@ -50,7 +51,7 @@ async function fingerprint(c,annotation,refs,full=false,budget={objects:0,stream
       const index=seen.size;seen.set(num,index);return ['object',index,canonical(c.keep(obj.resolve()),depth+1,root)];
     }
     if(obj.isBoolean())return ['bool',obj.asBoolean()];
-    if(obj.isNumber()){const n=obj.asNumber();if(!Number.isFinite(n))fail('annotation-object-invalid');return ['number',n];}
+    if(obj.isNumber())return canonicalNumber(obj);
     if(obj.isName())return ['name',obj.asName()];
     if(obj.isString()){const data=obj.asByteString();budget.strings+=data.length;if(budget.strings>ANNOTATION_LIMITS.stringBytes)fail('annotation-string-limit');return ['string',hex(data)];}
     if(obj.isArray()){
@@ -95,13 +96,7 @@ function nameDestinations(c){
 function destinationReader(c,refs,names){
   let usedValues=[],missingNames=[],destinations=[],destinationObjects=[],unexposedTargets=[];
   const destinationIds=new Map();
-  function resolve(value,seen=new Set(),depth=0){
-    if(depth>ANNOTATION_LIMITS.depth)fail('annotation-destination-invalid');
-    usedValues.push(value);
-    if(value.isName()||value.isString()){
-      const name=value.isName()?value.asName():value.asString();if(!names.has(name)){missingNames.push(name);return null;}if(seen.has(name)||names.get(name)===null)fail('annotation-destination-unresolved');seen.add(name);return resolve(names.get(name),seen,depth+1);
-    }
-    if(value.isDictionary())return resolve(c.get(value,'D'),seen,depth+1);
+  function resolveArray(value) {
     if(!value.isArray()||value.length<2)fail('annotation-destination-unresolved');
     const page=c.get(value,0),mode=c.get(value,1),length={XYZ:5,Fit:2,FitB:2,FitH:3,FitBH:3,FitV:3,FitBV:3,FitR:6}[mode.asName()];
     if(!page.isIndirect()||!refs.has(page.asIndirect())||!length||value.length!==length)fail('annotation-destination-unresolved');
@@ -111,6 +106,15 @@ function destinationReader(c,refs,names){
     const operands=Array.from({length:value.length-2},(_,i)=>{const n=c.get(value,i+2);return n.isNull()?null:n.asNumber();});
     if(operands.every(n=>n===null||Math.abs(n)<=100000)){destinations.push({id:destinationIds.get(id),kind:mode.asName(),targetSourcePageIndex,operands});destinationObjects.push(value);}else unexposedTargets.push(targetSourcePageIndex);
     return targetSourcePageIndex;
+  }
+  function resolve(value,seen=new Set(),depth=0){
+    if(depth>ANNOTATION_LIMITS.depth)fail('annotation-destination-invalid');
+    usedValues.push(value);
+    if(value.isName()||value.isString()){
+      const name=value.isName()?value.asName():value.asString();if(!names.has(name)){missingNames.push(name);return null;}if(seen.has(name)||names.get(name)===null)fail('annotation-destination-unresolved');seen.add(name);return resolve(names.get(name),seen,depth+1);
+    }
+    if(value.isDictionary())return resolve(c.get(value,'D'),seen,depth+1);
+    return resolveArray(value);
   }
   function actions(action,targets,visited=new Set(),depth=0){
     if(depth>ANNOTATION_LIMITS.depth)fail('annotation-destination-invalid');
@@ -175,10 +179,7 @@ export async function inspect({mupdf,sourceBytes,sourceSha256}={}){
     const tagged=!c.get(catalog,'StructTreeRoot').isNull()||c.get(catalog,'MarkInfo','Marked').asBoolean();
     const fitAction=await fitOpenAction(c,refs,pages),actionOwnershipUnsupported=unsupportedDocumentActions(c,pages)&&!fitAction,destinationBudget={objects:0,streams:0,strings:0};
     const names=nameDestinations(c),readDestination=destinationReader(c,refs,names),snapshot=await inventory(c,refs,pages,true),annotations=[];
-    for(const record of snapshot.records){
-      const annotation=record.object,descriptor={sourcePageIndex:record.sourcePageIndex,annotationIndex:record.annotationIndex,kind:c.get(record.object,'Subtype').asName()==='Link'?'link':'unsupported',eligible:true};
-      record.actionOwnershipUnsafe=actionOwnershipUnsupported||!c.get(annotation,'AA').isNull()||!c.get(annotation,'PA').isNull();
-      try{
+    function validateAnnotation(record,descriptor,annotation) {
         if(record.actionOwnershipUnsafe)fail('annotation-action-root-unsupported');
         const subtype=c.get(annotation,'Subtype').asName();if(subtype!=='Link'){descriptor.kind='unsupported';fail('annotation-subtype-unsupported');}
         const media=geometry(c,pages[record.sourcePageIndex]);record.media=media;descriptor.rect=annotationRectangle(c,c.get(annotation,'Rect'));if(!contains(media,descriptor.rect))fail('annotation-geometry-invalid');
@@ -186,18 +187,39 @@ export async function inspect({mupdf,sourceBytes,sourceSha256}={}){
         const owner=c.get(annotation,'P');record.hadP=!owner.isNull();if(record.hadP&&(!owner.isIndirect()||owner.asIndirect()!==pages[record.sourcePageIndex].asIndirect()))fail('annotation-page-owner-invalid');
         if(record.shared)fail('annotation-shared-object');
         if(tagged||!c.get(annotation,'StructParent').isNull()||!c.get(annotation,'StructParents').isNull()||!c.get(pages[record.sourcePageIndex],'StructParents').isNull())fail('annotation-tagged-ownership');
+    }
+    function needsDestinationRetry(descriptor,annotation) {
+      if(descriptor.destination)return false;
+      const hasTarget=!c.get(annotation,'Dest').isNull()||!c.get(annotation,'A').isNull();
+      return hasTarget||descriptor.kind==='link';
+    }
+    function createDescriptor(record,annotation) {
+      const descriptor={sourcePageIndex:record.sourcePageIndex,annotationIndex:record.annotationIndex,kind:c.get(record.object,'Subtype').asName()==='Link'?'link':'unsupported',eligible:true};
+      record.actionOwnershipUnsafe=actionOwnershipUnsupported||!c.get(annotation,'AA').isNull()||!c.get(annotation,'PA').isNull();
+      return descriptor;
+    }
+    for(const record of snapshot.records){
+      const annotation=record.object,descriptor=createDescriptor(record,annotation);
+      try{
+        validateAnnotation(record,descriptor,annotation);
         const resolved=readDestination(annotation);record.destinationFingerprints=await Promise.all(resolved.values.map(value=>fingerprint(c,value,refs,true,destinationBudget)));record.missingDestinationNames=resolved.missingNames;record.unexposedTargets=resolved.unexposedTargets;if(resolved.missingNames.length)descriptor.preservedMissingDestination=true;descriptor.destination=resolved.destination;descriptor.internalDestinationSourcePageIndices=resolved.targets;descriptor.internalDestinations=resolved.destinations;
       }catch(error){descriptor.eligible=false;descriptor.reason=error?.code||'annotation-object-invalid';}
-      if(!descriptor.destination){const hasTarget=!c.get(annotation,'Dest').isNull()||!c.get(annotation,'A').isNull();if(hasTarget||descriptor.kind==='link')try{const resolved=readDestination(annotation);record.destinationFingerprints=await Promise.all(resolved.values.map(value=>fingerprint(c,value,refs,true,destinationBudget)));record.missingDestinationNames=resolved.missingNames;record.unexposedTargets=resolved.unexposedTargets;if(resolved.missingNames.length)descriptor.preservedMissingDestination=true;descriptor.destination=resolved.destination;descriptor.internalDestinationSourcePageIndices=resolved.targets;descriptor.internalDestinations=resolved.destinations;}catch{record.destinationUnsafe=true;descriptor.destinationUnresolved=true;}}
+      if(needsDestinationRetry(descriptor,annotation))try{const resolved=readDestination(annotation);record.destinationFingerprints=await Promise.all(resolved.values.map(value=>fingerprint(c,value,refs,true,destinationBudget)));record.missingDestinationNames=resolved.missingNames;record.unexposedTargets=resolved.unexposedTargets;if(resolved.missingNames.length)descriptor.preservedMissingDestination=true;descriptor.destination=resolved.destination;descriptor.internalDestinationSourcePageIndices=resolved.targets;descriptor.internalDestinations=resolved.destinations;}catch{record.destinationUnsafe=true;descriptor.destinationUnresolved=true;}
       record.descriptor=descriptor;annotations.push(descriptor);
     }
     // Unsupported annotation geometry is still retained privately for no-op validation.
-    for(const record of snapshot.records){
+    function preserveUnsupportedGeometry() {
+      for(const record of snapshot.records){
       if(!record.descriptor.rect)try{record.descriptor.rect=annotationRectangle(c,c.get(record.object,'Rect'));}catch{}
       if(record.hadP===undefined)record.hadP=!c.get(record.object,'P').isNull();
+      }
     }
-    const model=frozen({schema:'falsify.flow-annotations.v1',sourceSha256:sha,pageCount:pages.length,actionOwnershipUnsupported:actionOwnershipUnsupported||snapshot.records.some(r=>r.actionOwnershipUnsafe),warnings:sourceWarnings(snapshot.records),annotations});
-    privateModels.set(model,{mupdf,sha,fitAction,actionOwnershipUnsupported:model.actionOwnershipUnsupported,records:snapshot.records.map(({object,...record})=>record),pageGeometry:pages.map(page=>{try{return geometry(c,page);}catch{return null;}})});return model;
+    preserveUnsupportedGeometry();
+    function freezeInspectionModel() {
+      const model=frozen({schema:'falsify.flow-annotations.v1',sourceSha256:sha,pageCount:pages.length,actionOwnershipUnsupported:actionOwnershipUnsupported||snapshot.records.some(r=>r.actionOwnershipUnsafe),warnings:sourceWarnings(snapshot.records),annotations});
+      privateModels.set(model,{mupdf,sha,fitAction,actionOwnershipUnsupported:model.actionOwnershipUnsupported,records:snapshot.records.map(({object,...record})=>record),pageGeometry:pages.map(page=>{try{return geometry(c,page);}catch{return null;}})});return model;
+    }
+    return freezeInspectionModel();
   }catch(error){if(error instanceof AnnotationTransportError)throw error;fail('annotation-inspection-failed');}finally{c.close();}
 }
 function mapping(model,map,count){
@@ -209,31 +231,43 @@ function mapping(model,map,count){
 function movementPlan(model,records,map,count,moves,reflowed,destinationMoves=[],preserveUnmovedUnsupported=false){
   if(!Array.isArray(moves)||moves.length>ANNOTATION_LIMITS.annotations||!Array.isArray(reflowed)||reflowed.some(p=>!Number.isInteger(p)||p<0||p>=model.pageCount)||new Set(reflowed).size!==reflowed.length)fail('annotation-move-invalid');
   const group=new Set(reflowed),byKey=new Map(records.map(r=>[key(r.sourcePageIndex,r.annotationIndex),r])),planned=new Map();
-  for(const move of moves){
-    if(!move||!['annotationIndex,dx,dy,outputPageIndex,sourcePageIndex','annotationIndex,dx,dy,outputPageIndex,rect,sourcePageIndex'].includes(Object.keys(move).sort().join(','))||!Number.isInteger(move.sourcePageIndex)||!Number.isInteger(move.annotationIndex)||!Number.isInteger(move.outputPageIndex)||move.outputPageIndex<0||move.outputPageIndex>=count||![move.dx,move.dy].every(n=>typeof n==='number'&&Number.isFinite(n)&&Math.abs(n)<=100000))fail('annotation-move-invalid');
-    const id=key(move.sourcePageIndex,move.annotationIndex),record=byKey.get(id);if(!record||planned.has(id)||!record.descriptor.eligible||!group.has(move.sourcePageIndex))fail('annotation-move-invalid');if(move.rect!==undefined){
-      const d=record.descriptor,r=move.rect;
+  function validateMoves() {
+    function validateExpansionGeometry(d,r,move) {
       if(d.kind!=='link'||d.quadPoints||!Array.isArray(d.rect)||!Array.isArray(r)||r.length!==4||!r.every(Number.isFinite)||r[0]>=r[2]||r[1]>=r[3]||move.dx!==0||move.dy!==0||move.outputPageIndex!==map.get(move.sourcePageIndex)||!contains(r,d.rect))fail('annotation-move-invalid');
+    }
+    function validateExpansion(move,record) {
+      const d=record.descriptor,r=move.rect;
+      validateExpansionGeometry(d,r,move);
       for(const other of records.filter(x=>x.sourcePageIndex===move.sourcePageIndex&&x!==record)){
         const q=other.descriptor.rect;if(!Array.isArray(q)||q.length!==4)fail('annotation-move-invalid');
         if(Math.min(r[2],q[2])-Math.max(r[0],q[0])>1e-4&&Math.min(r[3],q[3])-Math.max(r[1],q[1])>1e-4)fail('annotation-move-overlap');
       }
-    }planned.set(id,move);
+      }
+    function validateMove(move) {
+      if(!move||!['annotationIndex,dx,dy,outputPageIndex,sourcePageIndex','annotationIndex,dx,dy,outputPageIndex,rect,sourcePageIndex'].includes(Object.keys(move).sort().join(','))||!Number.isInteger(move.sourcePageIndex)||!Number.isInteger(move.annotationIndex)||!Number.isInteger(move.outputPageIndex)||move.outputPageIndex<0||move.outputPageIndex>=count||![move.dx,move.dy].every(n=>typeof n==='number'&&Number.isFinite(n)&&Math.abs(n)<=100000))fail('annotation-move-invalid');
+      const id=key(move.sourcePageIndex,move.annotationIndex),record=byKey.get(id);if(!record||planned.has(id)||!record.descriptor.eligible||!group.has(move.sourcePageIndex))fail('annotation-move-invalid');if(move.rect!==undefined)validateExpansion(move,record);planned.set(id,move);
+    }
+    for(const move of moves)validateMove(move);
   }
+  validateMoves();
   const expanded=[...planned.values()].filter(m=>m.rect!==undefined);
-  for(let i=0;i<expanded.length;i++)for(let j=i+1;j<expanded.length;j++){
+  function validateExpandedOverlaps() {
+    for(let i=0;i<expanded.length;i++)for(let j=i+1;j<expanded.length;j++){
     const a=expanded[i],b=expanded[j];if(a.outputPageIndex!==b.outputPageIndex)continue;
     if(Math.min(a.rect[2],b.rect[2])-Math.max(a.rect[0],b.rect[0])>1e-4&&Math.min(a.rect[3],b.rect[3])-Math.max(a.rect[1],b.rect[1])>1e-4)fail('annotation-move-overlap');
+    }
   }
+  validateExpandedOverlaps();
   if(!Array.isArray(destinationMoves)||destinationMoves.length>ANNOTATION_LIMITS.annotations)fail('annotation-destination-move-invalid');
   const destinations=new Map();
-  for(const record of records)for(const d of record.descriptor.internalDestinations||[]){
+  function collectDestinations() {
+    for(const record of records)for(const d of record.descriptor.internalDestinations||[]){
     const old=destinations.get(d.id);if(old&&JSON.stringify(old)!==JSON.stringify(d))fail('annotation-destination-move-invalid');destinations.set(d.id,d);
+    }
   }
+  collectDestinations();
   const destinationPlan=new Map();
-  for(const move of destinationMoves){
-    if(!move||Object.keys(move).sort().join(',')!=='dx,dy,id,outputPageIndex,sourcePageIndex'||!Number.isInteger(move.id)||!Number.isInteger(move.sourcePageIndex)||!Number.isInteger(move.outputPageIndex)||move.outputPageIndex<0||move.outputPageIndex>=count||![move.dx,move.dy].every(n=>typeof n==='number'&&Number.isFinite(n)&&Math.abs(n)<=100000))fail('annotation-destination-move-invalid');
-    const d=destinations.get(move.id);if(!d||destinationPlan.has(move.id)||d.targetSourcePageIndex!==move.sourcePageIndex||!group.has(move.sourcePageIndex))fail('annotation-destination-move-invalid');
+  function destinationOperands(d,move) {
     let operands;
     if(d.kind==='FitR'&&d.operands.length===4&&d.operands.every(n=>typeof n==='number'&&Number.isFinite(n))){
       operands=d.operands.map((n,i)=>n+(i%2?move.dy:move.dx));
@@ -242,19 +276,39 @@ function movementPlan(model,records,map,count,moves,reflowed,destinationMoves=[]
       operands=[d.operands[0]+move.dx,d.operands[1]+move.dy,d.operands[2]];
     }else fail('annotation-destination-move-invalid');
     if(!operands.every(n=>n===null||Number.isFinite(n)&&Math.abs(n)<=100000))fail('annotation-destination-move-invalid');
-    destinationPlan.set(move.id,{move,descriptor:d,operands});
+    return operands;
   }
-  for(const record of records){
-    const d=record.descriptor;if(record.shared&&(preserveUnmovedUnsupported!==true||records.some(r=>r.aliasKey===record.aliasKey&&planned.has(key(r.sourcePageIndex,r.annotationIndex)))))fail('annotation-shared-object');
-    if(group.size&&record.actionOwnershipUnsafe)fail('annotation-action-root-unsupported');
-    if(group.size&&record.destinationUnsafe)fail('annotation-destination-unresolved');
-    if((record.unexposedTargets||[]).some(p=>group.has(p)))fail('annotation-destination-reflowed');
-    if(group.has(record.sourcePageIndex)&&!d.eligible&&!(preserveUnmovedUnsupported===true&&!planned.has(key(record.sourcePageIndex,record.annotationIndex))&&(record.shared||(d.kind==='unsupported'&&d.reason==='annotation-subtype-unsupported'))))fail(d.reason);
-    if((d.internalDestinationSourcePageIndices||[]).some(p=>group.has(p)&&(!(d.internalDestinations||[]).some(x=>x.targetSourcePageIndex===p)||(d.internalDestinations||[]).some(x=>x.targetSourcePageIndex===p&&!destinationPlan.has(x.id)))))fail('annotation-destination-reflowed');
+  function validateDestinationMoves() {
+    function validateDestinationMove(move) {
+      if(!move||Object.keys(move).sort().join(',')!=='dx,dy,id,outputPageIndex,sourcePageIndex'||!Number.isInteger(move.id)||!Number.isInteger(move.sourcePageIndex)||!Number.isInteger(move.outputPageIndex)||move.outputPageIndex<0||move.outputPageIndex>=count||![move.dx,move.dy].every(n=>typeof n==='number'&&Number.isFinite(n)&&Math.abs(n)<=100000))fail('annotation-destination-move-invalid');
+      const d=destinations.get(move.id);if(!d||destinationPlan.has(move.id)||d.targetSourcePageIndex!==move.sourcePageIndex||!group.has(move.sourcePageIndex))fail('annotation-destination-move-invalid');
+      const operands=destinationOperands(d,move);
+      destinationPlan.set(move.id,{move,descriptor:d,operands});
+    }
+    for(const move of destinationMoves)validateDestinationMove(move);
   }
+  validateDestinationMoves();
+  function validateRecordSafety() {
+    function validateRecordDestinations(record,d) {
+      if((record.unexposedTargets||[]).some(p=>group.has(p)))fail('annotation-destination-reflowed');
+      if(group.has(record.sourcePageIndex)&&!d.eligible&&!(preserveUnmovedUnsupported===true&&!planned.has(key(record.sourcePageIndex,record.annotationIndex))&&(record.shared||(d.kind==='unsupported'&&d.reason==='annotation-subtype-unsupported'))))fail(d.reason);
+      if((d.internalDestinationSourcePageIndices||[]).some(p=>group.has(p)&&(!(d.internalDestinations||[]).some(x=>x.targetSourcePageIndex===p)||(d.internalDestinations||[]).some(x=>x.targetSourcePageIndex===p&&!destinationPlan.has(x.id)))))fail('annotation-destination-reflowed');
+    }
+    function validateRecord(record) {
+      const d=record.descriptor;if(record.shared&&(preserveUnmovedUnsupported!==true||records.some(r=>r.aliasKey===record.aliasKey&&planned.has(key(r.sourcePageIndex,r.annotationIndex)))))fail('annotation-shared-object');
+      if(group.size&&record.actionOwnershipUnsafe)fail('annotation-action-root-unsupported');
+      if(group.size&&record.destinationUnsafe)fail('annotation-destination-unresolved');
+      validateRecordDestinations(record,d);
+    }
+    for(const record of records)validateRecord(record);
+  }
+  validateRecordSafety();
   const expected=Array.from({length:count},()=>[]);
-  for(const record of records){const id=key(record.sourcePageIndex,record.annotationIndex),move=planned.get(id),origin=map.get(record.sourcePageIndex);if(!move||move.outputPageIndex===origin)expected[origin].push({record,move});}
-  for(const move of moves){const record=byKey.get(key(move.sourcePageIndex,move.annotationIndex));if(move.outputPageIndex!==map.get(move.sourcePageIndex))expected[move.outputPageIndex].push({record,move});}
+  function buildExpectedOrder() {
+    for(const record of records){const id=key(record.sourcePageIndex,record.annotationIndex),move=planned.get(id),origin=map.get(record.sourcePageIndex);if(!move||move.outputPageIndex===origin)expected[origin].push({record,move});}
+    for(const move of moves){const record=byKey.get(key(move.sourcePageIndex,move.annotationIndex));if(move.outputPageIndex!==map.get(move.sourcePageIndex))expected[move.outputPageIndex].push({record,move});}
+  }
+  buildExpectedOrder();
   return {expected,planned,destinationPlan};
 }
 async function bound({model,sourceBytes,outputBytes,sourcePageMap,moves=[],reflowedSourcePages=[],destinationMoves=[],preserveUnmovedUnsupported=false}){
@@ -264,10 +318,13 @@ async function bound({model,sourceBytes,outputBytes,sourcePageMap,moves=[],reflo
   try{
     if(reflowedSourcePages.length&&state.actionOwnershipUnsupported)fail('annotation-action-root-unsupported');
     const map=mapping(model,sourcePageMap,c.doc.countPages()),inverse=new Map([...map].map(([s,o])=>[o,['source-page',s]])),{refs,pages}=pageRefs(c,inverse),plan=movementPlan(model,state.records,map,pages.length,moves,reflowedSourcePages,destinationMoves,preserveUnmovedUnsupported);
-    if(reflowedSourcePages.length){
-      const outputAction=await fitOpenAction(c,refs,pages);
+    function validateOpenAction(outputAction) {
       if(!state.fitAction||!outputAction||JSON.stringify(state.fitAction)!==JSON.stringify(outputAction))fail('annotation-action-root-unsupported');
       if(state.fitAction.present&&(pages.length!==model.pageCount||[...map].some(([s,o])=>s!==o)||moves.some(m=>m.sourcePageIndex!==m.outputPageIndex)||destinationMoves.some(m=>m.sourcePageIndex!==m.outputPageIndex)))fail('annotation-action-root-unsupported');
+    }
+    if(reflowedSourcePages.length){
+      const outputAction=await fitOpenAction(c,refs,pages);
+      validateOpenAction(outputAction);
     }
     for(const [s,o]of map)if(state.pageGeometry[s]&&!numbers(state.pageGeometry[s],geometry(c,pages[o])))fail('annotation-page-identity-invalid');
     return {c,state,map,refs,pages,plan,preserveUnmovedUnsupported};
@@ -277,29 +334,36 @@ async function verifyDocument(ctx,expected,after=false){
   const {c,refs,pages}=ctx, restore=[], seen=new Map(), reader=destinationReader(c,refs,nameDestinations(c));
   try {
     // Resolve in source-record order so opaque IDs and shared array identity stay bound.
-    for(const record of ctx.state.records){
-      let found;for(let p=0;p<expected.length&&!found;p++){const i=expected[p].findIndex(x=>x.record===record);if(i>=0)found=c.get(annotationArray(c,pages[p]),i);}
-      if(!found)fail('annotation-output-count-mismatch');
-      if(!record.destinationFingerprints)continue;
-      const resolved=reader(found),original=record.descriptor.internalDestinations||[];
-      if(resolved.destinations.length!==original.length)fail('annotation-destination-definition-mismatch');
-      for(let i=0;i<original.length;i++){
-        const old=original[i],current=resolved.destinations[i],obj=resolved.destinationObjects[i],id=identity(obj),previous=seen.get(old.id);
+    function validatePriorDestinations() {
+      function validateDestinationAlias(old,id,previous) {
         if(previous!==undefined&&previous!==id)fail('annotation-destination-definition-mismatch');
         if([...seen].some(([other,value])=>other!==old.id&&value===id))fail('annotation-destination-definition-mismatch');seen.set(old.id,id);
+      }
+      function validatePriorDefinitions(resolved,original) {
+        for(let i=0;i<original.length;i++){
+        const old=original[i],current=resolved.destinations[i],obj=resolved.destinationObjects[i],id=identity(obj),previous=seen.get(old.id);
+        validateDestinationAlias(old,id,previous);
         const change=ctx.plan.destinationPlan.get(old.id),target=after&&change?change.move.outputPageIndex:ctx.map.get(old.targetSourcePageIndex),operands=after&&change?change.operands:old.operands;
         const page=c.get(obj,0);if(current.kind!==old.kind||!page.isIndirect()||page.asIndirect()!==pages[target].asIndirect()||JSON.stringify(current.operands)!==JSON.stringify(operands))fail('annotation-destination-definition-mismatch');
         if(after&&change&&!restore.some(x=>x.id===id))restore.push({id,obj,page,operands:current.operands,old});
+        }
       }
+      function validatePriorRecord(record) {
+        let found;for(let p=0;p<expected.length&&!found;p++){const i=expected[p].findIndex(x=>x.record===record);if(i>=0)found=c.get(annotationArray(c,pages[p]),i);}
+        if(!found)fail('annotation-output-count-mismatch');
+        if(!record.destinationFingerprints)return;
+        const resolved=reader(found),original=record.descriptor.internalDestinations||[];
+        if(resolved.destinations.length!==original.length)fail('annotation-destination-definition-mismatch');
+        validatePriorDefinitions(resolved,original);
+      }
+      for(const record of ctx.state.records)validatePriorRecord(record);
     }
+    validatePriorDestinations();
     for(const item of restore){item.obj.put(0,pages[ctx.map.get(item.old.targetSourcePageIndex)]);item.old.operands.forEach((n,j)=>item.obj.put(j+2,n));}
     const actual=await inventory(c,refs,pages),names=nameDestinations(c),readDestination=destinationReader(c,refs,names),destinationBudget={objects:0,streams:0,strings:0};
   if(ctx.preserveUnmovedUnsupported!==true&&actual.records.some(r=>r.shared))fail('annotation-shared-object');
   const aliases=new Map(),reverseAliases=new Map();
-  for(let p=0;p<pages.length;p++){
-    if(actual.byPage[p].length!==expected[p].length)fail('annotation-output-count-mismatch');
-    for(let i=0;i<expected[p].length;i++){
-      const {record,move}=expected[p][i],out=actual.byPage[p][i],d=record.descriptor;
+  function validateAnnotationIdentity(record,move,out) {
       if((aliases.has(record.aliasKey)&&aliases.get(record.aliasKey)!==out.aliasKey)||(reverseAliases.has(out.aliasKey)&&reverseAliases.get(out.aliasKey)!==record.aliasKey))fail('annotation-shared-object');
       aliases.set(record.aliasKey,out.aliasKey);reverseAliases.set(out.aliasKey,record.aliasKey);
       if((move?out.fingerprint:out.fullFingerprint)!==(move?record.fingerprint:record.fullFingerprint)){
@@ -307,8 +371,8 @@ async function verifyDocument(ctx,expected,after=false){
         // every other key, including unknown keys, remain in the fingerprint.
         if(record.generatedMarker!=='absent'||out.generatedMarker!=='true'||!(move?record.noGeneratedMoveFingerprint:record.noGeneratedFingerprint)||(move?record.noGeneratedMoveFingerprint:record.noGeneratedFingerprint)!==(move?out.noGeneratedMoveFingerprint:out.noGeneratedFingerprint))fail('annotation-semantic-mismatch');
       }
-      if(record.destinationFingerprints){const resolved=readDestination(out.object),fingerprints=await Promise.all(resolved.values.map(value=>fingerprint(c,value,refs,true,destinationBudget)));if(JSON.stringify(fingerprints)!==JSON.stringify(record.destinationFingerprints)||JSON.stringify(resolved.missingNames)!==JSON.stringify(record.missingDestinationNames))fail('annotation-destination-definition-mismatch');}
-      if(!move)continue;
+  }
+  function validateMovedGeometry(d,move,out,p,record) {
       if(!d.rect)fail('annotation-geometry-invalid');
       const rect=move?.rect??d.rect.map((v,k)=>v+(move?(k%2?move.dy:move.dx):0));
       if(!numbers(rect,annotationRectangle(c,c.get(out.object,'Rect'))))fail('annotation-output-geometry-mismatch');
@@ -318,6 +382,15 @@ async function verifyDocument(ctx,expected,after=false){
       else if(!quads.isNull())fail('annotation-output-geometry-mismatch');
       const owner=c.get(out.object,'P');if(move||record.hadP){if(!owner.isIndirect()||owner.asIndirect()!==pages[p].asIndirect())fail('annotation-output-owner-mismatch');}
       else if(!owner.isNull())fail('annotation-output-owner-mismatch');
+  }
+  for(let p=0;p<pages.length;p++){
+    if(actual.byPage[p].length!==expected[p].length)fail('annotation-output-count-mismatch');
+    for(let i=0;i<expected[p].length;i++){
+      const {record,move}=expected[p][i],out=actual.byPage[p][i],d=record.descriptor;
+      validateAnnotationIdentity(record,move,out);
+      if(record.destinationFingerprints){const resolved=readDestination(out.object),fingerprints=await Promise.all(resolved.values.map(value=>fingerprint(c,value,refs,true,destinationBudget)));if(JSON.stringify(fingerprints)!==JSON.stringify(record.destinationFingerprints)||JSON.stringify(resolved.missingNames)!==JSON.stringify(record.missingDestinationNames))fail('annotation-destination-definition-mismatch');}
+      if(!move)continue;
+      validateMovedGeometry(d,move,out,p,record);
     }
   }
     return actual;
@@ -330,22 +403,25 @@ export async function transport(request={}){
     const noMoves=movementPlan(request.model,ctx.state.records,ctx.map,ctx.pages.length,[],request.reflowedSourcePages||[],request.destinationMoves||[],request.preserveUnmovedUnsupported);
     const actual=await verifyDocument(ctx,noMoves.expected),located=new Map();
     for(const record of ctx.state.records)located.set(key(record.sourcePageIndex,record.annotationIndex),actual.byPage[ctx.map.get(record.sourcePageIndex)][record.annotationIndex].object);
-    const reader=destinationReader(ctx.c,ctx.refs,nameDestinations(ctx.c)),changed=new Set();
-    for(const record of ctx.state.records){if(!record.destinationFingerprints)continue;const resolved=reader(located.get(key(record.sourcePageIndex,record.annotationIndex)));
+    function applyMoves() {
+      const reader=destinationReader(ctx.c,ctx.refs,nameDestinations(ctx.c)),changed=new Set();
+      for(const record of ctx.state.records){if(!record.destinationFingerprints)continue;const resolved=reader(located.get(key(record.sourcePageIndex,record.annotationIndex)));
       for(let i=0;i<resolved.destinations.length;i++){const d=resolved.destinations[i],change=ctx.plan.destinationPlan.get(d.id);if(!change||changed.has(d.id))continue;
         const obj=resolved.destinationObjects[i];obj.put(0,ctx.pages[change.move.outputPageIndex]);change.operands.forEach((n,j)=>obj.put(j+2,n));changed.add(d.id);
       }
-    }
-    if(changed.size!==ctx.plan.destinationPlan.size)fail('annotation-destination-move-invalid');
-    const touched=new Set();
-    for(const move of request.moves||[]){
+      }
+      if(changed.size!==ctx.plan.destinationPlan.size)fail('annotation-destination-move-invalid');
+      const touched=new Set();
+      for(const move of request.moves||[]){
       const object=located.get(key(move.sourcePageIndex,move.annotationIndex)),record=ctx.state.records.find(r=>r.sourcePageIndex===move.sourcePageIndex&&r.annotationIndex===move.annotationIndex),d=record.descriptor;
       const rect=move.rect??d.rect.map((v,k)=>v+(k%2?move.dy:move.dx));if(!contains(geometry(ctx.c,ctx.pages[move.outputPageIndex]),rect))fail('annotation-output-geometry-mismatch');
       object.put('Rect',rect);object.put('P',ctx.pages[move.outputPageIndex]);
       if(d.quadPoints)object.put('QuadPoints',d.quadPoints.map((v,k)=>v+(k%2?move.dy:move.dx)));
       touched.add(ctx.map.get(move.sourcePageIndex));touched.add(move.outputPageIndex);
+      }
+      for(const p of touched){const array=ctx.c.keep(ctx.c.doc.newArray());for(const {record}of ctx.plan.expected[p])array.push(located.get(key(record.sourcePageIndex,record.annotationIndex)));ctx.pages[p].put('Annots',array);}
     }
-    for(const p of touched){const array=ctx.c.keep(ctx.c.doc.newArray());for(const {record}of ctx.plan.expected[p])array.push(located.get(key(record.sourcePageIndex,record.annotationIndex)));ctx.pages[p].put('Annots',array);}
+    applyMoves();
     await verifyDocument(ctx,ctx.plan.expected,true);
     const buffer=ctx.c.doc.saveToBuffer('garbage=0,compress=false');let pdf;try{pdf=buffer.asUint8Array().slice();}finally{buffer.destroy();}
     const result=await validate({...request,outputBytes:pdf});if(!result.ok)fail(result.code);

@@ -58,6 +58,8 @@ finally:
 PY
 node --test scripts/packaging.spec.mjs
 node scripts/package-release.mjs --out-dir "$work/release"
+archive=$("$work/venv/bin/python" -c 'import json,sys; print(json.load(open(sys.argv[1]))["archive"])' "$work/release/release-manifest.json")
+FALSIFY_RELEASE_ZIP="$work/release/$archive" "$work/venv/bin/python" app/tests/test_packaged_harness.py -v
 "$work/venv/bin/python" - "$work/release" <<'PY'
 import hashlib, json, pathlib, stat, subprocess, sys, zipfile
 release = pathlib.Path(sys.argv[1])

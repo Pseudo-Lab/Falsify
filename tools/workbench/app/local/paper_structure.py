@@ -135,6 +135,15 @@ def _origin_check(doc, source_sha256):
     if not _int(value) or value != int(source_sha256, 16) & _U64: raise _Reject('origin_hash_mismatch')
     return 'matched'
 
+def _page_size(key, page, source_pages, out):
+    if not isinstance(page, dict) or not _int(page.get('page_no')) or type(key) not in (str, int) or str(key) != str(page['page_no']):
+        raise _Reject('payload_invalid')
+    page_no, size = page['page_no'], page.get('size')
+    if not 1 <= page_no <= len(source_pages): raise _Reject('page_count_mismatch')
+    if page_no in out or not isinstance(size, dict) or not all(_num(size.get(k)) and size[k] > 0 for k in ('width', 'height')):
+        raise _Reject('payload_invalid')
+    return page_no, size
+
 def _pages(doc, source_pages):
     """({page_no: (docling height, identity, source width, source height)}, public page entries, any size compared)."""
     pages = doc.get('pages')
@@ -142,12 +151,7 @@ def _pages(doc, source_pages):
     if len(pages) > len(source_pages): raise _Reject('page_count_mismatch')
     out, entries, compared = {}, [], False
     for key, page in pages.items():
-        if not isinstance(page, dict) or not _int(page.get('page_no')) or type(key) not in (str, int) or str(key) != str(page['page_no']):
-            raise _Reject('payload_invalid')
-        page_no, size = page['page_no'], page.get('size')
-        if not 1 <= page_no <= len(source_pages): raise _Reject('page_count_mismatch')
-        if page_no in out or not isinstance(size, dict) or not all(_num(size.get(k)) and size[k] > 0 for k in ('width', 'height')):
-            raise _Reject('payload_invalid')
+        page_no, size = _page_size(key, page, source_pages, out)
         width, height, identity = source_pages[page_no - 1]
         if identity:
             if abs(size['width'] - width) > SIZE_TOLERANCE or abs(size['height'] - height) > SIZE_TOLERANCE:
@@ -201,14 +205,7 @@ def _read_order(doc, cols):
                 stack.append(cols[child[0]][child[1]])
     return order
 
-def _region(prov, pages, page_count):
-    """{'pageIndex', 'bbox', 'charspan'} in source MuPDF points, else a fixed reason code."""
-    if not isinstance(prov, dict) or not _int(prov.get('page_no')): return 'provenance'
-    page_no = prov['page_no']
-    if not 1 <= page_no <= page_count: raise _Reject('page_count_mismatch')
-    if page_no not in pages: return 'page_missing'
-    docling_height, identity, width, height = pages[page_no]
-    if not identity: return 'page_geometry'
+def _region_box(prov, docling_height, width, height):
     box = prov.get('bbox')
     if not isinstance(box, dict) or not all(_num(box.get(k)) for k in 'ltrb'): return 'bbox'
     if box.get('coord_origin') == 'TOPLEFT': y0, y1 = box['t'], box['b']
@@ -217,16 +214,25 @@ def _region(prov, pages, page_count):
     x0, x1 = box['l'], box['r']
     if not (x0 < x1 and y0 < y1) or x0 < -PAGE_OVERHANG or y0 < -PAGE_OVERHANG or x1 > width + PAGE_OVERHANG \
             or y1 > height + PAGE_OVERHANG: return 'bbox'
+    return x0, y0, x1, y1
+
+def _region(prov, pages, page_count):
+    """{'pageIndex', 'bbox', 'charspan'} in source MuPDF points, else a fixed reason code."""
+    if not isinstance(prov, dict) or not _int(prov.get('page_no')): return 'provenance'
+    page_no = prov['page_no']
+    if not 1 <= page_no <= page_count: raise _Reject('page_count_mismatch')
+    if page_no not in pages: return 'page_missing'
+    docling_height, identity, width, height = pages[page_no]
+    if not identity: return 'page_geometry'
+    coords = _region_box(prov, docling_height, width, height)
+    if isinstance(coords, str): return coords
+    x0, y0, x1, y1 = coords
     span = prov.get('charspan')
     if not isinstance(span, (list, tuple)) or len(span) != 2 or not all(_int(v) and v >= 0 for v in span) or span[0] > span[1]:
         return 'provenance'
     return {'pageIndex': page_no - 1, 'bbox': [round(float(v), 3) for v in (x0, y0, x1, y1)], 'charspan': list(span)}
 
-def _item(collection, index, item, order, pages, page_count, cols):
-    label = item.get('label')
-    kind = {'tables': 'table', 'pictures': 'picture'}.get(collection, 'caption' if label == 'caption' else 'text')
-    entry = {'ref': f'#/{collection}/{index}', 'type': kind, 'label': label if label in LABELS else None,
-        'readOrder': order.get((collection, index)), 'status': 'unavailable', 'reason': None, 'regions': [], 'captionRefs': []}
+def _item_captions(collection, item, cols, entry):
     if collection in COLLECTION_LABELS:
         captions = item.get('captions', [])
         if not isinstance(captions, list): raise _Reject('ref_invalid')
@@ -234,6 +240,13 @@ def _item(collection, index, item, order, pages, page_count, cols):
         refs = [_ref(c, cols) for c in captions]
         if any(r[0] != 'texts' for r in refs): raise _Reject('ref_invalid')
         entry['captionRefs'] = [f'#/{c}/{i}' for c, i in refs]
+
+def _item(collection, index, item, order, pages, page_count, cols):
+    label = item.get('label')
+    kind = {'tables': 'table', 'pictures': 'picture'}.get(collection, 'caption' if label == 'caption' else 'text')
+    entry = {'ref': f'#/{collection}/{index}', 'type': kind, 'label': label if label in LABELS else None,
+        'readOrder': order.get((collection, index)), 'status': 'unavailable', 'reason': None, 'regions': [], 'captionRefs': []}
+    _item_captions(collection, item, cols, entry)
     prov = item.get('prov', [])
     if not isinstance(prov, list): raise _Reject('payload_invalid')
     if len(prov) > LIMITS['maxProv']: raise _Reject('over_budget')
@@ -245,6 +258,13 @@ def _item(collection, index, item, order, pages, page_count, cols):
         if reason: entry['reason'] = reason
         else: entry['status'], entry['regions'] = 'resolved', regions
     return entry
+
+def _normalized_envelope(source_sha256, origin, payload_sha256, version, checks, page_entries, items):
+    items.sort(key=lambda e: (e['readOrder'] is None, e['readOrder'] or 0, ITEM_COLLECTIONS.index(e['ref'].split('/')[1])))
+    resolved = sum(e['status'] == 'resolved' for e in items)
+    status = 'available' if items and resolved == len(items) else 'partial' if resolved else 'unavailable'
+    reason = None if resolved else 'no_items' if not items else 'no_resolved_items'
+    return _envelope(source_sha256, status, reason, origin, payload_sha256, version, checks, page_entries, items)
 
 def normalize_docling(payload, source_bytes, *, payload_origin='supplied'):
     """Private structure envelope for a Docling payload against the exact source bytes. Never raises for bad input."""
@@ -267,11 +287,7 @@ def normalize_docling(payload, source_bytes, *, payload_origin='supplied'):
         return unavailable(source_sha256, e.args[0], payload_origin=origin)
     except (TypeError, ValueError, KeyError, AttributeError, RecursionError):
         return unavailable(source_sha256, 'payload_invalid', payload_origin=origin)
-    items.sort(key=lambda e: (e['readOrder'] is None, e['readOrder'] or 0, ITEM_COLLECTIONS.index(e['ref'].split('/')[1])))
-    resolved = sum(e['status'] == 'resolved' for e in items)
-    status = 'available' if items and resolved == len(items) else 'partial' if resolved else 'unavailable'
-    reason = None if resolved else 'no_items' if not items else 'no_resolved_items'
-    return _envelope(source_sha256, status, reason, origin, payload_sha256, version, checks, page_entries, items)
+    return _normalized_envelope(source_sha256, origin, payload_sha256, version, checks, page_entries, items)
 
 def summarize(envelope):
     """Fixed public summary: status, an allow-listed reason code (REASONS) and counts only, never coordinates, refs or text.
@@ -288,6 +304,16 @@ def default_runner(argv, *, input, cwd, env, timeout):
     flags = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
     return subprocess.run(argv, input=input, cwd=cwd, env=env, timeout=timeout, shell=False,
         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, creationflags=flags)
+
+def _conversion_output(runner, python, path, stdin, env):
+    try:
+        result = (runner or default_runner)([str(python), '-I', str(Path(__file__).resolve()), '--docling-worker'],
+            input=stdin, cwd=str(path.parent), env=env, timeout=LIMITS['timeoutSeconds'])
+        raw = (result.stdout or b'').strip()
+    except (subprocess.TimeoutExpired, OSError, ValueError):
+        return None
+    if result.returncode != 0 or not raw or len(raw) > LIMITS['maxStdoutBytes'] or b'\n' in raw: return None
+    return raw
 
 def convert_isolated(source_path, source_sha256, *, python, artifacts_path, runner=None):
     """Opt-in real conversion. `python` is an interpreter that already has Docling installed (a separate experimental venv,
@@ -310,13 +336,8 @@ def convert_isolated(source_path, source_sha256, *, python, artifacts_path, runn
     env.update(OFFLINE_ENV)
     stdin = json.dumps({'source': str(path), 'sourceSha256': source_sha256, 'artifactsPath': str(Path(artifacts_path).resolve())}).encode('utf-8')
     if len(stdin) > LIMITS['maxStdinBytes']: return fail('over_budget')
-    try:
-        result = (runner or default_runner)([str(python), '-I', str(Path(__file__).resolve()), '--docling-worker'],
-            input=stdin, cwd=str(path.parent), env=env, timeout=LIMITS['timeoutSeconds'])
-        raw = (result.stdout or b'').strip()
-    except (subprocess.TimeoutExpired, OSError, ValueError):
-        return fail('conversion_failed')
-    if result.returncode != 0 or not raw or len(raw) > LIMITS['maxStdoutBytes'] or b'\n' in raw: return fail('conversion_failed')
+    raw = _conversion_output(runner, python, path, stdin, env)
+    if raw is None: return fail('conversion_failed')
     return normalize_docling(raw, source, payload_origin='local-conversion')
 
 def _docling_worker():

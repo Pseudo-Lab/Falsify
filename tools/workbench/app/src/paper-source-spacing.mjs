@@ -5,6 +5,63 @@ const near = (a,b,t=0.5) => Number.isFinite(a) && Number.isFinite(b) && Math.abs
 const validBox = b => Array.isArray(b) && b.length===4 && b.every(Number.isFinite) && b[0]<=b[2] && b[1]<=b[3];
 const strip = text => text.replace(/\s/gu,'');
 
+function validSpacingLine(r,range,line,base) {
+  return !(!r || !range || !Number.isInteger(r.start) || !Number.isInteger(r.end) || r.start<range.start || r.end>range.end || r.start>=r.end ) && validSpacingOrientation(line,base);
+}
+
+function validSpacingOrientation(line,base) {
+  return !(line.writingMode!==0 || !Array.isArray(line.direction) || !near(line.direction[0],1,0.01) || !near(line.direction[1],0,0.01) || !Array.isArray(base) || base.length!==2 || !near(base[0]?.[1],base[1]?.[1],0.1));
+}
+
+function validSpacingItem(item) {
+  return !(typeof item.str!=='string' || !/\s/u.test(item.str) || item.dir!=='ltr' || !Array.isArray(item.transform) || item.transform.length!==6 || !item.transform.every(Number.isFinite) || !near(item.transform[1],0,0.01) || !near(item.transform[2],0,0.01) || !Number.isFinite(item.width) || item.width<=0);
+}
+
+function sourceLines(view,p) {
+  const lines=[];
+for(const b of view.blocks||[]) if(b.source?.pageIndex===p && typeof b.text==='string') for(const line of b.source.lines||[]) {
+  const r=line.range, base=line.baseline, range=b.source.range;
+  if(!validSpacingLine(r,range,line,base)) continue;
+  const chars=(b.source.characters||[]).filter(c=>c.start>=r.start && c.end<=r.end);
+  if(!chars.length || chars.some(c=>!validBox(c.bbox)) || chars[0].start!==r.start || chars.at(-1).end!==r.end || chars.some((c,i)=>i && c.start!==chars[i-1].end)) continue;
+  const text=b.text.slice(r.start-range.start,r.end-range.start);
+  if(view.pages[p].text?.slice(r.start,r.end)!==text) continue;
+  lines.push({b,r,base,chars,text});
+}
+  return lines;
+}
+
+function spacingOffsets(l,item) {
+  const raw=[]; for(let i=0;i<l.text.length;i++) if(!/\s/u.test(l.text[i])) raw.push(i);
+  let n=0, pending=false; const offsets=[];
+  for(let i=0;i<item.str.length;i++) {
+    if(/\s/u.test(item.str[i])) {if(n) pending=true; continue;}
+    const pos=raw[n++];
+    if(pending && n>1 && pos===raw[n-2]+1) offsets.push(l.r.start+pos);
+    pending=false;
+  }
+  return offsets;
+}
+
+function matchSpacingItems(content,lines,vp,evidence) {
+for(const item of content.items||[]) {
+  if(!validSpacingItem(item)) continue;
+  const x=vp.transform[0]*item.transform[4]+vp.transform[2]*item.transform[5]+vp.transform[4], y=vp.transform[1]*item.transform[4]+vp.transform[3]*item.transform[5]+vp.transform[5];
+  const candidates=lines.filter(l=>near(l.base[0][1],y,0.5) && near(l.chars[0].bbox[0],x,1) && near(l.chars.at(-1).bbox[2],x+item.width,2) && strip(l.text)===strip(item.str));
+  if(candidates.length!==1) continue;
+  const l=candidates[0];
+  const same=(content.items||[]).filter(q=>q!==item && typeof q.str==='string' && Array.isArray(q.transform) && near(q.transform[4],item.transform[4],0.5) && near(q.transform[5],item.transform[5],0.5) && strip(q.str)===strip(item.str));
+  if(same.length) continue;
+  const offsets=spacingOffsets(l,item);
+  if(offsets.length) { l.b.source.wordSpaceOffsets=[...new Set([...(l.b.source.wordSpaceOffsets||[]),...offsets])].sort((a,b)=>a-b); evidence.hints+=offsets.length; }
+  evidence.matchedLines++;
+}
+}
+
+function matchingFrame(frame,vp,model) {
+  return !(frame?.frame!=='mupdf-display' || !Array.isArray(frame.pageTransform) || !Array.isArray(vp.transform) || frame.pageTransform.length!==6 || vp.transform.length!==6 || !frame.pageTransform.every((v,i)=>near(v,vp.transform[i],0.01)) || !near(model.width,vp.width,0.01) || !near(model.height,vp.height,0.01));
+}
+
 // The second reader is evidence only: never replace, normalize, or edit source text.
 export async function recoverSourceSpaces({bytes,document,pdfjs,signal}={}) {
   abort(signal);
@@ -22,37 +79,10 @@ export async function recoverSourceSpaces({bytes,document,pdfjs,signal}={}) {
       abort(signal); const page=await pdf.getPage(p+1);
       try {
         const vp=page.getViewport({scale:1}), model=view.pages[p], frame=model?.geometry;
-        if(frame?.frame!=='mupdf-display' || !Array.isArray(frame.pageTransform) || !Array.isArray(vp.transform) || frame.pageTransform.length!==6 || vp.transform.length!==6 || !frame.pageTransform.every((v,i)=>near(v,vp.transform[i],0.01)) || !near(model.width,vp.width,0.01) || !near(model.height,vp.height,0.01)) continue;
+        if(!matchingFrame(frame,vp,model)) continue;
         evidence.pages++; const content=await page.getTextContent(); abort(signal);
-        const lines=[];
-        for(const b of view.blocks||[]) if(b.source?.pageIndex===p && typeof b.text==='string') for(const line of b.source.lines||[]) {
-          const r=line.range, base=line.baseline, range=b.source.range;
-          if(!r || !range || !Number.isInteger(r.start) || !Number.isInteger(r.end) || r.start<range.start || r.end>range.end || r.start>=r.end || line.writingMode!==0 || !Array.isArray(line.direction) || !near(line.direction[0],1,0.01) || !near(line.direction[1],0,0.01) || !Array.isArray(base) || base.length!==2 || !near(base[0]?.[1],base[1]?.[1],0.1)) continue;
-          const chars=(b.source.characters||[]).filter(c=>c.start>=r.start && c.end<=r.end);
-          if(!chars.length || chars.some(c=>!validBox(c.bbox)) || chars[0].start!==r.start || chars.at(-1).end!==r.end || chars.some((c,i)=>i && c.start!==chars[i-1].end)) continue;
-          const text=b.text.slice(r.start-range.start,r.end-range.start);
-          if(view.pages[p].text?.slice(r.start,r.end)!==text) continue;
-          lines.push({b,r,base,chars,text});
-        }
-        for(const item of content.items||[]) {
-          if(typeof item.str!=='string' || !/\s/u.test(item.str) || item.dir!=='ltr' || !Array.isArray(item.transform) || item.transform.length!==6 || !item.transform.every(Number.isFinite) || !near(item.transform[1],0,0.01) || !near(item.transform[2],0,0.01) || !Number.isFinite(item.width) || item.width<=0) continue;
-          const x=vp.transform[0]*item.transform[4]+vp.transform[2]*item.transform[5]+vp.transform[4], y=vp.transform[1]*item.transform[4]+vp.transform[3]*item.transform[5]+vp.transform[5];
-          const candidates=lines.filter(l=>near(l.base[0][1],y,0.5) && near(l.chars[0].bbox[0],x,1) && near(l.chars.at(-1).bbox[2],x+item.width,2) && strip(l.text)===strip(item.str));
-          if(candidates.length!==1) continue;
-          const l=candidates[0];
-          const same=(content.items||[]).filter(q=>q!==item && typeof q.str==='string' && Array.isArray(q.transform) && near(q.transform[4],item.transform[4],0.5) && near(q.transform[5],item.transform[5],0.5) && strip(q.str)===strip(item.str));
-          if(same.length) continue;
-          const raw=[]; for(let i=0;i<l.text.length;i++) if(!/\s/u.test(l.text[i])) raw.push(i);
-          let n=0, pending=false; const offsets=[];
-          for(let i=0;i<item.str.length;i++) {
-            if(/\s/u.test(item.str[i])) {if(n) pending=true; continue;}
-            const pos=raw[n++];
-            if(pending && n>1 && pos===raw[n-2]+1) offsets.push(l.r.start+pos);
-            pending=false;
-          }
-          if(offsets.length) { l.b.source.wordSpaceOffsets=[...new Set([...(l.b.source.wordSpaceOffsets||[]),...offsets])].sort((a,b)=>a-b); evidence.hints+=offsets.length; }
-          evidence.matchedLines++;
-        }
+        const lines=sourceLines(view,p);
+        matchSpacingItems(content,lines,vp,evidence);
       } finally {page.cleanup?.();}
     }
   } finally {await task.destroy();}

@@ -38,6 +38,15 @@ function pageGlyphs(page, mupdf) {
 function glyphEquals(a,b) {
   return a.c===b.c && a.fontName===b.fontName && near(a.size,b.size) && near(a.pdf?.[0],b.pdf?.[0]) && near(a.pdf?.[1],b.pdf?.[1]);
 }
+function compareMarkerPixels(pixA,pixB,xs,ys) {
+    const x0=Math.floor(Math.min(...xs)*2)-pixA.getX()-2, x1=Math.ceil(Math.max(...xs)*2)-pixA.getX()+2, y0=Math.floor(Math.min(...ys)*2)-pixA.getY()-2, y1=Math.ceil(Math.max(...ys)*2)-pixA.getY()+2;
+    const pa=pixA.getPixels(), pb=pixB.getPixels(), width=pixA.getWidth(); let changed=0;
+    for (let i=0;i<pa.length;i+=3) if (pa[i]!==pb[i] || pa[i+1]!==pb[i+1] || pa[i+2]!==pb[i+2]) {
+      const n=i/3, x=n%width, y=Math.floor(n/width); if (x<x0 || x>x1 || y<y0 || y>y1) return null; changed++;
+    }
+    return changed || null;
+}
+
 function verifyResult(original, edited, selected, replacement, mupdf) {
   const a=pageGlyphs(original, mupdf), b=pageGlyphs(edited, mupdf);
   const hits=[];
@@ -51,12 +60,7 @@ function verifyResult(original, edited, selected, replacement, mupdf) {
   try {
     pixB=edited.toPixmap([2,0,0,2,0,0],mupdf.ColorSpace.DeviceRGB,false);
     if (pixA.getWidth()!==pixB.getWidth() || pixA.getHeight()!==pixB.getHeight() || pixA.getX()!==pixB.getX() || pixA.getY()!==pixB.getY() || pixA.getWidth()*pixA.getHeight()>50000000) return null;
-    const x0=Math.floor(Math.min(...xs)*2)-pixA.getX()-2, x1=Math.ceil(Math.max(...xs)*2)-pixA.getX()+2, y0=Math.floor(Math.min(...ys)*2)-pixA.getY()-2, y1=Math.ceil(Math.max(...ys)*2)-pixA.getY()+2;
-    const pa=pixA.getPixels(), pb=pixB.getPixels(), width=pixA.getWidth(); let changed=0;
-    for (let i=0;i<pa.length;i+=3) if (pa[i]!==pb[i] || pa[i+1]!==pb[i+1] || pa[i+2]!==pb[i+2]) {
-      const n=i/3, x=n%width, y=Math.floor(n/width); if (x<x0 || x>x1 || y<y0 || y>y1) return null; changed++;
-    }
-    return changed || null;
+    return compareMarkerPixels(pixA,pixB,xs,ys);
   } finally { pixA.destroy(); pixB?.destroy(); }
 }
 function sourceMapping(font, bytes) {
@@ -79,37 +83,7 @@ async function validatedFace(snapshot, name) {
 }
 /** `glyphs`: selected complete source show, each {c,pdf:[x,y],fontName,size}.
  * Exactly the last character may change; scanTextShows is the parser API. */
-export async function replaceMarkerGlyph({bytes,pageIndex,glyphs,after,fontSnapshot,fontPostscriptName,scanTextShows,mupdf}) {
-  if (!mupdf || !(bytes instanceof Uint8Array) || !Number.isInteger(pageIndex) || !Array.isArray(glyphs) || !glyphs.length || typeof after !== 'string' || [...after].length !== glyphs.length || typeof scanTextShows !== 'function') return null;
-  bytes=bytes.slice(); glyphs=glyphs.map(g=>({...g,pdf:Array.isArray(g?.pdf) ? [...g.pdf] : null}));
-  const before=glyphs.map(g=>g.c).join(''), chars=[...after];
-  if ([...before].length!==glyphs.length || chars.slice(0,-1).join('')!==before.slice(0,-1) || chars.at(-1)===glyphs.at(-1).c || chars.at(-1).codePointAt(0)>0xffff) return null;
-  if (!Array.isArray(fontSnapshot?.fonts) || fontSnapshot.fonts.some(f=>!(f?.bytes instanceof Uint8Array))) return null;
-  const captured={...fontSnapshot,fonts:fontSnapshot.fonts.map(f=>({...f,bytes:f.bytes.slice()}))};
-  const face=await validatedFace(captured,fontPostscriptName); if (!face) return null;
-  let doc, font, saved, check, page;
-  try {
-    doc=mupdf.Document.openDocument(bytes,'application/pdf').asPDF();
-    if (!doc || doc.needsPassword() || pageIndex<0 || pageIndex>=doc.countPages()) return null;
-    page=doc.loadPage(pageIndex); const obj=page.getObject();
-    if (obj.getInheritable('Rotate').asNumber() % 360 !== 0) return null;
-    const contents=obj.get('Contents');
-    const streams=contents.isArray() ? Array.from({length:contents.length},(_,i)=>contents.get(i)) : [contents];
-    if (streams.some(s=>!s.isStream())) return null;
-    const resources=obj.getInheritable('Resources'), fontDict=resources.get('Font');
-    const candidates=[];
-    for (let si=0;si<streams.length;si++) {
-      const raw=readStream(streams[si]), parsed=scanTextShows(raw);
-      if (!parsed || parsed.diagnostics?.length) return null;
-      for (const show of parsed.shows) {
-        if (show.uncertain || !['Tj','TJ'].includes(show.kind) || show.renderMode!==0 || show.parts.length!==1 || show.parts[0].type!=='string' || !show.textMatrix || !show.ctm) continue;
-        const tm=show.textMatrix, cm=show.ctm;
-        if (![tm[0],tm[3],cm[0],cm[3]].every(n=>near(n,1)) || ![tm[1],tm[2],cm[1],cm[2]].every(n=>near(n,0))) continue;
-        if (!/^[A-Za-z0-9_.-]+$/.test(show.fontName)) continue;
-        const p=show.parts[0], source=fontDict.get(show.fontName), mapping=sourceMapping(source,p.bytes);
-        if (source.get('BaseFont').asName()!==glyphs[0].fontName) continue;
-        if (!mapping || mapping.length!==glyphs.length || mapping.some((v,i)=>v!==glyphs[i].c.codePointAt(0))) continue;
-        if (!near(tm[4]+cm[4],glyphs[0].pdf?.[0]) || !near(tm[5]+cm[5]+show.rise,glyphs[0].pdf?.[1]) || !near(show.fontSize,glyphs[0].size)) continue;
+function markerOriginsMatch(p,source,show,glyphs) {
         // Confirm every byte's origin from the source font's widths and text state.
         let x=glyphs[0].pdf[0], ok=true; const first=source.get('FirstChar').asNumber(), widths=source.get('Widths');
         for (let i=0;i<p.bytes.length;i++) {
@@ -117,13 +91,67 @@ export async function replaceMarkerGlyph({bytes,pageIndex,glyphs,after,fontSnaps
           if (!near(g.pdf?.[0],x) || !near(g.pdf?.[1],glyphs[0].pdf[1]) || g.fontName!==glyphs[0].fontName || !near(g.size,show.fontSize) || wi<0 || wi>=widths.length || !width.isNumber()) { ok=false; break; }
           x += (width.asNumber()/1000*show.fontSize + show.charSpace + (p.bytes[i]===32 ? show.wordSpace : 0))*show.hScale/100;
         }
-        if (ok) candidates.push({si,raw,show,p});
+        return ok;
+}
+
+function markerTextState(show) {
+        if (show.uncertain || !['Tj','TJ'].includes(show.kind) || show.renderMode!==0 || show.parts.length!==1 || show.parts[0].type!=='string' || !show.textMatrix || !show.ctm) return null;
+        const tm=show.textMatrix, cm=show.ctm;
+        if (![tm[0],tm[3],cm[0],cm[3]].every(n=>near(n,1)) || ![tm[1],tm[2],cm[1],cm[2]].every(n=>near(n,0))) return null;
+        if (!/^[A-Za-z0-9_.-]+$/.test(show.fontName)) return null;
+        return {tm,cm};
+}
+
+function matchMarkerShow(show,si,raw,fontDict,glyphs) {
+        const state=markerTextState(show);if(!state)return null;const {tm,cm}=state;
+        const p=show.parts[0], source=fontDict.get(show.fontName), mapping=sourceMapping(source,p.bytes);
+        if (source.get('BaseFont').asName()!==glyphs[0].fontName) return null;
+        if (!mapping || mapping.length!==glyphs.length || mapping.some((v,i)=>v!==glyphs[i].c.codePointAt(0))) return null;
+        if (!near(tm[4]+cm[4],glyphs[0].pdf?.[0]) || !near(tm[5]+cm[5]+show.rise,glyphs[0].pdf?.[1]) || !near(show.fontSize,glyphs[0].size)) return null;
+        const ok=markerOriginsMatch(p,source,show,glyphs);
+        if (ok) return {si,raw,show,p};
+        return null;
+}
+
+function findMarkerShows(streams,scanTextShows,fontDict,glyphs) {
+    const candidates=[];
+    for (let si=0;si<streams.length;si++) {
+      const raw=readStream(streams[si]), parsed=scanTextShows(raw);
+      if (!parsed || parsed.diagnostics?.length) return null;
+      for (const show of parsed.shows) {
+        const candidate=matchMarkerShow(show,si,raw,fontDict,glyphs);
+        if(candidate) candidates.push(candidate);
       }
     }
+    return candidates;
+}
+
+function validMarkerRequest(bytes,pageIndex,glyphs,after,scanTextShows,mupdf) {
+  if (!mupdf || !(bytes instanceof Uint8Array) || !Number.isInteger(pageIndex) || !Array.isArray(glyphs) || !glyphs.length || typeof after !== 'string' || [...after].length !== glyphs.length || typeof scanTextShows !== 'function') return false;
+  return true;
+}
+
+function validMarkerChange(before,chars,glyphs,fontSnapshot) {
+  if ([...before].length!==glyphs.length || chars.slice(0,-1).join('')!==before.slice(0,-1) || chars.at(-1)===glyphs.at(-1).c || chars.at(-1).codePointAt(0)>0xffff) return false;
+  if (!Array.isArray(fontSnapshot?.fonts) || fontSnapshot.fonts.some(f=>!(f?.bytes instanceof Uint8Array))) return false;
+  return true;
+}
+
+function markerPageSource(page,scanTextShows,glyphs) {
+    const obj=page.getObject();
+    if (obj.getInheritable('Rotate').asNumber() % 360 !== 0) return null;
+    const contents=obj.get('Contents');
+    const streams=contents.isArray() ? Array.from({length:contents.length},(_,i)=>contents.get(i)) : [contents];
+    if (streams.some(s=>!s.isStream())) return null;
+    const resources=obj.getInheritable('Resources'), fontDict=resources.get('Font');
+    const candidates=findMarkerShows(streams,scanTextShows,fontDict,glyphs);
+    if (!candidates) return null;
     if (candidates.length!==1) return null;
-    const {si,raw,show,p}=candidates[0];
-    font=new mupdf.Font(face.postscriptName || face.family,face.bytes);
-    const gid=font.encodeCharacter(chars.at(-1).codePointAt(0)); if (!gid || gid>65535) return null;
+    return {obj,contents,streams,resources,fontDict,candidate:candidates[0]};
+}
+
+function writeMarkerReplacement(doc,source,face,font,gid,chars) {
+    const {obj,contents,streams,resources,fontDict,candidate:{si,raw,show,p}}=source;
     const newResources=copyDict(doc,resources), newFonts=copyDict(doc,fontDict);
     let name='F'+face.sha256.slice(0,12); while (!newFonts.get(name).isNull()) name+='x';
     const pdfFont=doc.addFont(font), cmap=`/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def\n/CMapName /Unicode def\n/CMapType 2 def\n1 begincodespacerange\n<0000> <FFFF>\nendcodespacerange\n1 beginbfchar\n<${hex(gid)}> <${hex(chars.at(-1).codePointAt(0))}>\nendbfchar\nendcmap\nCMapName currentdict /CMap defineresource pop\nend\nend\n`;
@@ -134,6 +162,25 @@ export async function replaceMarkerGlyph({bytes,pageIndex,glyphs,after,fontSnaps
     out.set(raw.slice(0,show.start)); out.set(repl,show.start); out.set(raw.slice(show.end),show.start+repl.length);
     const stream=doc.addStream(out,{});
     if (contents.isArray()) { const a=doc.newArray(); streams.forEach((s,i)=>a.push(i===si?stream:s)); obj.put('Contents',a); } else obj.put('Contents',stream);
+}
+
+export async function replaceMarkerGlyph({bytes,pageIndex,glyphs,after,fontSnapshot,fontPostscriptName,scanTextShows,mupdf}) {
+  if (!validMarkerRequest(bytes,pageIndex,glyphs,after,scanTextShows,mupdf)) return null;
+  bytes=bytes.slice(); glyphs=glyphs.map(g=>({...g,pdf:Array.isArray(g?.pdf) ? [...g.pdf] : null}));
+  const before=glyphs.map(g=>g.c).join(''), chars=[...after];
+  if (!validMarkerChange(before,chars,glyphs,fontSnapshot)) return null;
+  const captured={...fontSnapshot,fonts:fontSnapshot.fonts.map(f=>({...f,bytes:f.bytes.slice()}))};
+  const face=await validatedFace(captured,fontPostscriptName); if (!face) return null;
+  let doc, font, saved, check, page;
+  try {
+    doc=mupdf.Document.openDocument(bytes,'application/pdf').asPDF();
+    if (!doc || doc.needsPassword() || pageIndex<0 || pageIndex>=doc.countPages()) return null;
+    page=doc.loadPage(pageIndex);
+    const source=markerPageSource(page,scanTextShows,glyphs);if(!source)return null;
+    const {show}=source.candidate;
+    font=new mupdf.Font(face.postscriptName || face.family,face.bytes);
+    const gid=font.encodeCharacter(chars.at(-1).codePointAt(0)); if (!gid || gid>65535) return null;
+    writeMarkerReplacement(doc,source,face,font,gid,chars);
     saved=doc.saveToBuffer(''); const result=saved.asUint8Array().slice();
     check=new mupdf.PDFDocument(result);
     const originalDoc=new mupdf.PDFDocument(bytes);

@@ -4,12 +4,18 @@
   const KEY='falsify.attempt-ledger.v1', HEX=/^[a-f0-9]{64}$/;
   const fields=['id','role','harnessHash','harnessName','harnessVersion','model','effort','budget','level','fileHash','sourceHash','startedAt','finishedAt','durationMs','calls','status'];
   const statuses=['completed','failed','cancelled','unknown'];
+  function validateIdentity(x){
+    if(typeof x.id!=='string'||!/^[A-Za-z0-9_:-]{1,160}$/.test(x.id)||!['red','blue'].includes(x.role)||!HEX.test(x.harnessHash)||!HEX.test(x.fileHash)||!HEX.test(x.sourceHash))throw Error('Invalid attempt identity');
+  }
+  function validateObservation(x){
+    if(!Number.isSafeInteger(x.startedAt)||x.startedAt<0||!Number.isSafeInteger(x.finishedAt)||x.finishedAt<x.startedAt||x.durationMs!==x.finishedAt-x.startedAt||!(x.calls===null||Number.isSafeInteger(x.calls)&&x.calls>=0)||!statuses.includes(x.status))throw Error('Invalid attempt observation');
+  }
   function normalize(x){
     if(!x||typeof x!=='object'||Array.isArray(x)||Object.keys(x).sort().join()!==fields.slice().sort().join())throw Error('Invalid attempt shape');
-    if(typeof x.id!=='string'||!/^[A-Za-z0-9_:-]{1,160}$/.test(x.id)||!['red','blue'].includes(x.role)||!HEX.test(x.harnessHash)||!HEX.test(x.fileHash)||!HEX.test(x.sourceHash))throw Error('Invalid attempt identity');
+    validateIdentity(x);
     for(const k of ['harnessName','harnessVersion','model','effort'])if(x[k]!==null&&(typeof x[k]!=='string'||x[k].length>160||/[\u0000-\u001f\u007f]/.test(x[k])))throw Error('Invalid attempt metadata');
     if(!Number.isSafeInteger(x.budget)||x.budget<1||x.budget>10000||!(x.level===null||Number.isSafeInteger(x.level)))throw Error('Invalid attempt budget');
-    if(!Number.isSafeInteger(x.startedAt)||x.startedAt<0||!Number.isSafeInteger(x.finishedAt)||x.finishedAt<x.startedAt||x.durationMs!==x.finishedAt-x.startedAt||!(x.calls===null||Number.isSafeInteger(x.calls)&&x.calls>=0)||!statuses.includes(x.status))throw Error('Invalid attempt observation');
+    validateObservation(x);
     return Object.fromEntries(fields.map(k=>[k,x[k]]));
   }
   function fromPending(r,observedAt){

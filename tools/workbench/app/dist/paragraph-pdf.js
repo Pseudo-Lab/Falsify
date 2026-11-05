@@ -4,6 +4,9 @@
   var current = typeof document !== 'undefined' && document.currentScript && document.currentScript.src;
   var nextId = 1;
   function failure(code, message) { return Object.assign(new Error(message), {name: 'ParagraphPdfError', code: code}); }
+  function validateBytes(bytes) {
+    if (!bytes || !bytes.length || bytes.length > 25 * 1024 * 1024) throw failure('invalid', 'A PDF within the 25 MiB size limit is required.');
+  }
   function run(operation, request) {
     request = request || {};
     var signal = request.signal, worker, settled = false, id = nextId++;
@@ -27,7 +30,7 @@
           : file && file.bytes instanceof Uint8Array ? new Uint8Array(file.bytes)
           : file && typeof file.arrayBuffer === 'function' ? new Uint8Array(await file.arrayBuffer()) : null;
         if (settled) return;
-        if (!bytes || !bytes.length || bytes.length > 25 * 1024 * 1024) throw failure('invalid', 'A PDF within the 25 MiB size limit is required.');
+        validateBytes(bytes);
         var url = new URL('./paragraph-pdf-worker.mjs', current);
         url.search = new URL(current).search;
         // A request owns its worker. Aborting one PDF cannot cancel another.

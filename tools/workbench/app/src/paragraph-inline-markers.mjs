@@ -48,12 +48,7 @@ function hits(chars, needle) {
   for(let i=hay.indexOf(needle);i>=0;i=hay.indexOf(needle,i+1)) found.push(chars[i+needle.length-1].g);
   return found;
 }
-export function planInlineMarkers(source, output, pageIndex=0) {
-  const warnings=[], repairs=[], sl=lines(source.glyphs);
-  const sourceClusters=clusters(source.glyphs), outputClusters=clusters(output.glyphs);
-  for(const marker of sourceClusters) {
-    if(!marker.length || marker.length>12) continue;
-    const m=marker[0], left=marker[0].l;
+function markerCandidates(source,sl,m,left) {
     const candidates=[];
     for(const line of sl) {
       if(line.size < size(m)*1.2 || line.size > size(m)*3 || line.y >= originY(m) || originY(m)-line.y > line.size*.8) continue;
@@ -68,6 +63,34 @@ export function planInlineMarkers(source, output, pageIndex=0) {
       if(anchor.length<12) continue;
       candidates.push({line,parent,anchor,column,chars});
     }
+    return candidates;
+}
+
+function planMarkerPunctuation(source,output,marker,outMarker,target,parent,line,pageIndex,repairs,warnings) {
+    // A body-sized punctuation glyph immediately following the citation in
+    // the source belongs to the same visual atom. Match it only by source
+    // geometry, style, and immediate text order on both pages.
+    const next = (page, group) => page.glyphs.filter(g=>g.i>Math.max(...group.map(x=>x.i)) && !/\s/u.test(String.fromCodePoint(g.u))).sort((a,b)=>a.i-b.i)[0];
+    const punctuation=next(source,marker);
+    if(punctuation && /^[.,;:!?]$/u.test(text([punctuation])) && near(size(punctuation),line.size,.2) && near(originY(punctuation),line.y,.5) && punctuation.l>=marker.at(-1).r-.2 && punctuation.l-marker.at(-1).r<=line.size*.5) {
+      const match=next(output,outMarker);
+      if(!match || text([match])!==text([punctuation]) || styleKey(match)!==styleKey(punctuation) || !match.obj || output.glyphs.some(g=>g.obj===match.obj && g!==match)) {
+        warnings.push({pageIndex,code:'inline_marker_punctuation_ambiguous',sourceIndex:punctuation.i});
+      } else {
+        const px=target.r+(punctuation.l-parent.r)-match.l;
+        const py=originY(target)+(originY(punctuation)-line.y)-originY(match);
+        if(Math.hypot(px,py)>=1) repairs.push({pageIndex,sourceIndex:punctuation.i,object:match.obj,dx:px,dy:py});
+      }
+    }
+}
+
+export function planInlineMarkers(source, output, pageIndex=0) {
+  const warnings=[], repairs=[], sl=lines(source.glyphs);
+  const sourceClusters=clusters(source.glyphs), outputClusters=clusters(output.glyphs);
+  for(const marker of sourceClusters) {
+    if(!marker.length || marker.length>12) continue;
+    const m=marker[0], left=marker[0].l;
+    const candidates=markerCandidates(source,sl,m,left);
     if(candidates.length!==1) continue;
     const {line,parent,anchor,column,chars}=candidates[0];
     const sourceHits=hits(chars,anchor), targetHits=hits(stream(output,line.size,column),anchor);
@@ -84,23 +107,26 @@ export function planInlineMarkers(source, output, pageIndex=0) {
     const dx=(target.r+(left-parent.r))-outMarker[0].l;
     const dy=(originY(target)+(originY(m)-line.y))-originY(outMarker[0]);
     if(Math.hypot(dx,dy)>=1) for(const object of handles) repairs.push({pageIndex,sourceIndex:m.i,object,dx,dy});
-    // A body-sized punctuation glyph immediately following the citation in
-    // the source belongs to the same visual atom. Match it only by source
-    // geometry, style, and immediate text order on both pages.
-    const next = (page, group) => page.glyphs.filter(g=>g.i>Math.max(...group.map(x=>x.i)) && !/\s/u.test(String.fromCodePoint(g.u))).sort((a,b)=>a.i-b.i)[0];
-    const punctuation=next(source,marker);
-    if(punctuation && /^[.,;:!?]$/u.test(text([punctuation])) && near(size(punctuation),line.size,.2) && near(originY(punctuation),line.y,.5) && punctuation.l>=marker.at(-1).r-.2 && punctuation.l-marker.at(-1).r<=line.size*.5) {
-      const match=next(output,outMarker);
-      if(!match || text([match])!==text([punctuation]) || styleKey(match)!==styleKey(punctuation) || !match.obj || output.glyphs.some(g=>g.obj===match.obj && g!==match)) {
-        warnings.push({pageIndex,code:'inline_marker_punctuation_ambiguous',sourceIndex:punctuation.i});
-      } else {
-        const px=target.r+(punctuation.l-parent.r)-match.l;
-        const py=originY(target)+(originY(punctuation)-line.y)-originY(match);
-        if(Math.hypot(px,py)>=1) repairs.push({pageIndex,sourceIndex:punctuation.i,object:match.obj,dx:px,dy:py});
-      }
-    }
+    planMarkerPunctuation(source,output,marker,outMarker,target,parent,line,pageIndex,repairs,warnings);
   }
   return {repairs,warnings};
+}
+
+function applyMarkerRepairs(out,plan,pageIndex,repairs,warnings) {
+      const seen=new Set(), counts=new Map();
+      for(const move of plan.repairs) counts.set(move.object,(counts.get(move.object)||0)+1);
+      const conflicts=new Set(plan.repairs.filter(move=>counts.get(move.object)!==1).map(move=>move.sourceIndex));
+      for(const sourceIndex of conflicts) warnings.push({pageIndex,code:'inline_marker_object_ambiguous',sourceIndex});
+      for(const move of plan.repairs) {
+        if(conflicts.has(move.sourceIndex)) continue;
+        seen.add(move.object);
+        out.M._FPDFPageObj_Transform(move.object,1,0,0,1,move.dx,move.dy);
+        repairs.push({pageIndex,sourceIndex:move.sourceIndex,dx:move.dx,dy:move.dy});
+      }
+      if(seen.size) {
+        if(!out.M._FPDFPage_GenerateContent(out.page)) throw new Error('inline_marker_generate_failed');
+        if(out.M._FPDFPage_GetAnnotCount?.(out.page)>0) warnings.push({pageIndex,code:'inline_marker_annotations_unverified'});
+      }
 }
 
 export async function repairInlineMarkers({engineFactory,sourceBytes,outputBytes,pageIndices,sourcePageMap}) {
@@ -116,20 +142,7 @@ export async function repairInlineMarkers({engineFactory,sourceBytes,outputBytes
       const s=readGlyphs(src,pageIndex), o=readGlyphs(out,outputPageIndex);
       if(!s.styled || !o.styled) {warnings.push({pageIndex,code:'inline_marker_style_unavailable'});continue;}
       const plan=planInlineMarkers(s,o,pageIndex); warnings.push(...plan.warnings);
-      const seen=new Set(), counts=new Map();
-      for(const move of plan.repairs) counts.set(move.object,(counts.get(move.object)||0)+1);
-      const conflicts=new Set(plan.repairs.filter(move=>counts.get(move.object)!==1).map(move=>move.sourceIndex));
-      for(const sourceIndex of conflicts) warnings.push({pageIndex,code:'inline_marker_object_ambiguous',sourceIndex});
-      for(const move of plan.repairs) {
-        if(conflicts.has(move.sourceIndex)) continue;
-        seen.add(move.object);
-        out.M._FPDFPageObj_Transform(move.object,1,0,0,1,move.dx,move.dy);
-        repairs.push({pageIndex,sourceIndex:move.sourceIndex,dx:move.dx,dy:move.dy});
-      }
-      if(seen.size) {
-        if(!out.M._FPDFPage_GenerateContent(out.page)) throw new Error('inline_marker_generate_failed');
-        if(out.M._FPDFPage_GetAnnotCount?.(out.page)>0) warnings.push({pageIndex,code:'inline_marker_annotations_unverified'});
-      }
+      applyMarkerRepairs(out,plan,pageIndex,repairs,warnings);
     }
     return {pdf:repairs.length?new Uint8Array(out.save()):new Uint8Array(outputBytes),repairs,warnings};
   } finally {try{src?.close();}finally{out?.close();}}

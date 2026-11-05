@@ -387,3 +387,104 @@ Cursor Grok 4.7 xhigh fast 두 좌석을 계산 코어와 UI 경계로 배치했
 Aside에서 합성 PDF 입력·그래프 영역 지정·실제 OCR/추출·JSON 다운로드를 확인했다. 394점·wpd-step·ready·역방향 되짚기0이며 값 단위 y−x RMSE0.02930(0~10축)이었다. 추출 픽셀 오차와 이 값 단위 지표는 구분한다. 구현·최종 검사·커밋 영수증은 소스 밖 coordination/chart-oss-benchmark-20261103/accuracy-v2/IMPLEMENTATION-REPORT.ko.md 및 검증된 WorkBite T-0152에 남긴다. 공개 웹·설치본은 이번 구현 범위에서 교체하지 않았다.
 
 최종 Windows Python827개 검사(통과819·환경별 제외8·실패0)와 전체 Node 검사, 변경된 벤더·재그리기10개 검사가 통과했다. 최종 Aside 네이티브 차트는 원본 선 명령과 끝점2개를 pdf-vector-calibrated로 반환했다. 회전 페이지의 page.rect/sourcePagePoint, 혼합480점/64계열 예산 및 잘린 계열의 래스터 복원 예산, 전체·일부 교체 이미지의 페인트 순서를 검사했다. 세로선 채점 오류와 교차선 거리 단언 오류 때문에 제품을 변경하지 않고 검사 기준을 고쳤다. 원본·기존 결과는 보존했으며, 이번 작업자 좌석은 산출물 검토 뒤 닫았다.
+
+## 2026-11-03 원본 서식과 곡선 직접 조작 — 조사 단계
+
+사용자는 원본 그래프·표·피규어의 서식을 유지한 채 변경 데이터만 반영하는 것을 요구했다. 사람이 좌표를 일일이 입력하지 않고 곡선을 밀어 bump/peak/well과 위치·높이·폭을 바꾸는 기본 흐름을 원한다. 정확한 좌표는 접힌 고급 기능에 두며, 사람이 쓰지 않는 분석·보정 도구는 API/MCP에 남긴다. 이번 요청은 OSS 조사이며 구현·fork·의존성 설치·배포를 시작하지 않았다.
+
+AUX ChartHandle/Range는 vanilla JS 조작부 후보, MIT ml-peak-shape-generator v5.6.0은 모양 계산 코어 후보로 좁혔다. DSSSP MIT 데모에서 드래그 400Hz/+7dB→658Hz/+9.4dB, wheel Q0.7→0.6을 실제 Aside로 확인했지만 React·오디오 축을 일반 데이터에서 분리하는 비용이 있다. Fityk·SpectraMatcher·Inkscape는 UX/고급 도구 참고이며, Mystique는 라이선스 미확인, Chart2SVG는 확인한 저자 페이지에서 코드·가중치·라이선스를 확인하지 못해 즉시 fork 후보로 확정하지 않는다.
+
+기본 UI는 곡선 선택·직접 이동·폭 손잡이와 되돌리기·원본 비교·다운로드로 구성하는 방향이다. 원본 전체 재피팅/전역 평활화로 변경 범위 밖 데이터나 잡음을 바꾸지 않는다. 국소 변형과 기존 peak 이동/폭 변경은 별도 동작이며 UI와 API/MCP가 같은 코어를 사용해야 한다. 원본 서식 보존은 추출 코어와 별도 출력 검증이 필요하다. 소스 밖 coordination/chart-oss-benchmark-20261103/accuracy-v2/shape-editor-research/RESEARCH.ko.md에 근거·후보·검증 범위를 남긴다. 구현 완료나 일반 정확도 측정을 뜻하지 않는다.
+## 2026-11-03 부품 조합형 편집 실행 계획
+
+사용자는 부품을 조합하는 방향을 선택하고 기존 구현 위에서 가장 빠르고 견고한 구현 계획을 요청했다. [원본 서식 보존형 곡선 편집 계획](PLAN_SOURCE_STYLE_SHAPE_EDITOR.md)에 source base 3721f2e와 공통 장면/operations 계약, 기존 부품, 파일별 소유권, 병렬 작업·통합 순서·완료 기준을 정리했다. 계획 작성만 수행했으며 구현·fork·배포는 시작하지 않았다.
+
+우선 원본 native/raster 각 한 건에서 선택 곡선의 제거·교체와 비편집 영역 보존을 실증한다. 계산 코어·벡터 출력·UI를 병렬 작업하고 래스터 배경 복원/API·MCP/독립 검수를 후속 배치한다. 원본의 고정 축·글꼴·범례를 재생성하지 않고 남기는 것이 기본이다. 기존 image occurrence의 토큰 처리·공유 Form 격리와 curve vector 추출을 재사용하되 seqno를 원본 operator 위치로 간주하지 않는다. 사람 UI와 에이전트는 같은 DOM 없는 JS 코어를 사용하며 BLUE read-only MCP는 유지하고 RED 편집 도구를 분리한다. 세부 구현 결정을 작업자가 추측하지 않도록 계획의 계약/검증과 소유 파일만 발췌해 배정한다.
+## 2026-11-03 원본 서식 곡선 편집 — 통합 진행
+
+사용자가 계획 실행과 Cursor Grok 4.7 xhigh fast 병렬 작업을 승인했다. 계산 코어·native/raster 출력·UI를 파일 경계로 배정했고 조율자가 API·RED 편집 MCP·기존 visual export·기록·BLUE 전달을 연결 중이다. MIT ml-peak-shape-generator Gaussian 원본을 고정하고 같은 JS를 브라우저와 MiniRacer에서 실행한다. AUX는 위젯 의존 비용을 확인해 기존 Pointer Events 조합을 선택했다.
+
+실제 Aside의 합성 PDF에서 곡선 드래그→편집기 내보내기 한 번→다운로드→BLUE 입력을 확인했다. source/output SHA와 3쪽 수·전체 추출 텍스트·그래프 밖 픽셀 대조를 보관했다. 두 native 그래프와 표 셀을 누적한 별도 통합 검사가 통과했다. 실제 SDK stdio의 prepare/preview/export와 author=agent 기록도 확인했다. MCP 이벤트 루프 안에서 MiniRacer 동기 제한을 호출하던 오류와 브라우저 route allowlist 누락을 수정했다. BLUE 모델 호출은 없었다.
+
+통합 중 남은 결함은 dense curve sample/원명령 연결, 래스터 ICCBased 이미지와 국소 마스크, 회전 페이지 좌표였다. 독립 QA는 합성12건 중10통과·2실패를 남겼고 원인에 맞춰 후속 수정자를 배치했다. 원본 fixture의 기본 closePath가 실제 닫힌 선을 만들었던 검사 조건도 공개 fixture에서 open curve로 바로잡았다. 제품이 진짜 원본 폐곡선의 잉크를 삭제하도록 고치지 않는다. 막대·산점 대상별 조작과 드래그 프레임 병합은 후속 병렬 작업 중이다. 완료·일반 정확도·공개 배포로 주장하지 않는다.
+
+
+## 2026-11-03 원본 서식 그래프 편집 — 개발본 검증 완료
+
+곡선 드래그·폭/위치 손잡이, native 막대 끝점과 원형 산점 이동, 되돌리기·원본 비교·즉시 PDF 다운로드를 기존 RED 표·그림 편집에 연결했다. 정밀 좌표와 분석·축 보정은 접혀 있다. UI와 별도 RED MCP의 prepare/preview/export가 같은 해시 고정 Gaussian JS 코어를 사용한다. native 선·cubic은 원본 operand/선택 Form 호출을 수정하고, 불투명 래스터는 원본 이미지 위에 바뀐 픽셀만 합성한다. RGB ICC와 soft mask, 회전 좌표를 보존한다. 원본 문서와 다른 사용 위치를 바꾸지 않는다.
+
+Cursor Grok 4.7 xhigh fast 작업자를 코어·출력·UI·독립 QA·후속 수리·막대/산점·성능으로 나눠 배치했다. 산출물을 검토하고 조율자가 API/MCP·기존 export·회전·래스터/ICC/투명도 및 마지막 페이지 연결을 통합했다. 투명도 helper 좌석은 조사 후 구현이 나오지 않아 정리하고 조율자가 완성했다. provider native 완료를 검증했다고 주장하지 않으며 좌석은 정리했다.
+
+전체 Python 922검사(통과915·환경별 제외7·실패0), 전체 Node와 후속 UI/패키징 검사가 통과했다. 1,000점 드래그의 작업자 브라우저 p95는7.1ms였고 프레임당 최신 포인터만 계산한다. 실제 Aside에서 native 곡선·막대 드래그와 원클릭 PDF 다운로드, undo 후 원본 SHA 일치, 좁은 화면의 비율·접힌 좌표를 확인했다. 생성 PDF와 BLUE 입력 SHA가 같고 BLUE 이벤트에는 file만 있다. BLUE 모델 호출은0회다.
+
+공개 PLOS 논문 Fig3의 래스터 준비는 색조별 중복 추적을 줄인 뒤 약9.1초였다. 편집 사본의17쪽 수·전체 텍스트·영역 밖 픽셀 검사가 통과했다. 이 검사는 원본 보존 검사이며 전체 그래프 수치 복원 정확도를 뜻하지 않는다. 최상위 filled 직사각/원형 mark와 색 래스터가 현재 조작 범위이며, Form 내부 mark·복합/패턴 채움·래스터 검은 곡선 자동 분리는 남은 범위다. 기존 이미지 교체와 고급 재그리기를 유지한다.
+
+구현/검증 자료는 소스 밖 coordination/chart-oss-benchmark-20261103/accuracy-v2/shape-implementation에 보관하고 검증된 WorkBite T-0152에 기록한다. 이번 작업은 개발 소스이며 공개 웹·설치본은 alpha.48을 유지한다. macOS/Windows CI 검사 경로를 추가했으며 이 커밋의 원격 CI·배포는 아직 실행하지 않았다.
+
+## 2026-11-04 alpha.49 공개 웹·설치본 교체 완료
+
+사용자의 배포 요청에 따라 069b7bd1ad7c1dd665fe68eb8e788572fa397912를 alpha.49로 공개했다. GitHub Actions 41748548511의 Linux·Windows·macOS ARM/Intel 및 Pages 배포가 모두 통과했다. 공개 핵심 자산 10개의 바이트가 해당 커밋과 일치하며, 공개 ZIP 146744000바이트의 SHA-256은 1e3b46014694b525e339b2bd5456b8a3ee53b2b80b7d046327462aed3df70762다. v0.2.0-alpha.49 태그도 같은 커밋을 가리킨다.
+
+설치본 falsify-public의 릴리스 파일 1217개를 대조했고 개인 설정·기록 36개를 보존했다. 기존 서버 진입점을 통해 7816에서 실행 중이며, 실제 HTTP 그래프 준비·미리보기·PDF 생성·undo 원본 바이트 일치가 통과했다. 합성 출력의 페이지·전체 텍스트·영역 밖 픽셀 검사는 passed이며, 일반 논문 전체의 그래프 복원 정확도를 측정한 것은 아니다. 모델 호출은 0회다.
+
+배포 중 Intel용 pikepdf 바이너리 설치를 10.13.0.post1 플랫폼 조건으로 수정했다. POSIX에서 짧은 communicate 제한 뒤 stdin 일부가 남는 교착은 단일 전송과 별도 취소 감시로 해결했다. 실제 지연 입력·취소·시간 제한 3개 회귀 검사를 추가했고 모든 플랫폼에서 통과했다. 미리보기 테스트가 비활성 적용 버튼을 누르던 비동기 순서도 준비 완료를 기다리도록 수정했다.
+
+최종 영수증은 소스 밖 coordination/chart-oss-benchmark-20261103/accuracy-v2/shape-implementation/release-alpha49-published/deployment-status.json에 보관했다. 검증된 WorkBite T-0152에 wb.checkpoint.T0152.20261104.alpha49-deployed로 committed를 확인했다. 포장용 Git worktree는 StorageGuardian이 외부 Git 객체 의존성으로 등록을 거절해 그대로 보존한다. 이 문서의 배포 영수증은 로컬 조율 기록이며 공개 릴리스 커밋을 변경하지 않는다.
+
+## 2026-11-04 배포 후 PC 클릭 연결 실행 경로 복구
+
+사용자가 브라우저 로컬 네트워크 권한을 허용한 뒤 companion 로그 안내가 나오는 문제를 신고했다. 배포 조율자가 서버를 상대경로 app/local/server.py로 직접 시작한 것이 원인이었다. API는 정상 응답했지만 기존 연결 앱은 절대경로의 설치본만 재사용하므로 Foreign / script argument is not an absolute local path로 거절했다. 웹 배포와 API 검증만으로 클릭 페어링 완료까지 확인한 것으로 취급하지 않는다.
+
+실제 OS PID와 인증된 lifecycle descriptor의 PID·절대 serverPath·busy=false를 대조한 뒤 해당 배포 프로세스에만 정상 종료를 요청했다. 절대경로로 재실행하고 기존 Get-FalsifyPortOccupant=Owned, descriptor HTTP200, Test-FalsifyCompanionDescriptor 오류 없음까지 확인했다. 코드나 권한 검사를 완화하지 않았고 웹·ZIP의 alpha.49 커밋은 유지한다. 브라우저 재연결을 시작했으며 사용자 승인 이후 실제 paired 표시는 별도로 확인해야 한다. 이후 배포 시 API뿐 아니라 기존 연결 앱의 OS 소유권·descriptor 검사를 함께 확인한다.
+
+## 2026-11-05 기술 부채 상환 실행
+
+사용자가 감사에서 정리한 23개 항목의 구현을 승인했다. Stackbite native Codex GPT-6.1 Terra high Fast를 최대 3개 작업자 좌석에 배치하며, 조율자는 파일 소유권·정확한 기준 커밋·검사·후속 wave를 관리한다. 개발 브랜치는 chore/tech-debt-20261105다. 설치본과 공개 배포는 수정하지 않았다.
+
+첫 wave의 비동기 편집 소유권, 백엔드 실행 슬롯·응답 계약·오류 분류·런타임 캐시, 배포 자산·테스트 등록·ZIP 검증·문서 항목 11개를 독립 검토 뒤 통합했다. 편집 후보의 이전 finally가 새 실행을 해제할 수 있어 보완 작업자를 추가 배치했다. 나머지는 비교 화면·저장·해제 수명, Confluence 기한·동시 조회, native 연산 격리·검사, 재현 가능한 빌드·POSIX 재연결, 그래프 드래그·codec 분리, 실제 복잡한 함수의 책임 분리 순서로 진행한다.
+
+소스 밖 coordination/tech-debt-audit-20261105/implementation/debt-ledger.json이 항목별 승인·커밋·검사 영수증이다. 원본 감사는 보존한다. Lizard의 정규식 처리로 함수 범위가 잘못 잡힌 수치는 정정하고, 잘못된 지표를 낮추기 위한 코드 변경은 하지 않는다. WorkBite T-0152의 wb.checkpoint.T0152.20261105.debt-wave1은 committed다. 구현 통과와 원격 CI·공개 배포는 별도 상태로 기록한다.
+
+## 2026-11-05 기술 부채 상환 통합 결과
+
+감사 F01–F23과 후속 확인 F24–F25를 개발 브랜치 chore/tech-debt-20261105에 통합했다. Stackbite native Codex GPT-6.1 Terra high Fast 좌석을 파일 소유권으로 나누고, 독립 검토에서 발견한 회귀도 후속 작업자로 수정했다. 실행 슬롯 반환, 비동기 편집 소유권, 저장 transaction 수명, 비교 화면 정리, Confluence 전체 요청 기한·동시 조회, native PDF 작업 격리·취소, 재현 가능한 재구성 빌드, POSIX 재연결, 그래프 드래그와 JPEG codec 분리, 핵심 정책 함수 분리가 이번 상환 범위다.
+
+검토 중 추가로 확인한 개발 의존성 advisory 경로를 갱신해 cloud API npm audit 0을 확인했고, Node engine 요구사항을 고정 도구와 같은 22 이상으로 맞췄다. Windows 권한 명령의 지역화된 출력을 Python UTF-8 설정으로 해독하던 문제는 bytes 처리와 엄격한 ASCII SID 추출로 고쳤다. 두 native 명령에 각각 10초 기한을 두었으며, 멈춘 실제 자식 프로세스 회수와 다음 임시 권한 검사 성공을 일반·UTF-8 환경에서 각각 6개 검사로 확인했다. 실제 권한 검사는 유지한다.
+
+같은 AST 측정기를 감사 기준 0ec8f00과 통합 후보 양쪽에 적용한 핵심 CCN은 checkRecomposition 259→28, buildPaperFlow 227→13, _export_pdf 173→16, check_page 102→27, Handler.do_POST 85→29다. 중첩 함수는 별도로 센다. app/src·app/local의 변경 함수에 복잡도 증가 gate를 추가했고, 책임 분리 후의 함수별 감소를 전체 연산 감소나 저장소 전체 복잡도 0으로 표현하지 않는다. Lizard의 stripTextObjects 범위 오류는 코드를 불필요하게 변경하지 않고 측정 정정으로 남겼다.
+
+전체 Node 검사 1,111개 통과·8개 제외, cloud API 57개 통과와 독립 재검토를 기록했다. 이후 작업대의 남은 PDF 열기 타이머를 수정해 focused 62개를 통과했고, POST 분리는 core 45·document broker 17·HTTP 5개와 변경 전후 HTTP 14개 관찰값 일치로 확인했다. Aside에서 실제 브라우저 컴파일러와 PDF.js로 원본 1쪽·수정본 2쪽을 만들고 출력에만 있는 쪽의 원본 canvas·텍스트층 정리와 이전 쪽 복원을 확인했다. Windows PowerShell 7·5.1과 WSL POSIX 검사는 통과했다. macOS native 검사는 이번 로컬 환경에서 실행하지 않았다.
+
+Python 전체 958개 검사에서 950개 통과·시간 기준 1개 실패·7개 제외를 보존하며 전체 통과로 기록하지 않는다. 실패한 stdio 3개 단독 재검사와 editor 51개는 통과했다. 전체 실행의 Windows 출력 해독 오류는 후속 수정·집중 검사로 확인했고, UTF-8 관련 모듈의 HTTP 시간 초과 1건도 최초 실패와 단독 재검사 통과를 함께 남긴다. Paragraph runtime의 sourceBuildVerified=false는 남아 있는 빌드 검증 제약이다.
+
+항목별 상태·정확한 커밋·최종 ZIP SHA·검사 범위는 소스 밖 coordination/tech-debt-audit-20261105/implementation/final-validation.json, debt-ledger.json과 IMPLEMENTATION_REPORT.ko.html에 보관한다. 공개 웹·설치본·실행 중인 사용자 companion은 이번 작업에서 교체하지 않았다. WorkBite T-0152에는 관찰 가능한 checkpoint만 추가하며 전체 프로젝트 Task 완료 상태로 바꾸지 않는다.
+
+## 2026-11-05 alpha.50 공개 배포·설치본 교체와 전체 CCN
+
+사용자 요청으로 553027a2e9057a7ad0c6f1647c7ad4129e45359a를 alpha.50으로 공개했다. GitHub Actions 41891615945의 Linux·Windows·macOS Intel/ARM 검증과 Pages 배포가 모두 통과했다. 공개 자산 13개는 해당 커밋과 바이트가 같고, 공개 ZIP 146800118바이트의 SHA-256은 3884110d04c98843a9dc16d58b5d8140712201ad47abb23895cec70df6ad7545다. 공개 태그도 같은 커밋이다. 초기 ARM runner 배정 실패 뒤 공식 macOS 15 ARM 이미지와 실제 arm64 검사를 사용했으며, 이미지에 고정된 포장 검사도 갱신해 13개를 통과했다. 초기 실패·취소 기록은 보존한다.
+
+설치본 릴리스 파일 1240개를 최종 ZIP과 대조하고 개인 설정·기록 36개와 연결 키를 보존했다. idle companion을 절대경로로 hidden 재시작했고 Owned·descriptor·busy=false를 확인했다. 실제 HTTP 그래프 준비·PNG 미리보기·PDF 생성·undo 원본 바이트 일치가 통과했으며 모델 호출은 0회다. Confluence 공유 API도 기존 변수·데이터를 유지해 worker a26e42d5-2591-407b-9d6b-4f8ac91aabaf로 배포하고 허용된 웹 Origin의 health HTTP200을 확인했다. 배포 backend 소스 b942eef와 최종 릴리스의 cloud/api 내용은 같다. Aside에서도 공개 index HTTP200과 alpha.50 자산 URL을 확인했으며 열려 있던 작업 탭은 보존했다. 브라우저 재페어링 완료를 주장하지 않는다.
+
+Stackbite Codex GPT-6.1 Terra high Fast 통계 작업자에게 읽기 전용 전수 집계를 배정하고 결과를 검토했다. 감사 기준 0ec8f00과 통합본 5627475 양쪽에 같은 Babel/Python AST 측정기를 적용했다. 이후 릴리스의 운영 함수는 같고 버전 상수·CI·포장 테스트만 달라졌다. 자체 운영 JS/Python은 199→202파일, 8127→8233함수, CCN 합계 39842→40209(+0.9%), 평균 4.902→4.884, 중앙값 2→2, p95 18→19, 최대 429→429다. CCN 50 초과 함수는 67→61, 100 초과는 11→7이다. 큰 함수 일부는 줄었지만 전체 합계가 감소하거나 기술 부채가 모두 사라진 결과는 아니다. 남은 최상위는 composeDocument 429, runPaperLayoutAgent 217, buildReconstructionModel 189다.
+
+외부 fork·생성 중복·테스트·도구는 별도 집계했고, 이들을 포함한 파싱 범위는 현재 662파일·49311함수·CCN164249다. PowerShell·shell·SQL·native와 HTML inline script는 측정하지 않았고 파싱 오류·크기 제한 제외는 0이다. 모든 언어의 CCN으로 확대하지 않는다. 소스 밖 coordination/tech-debt-audit-20261105/implementation/release-alpha50/ccn/report.html에 분포·상위 함수·범위·원시 CSV/JSON을 보관하고 deployment-status.json에 공개 자산·ZIP·설치본·실행 검증을 연결한다. Paragraph runtime sourceBuildVerified=false는 유지한다. 이번 영수증은 로컬 조율 기록이며 공개 릴리스 커밋을 바꾸지 않는다.
+
+## 2026-11-05 운영 함수 CCN 15 상한 실행
+
+사용자가 잔여 기술 부채 상환을 계속하고 CCN 15 초과 함수가 0개가 될 때까지 병렬 작업을 이어가도록 요청했다. alpha.50 통계의 자체 운영 JS/Python 범위를 유지한다. 시작 기준 bee3952의 202파일·8233함수 중 초과 함수는 540개, 해당 파일은 162개다. 새 운영 helper도 포함하고 기존 측정기·scope·임계값 예외를 바꿔 수치를 낮추지 않는다. 종료 조건은 같은 전수 AST 검사에서 초과 0·파싱 오류 0이며 관련 회귀 검사와 재빌드가 통과하는 것이다.
+
+개발 브랜치는 chore/ccn15-20261105다. Stackbite native Codex GPT-6.1 Terra high Fast 3개 좌석을 app/src 190개, app/local 153개, authored app/dist 188개로 나누고 조율자가 cloud API 9개·전수 검사·생성 자산·테스트 등록·통합을 맡는다. 파일별 의미 있는 책임을 분리하고 기존 내용·출력·오류·취소·RED/BLUE 독립 경로를 보존한다. 작은 커밋과 focused 검사 결과를 계속 받아 통합하며, 다음 묶음을 작업하는 동안 조율자가 앞 묶음을 독립 확인한다. 첫 source 좌석이 StorageGuardian 정리를 코드 수정 금지로 해석해 변경 없이 종료했으므로, 새로 승인된 작업 경계와 확인한 T-0152·보관 lease를 명시해 재배치했다. shared worktree는 자동 등록·정리하지 않는다.
+
+tools/quality/inventory.mjs는 기존 Babel/Python 측정기와 alpha.50의 고정 분류를 재사용한다. 최초 전체 집계 540개가 이전 통계와 일치했고 새 helper 포함·중첩 함수·임계값 경계·파싱 실패 검사가 통과했다. 새 CCN 회귀 spec은 기본 테스트 실행에 포함한다. 작업·상태·원본/통합 커밋·검사 결과는 소스 밖 coordination/tech-debt-audit-20261105/implementation/ccn15-20261105에 보관한다. 부분 통합과 전체 목표 달성은 구분한다. 설치본·공개 웹을 작업 중인 부분 리팩터링으로 교체하지 않는다.
+
+## 2026-11-05 운영 함수 CCN 15 상한 달성
+
+같은 자체 운영 JS/Python 202파일에서 CCN 15 초과 함수는 540→0개, 최대는 429→15가 됐다. 새 helper·중첩 함수를 포함한 최종 함수 수는 9883개이며 파싱 오류는 0이다. 기존 측정기·scope·상한 예외를 바꾸지 않았다. 역할 분리로 함수 수가 늘어 CCN 합계는 40209→41941이므로 전체 연산량이나 CCN 합계가 감소했다고 해석하지 않는다. 외부 fork·생성 중복·테스트·도구와 미측정 언어까지 상한을 달성했다는 뜻은 아니다.
+
+Stackbite native Codex GPT-6.1 Terra high Fast 작업자를 최대 3개씩 파일 소유권으로 분리해 계속 배치했다. 조율자가 차례로 검토·통합하고 source·UI·native 각 lane을 독립 재측정했다. 목표 달성 후 완료 좌석은 닫고 worktree와 최초 실패 기록을 보존했다. 개발 브랜치는 chore/ccn15-20261105, 소스·재빌드 검증 커밋은 2e6f2b1cfbcd8ec8346acdebec10f0d5826ebf67이다.
+
+전체 app 실행은 Node 집계1126통과·8제외·실패0이며 별도 자체 harness assertion은 합산하지 않았다. Python 최종 전체 재실행은984통과·7제외·1108하위 검사 통과·실패0이다. optional DocVortex 파일은 올바른 별도 runtime에서 실제 PDF 변환1개를 통과했다. cloud57·quality7·packaging13·글꼴/독립 두 경로 재빌드31개, Windows PowerShell7/5.1 총640검사가 통과했다. 브라우저6개 suite, 저장 가져오기70개, 교차 탭 중복 방지와 Aside 실제 입력·RED 가져오기·편집·독립 BLUE도 확인했다. 실제 LaTeX 컴파일과 PDF-only BLUE 전달은 모델 없이 검증했다. 기존 변경 함수 CCN 회귀 gate도 통과했다.
+
+최초 Python 전체 실행의982통과·3실패는 보존한다. DocVortex 의존성은 별도 환경에서 확인했고, native 그래프 시간 초과의 최초 원인은 확정하지 않았다. 최종 전체 재실행은 통과했으며 생산 기한을 늘리지 않았다. 200ms 자식 기동 가정은 기준본·수정본 각각16회 중3회 시간 초과로 재현되어 테스트의 clock/분류 검사와 실제 자식 검사를 분리했다. 수치 편집 금지와 숨은 UI를 전제로 한 오래된 저장 가져오기 검사는 기준본에서도 실패함을 확인한 뒤 현재 계약으로 수정했다. 최종 검토에서 사용하지 않는 자기 호출 helper를 제거했다. 각 최초 값과 후속 결과는 ledger에 함께 남긴다.
+
+보고서는 소스 밖 coordination/tech-debt-audit-20261105/implementation/ccn15-20261105/CCN15_REPORT.ko.html이며 원시 수치는 production-ccn-final.json에 있다. 공개 웹·설치본은 alpha.50 유지, 사용자 companion·개인 설정·기록은 변경하지 않았다. 새 커밋의 원격 macOS CI는 아직 실행하지 않았고 기존 Paragraph runtime sourceBuildVerified=false도 유지한다. WorkBite T-0152는 진행 상태를 유지하고 이번 결과만 checkpoint로 남긴다.

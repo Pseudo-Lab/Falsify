@@ -6,7 +6,7 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'app/local'))
@@ -19,14 +19,52 @@ class AdapterFailures(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             return adapter.run_stdio([sys.executable, '-c', code], b'', directory, str(Path(directory) / 'out'))
 
-    def test_process_failures_and_no_output_leaks(self):
-        for code, expected in [('import sys; print("SECRET"); sys.stderr.write("SECRET"); sys.exit(3)', 'process_exit'),
-                               ('import sys; sys.exit(124)', 'timeout'),
-                               ('import time; time.sleep(2)', 'timeout')]:
-            with self.subTest(expected=expected), patch.object(adapter, 'TIMEOUT_SECONDS', .2):
-                with self.assertRaises(adapter.AdapterFailure) as caught: self.run_process(code)
+    def test_process_exit_and_deadline_classification(self):
+        for returncode, times, expected in [(3, [0, 0], 'process_exit'),
+                                            (124, [0, 0], 'timeout'),
+                                            (None, [0, .2, .21], 'timeout')]:
+            with self.subTest(returncode=returncode):
+                process = Mock(returncode=returncode, pid=12345)
+                process.poll.return_value = returncode
+                if returncode is None:
+                    process.wait.side_effect = [adapter.subprocess.TimeoutExpired('fake', .1), None]
+
+                def launch(argv, **kwargs):
+                    kwargs['stdout'].write(b'STDOUT_SECRET')
+                    kwargs['stdout'].flush()
+                    self.assertIs(kwargs['stderr'], adapter.subprocess.DEVNULL)
+                    return process
+
+                termination = (patch.object(adapter.subprocess, 'run') if os.name == 'nt'
+                               else patch.object(adapter.os, 'killpg'))
+                with patch.object(adapter, 'TIMEOUT_SECONDS', .2), \
+                     patch.object(adapter.time, 'monotonic', side_effect=times), \
+                     patch.object(adapter.subprocess, 'Popen', side_effect=launch), termination:
+                    with self.assertRaises(adapter.AdapterFailure) as caught:
+                        self.run_process('unused')
                 self.assertEqual(caught.exception.code, expected)
-                self.assertNotIn('SECRET', str(caught.exception))
+                self.assertNotIn('STDOUT_SECRET', str(caught.exception))
+                self.assertNotIn('STDERR_SECRET', str(caught.exception))
+                process.wait.assert_any_call(timeout=.1)
+
+    def test_real_process_exit_redacts_output(self):
+        code = ('import sys; data = sys.stdin.buffer.read(); '
+                'print("STDOUT_SECRET"); sys.stderr.write("STDERR_SECRET"); '
+                'sys.exit(3 if data == b"INPUT_MARKER" and sys.argv[1] == "ARG_MARKER" else 0)')
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaises(adapter.AdapterFailure) as caught:
+                adapter.run_stdio([sys.executable, '-c', code, 'ARG_MARKER'], b'INPUT_MARKER',
+                                  directory, str(Path(directory) / 'out'))
+            self.assertEqual(caught.exception.code, 'process_exit')
+            self.assertEqual(Path(directory, 'out').read_bytes().strip(), b'STDOUT_SECRET')
+            self.assertNotIn('STDOUT_SECRET', str(caught.exception))
+            self.assertNotIn('STDERR_SECRET', str(caught.exception))
+
+    def test_real_timeout_and_missing_executable(self):
+        with patch.object(adapter, 'TIMEOUT_SECONDS', .2):
+            with self.assertRaises(adapter.AdapterFailure) as caught:
+                self.run_process('import time; time.sleep(2)')
+            self.assertEqual(caught.exception.code, 'timeout')
         with tempfile.TemporaryDirectory() as directory:
             with self.assertRaises(adapter.AdapterFailure) as caught:
                 adapter.run_stdio([str(Path(directory) / 'missing')], b'', directory, str(Path(directory) / 'out'))

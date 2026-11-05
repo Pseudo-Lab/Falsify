@@ -14,17 +14,26 @@ const aborted=()=>new DOMException('취소했습니다.','AbortError');
 const actionLabels={read_source:'소스 확인',replace_source:'배치 수정',compile_pdf:'PDF 생성',inspect_pdf:'겹침·잘림 검사',render_pages:'페이지 확인',render_reference_pages:'원본 페이지 확인',read_reference:'원본 구조 확인',restructure_source:'구조 배치',inspect_document:'문서 찾기',get_block:'블록 확인',render_region:'확대 비교',update_layout:'블록 배치',compare_document:'내용 대조',checkpoint:'후보 저장',restore_revision:'후보 복원',inspect_fonts:'글꼴 확인',set_typography:'서체 적용',read_table:'표 읽기',rebuild_table:'표 재조판',get_figure:'그림 확인',place_figure:'그림 배치',replace_figure:'그림 교체',finish:'마무리'};
 const runLabels={complete:'작업 완료',unresolved:'확인할 부분이 남았습니다',cancelled:'중단했습니다'};
 
-export async function renderLayoutRegion({bytes,args,loadPdf,doc,baseUrl=base,signal}={}){
- const check=()=>{if(signal?.aborted)throw aborted();};check();
+function validateRegionRequest(bytes,args){
  if(!(bytes instanceof Uint8Array)||!['original','candidate'].includes(args?.document)||!Number.isSafeInteger(args.pageIndex)||args.pageIndex<0||!Array.isArray(args.bbox)||args.bbox.length!==4||!args.bbox.every(Number.isFinite))throw new Error('문서·쪽·영역 좌표를 확인하세요.');
  // Untagged calls use the existing PDF.js display-coordinate contract. Numbers
  // alone cannot establish whether an upstream producer supplied this frame.
  const frame=args.coordinateFrame??'pdfjs-display';
  if(!['pdfjs-display','mupdf-display'].includes(frame))throw Object.assign(new Error('표시 좌표를 사용하세요. SyncTeX 원시 좌표는 변환이 필요합니다.'),{code:'INCOMPATIBLE_COORDINATE_FRAME'});
  if(args.scale!==undefined&&(!Number.isFinite(args.scale)||args.scale<0.25||args.scale>4))throw new Error('확대 배율은 0.25–4를 사용하세요.');
+ return frame;
+}
+
+function validateRegionBounds(natural,left,top,right,bottom){
+ if(!Number.isFinite(natural.width)||!Number.isFinite(natural.height)||natural.width<=0||natural.height<=0||left<0||top<0||right>natural.width||bottom>natural.height||right<=left||bottom<=top)throw new Error('페이지 안의 영역 좌표를 사용하세요.');
+}
+
+export async function renderLayoutRegion({bytes,args,loadPdf,doc,baseUrl=base,signal}={}){
+ const check=()=>{if(signal?.aborted)throw aborted();};check();
+ const frame=validateRegionRequest(bytes,args);
  const lib=await loadPdf();check();const task=lib.getDocument({data:bytes.slice(),cMapUrl:new URL('vendor/cmaps/',baseUrl).href,cMapPacked:true,standardFontDataUrl:new URL('vendor/standard_fonts/',baseUrl).href,wasmUrl:new URL('vendor/wasm/',baseUrl).href});let page;
  try{const pdf=await task.promise;check();if(args.pageIndex>=pdf.numPages)throw new Error('요청한 페이지가 없습니다.');page=await pdf.getPage(args.pageIndex+1);check();const natural=page.getViewport({scale:1}),[left,top,right,bottom]=args.bbox;
-  if(!Number.isFinite(natural.width)||!Number.isFinite(natural.height)||natural.width<=0||natural.height<=0||left<0||top<0||right>natural.width||bottom>natural.height||right<=left||bottom<=top)throw new Error('페이지 안의 영역 좌표를 사용하세요.');
+  validateRegionBounds(natural,left,top,right,bottom);
   const width=right-left,height=bottom-top;let scale=Math.min(args.scale??2,Math.sqrt(3996001/(width*height)),4095/width,4095/height),encoded='',pixelWidth=0,pixelHeight=0;
   while(Math.ceil(width*scale)*Math.ceil(height*scale)>4000000)scale*=0.999;
   for(let i=0;i<5;i++){
@@ -85,7 +94,8 @@ export function mountPaperLayoutAgent({doc,host,getSession,getEpoch,getReference
   const viewer=previewFactory({doc,originalCanvas,candidateCanvas:canvas,loadPdf:previewLoad,baseUrl:base,onStatus:message=>{pageLabel.textContent=typeof message==='string'?message:message?.message||'';},onPage:info=>{const c=info?.candidate,o=info?.original;if(c){previewPages=c.totalPages||0;candidatePage.max=String(previewPages||1);}if(o)originalPage.max=String(o.totalPages||1);controls();},onText:info=>{if(info?.original!==undefined)originalText.textContent=typeof info.original==='string'?info.original:info.original?.text||'';if(info?.candidate!==undefined)candidateText.textContent=typeof info.candidate==='string'?info.candidate:info.candidate?.text||'';}});
   recordButton.onclick=()=>{if(!candidate)return;download(new TextEncoder().encode(JSON.stringify({schema:'falsify.paper-layout-agent-run.v1',status:candidate.status,runState:candidate.runState,quality:candidate.quality,projectId:candidate.project?.id,pdfHash:candidate.artifact?.pdfHash,goal:candidate.goal||'',decisions:candidate.decisionReceipts||[],trace:candidate.trace||[],coverage:candidate.coverage,message:candidate.message,...(failedRun?{failedRun:{runId:failedRun.runId,runState:failedRun.runState,status:failedRun.status,message:failedRun.message,trace:failedRun.trace||[],pendingStep:failedRun.pendingStep||null,decisionReceipts:failedRun.decisionReceipts||[]}}:{})},null,2)),'layout-agent-run.json','application/json');};
   const same=()=>{const s=getSession();return !!s&&signature&&signature.epoch===getEpoch()&&signature.session===s&&signature.changes===context()?.changesSignature;};
-  function controls(){box.setAttribute('aria-busy',String(!!controller));previousPdf.hidden=!candidate?.previousCandidate?.artifact?.pdfBytes;recordButton.disabled=!candidate;const fresh=freshCandidate();resultBox.hidden=!candidate;start.disabled=!!controller;cancel.hidden=!controller;pdf.disabled=!candidate?.artifact?.pdfBytes;source.disabled=!candidate?.project;saveRun.disabled=!candidate?.sessionState;reset.disabled=!!controller;blue.disabled=!!controller||!fresh||!candidate?.artifact?.pdfBytes;adopt.disabled=!!controller||!fresh||!candidate?.project||typeof loadCandidate!=='function';previous.disabled=!previewPages||previewPage===0;next.disabled=!previewPages||previewPage>=previewPages-1;historyLabel.hidden=history.size<2;revisionLabel.hidden=!(candidate?.sessionState?.checkpoints?.length);historySelect.disabled=revisionSelect.disabled=!!controller;originNote.hidden=!candidate||fresh;pendingNote.hidden=discardPending.hidden=!(pendingProblem&&pendingStep);discardPending.disabled=!!controller;if(pendingProblem&&pendingStep)pendingNote.textContent=pendingProblem;if(candidate)identity.textContent=`후보 소스 ${candidate.project?.id||'미확인'} · PDF ${candidate.artifact?.pdfHash||'생성 전'}${fresh?' · 현재 작업':' · 다른 작업에서 만든 후보'}`;else identity.textContent='';}
+  function controls(){box.setAttribute('aria-busy',String(!!controller));previousPdf.hidden=!candidate?.previousCandidate?.artifact?.pdfBytes;recordButton.disabled=!candidate;const fresh=freshCandidate();resultBox.hidden=!candidate;start.disabled=!!controller;cancel.hidden=!controller;pdf.disabled=!candidate?.artifact?.pdfBytes;source.disabled=!candidate?.project;saveRun.disabled=!candidate?.sessionState;reset.disabled=!!controller;blue.disabled=!!controller||!fresh||!candidate?.artifact?.pdfBytes;adopt.disabled=!!controller||!fresh||!candidate?.project||typeof loadCandidate!=='function';navigationControls(fresh);}
+  function navigationControls(fresh){previous.disabled=!previewPages||previewPage===0;next.disabled=!previewPages||previewPage>=previewPages-1;historyLabel.hidden=history.size<2;revisionLabel.hidden=!(candidate?.sessionState?.checkpoints?.length);historySelect.disabled=revisionSelect.disabled=!!controller;originNote.hidden=!candidate||fresh;pendingNote.hidden=discardPending.hidden=!(pendingProblem&&pendingStep);discardPending.disabled=!!controller;if(pendingProblem&&pendingStep)pendingNote.textContent=pendingProblem;if(candidate)identity.textContent=`후보 소스 ${candidate.project?.id||'미확인'} · PDF ${candidate.artifact?.pdfHash||'생성 전'}${fresh?' · 현재 작업':' · 다른 작업에서 만든 후보'}`;else identity.textContent='';}
   function invalidate(){if(controller&&!same()){controller.abort();status.textContent='작업 중 소스가 변경되어 중단했습니다.';}controls();}
   async function preview(){
     const own=++previewTicket,artifact=candidate?.artifact,baseline=candidate?.sessionState?.baselineArtifact,original=candidate?.originalReference;previewPages=0;controls();
@@ -96,18 +106,28 @@ export function mountPaperLayoutAgent({doc,host,getSession,getEpoch,getReference
       if(key!==viewerKey){await viewer.setDocuments({original:before,candidate:artifact});if(own!==previewTicket)return;viewerKey=key;}if(own!==previewTicket)return;
       originalLabel.hidden=originalCanvas.hidden=originalPageLabel.hidden=!before;originalLabel.textContent=original?'원본 PDF':'배치 전 PDF';
       const shown=await viewer.show({originalPageIndex:originalIndex,candidatePageIndex:previewPage,focus:previewFocus});if(own!==previewTicket)return;
+      paintPreviewPages(shown,original);
+    }catch(e){if(own===previewTicket&&e.name!=='AbortError'){pageLabel.textContent='미리보기를 표시하지 못했습니다. PDF는 다운로드할 수 있습니다.';previewPages=0;controls();}}
+  }
+  function paintPreviewPages(shown,original){
       const c=shown?.candidate,o=shown?.original;if(c?.totalPages)previewPages=c.totalPages;if(c?.pageIndex!==undefined)previewPage=c.pageIndex;if(o?.pageIndex!==undefined)originalIndex=o.pageIndex;originalLabel.textContent=`${original?'원본 PDF':'배치 전 PDF'} ${originalIndex+1}${o?.totalPages?' / '+o.totalPages:''}쪽`;
       candidatePage.value=String(previewPage+1);originalPage.value=String(originalIndex+1);candidateLabel.textContent=`후보 PDF ${previewPage+1}${previewPages?' / '+previewPages:''}쪽`;pageLabel.textContent=`후보 ${previewPage+1}${previewPages?' / '+previewPages:''}쪽`;controls();
-    }catch(e){if(own===previewTicket&&e.name!=='AbortError'){pageLabel.textContent='미리보기를 표시하지 못했습니다. PDF는 다운로드할 수 있습니다.';previewPages=0;controls();}}
   }
   function paintOutcome(){
     if(!candidate){outcome.textContent='';findings.replaceChildren?.();return;}
     const q=candidate.quality,content={unchanged:'내용 유지',changed:'내용 차이 있음',unverified:'내용 확인 전'},layout={clear:'검사 범위에서 문제 없음',issues:'배치 확인 필요',unverified:'배치 확인 전'};
     const states={running:'작업 중',completed:'작업 끝',paused:'이어서 조정 가능',cancelled:'중단됨',failed:'실행 실패'};
     outcome.textContent=[states[candidate.runState]||runLabels[candidate.status]||'작업 끝',q?content[q.content]||'내용 확인 전':candidate.message||'',q?layout[q.layout]||'배치 확인 전':'',q?.observedPages?`확인한 후보 ${q.observedPages.length}쪽`:''].filter(Boolean).join(' · ');
+    paintFindings(q);paintHistory();paintRevisions();
+  }
+  function paintFindings(q){
     const labels={TEXT_MISSING:'추출 글자 누락',TEXT_ADDED:'추출 글자 추가',NUMBERS_MISSING:'숫자 누락',NUMBERS_ADDED:'숫자 추가',SOURCE_CONTENT_CHANGED:'소스 내용 차이',SOURCE_NUMBERS_MISSING:'소스 숫자 누락',SOURCE_NUMBERS_ADDED:'소스 숫자 추가',LINKS_MISSING:'인용 링크 누락',ASSETS_CHANGED:'그림·자산 차이',text_overlap:'글자 겹침',text_outside_page:'쪽 영역 밖의 글자','text-overlap':'글자 겹침','ink-outside-page':'쪽 영역 밖의 내용','text-clipped':'잘린 글자','text-image-overlap':'글자·그림 겹침','small-body-text':'작은 본문 글씨','body-font-deviation':'본문 글꼴 차이','caption-separated':'떨어진 캡션','heading-orphan':'홀로 남은 제목','blank-column':'빈 단',TEX_OVERFULL_BOX:'줄 너비 초과'};
     findings.replaceChildren?.();for(const f of q?.findings||[]){const li=el('li'),label=`${Number.isSafeInteger(f.pageIndex)?(f.pageIndex+1)+'쪽 · ':''}${labels[f.code]||f.message||f.code||'확인할 부분'}`;if(Number.isSafeInteger(f.pageIndex)){const b=el('button',label);b.type='button';b.title=f.message||f.code;b.className='button secondary';b.onclick=()=>{previewFocus=Array.isArray(f.bbox)?{document:f.document==='original'?'original':'candidate',bbox:f.bbox}:null;if(f.document==='original')originalIndex=f.pageIndex;else previewPage=f.pageIndex;void preview();};li.append(b);}else li.textContent=label;findings.append(li);}
+  }
+  function paintHistory(){
     historySelect.replaceChildren?.();for(const [id,h] of history){const option=el('option',`${h.goal||'레이아웃 후보'} · ${runLabels[h.status]||h.runState||'저장됨'}`);option.value=id;historySelect.append(option);}historySelect.value=candidate.runId||candidate.artifact?.pdfHash||candidate.project?.id;
+  }
+  function paintRevisions(){
     revisionSelect.replaceChildren?.();const first=el('option','지점 선택');first.value='';revisionSelect.append(first);for(const cp of candidate.sessionState?.checkpoints||[]){const option=el('option',`${cp.label||cp.revisionId}${cp.artifact?'':' · PDF 생성 전'}`);option.value=cp.revisionId;revisionSelect.append(option);}revisionSelect.value=candidate.sessionState?.activeRevisionId||'';
   }
   function setCandidate(value){const changed=candidate?.artifact?.pdfHash!==value?.artifact?.pdfHash||candidate?.project?.id!==value?.project?.id;candidate=value?{...value,sourceContext:value.sourceContext||context(),goal:value.goal??runGoal,decisionReceipts:value.decisionReceipts||[...receipts]}:null;if(candidate){const key=candidate.runId||candidate.artifact?.pdfHash||candidate.project?.id;history.set(key,candidate);}if(changed){previewPage=originalIndex=0;previewFocus=null;canvas.width=canvas.height=1;pageLabel.textContent=value?'후보 미리보기 준비 중…':'';}paintOutcome();controls();if(changed)void preview();}
@@ -132,13 +152,51 @@ export function mountPaperLayoutAgent({doc,host,getSession,getEpoch,getReference
   source.onclick=async()=>{if(!candidate?.project)return;try{const zip=await exportLatexProject(candidate.project);download(zip,'layout-candidate-source.zip','application/zip');}catch(e){status.textContent=e.message;}};
   blue.onclick=()=>{if(controller||!freshCandidate()||!candidate?.artifact?.pdfBytes)return;const ev=new CustomEvent('falsify:blue-file',{cancelable:true,detail:{file:new File([candidate.artifact.pdfBytes],'layout-candidate.pdf',{type:'application/pdf'})}});if(doc.dispatchEvent(ev))doc.querySelector('[data-view="blue"]')?.click();};
   adopt.onclick=async()=>{if(controller||!freshCandidate()||!candidate?.project||!loadCandidate)return;const selected=candidate;adopt.disabled=true;try{const zip=await exportLatexProject(selected.project);if(candidate!==selected||!freshCandidate())return;await loadCandidate(new File([zip],'layout-candidate-source.zip',{type:'application/zip'}));}catch(e){status.textContent=e.message;}finally{controls();}};
-  start.onclick=async()=>{
-    reveal();if(controller)return false;const session=getSession(),link=bridge?.session?.();if(!session||!link){status.textContent=!session?'논문을 먼저 여세요.':'PC 연결이 끊겼습니다. 연결 후 다시 누르세요.';return false;}
+  function mergeRunReceipts(baseResume,resume,attempt){return copyReceipts([...(baseResume?.decisionReceipts||[]),...(resume?.decisionReceipts||[]),...(attempt?.decisionReceipts||[])]);}
+  function initializeLayoutRun(session){
     const userFresh=forceFresh;forceFresh=false;
     const baseResume=!userFresh&&freshCandidate()&&!(replacementFiles.files?.length)?candidate?.sessionState:null;
     const attempt=!userFresh&&!(replacementFiles.files?.length)?recoverableAttempt(baseResume):null;
     const resume=attempt?.pendingStep?(attempt.sessionState||resumeForAttempt(baseResume,attempt)||baseResume):baseResume;
-    const inputContext=context(),own=new AbortController(),runId=globalThis.crypto?.randomUUID?.()||'layout-'+Date.now()+'-'+Math.random().toString(36).slice(2);let recovered=attempt?.pendingStep||resume?.pendingStep||null,deliveredAction=null;const prior=candidate,priorRunState=runState;pendingStep=recovered;pendingProblem=null;controller=own;signature={session,epoch:getEpoch(),changes:inputContext?.changesSignature};referenceBytes=null;receipts=copyReceipts([...(baseResume?.decisionReceipts||[]),...(resume?.decisionReceipts||[]),...(attempt?.decisionReceipts||[])]);status.textContent=resume?'선택한 후보에서 작업을 이어갑니다.':'현재 선택된 변경으로 PDF를 준비합니다.';const userGoal=goal.value.trim().slice(0,2000);runGoal=userGoal;controls();
+    const inputContext=context(),own=new AbortController(),runId=globalThis.crypto?.randomUUID?.()||'layout-'+Date.now()+'-'+Math.random().toString(36).slice(2);let recovered=attempt?.pendingStep||resume?.pendingStep||null;const prior=candidate,priorRunState=runState;pendingStep=recovered;pendingProblem=null;controller=own;signature={session,epoch:getEpoch(),changes:inputContext?.changesSignature};referenceBytes=null;receipts=mergeRunReceipts(baseResume,resume,attempt);status.textContent=resume?'선택한 후보에서 작업을 이어갑니다.':'현재 선택된 변경으로 PDF를 준비합니다.';const userGoal=goal.value.trim().slice(0,2000);runGoal=userGoal;controls();
+    return {resume,attempt,inputContext,own,runId,recovered,prior,priorRunState,userGoal};
+  }
+  async function prepareReplacements(project,artifact,compiler,own,check){
+      const allowedReplacements=[],extraFiles=[];
+      for(const file of [...(replacementFiles.files||[])]){if(!/\.(png|jpe?g)$/i.test(file.name)||file.size>25*1024*1024)throw new Error('교체 그림은 25MB 이하 PNG·JPEG 파일을 선택하세요.');const bytes=new Uint8Array(await file.arrayBuffer());check();const ext=/\.png$/i.test(file.name)?'png':'jpg',path='replacements/'+hex(bytes)+'.'+ext;allowedReplacements.push(path);if(!project.files.some(f=>f.path===path)&&!extraFiles.some(f=>f.path===path))extraFiles.push({path,bytes});}
+      if(extraFiles.length){project=await createLatexProject({...project,files:[...project.files,...extraFiles]});artifact=await compiler.compile({project,signal:own.signal});check();if(!artifact.success)throw new Error('교체 그림을 포함한 소스를 생성하지 못했습니다.');}
+      return {project,artifact,allowedReplacements};
+  }
+  async function prepareReference(project,check){
+      let referenceBytes=null,reference=null,structure=null;if(project.origin==='reconstructed-pdf'){const file=getReferenceFile();if(!file?.arrayBuffer)throw new Error('재구성 원본 PDF가 필요합니다.');const bytes=new Uint8Array(await file.arrayBuffer());check();if(hex(bytes)!==project.sourcePdfHash)throw new Error('원본 PDF와 현재 소스가 일치하지 않습니다.');referenceBytes=bytes.slice();if(project.files?.some(f=>f.path==='falsify-layout-structure.json')){const api=await import('./paper-layout-structure.mjs');structure=await api.readLayoutStructure(project);}check();reference={schema:'falsify.paper-layout-reference.v1',sourcePdfHash:project.sourcePdfHash,...(structure?{structure:{schema:structure.schema,sourcePdfHash:structure.sourcePdfHash,unitCount:structure.units.length,columns:structure.plan?.columns}}: {})};}
+      return {referenceBytes,reference,structure};
+  }
+  function finishedLayoutResult(result,runId,inputContext,userGoal,handlers){const keptReceipts=copyReceipts(receipts);const finished={...result,runId,sourceContext:inputContext,originalReference:referenceBytes,goal:userGoal,decisionReceipts:keptReceipts,sessionState:result.sessionState?{...result.sessionState,pendingStep,targets:handlers.getTargetMetadata(result.sessionState.currentProject),sourceContext:inputContext,goal:userGoal,decisionReceipts:keptReceipts}:undefined};
+    return finished;
+  }
+  function shouldKeepPrevious(result,initialHash,prior,resume,attempt){
+        const noNewPdf=!result.artifact?.pdfHash||result.artifact.pdfHash===initialHash;
+        const failedTerminal=['failed','cancelled'].includes(result.runState);
+        return failedTerminal&&noNewPdf&&prior?.artifact?.pdfBytes&&prior.artifact.pdfHash!==result.artifact?.pdfHash&&(!resume||attempt);
+  }
+  function keepPreviousCandidate(result,finished,runId,prior,priorRunState){
+          const failedPending=pendingStep,failedReceipts=copyReceipts(receipts);
+          failedRun={runId,runState:result.runState,status:result.status,message:result.message,trace:result.trace||[],pendingStep:failedPending,decisionReceipts:failedReceipts,sessionState:finished.sessionState};
+          const keptState=prior.sessionState||priorRunState;const merged=copyReceipts([...(keptState?.decisionReceipts||[]),...failedReceipts]);
+          const failedAttempt=failedPending||failedReceipts.length?{runId,pendingStep:failedPending||null,decisionReceipts:failedReceipts}:keptState?.failedAttempt||null;
+          pendingStep=failedPending??keptState?.pendingStep??null;candidate={...prior,decisionReceipts:merged};history.set(prior.runId||prior.artifact.pdfHash||prior.project?.id,candidate);
+    return {keptState,merged,failedAttempt};
+  }
+  function layoutConnection(){reveal();if(controller)return null;const session=getSession(),link=bridge?.session?.();if(!session||!link){status.textContent=!session?'논문을 먼저 여세요.':'PC 연결이 끊겼습니다. 연결 후 다시 누르세요.';return null;}return {session,link};}
+  function layoutHandlers(project,resume,allowedReplacements,check,own){
+      return createLayoutToolHandlers({project:resume?.currentProject||project,targetMetadata:resume?.targets,referenceBytes:referenceBytes||undefined,allowedReplacements,renderRegion:async input=>{check();const bytes=input.args.document==='original'?referenceBytes:input.artifact?.pdfBytes;if(!bytes)throw new Error(input.args.document==='original'?'원본 PDF를 입력하세요.':'현재 소스를 먼저 생성하세요.');return renderLayoutRegion({bytes,args:input.args,loadPdf,doc,signal:own.signal});}});
+  }
+  function previousCandidateStatus(result){return `${result.runState==='cancelled'?'새 실행을 중단해':'새 실행이 실패해'} 이전 후보를 유지합니다 · ${result.message||''}`;}
+  function finishedRunStatus(result){return `${runLabels[result.status]||'작업 종료'} · ${result.message||''}`;}
+  start.onclick=async()=>{
+    const connection=layoutConnection();if(!connection)return false;const {session,link}=connection;
+    const initialized=initializeLayoutRun(session);
+    const {resume,attempt,inputContext,own,runId,prior,priorRunState,userGoal}=initialized;let recovered=initialized.recovered,deliveredAction=null;
     let compiler,reader;
     const check=()=>{if(own.signal.aborted||!same())throw aborted();};
     const renderDocument=async (bytes,pages,documentKind)=>{check();const lib=await loadPdf();check();const task=lib.getDocument({data:bytes.slice(),cMapUrl:new URL('vendor/cmaps/',base).href,cMapPacked:true,standardFontDataUrl:new URL('vendor/standard_fonts/',base).href,wasmUrl:new URL('vendor/wasm/',base).href});let document;
@@ -146,13 +204,13 @@ export function mountPaperLayoutAgent({doc,host,getSession,getEpoch,getReference
     try{
       compiler=compilerFactory();reader=readerFactory();
       const cancelInitial=()=>session.cancel?.();own.signal.addEventListener('abort',cancelInitial,{once:true});let artifact,project;try{if(resume){artifact=resume.baselineArtifact;project=resume.baselineProject;}else{artifact=await session.compile();project=await session.getCurrentProject();}}finally{own.signal.removeEventListener('abort',cancelInitial);}check();
-      const allowedReplacements=[],extraFiles=[];
-      for(const file of [...(replacementFiles.files||[])]){if(!/\.(png|jpe?g)$/i.test(file.name)||file.size>25*1024*1024)throw new Error('교체 그림은 25MB 이하 PNG·JPEG 파일을 선택하세요.');const bytes=new Uint8Array(await file.arrayBuffer());check();const ext=/\.png$/i.test(file.name)?'png':'jpg',path='replacements/'+hex(bytes)+'.'+ext;allowedReplacements.push(path);if(!project.files.some(f=>f.path===path)&&!extraFiles.some(f=>f.path===path))extraFiles.push({path,bytes});}
-      if(extraFiles.length){project=await createLatexProject({...project,files:[...project.files,...extraFiles]});artifact=await compiler.compile({project,signal:own.signal});check();if(!artifact.success)throw new Error('교체 그림을 포함한 소스를 생성하지 못했습니다.');}
-      referenceBytes=null;let reference=null,structure=null;if(project.origin==='reconstructed-pdf'){const file=getReferenceFile();if(!file?.arrayBuffer)throw new Error('재구성 원본 PDF가 필요합니다.');const bytes=new Uint8Array(await file.arrayBuffer());check();if(hex(bytes)!==project.sourcePdfHash)throw new Error('원본 PDF와 현재 소스가 일치하지 않습니다.');referenceBytes=bytes.slice();if(project.files?.some(f=>f.path==='falsify-layout-structure.json')){const api=await import('./paper-layout-structure.mjs');structure=await api.readLayoutStructure(project);}check();reference={schema:'falsify.paper-layout-reference.v1',sourcePdfHash:project.sourcePdfHash,...(structure?{structure:{schema:structure.schema,sourcePdfHash:structure.sourcePdfHash,unitCount:structure.units.length,columns:structure.plan?.columns}}: {})};}
+      const replacement=await prepareReplacements(project,artifact,compiler,own,check);check();
+      project=replacement.project;artifact=replacement.artifact;const {allowedReplacements}=replacement;
+      const referenceResult=await prepareReference(project,check);check();
+      referenceBytes=referenceResult.referenceBytes;const {reference,structure}=referenceResult;
       if(artifact.projectId!==project.id)throw new Error('현재 소스와 PDF가 일치하지 않습니다.');
       if(!candidate)setCandidate({project,artifact,status:'unresolved',runId,sourceContext:inputContext,originalReference:referenceBytes,message:'검사와 렌더링 전 PDF'});
-      const handlers=createLayoutToolHandlers({project:resume?.currentProject||project,targetMetadata:resume?.targets,referenceBytes:referenceBytes||undefined,allowedReplacements,renderRegion:async input=>{check();const bytes=input.args.document==='original'?referenceBytes:input.artifact?.pdfBytes;if(!bytes)throw new Error(input.args.document==='original'?'원본 PDF를 입력하세요.':'현재 소스를 먼저 생성하세요.');return renderLayoutRegion({bytes,args:input.args,loadPdf,doc,signal:own.signal});}});
+      const handlers=layoutHandlers(project,resume,allowedReplacements,check,own);
       const initialHash=artifact?.pdfHash;
       const result=await runAgent({project,artifact,runId,resumeState:resume||undefined,signal:own.signal,reference,handlers,maxSteps:32,
         onState:state=>{if(own.signal.aborted||!same())return;if(deliveredAction&&state.trace?.at(-1)?.action===deliveredAction){pendingStep=null;deliveredAction=null;}const saved={...state,pendingStep,targets:handlers.getTargetMetadata(state.currentProject),sourceContext:inputContext,goal:userGoal,decisionReceipts:copyReceipts(receipts)};void remember(saved);if(saved.candidate?.artifact?.pdfHash!==initialHash||!candidate){const pair=saved.candidate;if(pair)setCandidate({...pair,runId:saved.runId,status:saved.status,runState:saved.runState,quality:saved.quality,coverage:saved.coverage,trace:saved.trace,sessionState:saved,sourceContext:inputContext,originalReference:referenceBytes,goal:userGoal,decisionReceipts:copyReceipts(receipts),previousCandidate:saved.previousCandidate});}},
@@ -174,19 +232,13 @@ export function mountPaperLayoutAgent({doc,host,getSession,getEpoch,getReference
         render:async ({artifact:a,pages,signal})=>renderDocument(a.pdfBytes,pages,'candidate'),
         onProgress:entry=>{if(!own.signal.aborted&&same())status.textContent=`${actionLabels[entry.action]||'작업'} · ${entry.result?.status==='ok'?'완료':entry.result?.status==='rejected'?'적용하지 못해 다시 조정 중':entry.result?.status==='failed'?'실패':'진행 중'}`;}
       });
-      if(same()){const keptReceipts=copyReceipts(receipts);const finished={...result,runId,sourceContext:inputContext,originalReference:referenceBytes,goal:userGoal,decisionReceipts:keptReceipts,sessionState:result.sessionState?{...result.sessionState,pendingStep,targets:handlers.getTargetMetadata(result.sessionState.currentProject),sourceContext:inputContext,goal:userGoal,decisionReceipts:keptReceipts}:undefined};
+      if(same()){const finished=finishedLayoutResult(result,runId,inputContext,userGoal,handlers);
         // A fresh run, or a recovered attempt, that stopped before producing its own PDF keeps the preceding candidate primary.
-        const noNewPdf=!result.artifact?.pdfHash||result.artifact.pdfHash===initialHash;
-        const failedTerminal=['failed','cancelled'].includes(result.runState);
-        if(failedTerminal&&noNewPdf&&prior?.artifact?.pdfBytes&&prior.artifact.pdfHash!==result.artifact?.pdfHash&&(!resume||attempt)){
-          const failedPending=pendingStep,failedReceipts=copyReceipts(receipts);
-          failedRun={runId,runState:result.runState,status:result.status,message:result.message,trace:result.trace||[],pendingStep:failedPending,decisionReceipts:failedReceipts,sessionState:finished.sessionState};
-          const keptState=prior.sessionState||priorRunState;const merged=copyReceipts([...(keptState?.decisionReceipts||[]),...failedReceipts]);
-          const failedAttempt=failedPending||failedReceipts.length?{runId,pendingStep:failedPending||null,decisionReceipts:failedReceipts}:keptState?.failedAttempt||null;
-          pendingStep=failedPending??keptState?.pendingStep??null;candidate={...prior,decisionReceipts:merged};history.set(prior.runId||prior.artifact.pdfHash||prior.project?.id,candidate);
+        if(shouldKeepPrevious(result,initialHash,prior,resume,attempt)){
+          const {keptState,merged,failedAttempt}=keepPreviousCandidate(result,finished,runId,prior,priorRunState);
           if(keptState)await remember({...keptState,pendingStep,decisionReceipts:merged,...(failedAttempt?{failedAttempt}:{})});else runState=null;paintOutcome();controls();
-          status.textContent=`${result.runState==='cancelled'?'새 실행을 중단해':'새 실행이 실패해'} 이전 후보를 유지합니다 · ${result.message||''}`;
-        }else{failedRun=null;setCandidate(finished);if(finished.sessionState)await remember(finished.sessionState);status.textContent=`${runLabels[result.status]||'작업 종료'} · ${result.message||''}`;}}
+          status.textContent=previousCandidateStatus(result);
+        }else{failedRun=null;setCandidate(finished);if(finished.sessionState)await remember(finished.sessionState);status.textContent=finishedRunStatus(result);}}
     }catch(e){if(e.name!=='AbortError')status.textContent=e.message;else if(same())status.textContent='작업을 중단했습니다.';}finally{compiler?.dispose();reader?.dispose();if(controller===own)controller=null;controls();}
   };
   // Source changes drop the in-memory run; the explicitly saved run store is left for a later explicit restore.

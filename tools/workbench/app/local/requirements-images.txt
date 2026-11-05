@@ -1,5 +1,7 @@
 # Optional: manual single-occurrence image replacement (POST /api/paper/images*). Requires Python >= 3.11.
 # Not installed automatically; without these the imageEditor capability reports available: false and every other
 # operation keeps working. PyMuPDF comes from requirements.txt.
-pikepdf==10.17.0
+# pikepdf 10.14+ ships no Intel macOS wheel; 10.13 is the last upstream binary release.
+pikepdf==10.13.0.post1; sys_platform == "darwin" and platform_machine == "x86_64"
+pikepdf==10.17.0; sys_platform != "darwin" or platform_machine != "x86_64"
 Pillow==12.3.0

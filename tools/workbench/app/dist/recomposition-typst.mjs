@@ -13,7 +13,7 @@ var __export = (target, all) => {
     __defProp(target, name, { get: all[name], enumerable: true });
 };
 
-// ../../../recomposition-20261027/typesetter/.local/spike/node_modules/@myriaddreamin/typst-ts-web-compiler/pkg/typst_ts_web_compiler.mjs
+// node_modules/@myriaddreamin/typst-ts-web-compiler/pkg/typst_ts_web_compiler.mjs
 function addHeapObject(obj) {
   if (heap_next === heap.length) heap.push(heap.length + 1);
   const idx = heap_next;
@@ -671,7 +671,7 @@ function setImportWasmModule(importer) {
 }
 var wasm, CLOSURE_DTORS, cachedDataViewMemory0, cachedUint32ArrayMemory0, cachedUint8ArrayMemory0, heap, heap_next, cachedTextDecoder, MAX_SAFARI_DECODE_BYTES, numBytesDecoded, cachedTextEncoder, WASM_VECTOR_LEN, IncrServerFinalization, ProxyContextFinalization, TypstCompileWorldFinalization, TypstCompilerFinalization, TypstCompilerBuilderFinalization, TypstFontResolverFinalization, TypstFontResolverBuilderFinalization, IncrServer, ProxyContext, TypstCompileWorld, TypstCompiler, TypstCompilerBuilder, TypstFontResolver, TypstFontResolverBuilder, EXPECTED_RESPONSE_TYPES, typst_ts_web_compiler_default, importWasmModule;
 var init_typst_ts_web_compiler = __esm({
-  "../../../recomposition-20261027/typesetter/.local/spike/node_modules/@myriaddreamin/typst-ts-web-compiler/pkg/typst_ts_web_compiler.mjs"() {
+  "node_modules/@myriaddreamin/typst-ts-web-compiler/pkg/typst_ts_web_compiler.mjs"() {
     CLOSURE_DTORS = typeof FinalizationRegistry === "undefined" ? { register: () => {
     }, unregister: () => {
     } } : new FinalizationRegistry((state) => state.dtor(state.a, state.b));
@@ -1535,7 +1535,7 @@ var init_typst_ts_web_compiler = __esm({
   }
 });
 
-// ../../../recomposition-20261027/typesetter/.local/spike/node_modules/@myriaddreamin/typst-ts-web-compiler/pkg/wasm-pack-shim.mjs
+// node_modules/@myriaddreamin/typst-ts-web-compiler/pkg/wasm-pack-shim.mjs
 var wasm_pack_shim_exports = {};
 __export(wasm_pack_shim_exports, {
   IncrServer: () => IncrServer,
@@ -1552,7 +1552,7 @@ __export(wasm_pack_shim_exports, {
 });
 var wasm_pack_shim_default, nodeJsImportWasmModule, isNode;
 var init_wasm_pack_shim = __esm({
-  "../../../recomposition-20261027/typesetter/.local/spike/node_modules/@myriaddreamin/typst-ts-web-compiler/pkg/wasm-pack-shim.mjs"() {
+  "node_modules/@myriaddreamin/typst-ts-web-compiler/pkg/wasm-pack-shim.mjs"() {
     init_typst_ts_web_compiler();
     init_typst_ts_web_compiler();
     init_typst_ts_web_compiler();
@@ -1570,7 +1570,7 @@ var init_wasm_pack_shim = __esm({
   }
 });
 
-// ../../../recomposition-20261027/typesetter/.local/spike/node_modules/@myriaddreamin/typst.ts/dist/esm/init.mjs
+// node_modules/@myriaddreamin/typst.ts/dist/esm/init.mjs
 var ComponentBuilder = class {
   loadedFonts = /* @__PURE__ */ new Set();
   fetcher = fetch;
@@ -1651,14 +1651,14 @@ function loadFontSync(font) {
   };
 }
 
-// ../../../recomposition-20261027/typesetter/.local/spike/node_modules/@myriaddreamin/typst.ts/dist/esm/internal.types.mjs
+// node_modules/@myriaddreamin/typst.ts/dist/esm/internal.types.mjs
 var kObject = /* @__PURE__ */ Symbol.for("reflexo-obj");
 var TypstDefaultParams;
 (function(TypstDefaultParams2) {
   TypstDefaultParams2[TypstDefaultParams2["PIXEL_PER_PT"] = 3] = "PIXEL_PER_PT";
 })(TypstDefaultParams || (TypstDefaultParams = {}));
 
-// ../../../recomposition-20261027/typesetter/.local/spike/node_modules/@myriaddreamin/typst.ts/dist/esm/options.init.mjs
+// node_modules/@myriaddreamin/typst.ts/dist/esm/options.init.mjs
 var _textFonts = [
   "DejaVuSansMono-Bold.ttf",
   "DejaVuSansMono-BoldOblique.ttf",
@@ -1736,7 +1736,7 @@ function loadFonts(userFonts, options) {
   return loader;
 }
 
-// ../../../recomposition-20261027/typesetter/.local/spike/node_modules/@myriaddreamin/typst.ts/dist/esm/wasm.mjs
+// node_modules/@myriaddreamin/typst.ts/dist/esm/wasm.mjs
 var once = (fn) => {
   let called = false;
   let res;
@@ -1765,7 +1765,7 @@ var LazyWasmModule = class {
   }
 };
 
-// ../../../recomposition-20261027/typesetter/.local/spike/node_modules/@myriaddreamin/typst.ts/dist/esm/compiler.mjs
+// node_modules/@myriaddreamin/typst.ts/dist/esm/compiler.mjs
 var CompileFormatEnum;
 (function(CompileFormatEnum2) {
   CompileFormatEnum2[CompileFormatEnum2["vector"] = 0] = "vector";

@@ -96,6 +96,61 @@ def _identifier(value):
     return type(value) is str and re.fullmatch(r"[a-z][a-z0-9_]{0,63}", value) is not None
 
 
+def _interpret_claude_assistant(event, result):
+    message = event.get("message")
+    if type(message) is not dict:
+        raise ValueError("protocol_violation")
+    errored = bool(event.get("error"))
+    content = message.get("content", [])
+    if type(content) is not list:
+        raise ValueError("protocol_violation")
+    for block in content:
+        if type(block) is dict and block.get("type") in TOOL_BLOCK_TYPES:
+            # The CLI's own structured-output channel is the only allowed tool block.
+            if not (block.get("type") == "tool_use" and block.get("name") == STRUCTURED_OUTPUT_TOOL):
+                result["observed_tool_calls"] += 1
+    refused = message.get("stop_reason") == "refusal"
+    return errored, refused
+
+
+def _interpret_claude_final(final, result):
+    usage = final.get("usage")
+    if type(usage) is dict:
+        result["usage"] = {k: v for k, v in usage.items() if "token" in k and type(v) is int and v >= 0}
+    model_usage = final.get("modelUsage")
+    models = set()
+    if type(model_usage) is dict:
+        models = {name for name in model_usage if type(name) is str and MODEL_PATTERN.fullmatch(name)}
+    result["observed_models"] = sorted(models)[:8]
+    if final.get("permission_denials"):
+        result["observed_tool_calls"] += len(final["permission_denials"]) if type(final["permission_denials"]) is list else 1
+    return final.get("stop_reason") == "refusal"
+
+
+def _finish_claude_result(run, schema, result, validator, final, refused, errored):
+    if result["observed_tool_calls"]:
+        result.update(status="tool_violation", error_code="tool_event")
+    elif refused:
+        result.update(status="error", error_code="refusal")
+    elif errored or final is None or final.get("is_error") is not False or final.get("subtype") != "success":
+        result.update(status="error", error_code="cli_error_result")
+    elif run["returncode"]:
+        raise ValueError("incomplete_response")
+    else:
+        response = final.get("structured_output")
+        if type(response) is not dict:
+            raise ValueError("response_not_object")
+        validator(schema).validate(response)
+        result.update(status="ok", response=response)
+
+
+def _validate_claude_init(event):
+    if event.get("apiKeySource", "none") != "none":
+        raise ValueError("api_auth_observed")
+    if event.get("mcp_servers"):
+        raise ValueError("mcp_observed")
+
+
 class ClaudeBackend:
     def __init__(self, max_calls=3, timeout_seconds=90, max_prompt_chars=30000,
                  *, transport=None, executable=None, model=None, effort=None):
@@ -179,7 +234,7 @@ class ClaudeBackend:
 
     def _interpret(self, run, schema, result, validator):
         final, refused, errored = None, False, False
-        event_types, models = set(), set()
+        event_types = set()
         for line in run.get("stdout", "").splitlines():
             if not line.strip():
                 continue
@@ -193,54 +248,16 @@ class ClaudeBackend:
             if len(event_types) < 32:
                 event_types.add(kind)
             if kind == "system" and event.get("subtype") == "init":
-                if event.get("apiKeySource", "none") != "none":
-                    raise ValueError("api_auth_observed")
-                if event.get("mcp_servers"):
-                    raise ValueError("mcp_observed")
+                _validate_claude_init(event)
             elif kind == "assistant":
-                message = event.get("message")
-                if type(message) is not dict:
-                    raise ValueError("protocol_violation")
-                if event.get("error"):
-                    errored = True
-                content = message.get("content", [])
-                if type(content) is not list:
-                    raise ValueError("protocol_violation")
-                for block in content:
-                    if type(block) is dict and block.get("type") in TOOL_BLOCK_TYPES:
-                        # The CLI's own structured-output channel is the only allowed tool block.
-                        if not (block.get("type") == "tool_use" and block.get("name") == STRUCTURED_OUTPUT_TOOL):
-                            result["observed_tool_calls"] += 1
-                if message.get("stop_reason") == "refusal":
-                    refused = True
+                assistant_error, assistant_refusal = _interpret_claude_assistant(event, result)
+                errored = errored or assistant_error
+                refused = refused or assistant_refusal
             elif kind == "result":
                 if final is not None:
                     raise ValueError("protocol_violation")
                 final = event
         result["observed_event_types"] = sorted(event_types)
         if final is not None:
-            usage = final.get("usage")
-            if type(usage) is dict:
-                result["usage"] = {k: v for k, v in usage.items() if "token" in k and type(v) is int and v >= 0}
-            model_usage = final.get("modelUsage")
-            if type(model_usage) is dict:
-                models = {name for name in model_usage if type(name) is str and MODEL_PATTERN.fullmatch(name)}
-            result["observed_models"] = sorted(models)[:8]
-            if final.get("permission_denials"):
-                result["observed_tool_calls"] += len(final["permission_denials"]) if type(final["permission_denials"]) is list else 1
-            if final.get("stop_reason") == "refusal":
-                refused = True
-        if result["observed_tool_calls"]:
-            result.update(status="tool_violation", error_code="tool_event")
-        elif refused:
-            result.update(status="error", error_code="refusal")
-        elif errored or final is None or final.get("is_error") is not False or final.get("subtype") != "success":
-            result.update(status="error", error_code="cli_error_result")
-        elif run["returncode"]:
-            raise ValueError("incomplete_response")
-        else:
-            response = final.get("structured_output")
-            if type(response) is not dict:
-                raise ValueError("response_not_object")
-            validator(schema).validate(response)
-            result.update(status="ok", response=response)
+            refused = _interpret_claude_final(final, result) or refused
+        _finish_claude_result(run, schema, result, validator, final, refused, errored)

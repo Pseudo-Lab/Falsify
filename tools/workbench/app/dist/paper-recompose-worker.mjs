@@ -1,4 +1,4 @@
-// app/src/paper-recompose-worker-entry.mjs
+// src/paper-recompose-worker-entry.mjs
 function installMessageHandler(scope, loadCore) {
   let core;
   scope.onmessage = async ({ data }) => {

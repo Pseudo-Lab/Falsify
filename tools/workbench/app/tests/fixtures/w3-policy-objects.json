@@ -1,0 +1,1105 @@
+{
+  "baseline": {
+    "schema": "falsify.recomposition-check.v1",
+    "readable": true,
+    "layoutQuality": {
+      "schema": "falsify.layout-quality.v1",
+      "status": "unavailable",
+      "score": null,
+      "penaltyTerms": {},
+      "issues": [],
+      "limitations": [
+        "Text paint bounds are glyph ink extents; structured text character boxes are font metrics.",
+        "Only axis-aligned rectangular clip paths are checked; arbitrary clips, transparency, occlusion, rotated text, vector figure ownership, and reading order remain unverified.",
+        "Scores measure detected defects only; they are not proof of visual quality.",
+        "MuPDF unavailable."
+      ]
+    },
+    "checks": {
+      "flow": {
+        "status": "not-requested"
+      },
+      "content": {
+        "status": "pass",
+        "comparison": "ordered text with whitespace runs collapsed; ambiguous item geometry is unavailable",
+        "representationDifferences": [],
+        "spacingEvidence": [],
+        "offsetUnit": "UTF-16 offsets in whitespace-normalized source expectation and PDF.js output; scoped flow differences use caption-local or body-after-caption-removal offsets"
+      },
+      "bounds": {
+        "status": "checked",
+        "limitation": "Extracted upright text items only, estimated from font ascent and descent; PDF.js may omit off-page text. Not clipping or ink bounds."
+      },
+      "movement": {
+        "status": "observed",
+        "locations": [
+          {
+            "id": "a",
+            "pageIndexes": [
+              0
+            ]
+          },
+          {
+            "id": "b",
+            "pageIndexes": [
+              0
+            ]
+          },
+          {
+            "id": "c",
+            "pageIndexes": [
+              0
+            ]
+          }
+        ]
+      },
+      "independent": {
+        "status": "declared",
+        "reader": "PDF.js text extraction",
+        "exporter": "MuPDF",
+        "limitation": "Distinct named engines only; exporter identity is caller supplied."
+      },
+      "visual": {
+        "status": "unavailable",
+        "reason": "No raster or visibility inspection."
+      },
+      "overlap": {
+        "status": "unavailable",
+        "reason": "Text and asset ownership not established."
+      },
+      "captionOwnership": {
+        "status": "unavailable",
+        "reason": "Relations not established from PDF bytes."
+      }
+    },
+    "findings": []
+  },
+  "wrapped": {
+    "schema": "falsify.recomposition-check.v1",
+    "readable": true,
+    "layoutQuality": {
+      "schema": "falsify.layout-quality.v1",
+      "status": "unavailable",
+      "score": null,
+      "penaltyTerms": {},
+      "issues": [],
+      "limitations": [
+        "Text paint bounds are glyph ink extents; structured text character boxes are font metrics.",
+        "Only axis-aligned rectangular clip paths are checked; arbitrary clips, transparency, occlusion, rotated text, vector figure ownership, and reading order remain unverified.",
+        "Scores measure detected defects only; they are not proof of visual quality.",
+        "MuPDF unavailable."
+      ]
+    },
+    "checks": {
+      "flow": {
+        "status": "not-requested"
+      },
+      "content": {
+        "status": "pass",
+        "comparison": "ordered text with whitespace runs collapsed; ambiguous item geometry is unavailable",
+        "representationDifferences": [],
+        "spacingEvidence": [],
+        "offsetUnit": "UTF-16 offsets in whitespace-normalized source expectation and PDF.js output; scoped flow differences use caption-local or body-after-caption-removal offsets"
+      },
+      "bounds": {
+        "status": "checked",
+        "limitation": "Extracted upright text items only, estimated from font ascent and descent; PDF.js may omit off-page text. Not clipping or ink bounds."
+      },
+      "movement": {
+        "status": "observed",
+        "locations": [
+          {
+            "id": "a",
+            "pageIndexes": [
+              0
+            ]
+          },
+          {
+            "id": "b",
+            "pageIndexes": [
+              0
+            ]
+          },
+          {
+            "id": "c",
+            "pageIndexes": [
+              0
+            ]
+          }
+        ]
+      },
+      "independent": {
+        "status": "declared",
+        "reader": "PDF.js text extraction",
+        "exporter": "MuPDF",
+        "limitation": "Distinct named engines only; exporter identity is caller supplied."
+      },
+      "visual": {
+        "status": "unavailable",
+        "reason": "No raster or visibility inspection."
+      },
+      "overlap": {
+        "status": "unavailable",
+        "reason": "Text and asset ownership not established."
+      },
+      "captionOwnership": {
+        "status": "unavailable",
+        "reason": "Relations not established from PDF bytes."
+      }
+    },
+    "findings": []
+  },
+  "moved": {
+    "schema": "falsify.recomposition-check.v1",
+    "readable": true,
+    "layoutQuality": {
+      "schema": "falsify.layout-quality.v1",
+      "status": "unavailable",
+      "score": null,
+      "penaltyTerms": {},
+      "issues": [],
+      "limitations": [
+        "Text paint bounds are glyph ink extents; structured text character boxes are font metrics.",
+        "Only axis-aligned rectangular clip paths are checked; arbitrary clips, transparency, occlusion, rotated text, vector figure ownership, and reading order remain unverified.",
+        "Scores measure detected defects only; they are not proof of visual quality.",
+        "MuPDF unavailable."
+      ]
+    },
+    "checks": {
+      "flow": {
+        "status": "not-requested"
+      },
+      "content": {
+        "status": "pass",
+        "comparison": "ordered text with whitespace runs collapsed; ambiguous item geometry is unavailable",
+        "representationDifferences": [],
+        "spacingEvidence": [],
+        "offsetUnit": "UTF-16 offsets in whitespace-normalized source expectation and PDF.js output; scoped flow differences use caption-local or body-after-caption-removal offsets"
+      },
+      "bounds": {
+        "status": "checked",
+        "limitation": "Extracted upright text items only, estimated from font ascent and descent; PDF.js may omit off-page text. Not clipping or ink bounds."
+      },
+      "movement": {
+        "status": "observed",
+        "locations": [
+          {
+            "id": "a",
+            "pageIndexes": [
+              0
+            ]
+          },
+          {
+            "id": "b",
+            "pageIndexes": [
+              0
+            ]
+          },
+          {
+            "id": "c",
+            "pageIndexes": [
+              1
+            ]
+          }
+        ]
+      },
+      "independent": {
+        "status": "declared",
+        "reader": "PDF.js text extraction",
+        "exporter": "MuPDF",
+        "limitation": "Distinct named engines only; exporter identity is caller supplied."
+      },
+      "visual": {
+        "status": "unavailable",
+        "reason": "No raster or visibility inspection."
+      },
+      "overlap": {
+        "status": "unavailable",
+        "reason": "Text and asset ownership not established."
+      },
+      "captionOwnership": {
+        "status": "unavailable",
+        "reason": "Relations not established from PDF bytes."
+      }
+    },
+    "findings": []
+  },
+  "edit": {
+    "schema": "falsify.recomposition-check.v1",
+    "readable": true,
+    "layoutQuality": {
+      "schema": "falsify.layout-quality.v1",
+      "status": "unavailable",
+      "score": null,
+      "penaltyTerms": {},
+      "issues": [],
+      "limitations": [
+        "Text paint bounds are glyph ink extents; structured text character boxes are font metrics.",
+        "Only axis-aligned rectangular clip paths are checked; arbitrary clips, transparency, occlusion, rotated text, vector figure ownership, and reading order remain unverified.",
+        "Scores measure detected defects only; they are not proof of visual quality.",
+        "MuPDF unavailable."
+      ]
+    },
+    "checks": {
+      "flow": {
+        "status": "not-requested"
+      },
+      "content": {
+        "status": "pass",
+        "comparison": "ordered text with whitespace runs collapsed; ambiguous item geometry is unavailable",
+        "representationDifferences": [],
+        "spacingEvidence": [],
+        "offsetUnit": "UTF-16 offsets in whitespace-normalized source expectation and PDF.js output; scoped flow differences use caption-local or body-after-caption-removal offsets"
+      },
+      "bounds": {
+        "status": "checked",
+        "limitation": "Extracted upright text items only, estimated from font ascent and descent; PDF.js may omit off-page text. Not clipping or ink bounds."
+      },
+      "movement": {
+        "status": "observed",
+        "locations": [
+          {
+            "id": "a",
+            "pageIndexes": [
+              0
+            ]
+          },
+          {
+            "id": "b",
+            "pageIndexes": [
+              0
+            ]
+          },
+          {
+            "id": "c",
+            "pageIndexes": [
+              0
+            ]
+          }
+        ]
+      },
+      "independent": {
+        "status": "declared",
+        "reader": "PDF.js text extraction",
+        "exporter": "MuPDF",
+        "limitation": "Distinct named engines only; exporter identity is caller supplied."
+      },
+      "visual": {
+        "status": "unavailable",
+        "reason": "No raster or visibility inspection."
+      },
+      "overlap": {
+        "status": "unavailable",
+        "reason": "Text and asset ownership not established."
+      },
+      "captionOwnership": {
+        "status": "unavailable",
+        "reason": "Relations not established from PDF bytes."
+      }
+    },
+    "findings": []
+  },
+  "missing": {
+    "schema": "falsify.recomposition-check.v1",
+    "readable": true,
+    "layoutQuality": {
+      "schema": "falsify.layout-quality.v1",
+      "status": "unavailable",
+      "score": null,
+      "penaltyTerms": {},
+      "issues": [],
+      "limitations": [
+        "Text paint bounds are glyph ink extents; structured text character boxes are font metrics.",
+        "Only axis-aligned rectangular clip paths are checked; arbitrary clips, transparency, occlusion, rotated text, vector figure ownership, and reading order remain unverified.",
+        "Scores measure detected defects only; they are not proof of visual quality.",
+        "MuPDF unavailable."
+      ]
+    },
+    "checks": {
+      "flow": {
+        "status": "not-requested"
+      },
+      "content": {
+        "status": "finding",
+        "comparison": "ordered text with whitespace runs collapsed; ambiguous item geometry is unavailable",
+        "representationDifferences": [],
+        "spacingEvidence": [],
+        "offsetUnit": "UTF-16 offsets in whitespace-normalized source expectation and PDF.js output; scoped flow differences use caption-local or body-after-caption-removal offsets"
+      },
+      "bounds": {
+        "status": "checked",
+        "limitation": "Extracted upright text items only, estimated from font ascent and descent; PDF.js may omit off-page text. Not clipping or ink bounds."
+      },
+      "movement": {
+        "status": "unavailable",
+        "locations": null,
+        "reason": "Complete ordered text alignment or supported geometry is unavailable."
+      },
+      "independent": {
+        "status": "declared",
+        "reader": "PDF.js text extraction",
+        "exporter": "MuPDF",
+        "limitation": "Distinct named engines only; exporter identity is caller supplied."
+      },
+      "visual": {
+        "status": "unavailable",
+        "reason": "No raster or visibility inspection."
+      },
+      "overlap": {
+        "status": "unavailable",
+        "reason": "Text and asset ownership not established."
+      },
+      "captionOwnership": {
+        "status": "unavailable",
+        "reason": "Relations not established from PDF bytes."
+      }
+    },
+    "findings": [
+      {
+        "code": "content-mismatch",
+        "expected": "The result was -12 in study [3]. A second paragraph remains intact. The selected sentence is short.",
+        "observed": "The result was -12 in study [ ]. A second paragraph remains intact. The selected sentence is short."
+      }
+    ]
+  },
+  "number": {
+    "schema": "falsify.recomposition-check.v1",
+    "readable": true,
+    "layoutQuality": {
+      "schema": "falsify.layout-quality.v1",
+      "status": "unavailable",
+      "score": null,
+      "penaltyTerms": {},
+      "issues": [],
+      "limitations": [
+        "Text paint bounds are glyph ink extents; structured text character boxes are font metrics.",
+        "Only axis-aligned rectangular clip paths are checked; arbitrary clips, transparency, occlusion, rotated text, vector figure ownership, and reading order remain unverified.",
+        "Scores measure detected defects only; they are not proof of visual quality.",
+        "MuPDF unavailable."
+      ]
+    },
+    "checks": {
+      "flow": {
+        "status": "not-requested"
+      },
+      "content": {
+        "status": "finding",
+        "comparison": "ordered text with whitespace runs collapsed; ambiguous item geometry is unavailable",
+        "representationDifferences": [],
+        "spacingEvidence": [],
+        "offsetUnit": "UTF-16 offsets in whitespace-normalized source expectation and PDF.js output; scoped flow differences use caption-local or body-after-caption-removal offsets"
+      },
+      "bounds": {
+        "status": "checked",
+        "limitation": "Extracted upright text items only, estimated from font ascent and descent; PDF.js may omit off-page text. Not clipping or ink bounds."
+      },
+      "movement": {
+        "status": "unavailable",
+        "locations": null,
+        "reason": "Complete ordered text alignment or supported geometry is unavailable."
+      },
+      "independent": {
+        "status": "declared",
+        "reader": "PDF.js text extraction",
+        "exporter": "MuPDF",
+        "limitation": "Distinct named engines only; exporter identity is caller supplied."
+      },
+      "visual": {
+        "status": "unavailable",
+        "reason": "No raster or visibility inspection."
+      },
+      "overlap": {
+        "status": "unavailable",
+        "reason": "Text and asset ownership not established."
+      },
+      "captionOwnership": {
+        "status": "unavailable",
+        "reason": "Relations not established from PDF bytes."
+      }
+    },
+    "findings": [
+      {
+        "code": "content-mismatch",
+        "expected": "The result was -12 in study [3]. A second paragraph remains intact. The selected sentence is short.",
+        "observed": "The result was -13 in study [3]. A second paragraph remains intact. The selected sentence is short."
+      }
+    ]
+  },
+  "sign": {
+    "schema": "falsify.recomposition-check.v1",
+    "readable": true,
+    "layoutQuality": {
+      "schema": "falsify.layout-quality.v1",
+      "status": "unavailable",
+      "score": null,
+      "penaltyTerms": {},
+      "issues": [],
+      "limitations": [
+        "Text paint bounds are glyph ink extents; structured text character boxes are font metrics.",
+        "Only axis-aligned rectangular clip paths are checked; arbitrary clips, transparency, occlusion, rotated text, vector figure ownership, and reading order remain unverified.",
+        "Scores measure detected defects only; they are not proof of visual quality.",
+        "MuPDF unavailable."
+      ]
+    },
+    "checks": {
+      "flow": {
+        "status": "not-requested"
+      },
+      "content": {
+        "status": "finding",
+        "comparison": "ordered text with whitespace runs collapsed; ambiguous item geometry is unavailable",
+        "representationDifferences": [],
+        "spacingEvidence": [],
+        "offsetUnit": "UTF-16 offsets in whitespace-normalized source expectation and PDF.js output; scoped flow differences use caption-local or body-after-caption-removal offsets"
+      },
+      "bounds": {
+        "status": "checked",
+        "limitation": "Extracted upright text items only, estimated from font ascent and descent; PDF.js may omit off-page text. Not clipping or ink bounds."
+      },
+      "movement": {
+        "status": "unavailable",
+        "locations": null,
+        "reason": "Complete ordered text alignment or supported geometry is unavailable."
+      },
+      "independent": {
+        "status": "declared",
+        "reader": "PDF.js text extraction",
+        "exporter": "MuPDF",
+        "limitation": "Distinct named engines only; exporter identity is caller supplied."
+      },
+      "visual": {
+        "status": "unavailable",
+        "reason": "No raster or visibility inspection."
+      },
+      "overlap": {
+        "status": "unavailable",
+        "reason": "Text and asset ownership not established."
+      },
+      "captionOwnership": {
+        "status": "unavailable",
+        "reason": "Relations not established from PDF bytes."
+      }
+    },
+    "findings": [
+      {
+        "code": "content-mismatch",
+        "expected": "The result was -12 in study [3]. A second paragraph remains intact. The selected sentence is short.",
+        "observed": "The result was 12 in study [3]. A second paragraph remains intact. The selected sentence is short."
+      }
+    ]
+  },
+  "duplicate": {
+    "schema": "falsify.recomposition-check.v1",
+    "readable": true,
+    "layoutQuality": {
+      "schema": "falsify.layout-quality.v1",
+      "status": "unavailable",
+      "score": null,
+      "penaltyTerms": {},
+      "issues": [],
+      "limitations": [
+        "Text paint bounds are glyph ink extents; structured text character boxes are font metrics.",
+        "Only axis-aligned rectangular clip paths are checked; arbitrary clips, transparency, occlusion, rotated text, vector figure ownership, and reading order remain unverified.",
+        "Scores measure detected defects only; they are not proof of visual quality.",
+        "MuPDF unavailable."
+      ]
+    },
+    "checks": {
+      "flow": {
+        "status": "not-requested"
+      },
+      "content": {
+        "status": "finding",
+        "comparison": "ordered text with whitespace runs collapsed; ambiguous item geometry is unavailable",
+        "representationDifferences": [],
+        "spacingEvidence": [],
+        "offsetUnit": "UTF-16 offsets in whitespace-normalized source expectation and PDF.js output; scoped flow differences use caption-local or body-after-caption-removal offsets"
+      },
+      "bounds": {
+        "status": "checked",
+        "limitation": "Extracted upright text items only, estimated from font ascent and descent; PDF.js may omit off-page text. Not clipping or ink bounds."
+      },
+      "movement": {
+        "status": "unavailable",
+        "locations": null,
+        "reason": "Complete ordered text alignment or supported geometry is unavailable."
+      },
+      "independent": {
+        "status": "declared",
+        "reader": "PDF.js text extraction",
+        "exporter": "MuPDF",
+        "limitation": "Distinct named engines only; exporter identity is caller supplied."
+      },
+      "visual": {
+        "status": "unavailable",
+        "reason": "No raster or visibility inspection."
+      },
+      "overlap": {
+        "status": "unavailable",
+        "reason": "Text and asset ownership not established."
+      },
+      "captionOwnership": {
+        "status": "unavailable",
+        "reason": "Relations not established from PDF bytes."
+      }
+    },
+    "findings": [
+      {
+        "code": "content-mismatch",
+        "expected": "The result was -12 in study [3]. A second paragraph remains intact. The selected sentence is short.",
+        "observed": "The result was -12 in study [3]. A second paragraph remains intact. A second paragraph remains intact. The selected sentence is short."
+      }
+    ]
+  },
+  "bounds": {
+    "schema": "falsify.recomposition-check.v1",
+    "readable": true,
+    "layoutQuality": {
+      "schema": "falsify.layout-quality.v1",
+      "status": "unavailable",
+      "score": null,
+      "penaltyTerms": {},
+      "issues": [],
+      "limitations": [
+        "Text paint bounds are glyph ink extents; structured text character boxes are font metrics.",
+        "Only axis-aligned rectangular clip paths are checked; arbitrary clips, transparency, occlusion, rotated text, vector figure ownership, and reading order remain unverified.",
+        "Scores measure detected defects only; they are not proof of visual quality.",
+        "MuPDF unavailable."
+      ]
+    },
+    "checks": {
+      "flow": {
+        "status": "not-requested"
+      },
+      "content": {
+        "status": "finding",
+        "comparison": "ordered text with whitespace runs collapsed; ambiguous item geometry is unavailable",
+        "representationDifferences": [],
+        "spacingEvidence": [],
+        "offsetUnit": "UTF-16 offsets in whitespace-normalized source expectation and PDF.js output; scoped flow differences use caption-local or body-after-caption-removal offsets"
+      },
+      "bounds": {
+        "status": "finding",
+        "limitation": "Extracted upright text items only, estimated from font ascent and descent; PDF.js may omit off-page text. Not clipping or ink bounds."
+      },
+      "movement": {
+        "status": "unavailable",
+        "locations": null,
+        "reason": "Complete ordered text alignment or supported geometry is unavailable."
+      },
+      "independent": {
+        "status": "declared",
+        "reader": "PDF.js text extraction",
+        "exporter": "MuPDF",
+        "limitation": "Distinct named engines only; exporter identity is caller supplied."
+      },
+      "visual": {
+        "status": "unavailable",
+        "reason": "No raster or visibility inspection."
+      },
+      "overlap": {
+        "status": "unavailable",
+        "reason": "Text and asset ownership not established."
+      },
+      "captionOwnership": {
+        "status": "unavailable",
+        "reason": "Relations not established from PDF bytes."
+      }
+    },
+    "findings": [
+      {
+        "code": "text-outside-page",
+        "pageIndex": 0,
+        "text": "he result was -12 in study [3]."
+      },
+      {
+        "code": "content-mismatch",
+        "expected": "The result was -12 in study [3]. A second paragraph remains intact. The selected sentence is short.",
+        "observed": "he result was -12 in study [3]. A second paragraph remains intact. The selected sentence is short."
+      }
+    ]
+  },
+  "geometry-split": {
+    "schema": "falsify.recomposition-check.v1",
+    "readable": true,
+    "layoutQuality": {
+      "schema": "falsify.layout-quality.v1",
+      "status": "unavailable",
+      "score": null,
+      "penaltyTerms": {},
+      "issues": [],
+      "limitations": [
+        "Text paint bounds are glyph ink extents; structured text character boxes are font metrics.",
+        "Only axis-aligned rectangular clip paths are checked; arbitrary clips, transparency, occlusion, rotated text, vector figure ownership, and reading order remain unverified.",
+        "Scores measure detected defects only; they are not proof of visual quality.",
+        "MuPDF unavailable."
+      ]
+    },
+    "checks": {
+      "flow": {
+        "status": "not-requested"
+      },
+      "content": {
+        "status": "pass",
+        "comparison": "ordered text with whitespace runs collapsed; ambiguous item geometry is unavailable",
+        "representationDifferences": [],
+        "spacingEvidence": [],
+        "offsetUnit": "UTF-16 offsets in whitespace-normalized source expectation and PDF.js output; scoped flow differences use caption-local or body-after-caption-removal offsets"
+      },
+      "bounds": {
+        "status": "checked",
+        "limitation": "Extracted upright text items only, estimated from font ascent and descent; PDF.js may omit off-page text. Not clipping or ink bounds."
+      },
+      "movement": {
+        "status": "observed",
+        "locations": [
+          {
+            "id": "x",
+            "pageIndexes": [
+              0
+            ]
+          }
+        ]
+      },
+      "independent": {
+        "status": "unavailable",
+        "reader": "PDF.js text extraction",
+        "reason": "Exporter path not supplied or uses PDF.js."
+      },
+      "visual": {
+        "status": "unavailable",
+        "reason": "No raster or visibility inspection."
+      },
+      "overlap": {
+        "status": "unavailable",
+        "reason": "Text and asset ownership not established."
+      },
+      "captionOwnership": {
+        "status": "unavailable",
+        "reason": "Relations not established from PDF bytes."
+      }
+    },
+    "findings": []
+  },
+  "geometry-gap": {
+    "schema": "falsify.recomposition-check.v1",
+    "readable": true,
+    "layoutQuality": {
+      "schema": "falsify.layout-quality.v1",
+      "status": "unavailable",
+      "score": null,
+      "penaltyTerms": {},
+      "issues": [],
+      "limitations": [
+        "Text paint bounds are glyph ink extents; structured text character boxes are font metrics.",
+        "Only axis-aligned rectangular clip paths are checked; arbitrary clips, transparency, occlusion, rotated text, vector figure ownership, and reading order remain unverified.",
+        "Scores measure detected defects only; they are not proof of visual quality.",
+        "MuPDF unavailable."
+      ]
+    },
+    "checks": {
+      "flow": {
+        "status": "not-requested"
+      },
+      "content": {
+        "status": "pass",
+        "comparison": "ordered text with whitespace runs collapsed; ambiguous item geometry is unavailable",
+        "representationDifferences": [],
+        "spacingEvidence": [],
+        "offsetUnit": "UTF-16 offsets in whitespace-normalized source expectation and PDF.js output; scoped flow differences use caption-local or body-after-caption-removal offsets"
+      },
+      "bounds": {
+        "status": "checked",
+        "limitation": "Extracted upright text items only, estimated from font ascent and descent; PDF.js may omit off-page text. Not clipping or ink bounds."
+      },
+      "movement": {
+        "status": "observed",
+        "locations": [
+          {
+            "id": "x",
+            "pageIndexes": [
+              0
+            ]
+          }
+        ]
+      },
+      "independent": {
+        "status": "unavailable",
+        "reader": "PDF.js text extraction",
+        "reason": "Exporter path not supplied or uses PDF.js."
+      },
+      "visual": {
+        "status": "unavailable",
+        "reason": "No raster or visibility inspection."
+      },
+      "overlap": {
+        "status": "unavailable",
+        "reason": "Text and asset ownership not established."
+      },
+      "captionOwnership": {
+        "status": "unavailable",
+        "reason": "Relations not established from PDF bytes."
+      }
+    },
+    "findings": []
+  },
+  "geometry-internal-space": {
+    "schema": "falsify.recomposition-check.v1",
+    "readable": true,
+    "layoutQuality": {
+      "schema": "falsify.layout-quality.v1",
+      "status": "unavailable",
+      "score": null,
+      "penaltyTerms": {},
+      "issues": [],
+      "limitations": [
+        "Text paint bounds are glyph ink extents; structured text character boxes are font metrics.",
+        "Only axis-aligned rectangular clip paths are checked; arbitrary clips, transparency, occlusion, rotated text, vector figure ownership, and reading order remain unverified.",
+        "Scores measure detected defects only; they are not proof of visual quality.",
+        "MuPDF unavailable."
+      ]
+    },
+    "checks": {
+      "flow": {
+        "status": "not-requested"
+      },
+      "content": {
+        "status": "finding",
+        "comparison": "ordered text with whitespace runs collapsed; ambiguous item geometry is unavailable",
+        "representationDifferences": [],
+        "spacingEvidence": [],
+        "offsetUnit": "UTF-16 offsets in whitespace-normalized source expectation and PDF.js output; scoped flow differences use caption-local or body-after-caption-removal offsets"
+      },
+      "bounds": {
+        "status": "checked",
+        "limitation": "Extracted upright text items only, estimated from font ascent and descent; PDF.js may omit off-page text. Not clipping or ink bounds."
+      },
+      "movement": {
+        "status": "unavailable",
+        "locations": null,
+        "reason": "Complete ordered text alignment or supported geometry is unavailable."
+      },
+      "independent": {
+        "status": "unavailable",
+        "reader": "PDF.js text extraction",
+        "reason": "Exporter path not supplied or uses PDF.js."
+      },
+      "visual": {
+        "status": "unavailable",
+        "reason": "No raster or visibility inspection."
+      },
+      "overlap": {
+        "status": "unavailable",
+        "reason": "Text and asset ownership not established."
+      },
+      "captionOwnership": {
+        "status": "unavailable",
+        "reason": "Relations not established from PDF bytes."
+      }
+    },
+    "findings": [
+      {
+        "code": "content-mismatch",
+        "expected": "regulation",
+        "observed": "regul ation"
+      }
+    ]
+  },
+  "geometry-wrap": {
+    "schema": "falsify.recomposition-check.v1",
+    "readable": true,
+    "layoutQuality": {
+      "schema": "falsify.layout-quality.v1",
+      "status": "unavailable",
+      "score": null,
+      "penaltyTerms": {},
+      "issues": [],
+      "limitations": [
+        "Text paint bounds are glyph ink extents; structured text character boxes are font metrics.",
+        "Only axis-aligned rectangular clip paths are checked; arbitrary clips, transparency, occlusion, rotated text, vector figure ownership, and reading order remain unverified.",
+        "Scores measure detected defects only; they are not proof of visual quality.",
+        "MuPDF unavailable."
+      ]
+    },
+    "checks": {
+      "flow": {
+        "status": "not-requested"
+      },
+      "content": {
+        "status": "pass",
+        "comparison": "ordered text with whitespace runs collapsed; ambiguous item geometry is unavailable",
+        "representationDifferences": [],
+        "spacingEvidence": [],
+        "offsetUnit": "UTF-16 offsets in whitespace-normalized source expectation and PDF.js output; scoped flow differences use caption-local or body-after-caption-removal offsets"
+      },
+      "bounds": {
+        "status": "checked",
+        "limitation": "Extracted upright text items only, estimated from font ascent and descent; PDF.js may omit off-page text. Not clipping or ink bounds."
+      },
+      "movement": {
+        "status": "observed",
+        "locations": [
+          {
+            "id": "x",
+            "pageIndexes": [
+              0
+            ]
+          }
+        ]
+      },
+      "independent": {
+        "status": "unavailable",
+        "reader": "PDF.js text extraction",
+        "reason": "Exporter path not supplied or uses PDF.js."
+      },
+      "visual": {
+        "status": "unavailable",
+        "reason": "No raster or visibility inspection."
+      },
+      "overlap": {
+        "status": "unavailable",
+        "reason": "Text and asset ownership not established."
+      },
+      "captionOwnership": {
+        "status": "unavailable",
+        "reason": "Relations not established from PDF bytes."
+      }
+    },
+    "findings": []
+  },
+  "geometry-ambiguous": {
+    "schema": "falsify.recomposition-check.v1",
+    "readable": true,
+    "layoutQuality": {
+      "schema": "falsify.layout-quality.v1",
+      "status": "unavailable",
+      "score": null,
+      "penaltyTerms": {},
+      "issues": [],
+      "limitations": [
+        "Text paint bounds are glyph ink extents; structured text character boxes are font metrics.",
+        "Only axis-aligned rectangular clip paths are checked; arbitrary clips, transparency, occlusion, rotated text, vector figure ownership, and reading order remain unverified.",
+        "Scores measure detected defects only; they are not proof of visual quality.",
+        "MuPDF unavailable."
+      ]
+    },
+    "checks": {
+      "flow": {
+        "status": "not-requested"
+      },
+      "content": {
+        "status": "unavailable",
+        "comparison": "ordered text with whitespace runs collapsed; ambiguous item geometry is unavailable",
+        "representationDifferences": [],
+        "spacingEvidence": [],
+        "offsetUnit": "UTF-16 offsets in whitespace-normalized source expectation and PDF.js output; scoped flow differences use caption-local or body-after-caption-removal offsets"
+      },
+      "bounds": {
+        "status": "checked",
+        "limitation": "Extracted upright text items only, estimated from font ascent and descent; PDF.js may omit off-page text. Not clipping or ink bounds."
+      },
+      "movement": {
+        "status": "unavailable",
+        "locations": null,
+        "reason": "Complete ordered text alignment or supported geometry is unavailable."
+      },
+      "independent": {
+        "status": "unavailable",
+        "reader": "PDF.js text extraction",
+        "reason": "Exporter path not supplied or uses PDF.js."
+      },
+      "visual": {
+        "status": "unavailable",
+        "reason": "No raster or visibility inspection."
+      },
+      "overlap": {
+        "status": "unavailable",
+        "reason": "Text and asset ownership not established."
+      },
+      "captionOwnership": {
+        "status": "unavailable",
+        "reason": "Relations not established from PDF bytes."
+      }
+    },
+    "findings": [
+      {
+        "code": "ambiguous-text-geometry",
+        "pageIndex": 0
+      }
+    ]
+  },
+  "twoColumn": {
+    "schema": "falsify.paper-flow.v1",
+    "sourceSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "items": [
+      {
+        "id": "flow-0-0",
+        "kind": "paragraph",
+        "blockIds": [
+          "l1"
+        ],
+        "assetIds": [],
+        "source": {
+          "pageIndex": 0,
+          "bbox": [
+            20,
+            40,
+            180,
+            48
+          ]
+        },
+        "columns": 2,
+        "span": "column",
+        "captionIds": [],
+        "continuousColumns": 2,
+        "continuousPosition": 0
+      },
+      {
+        "id": "flow-0-1",
+        "kind": "paragraph",
+        "blockIds": [
+          "l2"
+        ],
+        "assetIds": [],
+        "source": {
+          "pageIndex": 0,
+          "bbox": [
+            20,
+            60,
+            180,
+            68
+          ]
+        },
+        "columns": 2,
+        "span": "column",
+        "captionIds": [],
+        "continuousColumns": 2,
+        "continuousPosition": 1
+      },
+      {
+        "id": "flow-0-2",
+        "kind": "paragraph",
+        "blockIds": [
+          "r1"
+        ],
+        "assetIds": [],
+        "source": {
+          "pageIndex": 0,
+          "bbox": [
+            220,
+            40,
+            380,
+            48
+          ]
+        },
+        "columns": 2,
+        "span": "column",
+        "captionIds": [],
+        "continuousColumns": 2,
+        "continuousPosition": 2
+      },
+      {
+        "id": "flow-0-3",
+        "kind": "paragraph",
+        "blockIds": [
+          "r2"
+        ],
+        "assetIds": [],
+        "source": {
+          "pageIndex": 0,
+          "bbox": [
+            220,
+            60,
+            380,
+            68
+          ]
+        },
+        "columns": 2,
+        "span": "column",
+        "captionIds": [],
+        "continuousColumns": 2,
+        "continuousPosition": 3
+      },
+      {
+        "id": "flow-0-4",
+        "kind": "caption",
+        "blockIds": [
+          "cap",
+          "cont"
+        ],
+        "assetIds": [],
+        "source": {
+          "pageIndex": 0,
+          "bbox": [
+            20,
+            110,
+            380,
+            138
+          ]
+        },
+        "columns": 1,
+        "span": "page",
+        "captionIds": [],
+        "inline": true,
+        "joiners": [
+          " "
+        ],
+        "measuredColumns": 2,
+        "continuousColumns": 2,
+        "continuousPosition": 4
+      },
+      {
+        "id": "flow-0-6",
+        "kind": "paragraph",
+        "blockIds": [
+          "wide"
+        ],
+        "assetIds": [],
+        "source": {
+          "pageIndex": 0,
+          "bbox": [
+            20,
+            180,
+            380,
+            190
+          ]
+        },
+        "columns": 1,
+        "span": "page",
+        "captionIds": [],
+        "continuousPosition": 5
+      }
+    ],
+    "relations": [],
+    "diagnostics": [
+      {
+        "code": "caption-continuation-grouped",
+        "pageIndex": 0,
+        "itemId": "flow-0-4",
+        "memberItemIds": [
+          "flow-0-4",
+          "flow-0-5"
+        ],
+        "blockIds": [
+          "cap",
+          "cont"
+        ]
+      },
+      {
+        "code": "caption-association-unresolved",
+        "pageIndex": 0,
+        "itemId": "flow-0-4"
+      },
+      {
+        "code": "geometry-order-heuristic",
+        "pageIndex": 0,
+        "gutter": [
+          180,
+          220
+        ]
+      }
+    ],
+    "fragments": [],
+    "regions": []
+  }
+}

@@ -125,12 +125,7 @@ class LayoutStepLedger:
             self._release_once(entry, release)
 
     # -- public API -----------------------------------------------------------------------------
-    def submit(self, data, *, admit=None, release=None):
-        """Validate {runId, stepId, request, fingerprint?} and return a receipt dict.
-
-        Raises LayoutAgentError: invalid_request/request_limit (400), fingerprint_mismatch (400),
-        layout_step_conflict (409), companion_busy (409). Validation happens before admit().
-        """
+    def _prepare_submission(self, data):
         if type(data) is not dict or not {'runId', 'stepId', 'request'} <= set(data) or set(data) - ENVELOPE_KEYS:
             raise LayoutAgentError('invalid_request', 400)
         run_id, step_id = _identifier(data['runId']), _identifier(data['stepId'])
@@ -142,6 +137,16 @@ class LayoutStepLedger:
         try: request = validate_request(data['request'])
         except LayoutAgentError: raise
         except ValueError: raise LayoutAgentError('invalid_request', 400) from None
+
+        return run_id, step_id, fingerprint, request
+
+    def submit(self, data, *, admit=None, release=None):
+        """Validate {runId, stepId, request, fingerprint?} and return a receipt dict.
+
+        Raises LayoutAgentError: invalid_request/request_limit (400), fingerprint_mismatch (400),
+        layout_step_conflict (409), companion_busy (409). Validation happens before admit().
+        """
+        run_id, step_id, fingerprint, request = self._prepare_submission(data)
 
         while True:
             with self._lock:

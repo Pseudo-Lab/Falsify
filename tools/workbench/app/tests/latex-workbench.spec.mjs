@@ -177,3 +177,9 @@ test('real PDF.js text runs paint precise changed ranges and reject repeated quo
   assert.ok(result.count>=3);assert.ok(painted.every(el=>el.dataset.edit==='edit'));
   await document.cleanup();
 });
+
+test('missing comparison page removes selectable text and highlights',()=>{
+  let removed=0,cleared=0;const canvas={width:500,height:700},visibleText=[{element:{remove(){removed++;}}},null],overlay={replaceChildren(){cleared++;}};
+  workbench.clearMissingPreviewPane({canvas,overlay,visibleText,index:0});
+  assert.equal(canvas.width,1);assert.equal(canvas.height,1);assert.equal(visibleText[0],null);assert.equal(removed,1);assert.equal(cleared,1);
+});

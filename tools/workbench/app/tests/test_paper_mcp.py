@@ -118,7 +118,7 @@ class Store:
             "provenance": "pymupdf-find-tables", "fileHash": self.file_hash,
             "table": {{"rows": 1, "columns": 1, "cells": [{{"row": 0, "column": 0, "rowSpan": 1, "columnSpan": 1, "text": "CELLTEXT", "bbox": [1, 2, 3, 4], "header": None}}]}},
         }}
-    def render_region(self, paper_id, page_index, bbox=None, dpi=120):
+    def render_region(self, paper_id, page_index, bbox=None, dpi=120, *, cancelled=None):
         if self._foreign(paper_id) or page_index != 0:
             raise KeyError("paper_evidence_unknown_id")
         raw = __import__("base64").b64decode(PNG)

@@ -252,7 +252,7 @@ function mockUpstream(options = {}) {
   return { fetchImpl, calls, store };
 }
 
-function gateway(path, { method = 'GET', headers = {}, body, env, fetchImpl, now = T0, origin = ORIGIN } = {}) {
+function gateway(path, { method = 'GET', headers = {}, body, env, fetchImpl, now = T0, origin = ORIGIN, requestBudgetMs } = {}) {
   const requestHeaders = { Origin: origin, ...headers };
   const request = new Request(`https://worker.example${path}`, {
     method,
@@ -267,6 +267,7 @@ function gateway(path, { method = 'GET', headers = {}, body, env, fetchImpl, now
     settings: { origins: new Set([ORIGIN, OTHER]) },
     fetchImpl: fetchImpl ?? (async () => { throw new Error('unexpected fetch'); }),
     now: () => now,
+    requestBudgetMs,
   });
 }
 
@@ -1110,4 +1111,153 @@ describe('confluence gateway', { concurrency: false }, () => {
     assert.equal(readBack.json.archiveSha256, semantic);
     assert.equal(upstream.calls.some(call => call.host !== 'api.atlassian.com' && call.host !== 'auth.atlassian.com'), false);
   });
+
+  test('whole upstream deadline aborts stalled fetch and body and preserves unknown write outcome', async () => {
+    installBundle();
+    const minted = await mint();
+    const auth = { Authorization: `Bearer ${minted.session}` };
+    const signals = [];
+    let cancelled = false;
+    let writes = 0;
+    function stalled(kind) {
+      const mock = mockUpstream();
+      return async (url, init) => {
+        const path = new URL(url).pathname;
+        const target = kind === 'write' ? init.method === 'POST' && path.endsWith('/wiki/api/v2/pages')
+          : kind === 'after-write' ? path.endsWith('/pages/9001/attachments')
+          : path.endsWith('/oauth/token/accessible-resources');
+        if (!target) return mock.fetchImpl(url, init);
+        signals.push(init.signal);
+        if (kind === 'write') writes++;
+        if (kind === 'body') return new Response(new ReadableStream({
+          pull() { return new Promise(() => {}); },
+          cancel() { cancelled = true; },
+        }), { status: 200 });
+        return new Promise(() => {});
+      };
+    }
+    const start = Date.now();
+    const [fetchResult, bodyResult, writeResult, afterWrite] = await Promise.all([
+      gateway('/v1/confluence/archives', { headers: auth, fetchImpl: stalled('fetch') }).then(read),
+      gateway('/v1/confluence/archives', { headers: auth, fetchImpl: stalled('body') }).then(read),
+      gateway('/v1/confluence/archives', { method: 'POST', headers: { ...auth, 'Content-Type': 'application/json' }, body: { archive, teamShare: true }, fetchImpl: stalled('write') }).then(read),
+      gateway('/v1/confluence/archives', { method: 'POST', headers: { ...auth, 'Content-Type': 'application/json' }, body: { archive, teamShare: true }, fetchImpl: stalled('after-write') }).then(read),
+    ]);
+    assert.ok(Date.now() - start < 15000);
+    assert.equal(fetchResult.json.error.code, 'upstream_unavailable');
+    assert.equal(bodyResult.json.error.code, 'upstream_unavailable');
+    assert.equal(writeResult.json.error.code, 'write_unknown');
+    assert.equal(writeResult.json.readBack, true);
+    assert.equal(writes, 1);
+    assert.equal(afterWrite.json.error.code, 'write_unknown');
+    assert.equal(afterWrite.json.pageId, '9001');
+    assert.equal(afterWrite.json.readBack, true);
+    assert.equal(signals.length, 4);
+    assert.ok(signals.every(signal => signal.aborted));
+    assert.equal(cancelled, true);
+  });
+
+  test('lists 25 children with bounded parallel reads, stable order and restrictions', async () => {
+    installBundle();
+    const minted = await mint();
+    const children = Array.from({ length: 25 }, (_, i) => ({ id: String(9100 + i), parentId: PARENT }));
+    const mock = mockUpstream({ children });
+    let active = 0, peak = 0, reads = 0;
+    const fetchImpl = async (url, init) => {
+      const path = new URL(url).pathname;
+      const match = /\/pages\/(91\d\d)(\/restriction-state)?$/.exec(path);
+      if (!match) return mock.fetchImpl(url, init);
+      active++; peak = Math.max(peak, active); reads++;
+      await new Promise(resolve => setTimeout(resolve, 20));
+      active--;
+      const id = match[1];
+      if (match[2]) return jsonResponse(200, { state: id === '9107' ? 'VIEW_RESTRICTED' : 'OPEN' });
+      return jsonResponse(200, readyPage({ id, ...(id === '9108' ? { properties: { results: [] } } : {}), _links: { webui: `/spaces/Falsify/pages/${id}/Falsify` } }));
+    };
+    const start = Date.now();
+    const listed = await read(await gateway('/v1/confluence/archives', { headers: { Authorization: `Bearer ${minted.session}` }, fetchImpl }));
+    const elapsed = Date.now() - start;
+    assert.equal(listed.status, 200);
+    assert.deepEqual(listed.json.items.map(item => item.pageId), children.map(c => c.id).filter(id => id !== '9107' && id !== '9108'));
+    assert.equal(reads, 49); // Invalid metadata skips one unnecessary restriction request.
+    assert.ok(peak > 1 && peak <= 5, `peak ${peak}`);
+    assert.ok(elapsed < 850, `mock latency ${elapsed}ms; sequential budget is 1000ms`);
+  });
+
+  test('request budget bounds accumulated calls and cancels late responses without more work', async () => {
+    const minted = await mint();
+    const mock = mockUpstream();
+    let calls = 0, cancelled = false;
+    const fetchImpl = async (url, init) => {
+      calls++;
+      if (calls === 3) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+        return new Response(new ReadableStream({ cancel() { cancelled = true; } }));
+      }
+      await new Promise(resolve => setTimeout(resolve, 20));
+      return mock.fetchImpl(url, init);
+    };
+    const start = Date.now();
+    const result = await read(await gateway('/v1/confluence/archives', {
+      headers: { Authorization: `Bearer ${minted.session}` }, fetchImpl, requestBudgetMs: 70,
+    }));
+    assert.equal(result.json.error.code, 'upstream_unavailable');
+    assert.ok(Date.now() - start < 500);
+    await new Promise(resolve => setTimeout(resolve, 130));
+    assert.equal(calls, 3);
+    assert.equal(cancelled, true);
+  });
+
+  test('global expiry after page creation reports readBack and starts no later writes', async () => {
+    installBundle();
+    const minted = await mint();
+    const mock = mockUpstream();
+    let writes = 0, aborted = false, callsAfter = 0;
+    const fetchImpl = async (url, init) => {
+      const path = new URL(url).pathname;
+      if (init.method === 'POST' && path.includes('/wiki/')) writes++;
+      if (path.endsWith('/pages/9001/attachments')) {
+        init.signal.addEventListener('abort', () => { aborted = true; });
+        await new Promise(resolve => setTimeout(resolve, 120));
+        return jsonResponse(200, { results: [] });
+      }
+      if (aborted) callsAfter++;
+      return mock.fetchImpl(url, init);
+    };
+    const result = await read(await gateway('/v1/confluence/archives', {
+      method: 'POST', headers: { Authorization: `Bearer ${minted.session}`, 'Content-Type': 'application/json' },
+      body: { archive, teamShare: true }, fetchImpl, requestBudgetMs: 60,
+    }));
+    assert.equal(result.json.error.code, 'write_unknown');
+    assert.equal(result.json.pageId, '9001');
+    assert.equal(result.json.readBack, true);
+    await new Promise(resolve => setTimeout(resolve, 140));
+    assert.equal(aborted, true);
+    assert.equal(writes, 1);
+    assert.equal(callsAfter, 0);
+  });
+
+  test('global budget cancels a stalled response body before a write starts', async () => {
+    installBundle();
+    const minted = await mint();
+    let cancelled = false, writes = 0, signal;
+    const mock = mockUpstream();
+    const fetchImpl = async (url, init) => {
+      if (init.method === 'POST' && new URL(url).pathname.includes('/wiki/')) writes++;
+      if (new URL(url).pathname.endsWith('/oauth/token/accessible-resources')) {
+        signal = init.signal;
+        return new Response(new ReadableStream({ pull() { return new Promise(() => {}); }, cancel() { cancelled = true; } }));
+      }
+      return mock.fetchImpl(url, init);
+    };
+    const result = await read(await gateway('/v1/confluence/archives', {
+      method: 'POST', headers: { Authorization: `Bearer ${minted.session}`, 'Content-Type': 'application/json' },
+      body: { archive, teamShare: true }, fetchImpl, requestBudgetMs: 50,
+    }));
+    assert.equal(result.json.error.code, 'upstream_unavailable');
+    assert.equal(writes, 0);
+    assert.equal(signal.aborted, true);
+    assert.equal(cancelled, true);
+  });
+
 });

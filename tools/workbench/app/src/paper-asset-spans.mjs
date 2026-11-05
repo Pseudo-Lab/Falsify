@@ -4,18 +4,7 @@ const box = b => Array.isArray(b) && b.length === 4 && b.every(Number.isFinite) 
 const overlaps = (a,b) => a[0]<b[2] && a[2]>b[0] && a[1]<b[3] && a[3]>b[1];
 const inside = (b,p,t=0.5) => b[0]>=p[0]-t && b[1]>=p[1]-t && b[2]<=p[2]+t && b[3]<=p[3]+t;
 
-export function resolveOutputAssetSpans({bytes,mupdf,flow,blockSpans}={}) {
-  const spans=[], evidence=[];
-  if (!mupdf || !(bytes instanceof Uint8Array) || !flow || !Array.isArray(flow.items) || !Array.isArray(blockSpans)) return {spans,evidence:[{reason:'invalid-input'}]};
-  const items=flow.items.filter(x=>x?.kind==='asset');
-  const idFor=i=>i.renderAssetId || (i.assetIds?.length===1 ? i.assetIds[0] : null);
-  const counts=new Map();
-  for (const i of items) for (const id of new Set([idFor(i),...(i.assetIds || [])].filter(Boolean))) counts.set(id,(counts.get(id)||0)+1);
-  const nominations=new Map();
-  for (const s of blockSpans) if (typeof s?.id==='string') nominations.set(s.id,[...(nominations.get(s.id)||[]),s]);
-  let doc;
-  try {
-    doc=mupdf.Document.openDocument(bytes,'application/pdf');
+function readOutputPlacements(doc,mupdf) {
     const pages=[];
     for(let pi=0;pi<doc.countPages();pi++) {
       const page=doc.loadPage(pi), placements=[], clips=[]; let failed=false, maskDepth=0, dev;
@@ -37,16 +26,27 @@ export function resolveOutputAssetSpans({bytes,mupdf,flow,blockSpans}={}) {
         pages.push({bounds,placements,failed});
       } catch {pages.push({bounds:null,placements:[],failed:true});} finally {for (const clip of clips) clip?.mask?.destroy(); dev?.destroy();page.destroy();}
     }
-    const claims=[];
-    for(const item of items) {
+  return pages;
+}
+
+function validMarker(s,e,sourcePage,item,pages) {
+  return !(!s || !e || !Number.isInteger(item.source?.pageIndex) || sourcePage!==item.source.pageIndex || !Number.isInteger(s.page) || s.page!==e.page || s.page<1 || s.page>pages.length || ![s.x,s.y,e.x,e.y].every(Number.isFinite) || e.y-s.y<5 || Math.abs(e.x-s.x)>1 || (sourcePage!=null && sourcePage!==item.source?.pageIndex));
+}
+
+function sourceClaimReason(id,ids,ns,b,item,items,counts) {
+      if (!id || !Array.isArray(ids) || ids.some(x=>typeof x!=='string' || !x) || new Set(ids).size!==ids.length || [id,...ids].some(x=>counts.get(x)!==1)) return 'unbound-or-duplicate-id';
+      else if (ns.length!==1) return 'missing-or-duplicate-marker';
+      else if (box(b) && items.some(other=>other!==item && other.source?.pageIndex===item.source?.pageIndex && box(other.source?.bbox) && overlaps(b,other.source.bbox))) return 'overlapping-source-assets';
+  return null;
+}
+
+function nominatePlacement(item,items,idFor,counts,nominations,pages,claims,evidence) {
       const id=idFor(item), ids=item.assetIds || [], ns=nominations.get(id) || [], b=item.source?.bbox;
       let reason=null, candidates=[];
-      if (!id || !Array.isArray(ids) || ids.some(x=>typeof x!=='string' || !x) || new Set(ids).size!==ids.length || [id,...ids].some(x=>counts.get(x)!==1)) reason='unbound-or-duplicate-id';
-      else if (ns.length!==1) reason='missing-or-duplicate-marker';
-      else if (box(b) && items.some(other=>other!==item && other.source?.pageIndex===item.source?.pageIndex && box(other.source?.bbox) && overlaps(b,other.source.bbox))) reason='overlapping-source-assets';
-      else {
+      reason=sourceClaimReason(id,ids,ns,b,item,items,counts);
+      if (!reason) {
         const {start:s,end:e,sourcePage}=ns[0];
-        if (!s || !e || !Number.isInteger(item.source?.pageIndex) || sourcePage!==item.source.pageIndex || !Number.isInteger(s.page) || s.page!==e.page || s.page<1 || s.page>pages.length || ![s.x,s.y,e.x,e.y].every(Number.isFinite) || e.y-s.y<5 || Math.abs(e.x-s.x)>1 || (sourcePage!=null && sourcePage!==item.source?.pageIndex)) reason='invalid-marker';
+        if (!validMarker(s,e,sourcePage,item,pages)) reason='invalid-marker';
         else {
           const pg=pages[s.page-1], height=e.y-s.y, tol=1.5;
           if (pg.failed || !box(pg.bounds) || !inside([s.x,s.y,s.x+0.001,e.y],pg.bounds)) reason='unavailable-page';
@@ -60,6 +60,12 @@ export function resolveOutputAssetSpans({bytes,mupdf,flow,blockSpans}={}) {
         }
       }
       evidence.push({id,reason:reason || 'candidate',candidateCount:candidates.length});
+}
+
+function resolveClaims(items,idFor,counts,nominations,pages,spans,evidence) {
+    const claims=[];
+    for(const item of items) {
+      nominatePlacement(item,items,idFor,counts,nominations,pages,claims,evidence);
     }
     for(const claim of claims) {
       const shared=claims.filter(c=>c.pageIndex===claim.pageIndex && c.placement===claim.placement).length>1;
@@ -68,6 +74,22 @@ export function resolveOutputAssetSpans({bytes,mupdf,flow,blockSpans}={}) {
       entry.reason='resolved';
       for(const id of new Set([claim.id,...claim.ids])) spans.push({id,pageIndex:claim.pageIndex,bbox:[...claim.placement.bbox]});
     }
+}
+
+export function resolveOutputAssetSpans({bytes,mupdf,flow,blockSpans}={}) {
+  const spans=[], evidence=[];
+  if (!mupdf || !(bytes instanceof Uint8Array) || !flow || !Array.isArray(flow.items) || !Array.isArray(blockSpans)) return {spans,evidence:[{reason:'invalid-input'}]};
+  const items=flow.items.filter(x=>x?.kind==='asset');
+  const idFor=i=>i.renderAssetId || (i.assetIds?.length===1 ? i.assetIds[0] : null);
+  const counts=new Map();
+  for (const i of items) for (const id of new Set([idFor(i),...(i.assetIds || [])].filter(Boolean))) counts.set(id,(counts.get(id)||0)+1);
+  const nominations=new Map();
+  for (const s of blockSpans) if (typeof s?.id==='string') nominations.set(s.id,[...(nominations.get(s.id)||[]),s]);
+  let doc;
+  try {
+    doc=mupdf.Document.openDocument(bytes,'application/pdf');
+    const pages=readOutputPlacements(doc,mupdf);
+    resolveClaims(items,idFor,counts,nominations,pages,spans,evidence);
   } catch {return {spans:[],evidence:[{reason:'pdf-unavailable'}]};} finally {doc?.destroy();}
   return {spans,evidence};
 }

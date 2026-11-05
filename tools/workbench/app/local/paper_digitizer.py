@@ -14,17 +14,21 @@ def _number(n):
     return type(n) in (int, float) and math.isfinite(n)
 
 
+def _validate_ticks(ticks, axis, extent):
+    for tick in ticks:
+        if not isinstance(tick, dict) or set(tick) != {'pixel', 'value'} or not all(_number(tick[k]) for k in tick):
+            raise ValueError('digitizer_axis_invalid')
+        if not 0 <= tick['pixel'] <= extent or axis['scale'] == 'log' and tick['value'] <= 0:
+            raise ValueError('digitizer_axis_invalid')
+
+
 def _axis(axis, extent):
     if not isinstance(axis, dict) or set(axis) != {'scale', 'points'} or axis['scale'] not in ('linear', 'log'):
         raise ValueError('digitizer_axis_invalid')
     ticks = axis['points']
     if not isinstance(ticks, list) or len(ticks) != 2:
         raise ValueError('digitizer_axis_invalid')
-    for tick in ticks:
-        if not isinstance(tick, dict) or set(tick) != {'pixel', 'value'} or not all(_number(tick[k]) for k in tick):
-            raise ValueError('digitizer_axis_invalid')
-        if not 0 <= tick['pixel'] <= extent or axis['scale'] == 'log' and tick['value'] <= 0:
-            raise ValueError('digitizer_axis_invalid')
+    _validate_ticks(ticks, axis, extent)
     p0, p1 = (tick['pixel'] for tick in ticks)
     v0, v1 = (tick['value'] for tick in ticks)
     if p0 == p1 or v0 == v1: raise ValueError('digitizer_axis_invalid')
@@ -39,14 +43,7 @@ def _axis(axis, extent):
     return convert
 
 
-def digitize(store, paper_id, file_hash, page_index, image_sha256, calibration, points, bbox=None, dpi=120):
-    """Calibrate points on exactly one rendered original image and retain the result."""
-    if store.status(paper_id)['fileHash'] != file_hash: raise ValueError('analysis_hash_mismatch')
-    image = store.render_region(paper_id, page_index, bbox=bbox, dpi=dpi)
-    if image_sha256 != image['sha256']: raise ValueError('digitizer_image_mismatch')
-    if not isinstance(calibration, dict) or set(calibration) != {'x', 'y'}: raise ValueError('digitizer_axis_invalid')
-    x = _axis(calibration['x'], image['width']); y = _axis(calibration['y'], image['height'])
-    if not isinstance(points, list) or not 1 <= len(points) <= 5000: raise ValueError('digitizer_points_invalid')
+def _digitized_rows(points, image, x, y):
     rows, numeric = [], []
     for row, point in enumerate(points):
         if not isinstance(point, list) or len(point) != 2 or not all(_number(n) for n in point): raise ValueError('digitizer_points_invalid')
@@ -57,6 +54,18 @@ def digitize(store, paper_id, file_hash, page_index, image_sha256, calibration, 
             limits = sorted([convert(point[col]-0.5), convert(point[col]+0.5)])
             numeric.append({'row':row, 'column':col, 'raw':str(value), 'value':value, 'unit':None,
                             'origin':'pixel-calibrated', 'pixelInterval':limits})
+    return rows, numeric
+
+
+def digitize(store, paper_id, file_hash, page_index, image_sha256, calibration, points, bbox=None, dpi=120):
+    """Calibrate points on exactly one rendered original image and retain the result."""
+    if store.status(paper_id)['fileHash'] != file_hash: raise ValueError('analysis_hash_mismatch')
+    image = store.render_region(paper_id, page_index, bbox=bbox, dpi=dpi)
+    if image_sha256 != image['sha256']: raise ValueError('digitizer_image_mismatch')
+    if not isinstance(calibration, dict) or set(calibration) != {'x', 'y'}: raise ValueError('digitizer_axis_invalid')
+    x = _axis(calibration['x'], image['width']); y = _axis(calibration['y'], image['height'])
+    if not isinstance(points, list) or not 1 <= len(points) <= 5000: raise ValueError('digitizer_points_invalid')
+    rows, numeric = _digitized_rows(points, image, x, y)
     data = {'schema':'falsify.chart-data.v1', 'status':'ready',
             'image':{k:image[k] for k in ('sha256','width','height')},
             'columns':['x','y'], 'rows':rows, 'numericCells':numeric, 'title':None, 'chartType':'xy',

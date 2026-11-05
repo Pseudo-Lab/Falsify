@@ -59,26 +59,23 @@ def check_template(node, depth=0, count=None):
     elif not (node is None or isinstance(node, (str, int, float))):
         raise ValueError('wrapper map 값은 JSON이어야 합니다.')
 
-def validate_adapter(adapter):
-    if not isinstance(adapter, dict) or set(adapter) != {'type', 'target', 'input', 'output'} or adapter['type'] != 'wrapper':
-        raise ValueError('wrapper adapter 필드는 type/target/input/output만 허용합니다.')
-    # Compact JSON measured in UTF-16 code units, the same count as JSON.stringify(...).length in the browser.
-    try: size = len(json.dumps(adapter, ensure_ascii=False, allow_nan=False, separators=(',', ':')).encode('utf-16-le', 'surrogatepass')) // 2
-    except (TypeError, ValueError): raise ValueError('wrapper 설정은 JSON이어야 합니다.') from None
-    if size > MAX_CONFIG_CHARS: raise ValueError('wrapper 설정은 직렬화 32,000자 이내입니다.')
-    target, given, output = adapter['target'], adapter['input'], adapter['output']
-    if not isinstance(target, dict) or target.get('type') not in ('stdio', 'http'):
-        raise ValueError('wrapper target은 stdio/http adapter 형식만 허용합니다(중첩 불가).')
-    harness.validate_transport(target)
+def _validate_wrapper_placeholders(target, mode):
+    if target['type'] == 'stdio' and mode != 'files' and {a for a in target['args'] if a in PLACEHOLDERS} - {'{output}'}:
+        raise ValueError('{input}/{prompt}/{schema} 자리표시자는 files 모드에서만 허용합니다.')
+    if target['type'] == 'stdio' and any(a not in PLACEHOLDERS and PLACEHOLDER_TEXT.search(a) for a in target['args']):
+        raise ValueError('wrapper args 자리표시자는 인자 하나 전체로만 씁니다.')
+
+
+def _validate_wrapper_input(given, target):
     mode = given.get('mode') if isinstance(given, dict) else None
     if mode not in MODES or set(given) != ({'mode', 'template'} if mode == 'template' else {'mode'}):
         raise ValueError('wrapper input은 mode(invocation/prompt/template/files)와 template 모드의 template만 허용합니다.')
     if mode == 'template': check_template(given['template'])
     if mode == 'files' and target['type'] != 'stdio': raise ValueError('wrapper files 모드는 stdio target만 허용합니다.')
-    if target['type'] == 'stdio' and mode != 'files' and {a for a in target['args'] if a in PLACEHOLDERS} - {'{output}'}:
-        raise ValueError('{input}/{prompt}/{schema} 자리표시자는 files 모드에서만 허용합니다.')
-    if target['type'] == 'stdio' and any(a not in PLACEHOLDERS and PLACEHOLDER_TEXT.search(a) for a in target['args']):
-        raise ValueError('wrapper args 자리표시자는 인자 하나 전체로만 씁니다.')
+    _validate_wrapper_placeholders(target, mode)
+
+
+def _validate_wrapper_output(output, target):
     if not isinstance(output, dict) or not {'source', 'format'} <= set(output) or set(output) - {'source', 'format', 'path', 'map', 'stageMaps'}:
         raise ValueError('wrapper output 필드는 source/format/path/map/stageMaps만 허용합니다.')
     if output['source'] not in SOURCES or output['format'] not in FORMATS:
@@ -90,6 +87,21 @@ def validate_adapter(adapter):
         if not isinstance(output['stageMaps'], dict) or set(output['stageMaps']) - set(STAGES):
             raise ValueError('wrapper stageMaps 키는 scan/selection/red/blue입니다.')
         for t in output['stageMaps'].values(): check_template(t)
+
+
+def validate_adapter(adapter):
+    if not isinstance(adapter, dict) or set(adapter) != {'type', 'target', 'input', 'output'} or adapter['type'] != 'wrapper':
+        raise ValueError('wrapper adapter 필드는 type/target/input/output만 허용합니다.')
+    # Compact JSON measured in UTF-16 code units, the same count as JSON.stringify(...).length in the browser.
+    try: size = len(json.dumps(adapter, ensure_ascii=False, allow_nan=False, separators=(',', ':')).encode('utf-16-le', 'surrogatepass')) // 2
+    except (TypeError, ValueError): raise ValueError('wrapper 설정은 JSON이어야 합니다.') from None
+    if size > MAX_CONFIG_CHARS: raise ValueError('wrapper 설정은 직렬화 32,000자 이내입니다.')
+    target, given, output = adapter['target'], adapter['input'], adapter['output']
+    if not isinstance(target, dict) or target.get('type') not in ('stdio', 'http'):
+        raise ValueError('wrapper target은 stdio/http adapter 형식만 허용합니다(중첩 불가).')
+    harness.validate_transport(target)
+    _validate_wrapper_input(given, target)
+    _validate_wrapper_output(output, target)
     return adapter
 
 def resolve_pointer(value, pointer):

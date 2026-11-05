@@ -24,6 +24,11 @@ function resolveReference(dir, ref) {
  return parts.length ? parts.join('/') : null;
 }
 const parentDir=path=>path.includes('/')?path.slice(0,path.lastIndexOf('/')):'';
+function graphicsCommandDepth(text,command) {
+ let depth=0;
+ for(let i=0;i<command.index;i++) { if(text[i]==='\\') { i++; continue; } if(text[i]==='{')depth++; else if(text[i]==='}')depth--; if(depth<0)break; }
+ return depth;
+}
 function graphicsPaths(text, dir) {
  const commands=[...text.matchAll(/\\graphicspath\b/g)];
  if(!commands.length) return {dirs:[],unknown:false,declared:false};
@@ -31,8 +36,7 @@ function graphicsPaths(text, dir) {
  // TeX macros, conditionals, grouping, or runtime assignment order.
  const begin=text.search(/\\begin\s*\{document\}/);
  const command=commands[0], firstUse=text.search(/\\(?:input|include|includegraphics)\b/);
- let depth=0;
- for(let i=0;i<command.index;i++) { if(text[i]==='\\') { i++; continue; } if(text[i]==='{')depth++; else if(text[i]==='}')depth--; if(depth<0)break; }
+ const depth=graphicsCommandDepth(text,command);
  if(depth!==0 || commands.length!==1 || (firstUse>=0 && command.index>firstUse) || (begin>=0 && command.index>begin) || /\\(?:if\w*|newcommand|def|renewcommand)\b/.test(text.slice(0,command.index))) return {dirs:[],unknown:true,declared:true};
  const tail=text.slice(command.index), match=tail.match(/^\\graphicspath\s*\{((?:\s*\{[^{}\\]*\}\s*)+)\}/);
  if(!match) return {dirs:[],unknown:true,declared:true};
@@ -48,11 +52,12 @@ function graphicsPaths(text, dir) {
 }
 export function analyzeProjectFiles(project) {
  const paths=new Set(project.files.map(f=>f.path)), mainCandidates=[],missingFiles=[],diagnostics=[],texts=new Map();
- for(const f of project.files.filter(f=>/\.tex$/i.test(f.path))) {
-  let text;try{text=dec.decode(f.bytes)}catch{diagnostics.push({code:'INVALID_UTF8',message:'Source is not UTF-8',path:f.path});continue}
+ function inspectSource(f) {
+  let text;try{text=dec.decode(f.bytes)}catch{diagnostics.push({code:'INVALID_UTF8',message:'Source is not UTF-8',path:f.path});return}
   text=text.replace(/(^|[^\\])%.*/gm,'$1');texts.set(f.path,text);
   if(/\\documentclass(?:\s*\[[^\]]*\])?\s*\{/.test(text)&&/\\begin\s*\{document\}/.test(text))mainCandidates.push(f.path);
  }
+ for(const f of project.files.filter(f=>/\.tex$/i.test(f.path))) inspectSource(f);
  const roots=project.mainFile ? [project.mainFile,...mainCandidates.filter(x=>x!==project.mainFile)] : mainCandidates;
  const observations=new Map(), visited=new Set();let budget=0;
  const note=(main,path,index,ref,command,status)=>{
@@ -75,34 +80,40 @@ export function analyzeProjectFiles(project) {
   const conditional=/\\(?:if\w*|else|fi)\b/.test(text);
   if(conditional || /\\(?:input|include)\b(?!\s*\{)/.test(text))state={dirs:[],unknown:true};
   const re=/\\(input|include|bibliography|addbibresource|includegraphics)(?:\s*\[[^\]]*\])?\s*\{([^{}]+)\}/g;
-  for(const m of text.matchAll(re)) for(const part of (m[1]==='bibliography'?m[2].split(','):[m[2]])) {
-   const r=part.trim();if(!r)continue;
-   if(r.includes('\\')||/#[1-9]/.test(r)) {note(main,path,m.index,r,m[1],'unknown');if(m[1]==='input'||m[1]==='include')state={dirs:[],unknown:true};continue;}
-   const valid=resolveReference(root,r)!==null, direct=valid?resolve(root,r,extensions(m[1])):null;
+  function referenceStatus(valid,direct,m,r) {
    let status=direct?'found':'missing';
    if(valid&&!direct&&m[1]==='includegraphics') {
     if(state.unknown)status='unknown';
     else if(state.dirs.some(dir=>resolve(dir,r,extensions(m[1]))))status='found';
    }
    if(conditional && valid)status='unknown';
+   return status;
+  }
+  function inspectReference(m,part) {
+   const r=part.trim();if(!r)return;
+   if(r.includes('\\')||/#[1-9]/.test(r)) {note(main,path,m.index,r,m[1],'unknown');if(m[1]==='input'||m[1]==='include')state={dirs:[],unknown:true};return;}
+   const valid=resolveReference(root,r)!==null, direct=valid?resolve(root,r,extensions(m[1])):null;
+   const status=referenceStatus(valid,direct,m,r);
    note(main,path,m.index,r,m[1],status);
    if(direct && !conditional && (m[1]==='input'||m[1]==='include') && texts.has(direct)) state=walk(main,root,direct,state,next);
    else if((m[1]==='input'||m[1]==='include') && status==='unknown') state={dirs:[],unknown:true};
   }
+  for(const m of text.matchAll(re)) for(const part of (m[1]==='bibliography'?m[2].split(','):[m[2]])) inspectReference(m,part);
   return state;
  };
  for(const main of roots) if(texts.has(main))walk(main,parentDir(main),main,{dirs:[],unknown:false},new Set());
  // Detached source files have no proven execution root; inspect against their
  // own directory, retaining the existing diagnostics for standalone sources.
  for(const path of texts.keys()) if(!visited.has(path))walk(null,parentDir(path),path,{dirs:[],unknown:false},new Set());
- for(const {path,reference,command,results} of observations.values()) {
+ function inspectObservation({path,reference,command,results}) {
   const selected=project.mainFile && results.some(x=>x.main===project.mainFile) ? results.filter(x=>x.main===project.mainFile) : results;
   const states=new Set(selected.map(x=>x.status));
-  if(states.size===1 && states.has('found'))continue;
+  if(states.size===1 && states.has('found'))return;
   const detail={path,reference,command};
   if(states.has('unknown')||states.has('found')) diagnostics.push({code:'UNRESOLVED_REFERENCE',message:'Referenced file could not be determined',...detail});
   else missingFiles.push(detail);
  }
+ for(const observation of observations.values()) inspectObservation(observation);
  if(!project.mainFile&&mainCandidates.length!==1)diagnostics.push({code:mainCandidates.length?'AMBIGUOUS_MAIN':'MISSING_MAIN',message:mainCandidates.length?'Multiple main files found':'No main file found'});
  for(const m of missingFiles)diagnostics.push({code:'MISSING_FILE',message:'Referenced file is missing',...m}); return {mainCandidates,missingFiles,diagnostics};
 }

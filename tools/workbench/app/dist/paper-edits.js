@@ -203,13 +203,7 @@
     while(next.length>LIMITS.maxHistory)next.splice(1,1);
     return next;
   }
-  function locate(segments,input){
-    allowKeys(input,ADD_KEYS,['pageIndex','before','after','origin'],'invalid','편집');
-    const pageIndex=pageOf(input.pageIndex),before=text(input.before,LIMITS.maxText,'Before'),after=afterText(input.after),origin=originOf(input.origin);
-    if(before===after)fail('invalid','Before와 After가 같습니다.');
-    const hinted=inputAnchor(Object.hasOwn(input,'anchor')?input.anchor:null,before);
-    let segmentId=null;
-    if(Object.hasOwn(input,'segmentId')){segmentId=idOf(input.segmentId,'문단 ID');if(!segments.some(s=>s.id===segmentId))fail('invalid','문단 ID가 원문에 없습니다.');}
+  function findOccurrences(segments,segmentId,pageIndex,before){
     const pool=[];
     for(const seg of segments){
       if(segmentId&&seg.id!==segmentId)continue;
@@ -219,6 +213,16 @@
       hits.forEach((start,occurrence)=>pool.push({segmentId:seg.id,start,end:start+before.length,occurrence}));
     }
     if(!pool.length)fail('invalid','원문 인용이 없습니다.');
+    return pool;
+  }
+  function locate(segments,input){
+    allowKeys(input,ADD_KEYS,['pageIndex','before','after','origin'],'invalid','편집');
+    const pageIndex=pageOf(input.pageIndex),before=text(input.before,LIMITS.maxText,'Before'),after=afterText(input.after),origin=originOf(input.origin);
+    if(before===after)fail('invalid','Before와 After가 같습니다.');
+    const hinted=inputAnchor(Object.hasOwn(input,'anchor')?input.anchor:null,before);
+    let segmentId=null;
+    if(Object.hasOwn(input,'segmentId')){segmentId=idOf(input.segmentId,'문단 ID');if(!segments.some(s=>s.id===segmentId))fail('invalid','문단 ID가 원문에 없습니다.');}
+    const pool=findOccurrences(segments,segmentId,pageIndex,before);
     let chosen;
     if(hinted.start!=null){
       const found=pool.filter(p=>p.start===hinted.start&&p.end===hinted.end);

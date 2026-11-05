@@ -48,6 +48,28 @@ class _Block:
         self.complete = complete
 
 
+def _validate_summary_counts(summary):
+    counts = summary.get("counts")
+    if (not isinstance(counts, dict) or type(counts.get("tables")) is not int or type(counts.get("figures")) is not int
+            or counts["tables"] < 0 or counts["figures"] < 0):
+        raise ValueError("paper_evidence_summary_invalid")
+
+
+def _validate_summary_facts(summary):
+    if summary.get("status") not in ("ready", "partial"):
+        raise ValueError("paper_evidence_summary_invalid")
+    if type(summary.get("pageCount")) is not int or summary["pageCount"] < 0:
+        raise ValueError("paper_evidence_summary_invalid")
+    _validate_summary_counts(summary)
+    if type(summary.get("engine")) is not str or not summary["engine"]:
+        raise ValueError("paper_evidence_summary_invalid")
+    limitations = summary.get("limitations")
+    if not isinstance(limitations, list) or any(type(item) is not str for item in limitations):
+        raise ValueError("paper_evidence_summary_invalid")
+    if type(summary.get("expiresAt")) is not str or not summary["expiresAt"]:
+        raise ValueError("paper_evidence_summary_invalid")
+
+
 def require_summary(summary, paper_id=None, file_hash=None):
     """Reject a store summary that is not the shared evidence contract."""
     if not isinstance(summary, dict) or summary.get("schema") != SCHEMA:
@@ -61,21 +83,7 @@ def require_summary(summary, paper_id=None, file_hash=None):
         raise ValueError("paper_evidence_unknown_id")
     if file_hash is not None and found_hash != file_hash:
         raise ValueError("paper_evidence_hash_mismatch")
-    if summary.get("status") not in ("ready", "partial"):
-        raise ValueError("paper_evidence_summary_invalid")
-    if type(summary.get("pageCount")) is not int or summary["pageCount"] < 0:
-        raise ValueError("paper_evidence_summary_invalid")
-    counts = summary.get("counts")
-    if (not isinstance(counts, dict) or type(counts.get("tables")) is not int or type(counts.get("figures")) is not int
-            or counts["tables"] < 0 or counts["figures"] < 0):
-        raise ValueError("paper_evidence_summary_invalid")
-    if type(summary.get("engine")) is not str or not summary["engine"]:
-        raise ValueError("paper_evidence_summary_invalid")
-    limitations = summary.get("limitations")
-    if not isinstance(limitations, list) or any(type(item) is not str for item in limitations):
-        raise ValueError("paper_evidence_summary_invalid")
-    if type(summary.get("expiresAt")) is not str or not summary["expiresAt"]:
-        raise ValueError("paper_evidence_summary_invalid")
+    _validate_summary_facts(summary)
     return summary
 
 
@@ -121,6 +129,27 @@ def _collect(store, paper_id, file_hash):
     return items, max(0, total - len(items)), capped
 
 
+def _format_table(item, lines, complete):
+    table = item.get("table")
+    cells = table.get("cells") if isinstance(table, dict) else None
+    if isinstance(table, dict) and "rows" in table:
+        lines.append("storeRows: " + json.dumps(table.get("rows"), ensure_ascii=False))
+    if isinstance(table, dict) and "columns" in table:
+        lines.append("storeColumns: " + json.dumps(table.get("columns"), ensure_ascii=False))
+    if not isinstance(cells, list):
+        lines.append("cells: unavailable")
+        complete = False
+    else:
+        lines.append("cells:")
+        for cell in cells:
+            if not isinstance(cell, dict):
+                lines.append("cell unavailable")
+                complete = False
+                continue
+            lines.append("cell " + json.dumps(cell, ensure_ascii=False, separators=(",", ":")))
+    return complete
+
+
 def _format_block(paper_id, item, kind):
     item_id = item["id"]
     page, bbox = item.get("pageIndex"), item.get("bbox")
@@ -136,23 +165,7 @@ def _format_block(paper_id, item, kind):
             "provenance: " + json.dumps(provenance, ensure_ascii=False),
         ]
         if kind == "table":
-            table = item.get("table")
-            cells = table.get("cells") if isinstance(table, dict) else None
-            if isinstance(table, dict) and "rows" in table:
-                lines.append("storeRows: " + json.dumps(table.get("rows"), ensure_ascii=False))
-            if isinstance(table, dict) and "columns" in table:
-                lines.append("storeColumns: " + json.dumps(table.get("columns"), ensure_ascii=False))
-            if not isinstance(cells, list):
-                lines.append("cells: unavailable")
-                complete = False
-            else:
-                lines.append("cells:")
-                for cell in cells:
-                    if not isinstance(cell, dict):
-                        lines.append("cell unavailable")
-                        complete = False
-                        continue
-                    lines.append("cell " + json.dumps(cell, ensure_ascii=False, separators=(",", ":")))
+            complete = _format_table(item, lines, complete)
         elif kind != "figure":
             lines.append("cells: unavailable")
             complete = False
@@ -274,29 +287,43 @@ def _last_resort(summary, blocks, facts, max_chars):
     return _result(summary, text, facts, [], list(blocks), max_chars, False)
 
 
-def context_for_review(paper_id, file_hash, store=None, max_chars=24000):
-    """Return bounded raw table cells and figure captions for one prepared PDF.
+def _analysis_header(kind, native, method):
+    header = ('DERIVED OCR transcription; may contain recognition errors; confidence is engine-reported.' if kind == 'ocr'
+              else 'DERIVED PDF path geometry; source endpoints keep their page coordinates and cubic interiors are interpolated samples with a recorded pixel error. This is not experimental observation data or a confidence interval.'
+              if native
+              else 'DERIVED curve samples; PlotTracer pixel coordinates and source-bound axis calibration. Samples are not independent observations or confidence-interval endpoints. Point origin and role distinguish measured pixels from interpolated samples such as WPD XStep.'
+              if method == 'oss-pixel-calibration'
+              else 'DERIVED chart table; caller-selected axis ticks and image points, pixel-calibrated estimates, not measured source data.'
+              if method == 'caller-selected-ticks-and-points'
+              else 'DERIVED chart table; OCR axis ticks and original curve pixels, calibrated raster estimates. Inspect axis fits, rejected ticks and series binding.'
+              if method == 'ocr-tick-pixel-calibration'
+              else 'DERIVED chart table; numeric values are model estimates, not measured source data.')
+    return header
 
-    Hash mismatch and an unknown paper id are rejected. truncationCount counts
-    items left out of text: budget omissions plus the list gap. Limitations
-    that do not fit stay in coverage and limitationsInText is false.
-    """
-    if type(paper_id) is not str or not 1 <= len(paper_id) <= 160:
-        raise ValueError("paper_evidence_id_invalid")
-    if type(file_hash) is not str or _HEX.fullmatch(file_hash) is None:
-        raise ValueError("paper_evidence_hash_invalid")
-    if type(max_chars) is not int or max_chars < 0:
-        raise ValueError("paper_evidence_budget_invalid")
-    store = _default_store() if store is None else store
-    try:
-        summary = store.status(paper_id)
-    except KeyError:
-        raise ValueError("paper_evidence_unknown_id") from None
-    except ValueError as exc:
-        _fixed(exc)
-    require_summary(summary, paper_id=paper_id, file_hash=file_hash)
-    metas, unlisted, capped = _collect(store, paper_id, file_hash)
-    blocks = [_load_block(store, paper_id, file_hash, meta) for meta in metas]
+
+def _analysis_context_entry(entry, kind, native, method):
+    context_entry = entry
+    # Pixel-calibrated rows already have their full numeric values and
+    # original point bounds in geometry.series.points. Repeating them
+    # again as numericCells can evict the entire recovered chart from
+    # BLUE's context. Keep the original analysis intact for MCP/export.
+    # Native path context keeps the source stroke and a per-series
+    # origin summary instead of a second copy of the sample arrays.
+    if kind == 'chart' and isinstance(entry['data'].get('geometry'), dict) and (native or method in ('ocr-tick-pixel-calibration','oss-pixel-calibration')):
+        context_data = {key: value for key, value in entry['data'].items() if key != 'numericCells'}
+        context_data.update(schema='falsify.chart-context.v1', sourceSchema=entry['data']['schema'],
+                            representation='table-and-original-curve-points')
+        context_entry = {**entry, 'data': context_data}
+        if native or method == 'oss-pixel-calibration':
+            geometry = entry['data']['geometry']
+            context_data.pop('geometry', None)
+            context_data['geometrySummary'] = {key: geometry[key] for key in ('plotBbox','sourcePlotBbox','axes','calibrationSource','pointKind','provenance','vectorSource') if key in geometry}
+            context_data['curveSources'] = [_curve_source(series) for series in geometry.get('series', [])]
+            context_data['representation'] = 'table-and-vector-summary' if native else 'table-and-geometry-summary'
+    return context_entry
+
+
+def _append_analyses(store, paper_id, file_hash, blocks):
     analyses = []
     if hasattr(store, 'list_analyses'):
         listing = store.list_analyses(paper_id)
@@ -309,40 +336,18 @@ def context_for_review(paper_id, file_hash, store=None, max_chars=24000):
             provenance = entry['data'].get('provenance') if isinstance(entry['data'].get('provenance'), dict) else {}
             method = provenance.get('method')
             native = provenance.get('vector') == 'pdf-native-path'
-            header = ('DERIVED OCR transcription; may contain recognition errors; confidence is engine-reported.' if kind == 'ocr'
-                      else 'DERIVED PDF path geometry; source endpoints keep their page coordinates and cubic interiors are interpolated samples with a recorded pixel error. This is not experimental observation data or a confidence interval.'
-                      if native
-                      else 'DERIVED curve samples; PlotTracer pixel coordinates and source-bound axis calibration. Samples are not independent observations or confidence-interval endpoints. Point origin and role distinguish measured pixels from interpolated samples such as WPD XStep.'
-                      if method == 'oss-pixel-calibration'
-                      else 'DERIVED chart table; caller-selected axis ticks and image points, pixel-calibrated estimates, not measured source data.'
-                      if method == 'caller-selected-ticks-and-points'
-                      else 'DERIVED chart table; OCR axis ticks and original curve pixels, calibrated raster estimates. Inspect axis fits, rejected ticks and series binding.'
-                      if method == 'ocr-tick-pixel-calibration'
-                      else 'DERIVED chart table; numeric values are model estimates, not measured source data.')
-            context_entry = entry
-            # Pixel-calibrated rows already have their full numeric values and
-            # original point bounds in geometry.series.points. Repeating them
-            # again as numericCells can evict the entire recovered chart from
-            # BLUE's context. Keep the original analysis intact for MCP/export.
-            # Native path context keeps the source stroke and a per-series
-            # origin summary instead of a second copy of the sample arrays.
-            if kind == 'chart' and isinstance(entry['data'].get('geometry'), dict) and (native or method in ('ocr-tick-pixel-calibration','oss-pixel-calibration')):
-                context_data = {key: value for key, value in entry['data'].items() if key != 'numericCells'}
-                context_data.update(schema='falsify.chart-context.v1', sourceSchema=entry['data']['schema'],
-                                    representation='table-and-original-curve-points')
-                context_entry = {**entry, 'data': context_data}
-                if native or method == 'oss-pixel-calibration':
-                    geometry = entry['data']['geometry']
-                    context_data.pop('geometry', None)
-                    context_data['geometrySummary'] = {key: geometry[key] for key in ('plotBbox','sourcePlotBbox','axes','calibrationSource','pointKind','provenance','vectorSource') if key in geometry}
-                    context_data['curveSources'] = [_curve_source(series) for series in geometry.get('series', [])]
-                    context_data['representation'] = 'table-and-vector-summary' if native else 'table-and-geometry-summary'
+            header = _analysis_header(kind, native, method)
+            context_entry = _analysis_context_entry(entry, kind, native, method)
             text = header + '\n' + json.dumps(context_entry, ensure_ascii=False, separators=(',', ':'))
             blocks.append(_Block(analysis_id, 'other', text, True))
             analyses.append({'analysisId':analysis_id, 'kind':kind, 'pageIndex':entry['pageIndex'],
                              'imageSha256':entry['inputImage']['sha256'], 'provenance':entry['data'].get('provenance')})
             if context_entry is not entry:
                 analyses[-1]['representation'] = context_entry['data']['representation']
+    return analyses
+
+
+def _coverage_facts(summary, metas, blocks, unlisted, capped):
     listed_tables = sum(meta.get("type") == "table" for meta in metas)
     listed_figures = sum(meta.get("type") == "figure" for meta in metas)
     counts = summary["counts"]
@@ -353,6 +358,38 @@ def context_for_review(paper_id, file_hash, store=None, max_chars=24000):
         "list_incomplete": bool(capped or unlisted or count_gap),
         "unavailable": sum(not block.complete for block in blocks),
     }
+    return facts
+
+
+def _validate_context_request(paper_id, file_hash, max_chars):
+    if type(paper_id) is not str or not 1 <= len(paper_id) <= 160:
+        raise ValueError("paper_evidence_id_invalid")
+    if type(file_hash) is not str or _HEX.fullmatch(file_hash) is None:
+        raise ValueError("paper_evidence_hash_invalid")
+    if type(max_chars) is not int or max_chars < 0:
+        raise ValueError("paper_evidence_budget_invalid")
+
+
+def context_for_review(paper_id, file_hash, store=None, max_chars=24000):
+    """Return bounded raw table cells and figure captions for one prepared PDF.
+
+    Hash mismatch and an unknown paper id are rejected. truncationCount counts
+    items left out of text: budget omissions plus the list gap. Limitations
+    that do not fit stay in coverage and limitationsInText is false.
+    """
+    _validate_context_request(paper_id, file_hash, max_chars)
+    store = _default_store() if store is None else store
+    try:
+        summary = store.status(paper_id)
+    except KeyError:
+        raise ValueError("paper_evidence_unknown_id") from None
+    except ValueError as exc:
+        _fixed(exc)
+    require_summary(summary, paper_id=paper_id, file_hash=file_hash)
+    metas, unlisted, capped = _collect(store, paper_id, file_hash)
+    blocks = [_load_block(store, paper_id, file_hash, meta) for meta in metas]
+    analyses = _append_analyses(store, paper_id, file_hash, blocks)
+    facts = _coverage_facts(summary, metas, blocks, unlisted, capped)
     packed = _try_pack(summary, blocks, facts, max_chars, True)
     if packed is None:
         packed = _try_pack(summary, blocks, facts, max_chars, False)

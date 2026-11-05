@@ -33,6 +33,7 @@ import json
 import math
 import re
 from collections import Counter
+from typing import NamedTuple
 
 PLAN_SCHEMA = 'falsify.pdf-edit-plan.v1'
 POLICY = 'document-consistency-text'
@@ -105,32 +106,39 @@ def _sha(text): return hashlib.sha256(text.encode('utf-8')).hexdigest()
 def _union(boxes):
     return (min(b[0] for b in boxes), min(b[1] for b in boxes), max(b[2] for b in boxes), max(b[3] for b in boxes))
 
+def _picked_status(status, lines, styles, taken, page, picked):
+    if status == 'resolved' and (len(lines) > LIMITS['maxEditLines'] or len(styles) > LIMITS['maxStyles']): status = 'unavailable'
+    # Later overlapping edits are not guessed.
+    if status == 'resolved' and taken.setdefault(page, set()) & set(picked): status = 'ambiguous'
+    return status
+
+def _build_plan_entry(doc, mupdf, e, k, max_chars, models, located, entries, taken):
+    p = e.get('pageIndex')
+    entry = {'id': f'edit-{k + 1}', 'pageIndex': p, 'beforeSha256': _sha(e['before']), 'afterSha256': _sha(e['after']),
+        'status': 'unavailable', 'regions': [], 'styles': []}
+    entries.append(entry)
+    if type(p) is not int or not 0 <= p < doc.page_count or k >= LIMITS['maxPlanEdits']: return
+    if p not in models: models[p] = page_model(doc[p], mupdf, max_chars)
+    if models[p] is None: return
+    chars = models[p].chars
+    status, picked = locate(models[p], e['before'])
+    lines = {}
+    for i in picked: lines.setdefault(chars[i].line, []).append(chars[i].box)
+    styles = list(dict.fromkeys(chars[i].style for i in picked))
+    status = _picked_status(status, lines, styles, taken, p, picked)
+    entry['status'] = status
+    if status != 'resolved': return
+    taken[p] |= set(picked)
+    located[k] = (picked, styles)
+    entry['regions'] = [[round(v, 3) for v in _union(boxes)] for boxes in lines.values()]
+    entry['styles'] = [{'font': s[3], 'size': round(s[1], 3), 'color': s[2]} for s in styles]
+
 def build_plan(doc, mupdf, source_sha256, edits, max_chars):
     """(plan, located, models): plan is the private contract dict; located maps edit index -> (selected char indices,
     source styles) of resolved edits; models maps page index -> PageModel, or None when over budget."""
     models, located, entries, taken = {}, {}, [], {}
     for k, e in enumerate(edits):
-        p = e.get('pageIndex')
-        entry = {'id': f'edit-{k + 1}', 'pageIndex': p, 'beforeSha256': _sha(e['before']), 'afterSha256': _sha(e['after']),
-            'status': 'unavailable', 'regions': [], 'styles': []}
-        entries.append(entry)
-        if type(p) is not int or not 0 <= p < doc.page_count or k >= LIMITS['maxPlanEdits']: continue
-        if p not in models: models[p] = page_model(doc[p], mupdf, max_chars)
-        if models[p] is None: continue
-        chars = models[p].chars
-        status, picked = locate(models[p], e['before'])
-        lines = {}
-        for i in picked: lines.setdefault(chars[i].line, []).append(chars[i].box)
-        styles = list(dict.fromkeys(chars[i].style for i in picked))
-        if status == 'resolved' and (len(lines) > LIMITS['maxEditLines'] or len(styles) > LIMITS['maxStyles']): status = 'unavailable'
-        # Two edits claiming the same source characters cannot both be honoured, so the later one is not guessed.
-        if status == 'resolved' and taken.setdefault(p, set()) & set(picked): status = 'ambiguous'
-        entry['status'] = status
-        if status != 'resolved': continue
-        taken[p] |= set(picked)
-        located[k] = (picked, styles)
-        entry['regions'] = [[round(v, 3) for v in _union(boxes)] for boxes in lines.values()]
-        entry['styles'] = [{'font': s[3], 'size': round(s[1], 3), 'color': s[2]} for s in styles]
+        _build_plan_entry(doc, mupdf, e, k, max_chars, models, located, entries, taken)
     states = {e['status'] for e in entries}
     status = 'resolved' if states == {'resolved'} else 'partial' if 'resolved' in states else 'unavailable'
     return {'schema': PLAN_SCHEMA, 'sourceSha256': source_sha256, 'policy': POLICY, 'status': status, 'edits': entries}, located, models
@@ -153,6 +161,22 @@ def _same_styles(got, own):
     return all(_style_eq((font_key(g['font']), g['size'], g['color']), (font_key(o['font']), o['size'], o['color']))
         for g, o in zip(sorted(got, key=key), sorted(own, key=key)))
 
+def _edit_matches(got, own):
+    if not isinstance(got, dict) or not isinstance(got.get('id'), str) or not 0 < len(got['id']) <= 64 \
+            or type(got.get('pageIndex')) is not int: return False
+    if not all(_HEX.fullmatch(str(got.get(k))) for k in ('beforeSha256', 'afterSha256')): return False
+    if any(got.get(k) != own[k] for k in ('pageIndex', 'beforeSha256', 'afterSha256')): return False
+    if not isinstance(got.get('regions'), list) or not isinstance(got.get('styles'), list): return False
+    return _edit_regions_match(got, own)
+
+def _edit_regions_match(got, own):
+    if got.get('status') in ('ambiguous', 'unavailable'):
+        if got['regions'] or got['styles']: return False
+    elif got.get('status') != 'resolved' or own['status'] != 'resolved' \
+            or not (_same_regions(got['regions'], own['regions']) and _same_styles(got['styles'], own['styles'])):
+        return False
+    return True
+
 def compare_plan(supplied, plan):
     """'absent' | 'accepted' | 'rejected'. A supplied plan is accepted only when it is well formed, bound to the same
     source bytes and selected Before/After hashes, and agrees with the located plan; it never adds or widens a region.
@@ -165,17 +189,7 @@ def compare_plan(supplied, plan):
         if supplied.get('status') not in ('resolved', 'partial', 'unavailable'): return 'rejected'
         got_edits = supplied.get('edits')
         if not isinstance(got_edits, list) or len(got_edits) != len(plan['edits']): return 'rejected'
-        for got, own in zip(got_edits, plan['edits']):
-            if not isinstance(got, dict) or not isinstance(got.get('id'), str) or not 0 < len(got['id']) <= 64 \
-                    or type(got.get('pageIndex')) is not int: return 'rejected'
-            if not all(_HEX.fullmatch(str(got.get(k))) for k in ('beforeSha256', 'afterSha256')): return 'rejected'
-            if any(got.get(k) != own[k] for k in ('pageIndex', 'beforeSha256', 'afterSha256')): return 'rejected'
-            if not isinstance(got.get('regions'), list) or not isinstance(got.get('styles'), list): return 'rejected'
-            if got.get('status') in ('ambiguous', 'unavailable'):
-                if got['regions'] or got['styles']: return 'rejected'
-            elif got.get('status') != 'resolved' or own['status'] != 'resolved' \
-                    or not (_same_regions(got['regions'], own['regions']) and _same_styles(got['styles'], own['styles'])):
-                return 'rejected'
+        if not all(_edit_matches(got, own) for got, own in zip(got_edits, plan['edits'])): return 'rejected'
         return 'accepted'
     except (TypeError, ValueError, AttributeError, KeyError, RecursionError):
         return 'rejected'
@@ -252,6 +266,18 @@ def _blank(sa, sb, pix, page, boxes):
             o = y * stride + x0 * n
             sa[o:o + len(blank)] = blank; sb[o:o + len(blank)] = blank
 
+def _pixel_deltas(sa, sb, pa, stride, n, explain):
+    minor, high = 0, set()
+    for y in range(pa.height):
+        ra, rb = sa[y * stride:(y + 1) * stride], sb[y * stride:(y + 1) * stride]
+        if ra == rb: continue
+        for k, (x, z) in enumerate(zip(ra, rb)):
+            if x != z:
+                if abs(x - z) <= PIXEL_DELTA: minor += 1; continue
+                high.add((k // n, y))
+                if explain is None or len(high) > NOISE_MAX: return None, None
+    return minor, high
+
 def _masked_diff(pa, pb, page, sealed, zones, explain=None):
     """(status, zone_changed) for the same-frame renders. Only the sealed source regions (plus BLEED) are excluded.
     A difference confined to the zones (After or kept edited-line text that slid outside the sealed regions) is a
@@ -263,15 +289,8 @@ def _masked_diff(pa, pb, page, sealed, zones, explain=None):
     za = zb = None
     if zones: za, zb = bytes(sa), bytes(sb); _blank(sa, sb, pa, page, zones)
     if sa == sb: return ('warning', True) if za != zb else ('passed', False)
-    minor, high = 0, set()
-    for y in range(pa.height):
-        ra, rb = sa[y * stride:(y + 1) * stride], sb[y * stride:(y + 1) * stride]
-        if ra == rb: continue
-        for k, (x, z) in enumerate(zip(ra, rb)):
-            if x != z:
-                if abs(x - z) <= PIXEL_DELTA: minor += 1; continue
-                high.add((k // n, y))
-                if explain is None or len(high) > NOISE_MAX: return 'failed', False
+    minor, high = _pixel_deltas(sa, sb, pa, stride, n, explain)
+    if high is None: return 'failed', False
     if high: return ('warning', True) if explain(high) else ('failed', False)
     if minor > MINOR_FRACTION * len(sa): return 'warning', False
     return ('warning', True) if za != zb else ('passed', False)
@@ -308,6 +327,9 @@ def _drift_noise(high, pa, pb, src_page, out_page, drifted, unmatched):
         a, b = _ink_sum(pa, rects[k][1]), _ink_sum(pb, rects[k][1])
         if not a or abs(a - b) > NOISE_INK * max(a, b): return False
     if any(_overlap(u, box) for u in unmatched for box in boxes): return False
+    return _nearby_objects_equal(src_page, out_page, boxes)
+
+def _nearby_objects_equal(src_page, out_page, boxes):
     near = lambda r: any(_overlap(tuple(r), box) for box in boxes)
     for page in (src_page, out_page):
         if any(near(a.rect) for a in page.annots()): return False
@@ -349,16 +371,31 @@ def _rigid(run):
     if any(abs(a - b) > DRIFT_TOL for d in deltas for a, b in zip(d, ref)): return False
     return 0 < max(abs(v) for d in deltas for v in d) <= RIGID_TOL
 
-def check_page(src_page, out_page, model, picks, mupdf, raster, max_chars):
-    """Regional QA of one edited output page against its source page. picks: [(selected source char indices, After,
-    source styles)] for every edit on the page, all resolved. Returns ({code: status}, {limitation keys})."""
-    if src_page.rotation or not _box_eq(src_page.cropbox, src_page.mediabox):
-        return dict.fromkeys(CODES, 'warning'), {'regional_partial'}
-    if out_page.rotation or not _box_eq(out_page.mediabox, src_page.mediabox) or not _box_eq(out_page.cropbox, out_page.mediabox):
-        return {'edited_page_render': 'failed'}, {'regional'}
-    out_model = page_model(out_page, mupdf, max_chars)
-    if out_model is None: return dict.fromkeys(CODES, 'warning'), {'budget'}
-    S, O, res, notes = model.chars, out_model.chars, {}, {'regional'}
+class _RowAlignment(NamedTuple):
+    selected: dict
+    afters: dict
+    src_rows: list
+    out_rows: list
+    row_of: dict
+    edited: list
+    expected: list
+    used: set
+    aligned: list
+    strict: bool
+
+def _map_edited_rows(S, O, src_rows, out_rows, edited, expected):
+    used, mapped, strict = set(), [], True
+    for r in edited:
+        near = [q for q, (base, _) in enumerate(out_rows) if abs(base - src_rows[r][0]) <= BASE_TOL and q not in used]
+        if len(near) != 1: strict = False; break
+        used.add(near[0]); mapped.append(near[0])
+    aligned = [j for q in mapped for j in out_rows[q][1]] if strict else []
+    strict = strict and ''.join(O[j].c for j in aligned) == ''.join(c for c, _, _ in expected)
+    if not strict: used = set()
+    return used, aligned, strict
+
+def _align_edited_rows(S, O, picks):
+    """Plan expected edited text and align it to output baselines when possible."""
     selected, first, afters = {}, {}, {}
     for k, (picked, after, _) in enumerate(picks):
         selected.update(dict.fromkeys(picked, k))
@@ -375,19 +412,25 @@ def check_page(src_page, out_page, model, picks, mupdf, raster, max_chars):
             elif i == first[k]: expected += [(c, None, k) for c in afters[k]]
     # Same placement: every edited source line has exactly one output line on its baseline, and together they hold
     # exactly the expected characters. Anything else is reflow, which is only partially compared.
-    used, mapped, strict = set(), [], True
-    for r in edited:
-        near = [q for q, (base, _) in enumerate(out_rows) if abs(base - src_rows[r][0]) <= BASE_TOL and q not in used]
-        if len(near) != 1: strict = False; break
-        used.add(near[0]); mapped.append(near[0])
-    aligned = [j for q in mapped for j in out_rows[q][1]] if strict else []
-    strict = strict and ''.join(O[j].c for j in aligned) == ''.join(c for c, _, _ in expected)
-    if not strict: used = set()
+    used, aligned, strict = _map_edited_rows(S, O, src_rows, out_rows, edited, expected)
+    return _RowAlignment(selected, afters, src_rows, out_rows, row_of, edited, expected, used, aligned, strict)
+
+class _UneditedRows(NamedTuple):
+    lost: bool
+    restyled: bool
+    moved: bool
+    text_font: bool
+    pairs: list
+    runs: list
+
+def _match_unedited_rows(S, O, alignment):
+    selected, src_rows, out_rows = alignment.selected, alignment.src_rows, alignment.out_rows
+    edited, used, strict = alignment.edited, alignment.used, alignment.strict
     blocks, edited_set, by_text = {S[i].block for i in selected}, set(edited), {}
     for q, (_, row) in enumerate(out_rows):
         if q not in used: by_text.setdefault(_text(O, row), []).append(q)
     # text_font/after_font: a font name changed without a proven size, color or metric change (unverified, warning).
-    lost = restyled = moved = text_font = after_font = False
+    lost = restyled = moved = text_font = False
     pairs = []  # (source, output) characters of unedited lines matched in place: candidates for float32 drift noise
     runs = []   # consecutive (source, output) pairs of one line or kept stretch: candidates for a rigid translation
     first_row = lambda row, hits, placed: next(((q, v) for q in hits for v in (_same_row(S, row, O, out_rows[q][1], placed),) if v), None)
@@ -403,58 +446,71 @@ def check_page(src_page, out_page, model, picks, mupdf, raster, max_chars):
             elif hits: match, restyled = (hits[0], None), True
             else: lost = True
         if match is not None: used.add(match[0]); text_font |= match[1] == 'font'
+    return _UneditedRows(lost, restyled, moved, text_font, pairs, runs)
+
+class _EditedSpans(NamedTuple):
+    boxes: dict
+    unknown: bool
+    zones: list
+    kept: list
+
+def _check_strict_spans(S, O, picks, expected, aligned, row_of, refs, boxes, zones, kept, runs):
+    stretch = None
+    style_bad = after_font = restyled = text_font = False
+    for (_, i, k), j in zip(expected, aligned):
+        if k is not None:
+            stretch = None
+            boxes[k].append(O[j])
+            v = _after_glyph(picks[k][2], O[j], refs)
+            style_bad |= v == 'bad'; after_font |= v == 'font'
+            zones.append(O[j].box)
+            continue
+        # Unselected text on an edited line keeps its style; it may only slide along its own baseline.
+        v = _glyph(S[i].style, O[j], [_width(S[i])])
+        restyled |= v == 'bad'; text_font |= v == 'font'
+        kept.append((S[i], O[j]))
+        if stretch != row_of[i]: stretch = row_of[i]; runs.append([])
+        runs[-1].append(kept[-1])
+        if abs(S[i].box[0] - O[j].box[0]) > POS_TOL or abs(S[i].box[2] - O[j].box[2]) > POS_TOL: zones += [S[i].box, O[j].box]
+    return style_bad, after_font, restyled, text_font
+
+def _find_after_spans(O, out_model, picks, afters, refs, boxes):
+    unknown = style_bad = after_font = False
+    for k, after in afters.items():
+        hits = _find(out_model.stream, after)
+        if len(hits) != 1: unknown = True; continue
+        boxes[k] = O[hits[0]:hits[0] + len(after)]
+        vs = {_after_glyph(picks[k][2], ch, refs) for ch in boxes[k]}
+        style_bad |= 'bad' in vs; after_font |= 'font' in vs
+    return unknown, style_bad, after_font
+
+def _style_width_refs(chars):
     refs = {}
-    for ch in S: refs.setdefault((ch.c, ch.style), []).append(_width(ch))
+    for ch in chars: refs.setdefault((ch.c, ch.style), []).append(_width(ch))
+    return refs
+
+def _check_edited_spans(S, O, out_model, picks, alignment, row_results, res, notes):
+    afters, out_rows, row_of = alignment.afters, alignment.out_rows, alignment.row_of
+    expected, used, aligned, strict = alignment.expected, alignment.used, alignment.aligned, alignment.strict
+    lost, restyled, moved, text_font, pairs, runs = row_results
+    after_font = False
+    refs = _style_width_refs(S)
     # zones: output-side areas that may legitimately differ but are outside the sealed source regions (warning only).
     boxes, style_bad, unknown, zones, kept = {k: [] for k in afters}, False, False, [], []
-    stretch = None  # source row of the current kept stretch of an edited line (broken by a selection or a new line)
     if strict:
-        for (_, i, k), j in zip(expected, aligned):
-            if k is not None:
-                stretch = None
-                boxes[k].append(O[j])
-                v = _after_glyph(picks[k][2], O[j], refs)
-                style_bad |= v == 'bad'; after_font |= v == 'font'
-                zones.append(O[j].box)
-                continue
-            # Unselected text on an edited line keeps its style; it may only slide along its own baseline.
-            v = _glyph(S[i].style, O[j], [_width(S[i])])
-            restyled |= v == 'bad'; text_font |= v == 'font'
-            kept.append((S[i], O[j]))
-            if stretch != row_of[i]: stretch = row_of[i]; runs.append([])
-            runs[-1].append(kept[-1])
-            if abs(S[i].box[0] - O[j].box[0]) > POS_TOL or abs(S[i].box[2] - O[j].box[2]) > POS_TOL: zones += [S[i].box, O[j].box]
+        style_bad, after_font, span_restyled, span_font = _check_strict_spans(S, O, picks, expected, aligned, row_of, refs, boxes, zones, kept, runs)
+        restyled |= span_restyled; text_font |= span_font
         res['edited_page_text'] = ('failed' if lost or restyled or moved else
             'warning' if text_font or len(used) < len(out_rows) else 'passed')
     else:
         notes.add('regional_partial')
         res['edited_page_text'] = 'failed' if lost or restyled else 'warning'
-        for k, after in afters.items():
-            hits = _find(out_model.stream, after)
-            if len(hits) != 1: unknown = True; continue
-            boxes[k] = O[hits[0]:hits[0] + len(after)]
-            vs = {_after_glyph(picks[k][2], ch, refs) for ch in boxes[k]}
-            style_bad |= 'bad' in vs; after_font |= 'font' in vs
+        unknown, style_bad, after_font = _find_after_spans(O, out_model, picks, afters, refs, boxes)
     if text_font or after_font: notes.add('regional_partial')
     res['edited_region_style'] = 'failed' if style_bad else 'warning' if unknown or after_font else 'passed'
-    trace = out_page.get_texttrace()
-    if sum(len(s.get('chars', ())) for s in trace) > max_chars:
-        notes.add('budget'); res['edited_region_visible'] = 'warning'; trace = None
-    pa, pb = raster(src_page), raster(out_page)
-    if trace is not None:
-        hidden = [s['bbox'] for s in trace if s.get('type') == 3 or s.get('opacity', 1) == 0]
-        overlaps = lambda a, b: min(a[2], b[2]) > max(a[0], b[0]) and min(a[3], b[3]) > max(a[1], b[1])
-        after = [ch for chars in boxes.values() for ch in chars]
-        shown = after + [o for _, o in kept]
-        # Every After letter must leave ink; kept same-line letters must still leave ink where the source did.
-        lost_ink = any(f is False for f in _ink(pb, out_page, after))
-        if kept:
-            was, now = _ink(pa, src_page, [s for s, _ in kept]), _ink(pb, out_page, [o for _, o in kept])
-            lost_ink |= any(w and n is False for w, n in zip(was, now))
-        invisible = lost_ink or any(overlaps(ch.box, h) for ch in shown for h in hidden)
-        res['edited_region_visible'] = 'failed' if invisible else 'warning' if unknown else 'passed'
-    if not strict:
-        res['edited_page_render'] = 'warning'; return res, notes
+    return _EditedSpans(boxes, unknown, zones, kept)
+
+def _drift_candidates(O, pairs, runs, boxes, kept):
     pairs += [(s, o) for s, o in kept if abs(s.box[0] - o.box[0]) <= POS_TOL and abs(s.box[2] - o.box[2]) <= POS_TOL]
     drifted = [(s, o) for s, o in pairs if s.c == o.c and s.style == o.style and
         0 < max(abs(s.base - o.base), *(abs(a - b) for a, b in zip(s.box, o.box))) <= DRIFT_TOL]
@@ -463,6 +519,13 @@ def check_page(src_page, out_page, model, picks, mupdf, raster, max_chars):
     drifted += [p for run in runs if _rigid(run) for p in run if id(p[1]) not in seen]
     matched = {id(o) for _, o in pairs} | {id(ch) for chars in boxes.values() for ch in chars}
     unmatched = [o.box for o in O if id(o) not in matched]
+    return drifted, unmatched
+
+def _check_regional_pixels(src_page, out_page, S, O, alignment, rows, spans, pa, pb, res, notes):
+    selected = alignment.selected
+    pairs, runs = rows.pairs, rows.runs
+    boxes, zones, kept = spans.boxes, spans.zones, spans.kept
+    drifted, unmatched = _drift_candidates(O, pairs, runs, boxes, kept)
     explain = lambda high: bool(drifted) and _drift_noise(high, pa, pb, src_page, out_page, drifted, unmatched)
     # Sealed: tight per-line boxes of the selected SOURCE characters only (never whole lines or output boxes).
     by_line = {}
@@ -474,4 +537,44 @@ def check_page(src_page, out_page, model, picks, mupdf, raster, max_chars):
     else:
         res['edited_page_render'], partial = _masked_diff(pa, pb, src_page, sealed, zones, explain)
         if partial: notes.add('regional_partial')
+
+def _lost_visible_ink(src_page, out_page, after, kept, pa, pb):
+    lost_ink = any(f is False for f in _ink(pb, out_page, after))
+    if kept:
+        was, now = _ink(pa, src_page, [s for s, _ in kept]), _ink(pb, out_page, [o for _, o in kept])
+        lost_ink |= any(w and n is False for w, n in zip(was, now))
+    return lost_ink
+
+def _check_visibility(src_page, out_page, boxes, kept, unknown, trace, pa, pb, res):
+    hidden = [s['bbox'] for s in trace if s.get('type') == 3 or s.get('opacity', 1) == 0]
+    overlaps = lambda a, b: min(a[2], b[2]) > max(a[0], b[0]) and min(a[3], b[3]) > max(a[1], b[1])
+    after = [ch for chars in boxes.values() for ch in chars]
+    shown = after + [o for _, o in kept]
+    # Every After letter must leave ink; kept same-line letters must still leave ink where the source did.
+    lost_ink = _lost_visible_ink(src_page, out_page, after, kept, pa, pb)
+    invisible = lost_ink or any(overlaps(ch.box, h) for ch in shown for h in hidden)
+    res['edited_region_visible'] = 'failed' if invisible else 'warning' if unknown else 'passed'
+
+def check_page(src_page, out_page, model, picks, mupdf, raster, max_chars):
+    """Regional QA of one edited output page against its source page. picks: [(selected source char indices, After,
+    source styles)] for every edit on the page, all resolved. Returns ({code: status}, {limitation keys})."""
+    if src_page.rotation or not _box_eq(src_page.cropbox, src_page.mediabox):
+        return dict.fromkeys(CODES, 'warning'), {'regional_partial'}
+    if out_page.rotation or not _box_eq(out_page.mediabox, src_page.mediabox) or not _box_eq(out_page.cropbox, out_page.mediabox):
+        return {'edited_page_render': 'failed'}, {'regional'}
+    out_model = page_model(out_page, mupdf, max_chars)
+    if out_model is None: return dict.fromkeys(CODES, 'warning'), {'budget'}
+    S, O, res, notes = model.chars, out_model.chars, {}, {'regional'}
+    alignment = _align_edited_rows(S, O, picks)
+    row_results = _match_unedited_rows(S, O, alignment)
+    spans = _check_edited_spans(S, O, out_model, picks, alignment, row_results, res, notes)
+    boxes, unknown, kept = spans.boxes, spans.unknown, spans.kept
+    trace = out_page.get_texttrace()
+    if sum(len(s.get('chars', ())) for s in trace) > max_chars:
+        notes.add('budget'); res['edited_region_visible'] = 'warning'; trace = None
+    pa, pb = raster(src_page), raster(out_page)
+    if trace is not None: _check_visibility(src_page, out_page, boxes, kept, unknown, trace, pa, pb, res)
+    if not alignment.strict:
+        res['edited_page_render'] = 'warning'; return res, notes
+    _check_regional_pixels(src_page, out_page, S, O, alignment, row_results, spans, pa, pb, res, notes)
     return res, notes

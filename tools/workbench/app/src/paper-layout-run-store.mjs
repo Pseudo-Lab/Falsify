@@ -44,10 +44,13 @@ function boundedJSON(value){let s;try{s=JSON.stringify(value);}catch{fail();}if(
 // Supplied project/artifact bytes are treated as immutable: a verified object is
 // hashed once and reused by later snapshots instead of being re-hashed or cloned.
 const verifiedProjects=new WeakMap(), verifiedArtifacts=new WeakMap();
-async function verifyProject(project,createLatexProject){
-  if(project&&typeof project==='object'&&verifiedProjects.has(project))return verifiedProjects.get(project);
+function validateProjectBytes(project){
   if(project?.schema!=='falsify.latex-project.v1'||!sha.test(project.id)||!Array.isArray(project.files)||!project.files.length)fail();
   for(const f of project.files)if(!(f?.bytes instanceof Uint8Array)||!sha.test(f.sha256)||hex(f.bytes)!==f.sha256)fail();
+}
+async function verifyProject(project,createLatexProject){
+  if(project&&typeof project==='object'&&verifiedProjects.has(project))return verifiedProjects.get(project);
+  validateProjectBytes(project);
   let p;try{p=await createLatexProject({files:project.files,mainFile:project.mainFile??null,engine:project.engine,origin:project.origin,sourcePdfHash:project.sourcePdfHash});}catch{fail();}
   if(p.id!==project.id)fail();
   // Hashes are equal, so keep the caller's buffers rather than createLatexProject's copies.
@@ -81,14 +84,24 @@ async function verifyPair(pair,base,createLatexProject,{allowMissingArtifact=tru
   return {project,artifact};
 }
 
-/** Validate a layout run state and return a normalized copy sharing the verified byte buffers. */
-export async function validateLayoutRunState(state,{createLatexProject=defaultCreateLatexProject}={}){
-  if(!isPlain(state)||(state.schema!==undefined&&state.schema!==LAYOUT_RUN_STATE_SCHEMA))fail();
-  const {schema,runId,parentRunId,carriedStepCount,baselineProject,baselineArtifact=null,currentProject,candidate,previousCandidate,checkpoints=[],trace=[],coverage=null,quality=null,status,runState,stepCount,...extra}=state;
+function validateRunHeader({runId,parentRunId,carriedStepCount,runState,status,stepCount}) {
   if(typeof runId!=='string'||!runIdPattern.test(runId))fail();
   if(parentRunId!=null&&(typeof parentRunId!=='string'||!runIdPattern.test(parentRunId)))fail();
   if(carriedStepCount!==undefined&&(!Number.isSafeInteger(carriedStepCount)||carriedStepCount<0))fail();
   if(!RUN_STATES.has(runState)||typeof status!=='string'||status.length>64||!Number.isSafeInteger(stepCount)||stepCount<0||stepCount>1e6)fail();
+}
+function validateCheckpoint(c,ids) {
+  if(!isPlain(c)||typeof c.revisionId!=='string'||!revisionPattern.test(c.revisionId)||ids.has(c.revisionId)||typeof c.label!=='string'||c.label.length>200)fail();
+}
+function validateRunEvidence(trace,coverage,quality) {
+  if(!Array.isArray(trace)||trace.length>MAX_LAYOUT_TRACE||trace.some(e=>!isPlain(e)))fail();
+  if(coverage!==null&&!isPlain(coverage)||quality!==null&&!isPlain(quality))fail();
+}
+/** Validate a layout run state and return a normalized copy sharing the verified byte buffers. */
+export async function validateLayoutRunState(state,{createLatexProject=defaultCreateLatexProject}={}){
+  if(!isPlain(state)||(state.schema!==undefined&&state.schema!==LAYOUT_RUN_STATE_SCHEMA))fail();
+  const {schema,runId,parentRunId,carriedStepCount,baselineProject,baselineArtifact=null,currentProject,candidate,previousCandidate,checkpoints=[],trace=[],coverage=null,quality=null,status,runState,stepCount,...extra}=state;
+  validateRunHeader({runId,parentRunId,carriedStepCount,runState,status,stepCount});
   const base=await verifyProject(baselineProject,createLatexProject);
   const baseArtifact=verifyArtifact(baselineArtifact,base);
   const current=await verifyProject(currentProject,createLatexProject);sameLineage(base,current);
@@ -97,13 +110,12 @@ export async function validateLayoutRunState(state,{createLatexProject=defaultCr
   if(!Array.isArray(checkpoints)||checkpoints.length>MAX_LAYOUT_CHECKPOINTS)fail();
   const ids=new Set(),cps=[];
   for(const c of checkpoints){
-    if(!isPlain(c)||typeof c.revisionId!=='string'||!revisionPattern.test(c.revisionId)||ids.has(c.revisionId)||typeof c.label!=='string'||c.label.length>200)fail();
+    validateCheckpoint(c,ids);
     ids.add(c.revisionId);
     const pair=await verifyPair({project:c.project,artifact:c.artifact??null},base,createLatexProject);
     cps.push({revisionId:c.revisionId,label:c.label,...pair});
   }
-  if(!Array.isArray(trace)||trace.length>MAX_LAYOUT_TRACE||trace.some(e=>!isPlain(e)))fail();
-  if(coverage!==null&&!isPlain(coverage)||quality!==null&&!isPlain(quality))fail();
+  validateRunEvidence(trace,coverage,quality);
   const out={schema:LAYOUT_RUN_STATE_SCHEMA,runId,...(parentRunId!=null?{parentRunId}:{}),...(carriedStepCount!==undefined?{carriedStepCount}:{}),
     baselineProject:base,baselineArtifact:baseArtifact,currentProject:current,candidate:cand,...(prev?{previousCandidate:prev}:{}),
     checkpoints:cps,trace:jsonData(trace),coverage:jsonData(coverage),quality:jsonData(quality),status,runState,stepCount,...jsonData(extra)};
@@ -230,7 +242,12 @@ export function createLayoutRunStore({now=Date.now,indexedDB=globalThis.indexedD
   // Invocation order, not validation/encode completion order. A later put of the same run wins.
   const claim=(runId,writeId)=>{const prev=latestWrite.get(runId)??null;if(!prev||writeSeq(writeId)>=writeSeq(prev))latestWrite.set(runId,writeId);return prev;};
   const owns=(runId,writeId)=>latestWrite.get(runId)===writeId;
+  const wantsPersistence=explicit=>explicit===true||explicit===undefined&&consent===true;
+  const staleWrite=(at,runId,writeId)=>disposed||at<wipeEpoch||!owns(runId,writeId);
+  const shouldSkipPersistence=(wanted,at,runId,writeId)=>!wanted||at!==epoch||staleWrite(at,runId,writeId);
+  const staleConsentWrite=(at,runId,writeId)=>disposed||at!==epoch||at<wipeEpoch||!owns(runId,writeId);
   const unclaim=(runId,writeId,prev)=>{if(runId&&owns(runId,writeId)){if(prev)latestWrite.set(runId,prev);else latestWrite.delete(runId);}};
+  const reconcileClaim=(runId,hinted,writeId,prev)=>{if(runId!==hinted){if(hinted)unclaim(hinted,writeId,prev);claim(runId,writeId);}};
   const closeDb=()=>{const p=dbPromise;dbPromise=null;p?.then(db=>db.close?.(),()=>{});};
   const live=()=>{if(disposed)throw Object.assign(new Error('Layout run store is disposed'),{code:'DISPOSED'});};
   const open=()=>{
@@ -253,27 +270,33 @@ export function createLayoutRunStore({now=Date.now,indexedDB=globalThis.indexedD
     if(stale.length)await tx(db,'readwrite',s=>Promise.all(stale.map(r=>typeof r.runId==='string'?deleteIfSameWrite(s,r.runId,r):req(s.delete(r.runId)))));
     return rows.filter(r=>fresh(r)&&typeof r.runId==='string');
   }
+  const writeWithdrawn=at=>disposed||at!==epoch||at<wipeEpoch;
+  function failedPut(e,at,runId,savedAt){
+    if(disposed||at<wipeEpoch)return {runId,savedAt,persisted:false};
+    lastError=storageError(e);return {runId,savedAt,persisted:false,storageError:lastError};
+  }
+  function finishPut(){activePuts--;if(disposed&&activePuts===0&&closeWhenIdle){const close=closeWhenIdle;closeWhenIdle=null;close();}}
   return {
     async put(state,{consent:explicit}={}){
       live();
       // Capture the consent epoch at call time so a withdrawal during validation or the write wins.
       // writeId is assigned now so a slower earlier save cannot pass a save invoked after it.
-      const at=epoch,wanted=explicit===true||explicit===undefined&&consent===true,writeId=nextWriteId();
+      const at=epoch,wanted=wantsPersistence(explicit),writeId=nextWriteId();
       const hinted=typeof state?.runId==='string'?state.runId:null,prev=hinted?claim(hinted,writeId):null;
       activePuts++;
       try{
         let valid;
         try{valid=await validateLayoutRunState(state,{createLatexProject});}
         catch(e){if(hinted)unclaim(hinted,writeId,prev);throw e;}
-        if(valid.runId!==hinted){if(hinted)unclaim(hinted,writeId,prev);claim(valid.runId,writeId);}
+        reconcileClaim(valid.runId,hinted,writeId,prev);
         const savedAt=now();
         // clear/dispose bumps wipeEpoch. Consent withdrawal bumps epoch only, so memory still updates.
-        if(disposed||at<wipeEpoch||!owns(valid.runId,writeId))return {runId:valid.runId,savedAt,persisted:false};
+        if(staleWrite(at,valid.runId,writeId))return {runId:valid.runId,savedAt,persisted:false};
         remember(valid,savedAt);
-        if(!wanted||at!==epoch||disposed||at<wipeEpoch||!owns(valid.runId,writeId))return {runId:valid.runId,savedAt,persisted:false};
+        if(shouldSkipPersistence(wanted,at,valid.runId,writeId))return {runId:valid.runId,savedAt,persisted:false};
         try{
           const data=await encodeLayoutRun(valid,{createLatexProject});
-          if(disposed||at!==epoch||at<wipeEpoch||!owns(valid.runId,writeId))return {runId:valid.runId,savedAt,persisted:false};
+          if(staleConsentWrite(at,valid.runId,writeId))return {runId:valid.runId,savedAt,persisted:false};
           const db=await open();
           const row={runId:valid.runId,writeId,savedAt,expiresAt:savedAt+LAYOUT_RUN_TTL_MS,data};
           // Epoch and invocation identity are re-checked when the put is issued. A withdrawal,
@@ -282,13 +305,13 @@ export function createLayoutRunStore({now=Date.now,indexedDB=globalThis.indexedD
           // or dispose. A newer invocation that only took the claim leaves this valid row;
           // a later issued readwrite transaction overwrites it when that save succeeds.
           const issued=await tx(db,'readwrite',s=>at!==epoch||!owns(valid.runId,writeId)?false:req(s.put(row)).then(()=>true));
-          const withdrawn=disposed||at!==epoch||at<wipeEpoch;
+          const withdrawn=writeWithdrawn(at);
           if(!issued||withdrawn){if(issued){try{await tx(db,'readwrite',s=>deleteIfSameWrite(s,valid.runId,row));}catch{}}return {runId:valid.runId,savedAt,persisted:false};}
           if(!owns(valid.runId,writeId))return {runId:valid.runId,savedAt,persisted:false};
           lastError=null;
           return {runId:valid.runId,savedAt,persisted:true,expiresAt:savedAt+LAYOUT_RUN_TTL_MS};
-        }catch(e){if(disposed||at<wipeEpoch)return {runId:valid.runId,savedAt,persisted:false};lastError=storageError(e);return {runId:valid.runId,savedAt,persisted:false,storageError:lastError};}
-      }finally{activePuts--;if(disposed&&activePuts===0&&closeWhenIdle){const close=closeWhenIdle;closeWhenIdle=null;close();}}
+        }catch(e){return failedPut(e,at,valid.runId,savedAt);}
+      }finally{finishPut();}
     },
     async get(runId){
       live();

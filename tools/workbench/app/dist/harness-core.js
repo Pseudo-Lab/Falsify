@@ -10,7 +10,8 @@
   // Existing stdio/http transports. A wrapper target reuses exactly these shapes, so a wrapper never nests another wrapper.
   function transport(a){
     if(a.type==='stdio'&&(Object.keys(a).sort().join()!=='args,executable,type'||typeof a.executable!=='string'||a.executable.includes('\0')||! /^(?:[A-Za-z]:[\\/]|\/)/.test(a.executable)||!Array.isArray(a.args)||a.args.length>32||a.args.some(x=>typeof x!=='string'||x.length>2000||x.includes('\0'))))throw Error('stdio: executable 절대 경로, args 문자열 배열');
-    if(a.type==='http'){let u;try{u=new URL(a.url);}catch{throw Error('외부 adapter URL 오류');}if(Object.keys(a).sort().join()!=='type,url'||typeof a.url!=='string'||a.url.length>2000||u.protocol!=='https:'||u.username||u.password||u.search||u.hash)throw Error('외부 adapter는 자격증명·쿼리 없는 HTTPS만 허용');}}
+    if(a.type==='http')httpTransport(a);}
+  function httpTransport(a){let u;try{u=new URL(a.url);}catch{throw Error('외부 adapter URL 오류');}if(Object.keys(a).sort().join()!=='type,url'||typeof a.url!=='string'||a.url.length>2000||u.protocol!=='https:'||u.username||u.password||u.search||u.hash)throw Error('외부 adapter는 자격증명·쿼리 없는 HTTPS만 허용');}
   // Wrapper adapter v1: an existing program behind a pure, deterministic input/output profile. The browser checks shape and
   // pointer/map syntax only; the local backend checks the executable and runs it. Messages are fixed text and never echo user values.
   const WRAPPER_ERRORS=Object.freeze({shape:'wrapper: type·target·input·output 네 필드만 허용합니다. 알 수 없는 필드를 지우세요.',size:'wrapper 설정은 직렬화 32,000자 이내여야 합니다. 매핑을 줄이세요.',
@@ -40,11 +41,12 @@
   function resolve(v,p){let cur=v;for(const k of pointer(p)){if(Array.isArray(cur)){if(!/^(?:0|[1-9]\d*)$/.test(k)||Number(k)>=cur.length)fail('missing');cur=cur[Number(k)];}else if(plain(cur)&&Object.hasOwn(cur,k))cur=cur[k];else fail('missing');}return cur;}
   function checkMap(t,depth=0,seen={n:0}){if(depth>20||++seen.n>1000)fail('mapSize');
     if(Array.isArray(t)){for(const x of t)checkMap(x,depth+1,seen);return;}
-    if(!plain(t)){if(t===null||typeof t==='string'||typeof t==='boolean'||typeof t==='number'&&Number.isFinite(t))return;fail('directive');}
+    if(!plain(t)){checkMapLiteral(t);return;}
     const ks=Object.keys(t);
     if(Object.hasOwn(t,'$from')){if(ks.length!==1)fail('directive');pointer(t.$from);return;}
     if(Object.hasOwn(t,'$each')){if(ks.length!==2||!Object.hasOwn(t,'template'))fail('directive');pointer(t.$each);checkMap(t.template,depth+1,seen);return;}
     for(const k of ks){if(UNSAFE.has(k))fail('proto');if(k[0]==='$')fail('directive');checkMap(t[k],depth+1,seen);}}
+  function checkMapLiteral(t){if(t===null||typeof t==='string'||typeof t==='boolean'||typeof t==='number'&&Number.isFinite(t))return;fail('directive');}
   const own=(o,k,v)=>Object.defineProperty(o,k,{value:v,enumerable:true,writable:true,configurable:true});
   // One budget unit per template node and per copied output node, as the backend _spend counts.
   function spend(v,seen){if(++seen.n>100000)fail('resultSize');if(Array.isArray(v))for(const x of v)spend(x,seen);else if(plain(v))for(const k of Object.keys(v))spend(v[k],seen);}
@@ -67,10 +69,13 @@
     const t=a.target;if(!plain(t)||!['stdio','http'].includes(t.type))fail('target');try{transport(t);}catch{fail('target');}
     const i=a.input;if(!only(i,['mode','template'],['mode'])||!WRAPPER_INPUTS.includes(i.mode)||(i.mode==='template')!==Object.hasOwn(i,'template')||i.mode==='files'&&t.type!=='stdio')fail('input');
     if(i.mode==='template')checkMap(i.template);
-    if(t.type==='stdio'){if(i.mode!=='files'&&t.args.some(x=>['{input}','{prompt}','{schema}'].includes(x)))fail('filesOnly');
-      if(t.args.some(x=>!['{input}','{prompt}','{schema}','{output}'].includes(x)&&/\{(?:input|prompt|schema|output)\}/.test(x)))fail('placeholder');}
+    if(t.type==='stdio')checkWrapperArgs(t,i);
     checkOutput(a.output,t.type);
     return JSON.parse(text);}
+  function checkWrapperArgs(t,i){
+    if(i.mode!=='files'&&t.args.some(x=>['{input}','{prompt}','{schema}'].includes(x)))fail('filesOnly');
+      if(t.args.some(x=>!['{input}','{prompt}','{schema}','{output}'].includes(x)&&/\{(?:input|prompt|schema|output)\}/.test(x)))fail('placeholder');
+  }
   // JSON.parse turns 1e400 into Infinity, so the parsed value is walked; the backend rejects the same literals.
   function finite(v){if(typeof v==='number'&&!Number.isFinite(v))fail('parse');if(Array.isArray(v))for(const x of v)finite(x);else if(plain(v))for(const k of Object.keys(v))finite(v[k]);}
   // Same rule as the backend FENCE: JSON whitespace around one block, newline before the closing fence, no embedded fence, no BOM.
@@ -86,14 +91,20 @@
     return map===undefined?v:applyMap(map,v,{n:0});}
   function validate(h,role){
     if(!h||typeof h!=='object'||keys.some(k=>!Object.hasOwn(h,k))||Object.keys(h).some(k=>!keys.includes(k)&&!['adapter','settings'].includes(k))||h.schema!=='falsify.harness.v1'||!['red','blue'].includes(h.role)||role&&h.role!==role)throw Error('harness 스키마·역할·허용 필드를 확인하세요.');
+    validateFields(h);
+    validateAdapter(h);
+    if(Object.hasOwn(h,'settings')&&(!h.settings||typeof h.settings!=='object'||Array.isArray(h.settings)||JSON.stringify(h.settings).length>32000))throw Error('settings는 JSON 객체 32,000자 이내');
+    return JSON.parse(JSON.stringify(h));
+  }
+  function validateFields(h){
     for(const k of ['id','version'])if(typeof h[k]!=='string'||! /^[A-Za-z0-9_.-]{1,80}$/.test(h[k]))throw Error('ID/버전: 영문·숫자·._- 1–80자');
     for(const [k,n] of [['name',120],['instructions',8000]])if(typeof h[k]!=='string'||!h[k].trim()||h[k].length>n||h[k].includes('\0'))throw Error('이름/지침 길이 제한 초과');
     if(!Number.isInteger(h.maxCalls)||h.maxCalls<1||h.maxCalls>32)throw Error('호출 한도는 1–32회입니다.');
+  }
+  function validateAdapter(h){
     if(Object.hasOwn(h,'adapter')){const a=h.adapter;if(!a||typeof a!=='object'||Array.isArray(a)||!['codex','claude','stdio','http','wrapper'].includes(a.type))throw Error('adapter: codex / claude / stdio / http / wrapper');
       if(Object.hasOwn(CLI,a.type))cliFields(a);
       if(a.type==='wrapper')validateWrapper(a);else transport(a);}
-    if(Object.hasOwn(h,'settings')&&(!h.settings||typeof h.settings!=='object'||Array.isArray(h.settings)||JSON.stringify(h.settings).length>32000))throw Error('settings는 JSON 객체 32,000자 이내');
-    return JSON.parse(JSON.stringify(h));
   }
   function sorted(v){return Array.isArray(v)?v.map(sorted):v&&typeof v==='object'?Object.fromEntries(Object.keys(v).sort().map(k=>[k,sorted(v[k])])):v;}
   const canonical=h=>JSON.stringify(sorted(validate(h)));

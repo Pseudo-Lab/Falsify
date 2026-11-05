@@ -7,3 +7,6 @@
 /app/vendor-sources/plottracer/** -text whitespace=-blank-at-eol,-blank-at-eof
 /app/vendor-sources/wpd-curve/** -text whitespace=-blank-at-eol,-blank-at-eof
 /app/dist/plottracer-vendor/** -text whitespace=-blank-at-eol,-blank-at-eof
+/app/vendor-sources/chart-shape/** -text whitespace=-blank-at-eol,-blank-at-eof
+/app/dist/chart-shape-vendor/** -text whitespace=-blank-at-eol,-blank-at-eof
+/app/dist/chart-shape-core.js -text

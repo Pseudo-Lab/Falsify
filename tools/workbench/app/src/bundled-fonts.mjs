@@ -40,21 +40,27 @@ async function load(face, fetcher) {
   return {id: `bundled:${postscriptName}`, family, postscriptName, weight, italic, bytes: bytes.slice(), source: "bundled", sha256};
 }
 
+function selectCjkFaces(name, text, selected) {
+  if (cjk.test(text) || name === "noto sans cjk kr" || name === "noto serif cjk kr") {
+    if (!serifNames.has(name)) selected.add(faces[9]);
+    if (!sansNames.has(name)) selected.add(faces[10]);
+  }
+}
+
+function selectFaces(requirement, selected) {
+  const name = String(requirement.family || "").trim().replace(/^[A-Z]{6}\+/, "").toLowerCase();
+  const text = String(requirement.text || "");
+  if ((name === "cmr7" || name === "lmroman7" || name === "lm roman 7") && !requirement.bold && !requirement.italic) selected.add(lm7);
+  const families = serifNames.has(name) ? ["Liberation Serif"] : sansNames.has(name) ? ["Liberation Sans"] : ["Liberation Sans", "Liberation Serif"];
+  for (const family of families) {
+    selected.add(faces.find(f => f[0] === family && f[2] === (requirement.bold ? 700 : 400) && f[3] === !!requirement.italic));
+  }
+  if (math.test(text) || name === "stix two math") selected.add(faces[8]);
+  selectCjkFaces(name, text, selected);
+}
+
 export async function getBundledFonts(requirements, {fetch = globalThis.fetch} = {}) {
   const selected = new Set();
-  for (const requirement of requirements) {
-    const name = String(requirement.family || "").trim().replace(/^[A-Z]{6}\+/, "").toLowerCase();
-    const text = String(requirement.text || "");
-    if ((name === "cmr7" || name === "lmroman7" || name === "lm roman 7") && !requirement.bold && !requirement.italic) selected.add(lm7);
-    const families = serifNames.has(name) ? ["Liberation Serif"] : sansNames.has(name) ? ["Liberation Sans"] : ["Liberation Sans", "Liberation Serif"];
-    for (const family of families) {
-      selected.add(faces.find(f => f[0] === family && f[2] === (requirement.bold ? 700 : 400) && f[3] === !!requirement.italic));
-    }
-    if (math.test(text) || name === "stix two math") selected.add(faces[8]);
-    if (cjk.test(text) || name === "noto sans cjk kr" || name === "noto serif cjk kr") {
-      if (!serifNames.has(name)) selected.add(faces[9]);
-      if (!sansNames.has(name)) selected.add(faces[10]);
-    }
-  }
+  for (const requirement of requirements) selectFaces(requirement, selected);
   return Promise.all([...selected].map(face => load(face, fetch)));
 }

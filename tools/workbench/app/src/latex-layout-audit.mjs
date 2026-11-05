@@ -15,6 +15,19 @@ function checkAbort(signal) {
   if (signal?.aborted) throw new DOMException('Audit cancelled', 'AbortError');
 }
 
+function safeLimitations(result, validFindings) {
+  const limitations = [];
+  for (const item of result.limitations || []) {
+    let safe = LIMITATIONS.includes(item) ? item :
+      item.startsWith('Caption or associated image could not be uniquely observed:') ? 'Caption or associated image could not be uniquely observed.' :
+      item.startsWith('Heading could not be uniquely observed:') ? 'Heading could not be uniquely observed.' : null;
+    if (safe && !limitations.includes(safe)) limitations.push(safe);
+  }
+  if (result.status !== 'partial' && !limitations.includes('MuPDF unavailable.')) limitations.push('Layout inspection unavailable.');
+  if (validFindings.length > LIMIT) limitations.push('Findings truncated.');
+  return limitations;
+}
+
 // The inspector may contain document text in evidence, profile and errors. Only
 // explicitly selected geometry and known diagnostic categories leave this boundary.
 export async function auditLatexLayout({bytes,mupdf,profile={},signal}={}) {
@@ -29,15 +42,7 @@ export async function auditLatexLayout({bytes,mupdf,profile={},signal}={}) {
   checkAbort(signal);
   const validFindings = (result.issues || []).filter(i => TYPES.has(i.type) && Number.isSafeInteger(i.pageIndex) && i.pageIndex >= 0 && Array.isArray(i.bbox) && i.bbox.length === 4 && i.bbox.every(Number.isFinite));
   const findings = validFindings.slice(0,LIMIT).map(({type,pageIndex,bbox}) => ({type,pageIndex,bbox:[...bbox]}));
-  const limitations = [];
-  for (const item of result.limitations || []) {
-    let safe = LIMITATIONS.includes(item) ? item :
-      item.startsWith('Caption or associated image could not be uniquely observed:') ? 'Caption or associated image could not be uniquely observed.' :
-      item.startsWith('Heading could not be uniquely observed:') ? 'Heading could not be uniquely observed.' : null;
-    if (safe && !limitations.includes(safe)) limitations.push(safe);
-  }
-  if (result.status !== 'partial' && !limitations.includes('MuPDF unavailable.')) limitations.push('Layout inspection unavailable.');
-  if (validFindings.length > LIMIT) limitations.push('Findings truncated.');
+  const limitations = safeLimitations(result, validFindings);
   const c = result.coverage;
   let coverage = null;
   if (c) {

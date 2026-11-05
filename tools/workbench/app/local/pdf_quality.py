@@ -67,6 +67,16 @@ def _overall(checks):
     if states == {'unavailable'}: return 'unavailable'
     return 'warning' if states & {'warning', 'unavailable'} else 'passed'
 
+def _sanitize_checks(checks):
+    out = []
+    for c in checks:
+        pages = c.get('pages') if isinstance(c, dict) else None
+        if c.get('code') not in CODES or c.get('status') not in STATUSES or not isinstance(pages, list) \
+                or len(pages) > LIMITS['maxListedPages'] or any(type(p) is not int or not 1 <= p <= 100000 for p in pages): raise ValueError
+        out.append({'code': c['code'], 'status': c['status'], 'pages': list(pages)})
+    if len({c['code'] for c in out}) != len(out): raise ValueError
+    return out
+
 def sanitize(value):
     """Strict whitelist copy of a report; anything malformed becomes the unavailable report."""
     try:
@@ -75,13 +85,7 @@ def sanitize(value):
         if not isinstance(method, str) or not re.fullmatch(r'[a-z0-9][a-z0-9 .,/+()-]{0,119}', method): raise ValueError
         checks = value.get('checks')
         if not isinstance(checks, list) or not 1 <= len(checks) <= len(CODES): raise ValueError
-        out = []
-        for c in checks:
-            pages = c.get('pages') if isinstance(c, dict) else None
-            if c.get('code') not in CODES or c.get('status') not in STATUSES or not isinstance(pages, list) \
-                    or len(pages) > LIMITS['maxListedPages'] or any(type(p) is not int or not 1 <= p <= 100000 for p in pages): raise ValueError
-            out.append({'code': c['code'], 'status': c['status'], 'pages': list(pages)})
-        if len({c['code'] for c in out}) != len(out): raise ValueError
+        out = _sanitize_checks(checks)
         lims = value.get('limitations')
         if not isinstance(lims, list) or any(l not in LIMITATIONS.values() for l in lims): raise ValueError
         if _overall(out) != value['status']: raise ValueError
@@ -211,6 +215,9 @@ def _hidden_counts(page, budget):
             if color and ((cs in (1, 3) and min(color) >= 0.97) or (cs == 4 and max(color) <= 0.03)): white += n
     log = page.get_bboxlog()
     if len(log) > budget: return None
+    return invisible, white, _covered_count(log)
+
+def _covered_count(log):
     covered = 0
     for i, (kind, r) in enumerate(log):
         area = max(r[2] - r[0], 0) * max(r[3] - r[1], 0)
@@ -219,7 +226,7 @@ def _hidden_counts(page, budget):
             if kind2 not in ('fill-path', 'fill-image', 'fill-shade'): continue
             iw, ih = min(r[2], q[2]) - max(r[0], q[0]), min(r[3], q[3]) - max(r[1], q[1])
             if iw > 0 and ih > 0 and iw * ih >= 0.9 * area: covered += 1; break
-    return invisible, white, covered
+    return covered
 
 def _lost_chunks(expected, actual):
     ops = difflib.SequenceMatcher(None, expected, actual, autojunk=False).get_opcodes()
@@ -250,16 +257,7 @@ def _candidates(source, pairs):
         variants = nxt[:16]
     return variants
 
-def _check_edited(rep, src_page, out, group, edits, out_all, mupdf):
-    src_lines = _lines(src_page, mupdf)
-    src_text = ''.join(src_lines)
-    group_lines = [_lines(out[o], mupdf) for o in group]
-    parts = [''.join(l) for l in group_lines]
-    actual = ''.join(parts)
-    body = _strip_copied_edges(src_lines, group_lines) if len(group) > 1 else actual
-    pairs = [(_norm(e['before']), _norm(e['after'])) for e in edits]
-    # MuPDF must find each exact Before in the source before a missing After counts as definite.
-    reliable = all(b and b in src_text for b, _ in pairs)
+def _check_edit_pairs(rep, pairs, src_text, actual, body, group, reliable):
     for b, a in pairs:
         if a in actual or a in body: state = 'passed'
         elif not reliable: state = 'warning'
@@ -270,10 +268,25 @@ def _check_edited(rep, src_page, out, group, edits, out_all, mupdf):
         rep.set('edited_after_present', state, () if state == 'passed' else group)
         residual = actual.count(b) - (src_text.count(b) - 1) - actual.count(a) * a.count(b) if b else 0
         rep.set('edited_before_removed', 'warning' if residual > 0 else 'passed', group if residual > 0 else ())
+
+def _check_edited(rep, src_page, out, group, edits, out_all, mupdf):
+    src_lines = _lines(src_page, mupdf)
+    src_text = ''.join(src_lines)
+    group_lines = [_lines(out[o], mupdf) for o in group]
+    parts = [''.join(l) for l in group_lines]
+    actual = ''.join(parts)
+    body = _strip_copied_edges(src_lines, group_lines) if len(group) > 1 else actual
+    pairs = [(_norm(e['before']), _norm(e['after'])) for e in edits]
+    # MuPDF must find each exact Before in the source before a missing After counts as definite.
+    reliable = all(b and b in src_text for b, _ in pairs)
+    _check_edit_pairs(rep, pairs, src_text, actual, body, group, reliable)
     if len(group) > 1:
         rep.note('continuation')
         empty = [o for o, p in zip(group[1:], parts[1:]) if not p]
         rep.set('continuation_pages', 'warning' if empty else 'passed', empty)
+    _check_edit_order(rep, src_page, out, group, edits, out_all, mupdf, src_text, actual, pairs, reliable)
+
+def _check_edit_order(rep, src_page, out, group, edits, out_all, mupdf, src_text, actual, pairs, reliable):
     if not reliable or len(src_text) > LIMITS['maxGroupChars'] or len(actual) > LIMITS['maxGroupChars']:
         rep.set('edited_text_order', 'warning', group); return
     best = None
@@ -284,6 +297,9 @@ def _check_edited(rep, src_page, out, group, edits, out_all, mupdf):
     if best is None: rep.set('edited_text_order', 'warning', group); return
     _, lost, extra = best
     if not lost and (extra == 0 or len(group) > 1): rep.set('edited_text_order', 'passed'); return
+    _report_lost_text(rep, src_page, out, group, edits, out_all, mupdf, lost)
+
+def _report_lost_text(rep, src_page, out, group, edits, out_all, mupdf, lost):
     # Original text gone from the entire output is definite loss; reordering, extraction quirks and
     # continuation header/footer copies are ambiguous warnings.
     vanished = any(len(c) >= MIN_LOST_CHUNK and c not in out_all for c in lost)
@@ -293,15 +309,19 @@ def _check_edited(rep, src_page, out, group, edits, out_all, mupdf):
     if vanished and _block_order_exact(src_page, [out[o] for o in group], edits, mupdf): vanished = False
     rep.set('edited_text_order', 'failed' if vanished else 'warning', group)
 
-def _check_regional(rep, regions, s, src_page, out, group, ks, edits, located, models, mupdf, assumed):
-    """Regional codes for one edited source page. Unsupported cases (continuation, unlocated edit, budget) are warnings."""
+def _regional_available(rep, regions, s, group, ks, located, models):
     if regions is None:
         for code in REGIONAL: rep.set(code, 'unavailable', group)
-        return
+        return False
     if len(group) > 1 or any(k not in located for k in ks) or models.get(s) is None:
         rep.note('budget' if s in models and models[s] is None else 'regional_partial')
         for code in REGIONAL: rep.set(code, 'warning', group)
-        return
+        return False
+    return True
+
+def _check_regional(rep, regions, s, src_page, out, group, ks, edits, located, models, mupdf, assumed):
+    """Regional codes for one edited source page. Unsupported cases (continuation, unlocated edit, budget) are warnings."""
+    if not _regional_available(rep, regions, s, group, ks, located, models): return
     picks = [(located[k][0], edits[k]['after'], located[k][1]) for k in ks]
     try:
         res, notes = regions.check_page(src_page, out[group[0]], models[s], picks, mupdf, lambda p: _raster(p, mupdf), LIMITS['maxTraceChars'])
@@ -312,6 +332,77 @@ def _check_regional(rep, regions, s, src_page, out, group, ks, edits, located, m
         if state == 'failed' and assumed: state = 'warning'  # an assumed page mapping never gates
         rep.set(code, state, () if state == 'passed' else group)
     for key in sorted(notes): rep.note(key)
+
+def _check_edited_page(rep, src, out, s, group, edited, edits, out_all, mupdf, regions, located, models, assumed, rendered, started):
+    _check_edited(rep, src[s], out, group, edited[s], out_all, mupdf)
+    ks = [k for k, e in enumerate(edits) if e['pageIndex'] == s]
+    if rendered >= LIMITS['maxRenderPages'] or time.monotonic() - started > LIMITS['workBudgetSeconds']:
+        rep.note('budget')
+        for code in REGIONAL: rep.set(code, 'warning', group)
+    else:
+        rendered += 1
+        _check_regional(rep, regions, s, src[s], out, group, ks, edits, located, models, mupdf, assumed)
+    base = _hidden_counts(src[s], LIMITS['maxTraceChars'])
+    tallies = [_hidden_counts(out[o], LIMITS['maxTraceChars']) for o in group]
+    if base is None or any(t is None for t in tallies):
+        rep.note('budget')
+        for code in HIDDEN: rep.set(code, 'warning', group)
+        return rendered
+    for k, code in enumerate(HIDDEN):
+        grew = sum(t[k] for t in tallies) > base[k]
+        rep.set(code, 'warning' if grew else 'passed', group if grew else ())
+    return rendered
+
+def _check_unedited_page(rep, src, out, s, group, mupdf, defect, rendered, started):
+    a, b = src[s], out[group[0]]
+    geometry_ok = _geometry_equal(a, b)
+    rep.set('unedited_geometry', 'passed' if geometry_ok else defect, () if geometry_ok else [group[0]])
+    text_ok = _norm(_text(a, mupdf)) == _norm(_text(b, mupdf))
+    if rendered >= LIMITS['maxRenderPages'] or time.monotonic() - started > LIMITS['workBudgetSeconds']:
+        rep.note('budget'); rep.set('unedited_render', 'warning', [group[0]])
+        rep.set('unedited_text', 'passed' if text_ok else 'warning', () if text_ok else [group[0]]); return rendered
+    rendered += 1
+    diff = _render_diff(a, b, mupdf)
+    rep.set('unedited_render', {'same': 'passed', 'minor': 'warning', 'changed': defect}[diff], () if diff == 'same' else [group[0]])
+    # Changed extraction under a stable render (e.g. a shared font's ToUnicode) is reported, not gated.
+    rep.set('unedited_text', 'passed' if text_ok else (defect if diff == 'changed' else 'warning'), () if text_ok else [group[0]])
+    return rendered
+
+def _page_groups(rep, edits, page_map, src_n, out_n):
+    edited = {}
+    for e in edits: edited.setdefault(e['pageIndex'], []).append(e)
+    groups, assumed = _valid_map(page_map, src_n, out_n), False
+    if groups is not None and any(len(g) > 1 and i not in edited for i, g in enumerate(groups)): groups = None
+    if groups is None:
+        rep.set('page_map', 'warning')
+        if src_n == out_n: groups, assumed = [[i] for i in range(src_n)], True; rep.note('page_map_assumed')
+        else: rep.note('page_map_unusable'); rep.set('unedited_text', 'unavailable')
+    else: rep.set('page_map', 'passed')
+    if not edited or any(i >= src_n for i in edited): rep.set('edited_after_present', 'warning')
+    return edited, groups, assumed
+
+def _regional_plan(rep, src, mupdf, source_bytes, edits, edit_plan):
+    regions, located, models = _regions(), {}, {}
+    if regions is not None:
+        try: plan, located, models = regions.build_plan(src, mupdf, hashlib.sha256(bytes(source_bytes)).hexdigest(), edits, LIMITS['maxTraceChars'])
+        except Exception: regions = None
+    if edit_plan is not None:
+        accepted = regions is not None and regions.compare_plan(edit_plan, plan) == 'accepted'
+        rep.set('edit_plan', 'passed' if accepted else 'warning')
+    return regions, located, models
+
+def _check_pages(rep, src, out, groups, edited, edits, out_all, mupdf, regions, located, models, assumed, defect, started):
+    rendered = 0
+    for s, group in enumerate(groups):
+        if s in edited:
+            rendered = _check_edited_page(rep, src, out, s, group, edited, edits, out_all, mupdf, regions, located, models, assumed, rendered, started)
+        else:
+            rendered = _check_unedited_page(rep, src, out, s, group, mupdf, defect, rendered, started)
+
+def _check_page_count(rep, page_count, src_n, out_n):
+    if page_count is not None:  # a reported count is compared with the actual one; none reported makes no claim
+        reported = page_count if isinstance(page_count, dict) else {}
+        rep.set('page_count', 'passed' if (reported.get('source'), reported.get('output')) == (src_n, out_n) else 'warning')
 
 def verify_pdf_quality(source_bytes, output_bytes, edits, page_map, page_count=None, *, edit_plan=None):
     """In-process QA. edits: [{pageIndex, before, after}] exactly as selected; page_map: sanitized sourcePageMap or None;
@@ -334,63 +425,14 @@ def verify_pdf_quality(source_bytes, output_bytes, edits, page_map, page_count=N
     src_n, out_n = src.page_count, out.page_count
     if src.needs_pass or max(src_n, out_n) > LIMITS['maxPages']:
         rep.note('budget'); rep.set('unedited_text', 'unavailable'); return sanitize(rep.result(method))
-    if page_count is not None:  # a reported count is compared with the actual one; none reported makes no claim
-        reported = page_count if isinstance(page_count, dict) else {}
-        rep.set('page_count', 'passed' if (reported.get('source'), reported.get('output')) == (src_n, out_n) else 'warning')
-    edited = {}
-    for e in edits: edited.setdefault(e['pageIndex'], []).append(e)
-    groups, assumed = _valid_map(page_map, src_n, out_n), False
-    if groups is not None and any(len(g) > 1 and i not in edited for i, g in enumerate(groups)): groups = None
-    if groups is None:
-        rep.set('page_map', 'warning')
-        if src_n == out_n: groups, assumed = [[i] for i in range(src_n)], True; rep.note('page_map_assumed')
-        else: rep.note('page_map_unusable'); rep.set('unedited_text', 'unavailable')
-    else: rep.set('page_map', 'passed')
-    if not edited or any(i >= src_n for i in edited): rep.set('edited_after_present', 'warning')
+    _check_page_count(rep, page_count, src_n, out_n)
+    edited, groups, assumed = _page_groups(rep, edits, page_map, src_n, out_n)
     if groups is None: return sanitize(rep.result(method))
     rep.note('render'); rep.note('hidden')
     defect = 'warning' if assumed else 'failed'
-    regions, located, models = _regions(), {}, {}
-    if regions is not None:
-        try: plan, located, models = regions.build_plan(src, mupdf, hashlib.sha256(bytes(source_bytes)).hexdigest(), edits, LIMITS['maxTraceChars'])
-        except Exception: regions = None
-    if edit_plan is not None:
-        accepted = regions is not None and regions.compare_plan(edit_plan, plan) == 'accepted'
-        rep.set('edit_plan', 'passed' if accepted else 'warning')
+    regions, located, models = _regional_plan(rep, src, mupdf, source_bytes, edits, edit_plan)
     out_all = ''.join(_norm(_text(p, mupdf)) for p in out)
-    rendered = 0
-    for s, group in enumerate(groups):
-        if s in edited:
-            _check_edited(rep, src[s], out, group, edited[s], out_all, mupdf)
-            ks = [k for k, e in enumerate(edits) if e['pageIndex'] == s]
-            if rendered >= LIMITS['maxRenderPages'] or time.monotonic() - started > LIMITS['workBudgetSeconds']:
-                rep.note('budget')
-                for code in REGIONAL: rep.set(code, 'warning', group)
-            else:
-                rendered += 1
-                _check_regional(rep, regions, s, src[s], out, group, ks, edits, located, models, mupdf, assumed)
-            base = _hidden_counts(src[s], LIMITS['maxTraceChars'])
-            tallies = [_hidden_counts(out[o], LIMITS['maxTraceChars']) for o in group]
-            if base is None or any(t is None for t in tallies):
-                rep.note('budget')
-                for code in HIDDEN: rep.set(code, 'warning', group)
-                continue
-            for k, code in enumerate(HIDDEN):
-                grew = sum(t[k] for t in tallies) > base[k]
-                rep.set(code, 'warning' if grew else 'passed', group if grew else ())
-            continue
-        a, b = src[s], out[group[0]]
-        geometry_ok = _geometry_equal(a, b)
-        rep.set('unedited_geometry', 'passed' if geometry_ok else defect, () if geometry_ok else [group[0]])
-        text_ok = _norm(_text(a, mupdf)) == _norm(_text(b, mupdf))
-        if rendered >= LIMITS['maxRenderPages'] or time.monotonic() - started > LIMITS['workBudgetSeconds']:
-            rep.note('budget'); rep.set('unedited_render', 'warning', [group[0]])
-            rep.set('unedited_text', 'passed' if text_ok else 'warning', () if text_ok else [group[0]]); continue
-        rendered += 1
-        diff = _render_diff(a, b, mupdf)
-        rep.set('unedited_render', {'same': 'passed', 'minor': 'warning', 'changed': defect}[diff], () if diff == 'same' else [group[0]])
-        # Changed extraction under a stable render (e.g. a shared font's ToUnicode) is reported, not gated.
-        rep.set('unedited_text', 'passed' if text_ok else (defect if diff == 'changed' else 'warning'), () if text_ok else [group[0]])
+    _check_pages(rep, src, out, groups, edited, edits, out_all, mupdf, regions, located, models, assumed, defect, started)
     return sanitize(rep.result(method))
 
 def default_runner(argv, *, input, cwd, env, timeout):

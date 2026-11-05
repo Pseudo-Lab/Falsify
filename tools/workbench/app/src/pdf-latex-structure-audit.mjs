@@ -18,21 +18,30 @@ export function auditReconstructionStructure({model,sourceDocument,document,mupd
   const observed=[];
   for(const a of document.assets){try{const c=a.content;if(c?.bytes)observed.push({id:a.id,pageIndex:a.source.pageIndex,bbox:a.source.bbox,hash:imageFingerprint(c.bytes,c.mask?.bytes,mupdf)});}catch{}}
   const owned=new Map();
-  for(const i of model.items.filter(i=>i.assetId)){
-    const asset=model.assets.find(a=>a.id===i.assetId);if(!asset||hex(asset.bytes)!==asset.sha256)throw new Error('STALE_ASSET');
-    let fingerprint;try{fingerprint=imageFingerprint(asset.bytes,null,mupdf);}catch{result.assets.push({itemId:i.id,status:'unavailable'});continue;}
-    const hits=observed.filter(a=>a.hash===fingerprint);
-    const status=hits.length===1?'source-pixels-preserved':hits.length?'ambiguous':'missing';result.assets.push({itemId:i.id,status});if(hits.length===1){owned.set(i.id,hits[0]);result.coverage.sourceRegions++;}
+  function inspectTable(i,status){
     if(i.kind==='table'){
       let checked=0,total=0;for(const cell of i.table?.rows?.flat()||[]){total++;const refs=(cell.evidence||[]).filter(e=>e.range),text=refs.map(e=>sourceDocument.pages[e.pageIndex]?.text.slice(e.range.start,e.range.end)||'').join('');if(compact(text)===compact(cell.text))checked++;}
       result.coverage.tableCells+=checked;result.tables.push({itemId:i.id,rows:i.table?.rows?.length||0,columns:i.table?.rows?.[0]?.length||0,cellsChecked:checked,cellsTotal:total,status:status==='source-pixels-preserved'?'source-region-preserved':status});
     }
   }
-  for(const r of model.relations.filter(r=>r.kind==='caption')){
-    const caption=model.items.find(i=>i.id===r.to),number=label(caption?.text),image=owned.get(r.from),matches=[];
+  function inspectAsset(i){
+    const asset=model.assets.find(a=>a.id===i.assetId);if(!asset||hex(asset.bytes)!==asset.sha256)throw new Error('STALE_ASSET');
+    let fingerprint;try{fingerprint=imageFingerprint(asset.bytes,null,mupdf);}catch{result.assets.push({itemId:i.id,status:'unavailable'});return;}
+    const hits=observed.filter(a=>a.hash===fingerprint);
+    const status=hits.length===1?'source-pixels-preserved':hits.length?'ambiguous':'missing';result.assets.push({itemId:i.id,status});if(hits.length===1){owned.set(i.id,hits[0]);result.coverage.sourceRegions++;}
+    inspectTable(i,status);
+  }
+  for(const i of model.items.filter(i=>i.assetId))inspectAsset(i);
+  function findCaptionMatches(number){
+    const matches=[];
     if(number)for(const b of document.blocks.filter(b=>b.text)){for(const l of b.source.lines||[]){const text=document.pages[b.source.pageIndex].text.slice(l.range.start,l.range.end);if(label(text)===number)matches.push({pageIndex:b.source.pageIndex,bbox:b.source.bbox});}}
+    return matches;
+  }
+  function inspectCaption(r){
+    const caption=model.items.find(i=>i.id===r.to),number=label(caption?.text),image=owned.get(r.from),matches=findCaptionMatches(number);
     const c=matches.length===1?matches[0]:null,gap=c&&image?Math.max(0,c.bbox[1]-image.bbox[3],image.bbox[1]-c.bbox[3]):Infinity,overlap=c&&image?Math.min(c.bbox[2],image.bbox[2])-Math.max(c.bbox[0],image.bbox[0]):0;
     const status=c&&image?c.pageIndex===image.pageIndex&&gap<=36&&overlap>0?'attached':'separated':'unavailable';if(status==='attached')result.coverage.captions++;result.captions.push({itemId:r.to,figureItemId:r.from,label:number||null,status,...(Number.isFinite(gap)?{gap}:{} )});
   }
+  for(const r of model.relations.filter(r=>r.kind==='caption'))inspectCaption(r);
   result.status=[...result.assets,...result.captions].some(x=>['missing','separated'].includes(x.status))?'failed':'partial';return result;
 }

@@ -46,13 +46,16 @@ function iso(v,field){const m=typeof v==='string'&&v.length<=40?ISO.exec(v):null
 
 const RUN_REQUIRED=['localId','role','harnessHash','sourceHash','fileHash','model','level','maxCalls','status','calls','provenance','createdAt'];
 // publicView checks a projection (no localId, no evidence) as read back from GET shared.
-function checkRun(p,publicView=false){
-  exact(p,publicView?RUN_REQUIRED.filter(k=>k!=='localId'):RUN_REQUIRED,publicView?['caseLabel','protocolVersion']:['caseLabel','protocolVersion','evidence'],'run');
+function checkRunFields(p){
   if(!['red','blue'].includes(p.role))invalid('role');
   if(p.role==='red'?![1,2,3].includes(p.level):p.level!==null)invalid('level');
   if(!Number.isInteger(p.maxCalls)||p.maxCalls<1||p.maxCalls>32)invalid('maxCalls');
   if(p.calls!==null&&(!Number.isSafeInteger(p.calls)||p.calls<0||p.calls>LIMITS.calls))invalid('calls');
   if(!RUN_STATUSES.includes(p.status))invalid('status');if(!PROVENANCES.includes(p.provenance))invalid('provenance');
+}
+function checkRun(p,publicView=false){
+  exact(p,publicView?RUN_REQUIRED.filter(k=>k!=='localId'):RUN_REQUIRED,publicView?['caseLabel','protocolVersion']:['caseLabel','protocolVersion','evidence'],'run');
+  checkRunFields(p);
   const out={...(publicView?{}:{localId:text(p.localId,LIMITS.localId,'localId')}),role:p.role,harnessHash:hex(p.harnessHash,'harnessHash'),sourceHash:hex(p.sourceHash,'sourceHash'),fileHash:hex(p.fileHash,'fileHash'),
     model:text(p.model,LIMITS.model,'model'),level:p.level,maxCalls:p.maxCalls,status:p.status,calls:p.calls,provenance:p.provenance,createdAt:iso(p.createdAt,'createdAt')};
   if(own(p,'caseLabel'))out.caseLabel=text(p.caseLabel,LIMITS.caseLabel,'caseLabel');
@@ -127,17 +130,21 @@ const later=(a,b)=>time(a.createdAt)-time(b.createdAt)||(a.revision??0)-(b.revis
 // Reviews count once per run and server owner (the latest among those whose caseLabel and protocolVersion both exactly match
 // the run's); uncertain reviews never enter scoreMean. warnings[] = {code,message,recordIds}.
 // harnessAvailable means a visible, structurally plausible definition: its hash is checked by validatePayload on write, not here.
-export function compareRecords(records){
-  const warned=new Map(),warn=(code,id)=>{if(!warned.has(code))warned.set(code,new Set());if(id!==undefined)warned.get(code).add(id);};
+function validComparisonRecord(r){return plain(r)&&typeof r.id==='string'&&!!r.id&&plain(r.owner)&&typeof r.owner.id==='string'&&!!r.owner.id&&KINDS.includes(r.kind)&&plain(r.payload);}
+function deduplicateRecords(records,warn){
   const byId=new Map();
   for(const r of Array.isArray(records)?records:[]){
-    if(!plain(r)||typeof r.id!=='string'||!r.id||!plain(r.owner)||typeof r.owner.id!=='string'||!r.owner.id||!KINDS.includes(r.kind)||!plain(r.payload)){warn('invalid_record',typeof r?.id==='string'?r.id:undefined);continue;}
+    if(!validComparisonRecord(r)){warn('invalid_record',typeof r?.id==='string'?r.id:undefined);continue;}
     const prev=byId.get(r.id);if(!prev||(r.revision??0)>(prev.revision??0)||(r.revision??0)===(prev.revision??0)&&canonicalJSON(r)>canonicalJSON(prev))byId.set(r.id,r);}
-  const runs=new Map(),reviews=[],harnesses=new Set();
+  return byId;
+}
+function classifyRecords(byId,runs,reviews,harnesses,warn){
   for(const r of byId.values()){try{
     if(r.kind==='harness'){const p=r.payload;if(!plain(p.config)||typeof p.hash!=='string'||!HEX.test(p.hash))invalid('harness');harnesses.add(p.hash);}
     else if(r.kind==='run')runs.set(r.id,{r,p:checkRun(publicPayload('run',r.payload),true)});
     else reviews.push({r,p:checkReview(publicPayload('review',r.payload))});}catch{warn('invalid_record',r.id);}}
+}
+function latestReviews(reviews,runs,byId,warn){
   const latest=new Map();
   for(const v of reviews){const run=runs.get(v.p.runId)?.p;if(!run){warn('review_run_missing',v.r.id);continue;}
     if(v.p.supersedes&&byId.get(v.p.supersedes)?.kind==='review'&&byId.get(v.p.supersedes).owner.id!==v.r.owner.id)warn('review_supersedes_other_owner',v.r.id);
@@ -146,6 +153,9 @@ export function compareRecords(records){
     // review never hides an older matching one. Mismatched records stay in the data, they are only left out of the aggregation.
     if(!own(run,'caseLabel')||!own(run,'protocolVersion')||!own(v.p,'protocolVersion')||v.p.caseLabel!==run.caseLabel||v.p.protocolVersion!==run.protocolVersion){warn('review_condition_mismatch',v.r.id);continue;}
     const key=v.p.runId+'\n'+v.r.owner.id,prev=latest.get(key);if(!prev||later(v.r,prev.r)>0)latest.set(key,v);}
+  return latest;
+}
+function groupRuns(runs,harnesses,latest,warn){
   const groups=new Map();
   for(const {r,p} of runs.values()){
     if(!own(p,'caseLabel')||!own(p,'protocolVersion')){warn('incomparable_missing_condition',r.id);continue;}
@@ -156,6 +166,15 @@ export function compareRecords(records){
     if(!g.entries.has(entryKey))g.entries.set(entryKey,{hash:p.harnessHash,origin,harnessAvailable:harnesses.has(p.harnessHash),runIds:[],statuses:Object.fromEntries(RUN_STATUSES.map(s=>[s,0])),calls:0,callsUnknown:0,reviews:[]});
     const e=g.entries.get(entryKey);e.runIds.push(r.id);e.statuses[p.status]++;if(p.calls===null)e.callsUnknown++;else e.calls+=p.calls;
     for(const v of latest.values())if(v.p.runId===r.id)e.reviews.push(v);}
+  return groups;
+}
+export function compareRecords(records){
+  const warned=new Map(),warn=(code,id)=>{if(!warned.has(code))warned.set(code,new Set());if(id!==undefined)warned.get(code).add(id);};
+  const byId=deduplicateRecords(records,warn);
+  const runs=new Map(),reviews=[],harnesses=new Set();
+  classifyRecords(byId,runs,reviews,harnesses,warn);
+  const latest=latestReviews(reviews,runs,byId,warn);
+  const groups=groupRuns(runs,harnesses,latest,warn);
   const out=[...groups.values()].sort((a,b)=>cmp(a.conditionKey,b.conditionKey)).map(({entries,...g})=>({...g,harnesses:[...entries.values()].sort((a,b)=>cmp(a.hash,b.hash)||cmp(a.origin,b.origin)).map(({reviews:rs,...e})=>{
     const scores=rs.filter(v=>v.p.verdict!=='uncertain'&&v.p.score!==null).map(v=>v.p.score).sort((a,b)=>a-b);
     return {...e,runIds:e.runIds.sort(),runCount:e.runIds.length,reviewCount:rs.length,uncertainCount:rs.filter(v=>v.p.verdict==='uncertain').length,scoreCount:scores.length,

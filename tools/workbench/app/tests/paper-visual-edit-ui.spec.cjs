@@ -130,7 +130,7 @@ function world(over={}){
     const rec={path,body,options};
     calls.push(rec);
     if(options?.signal?.aborted)return Promise.reject(Object.assign(new Error('aborted'),{name:'AbortError'}));
-    return Promise.resolve(respond(path,body));
+    return Promise.resolve(over.request ? over.request(path,body,()=>respond(path,body)) : respond(path,body));
   }};
   async function respond(path,body){
     const fileHash=source&&source.fileHash;
@@ -148,6 +148,7 @@ function world(over={}){
     if(path==='/api/paper/evidence/query'&&body.operation==='render'){
       return {paperId:'paper-visual',fileHash,pageIndex:body.pageIndex,bbox:body.bbox.slice(),mimeType:'image/png',data:WHITE.toString('base64'),sha256:WHITE_SHA,width:64,height:32};
     }
+    if(path==='/api/paper/chart/prepare'&&over.shapeScene)return {...over.shapeScene,pageIndex:body.pageIndex,bbox:body.bbox};
     if(path==='/api/paper/visual/export')return exportImpl?exportImpl(body):pdfOf(fileHash,'ok');
     throw new Error('unexpected '+path);
   }
@@ -327,6 +328,7 @@ serial('graph edits replot explicit points and hash the region',async()=>{
   assert.equal(drawn.series[0].points[2].yHigh,7);
   assert.equal(h.renders.at(-1).width,640);
   assert.equal(h.renders.at(-1).height,427);
+  await until(()=>!h.button('PDF에 적용').disabled,'graph preview ready');
   h.button('PDF에 적용').click();
   await until(()=>h.outputs.length===1,'graph out');
   const op=h.calls.filter(call=>call.path==='/api/paper/visual/export').at(-1).body.operations[0];
@@ -587,4 +589,157 @@ serial('a page region can be edited without an automatically detected figure',as
   assert.equal(h.previews.length,2);
   assert.equal(h.ui.snapshot().pending,0);
   assert.equal(h.calls.some(call=>call.path==='/api/paper/visual/export'),false);
+});
+
+serial('graph edit binds to the visible page after page navigation',async()=>{
+  const mounts=[];
+  globalThis.FalsifyChartShape={};
+  globalThis.FalsifyChartShapeEditor={create:args=>{mounts.push(args);return {destroy(){}};}};
+  try{
+    const h=world({catalog:{items:[],full:{},analyses:[],fullAnalyses:{}},shapeScene:{sceneId:'s',series:[{id:'a',points:[{x:1,y:2}]}]}});
+    h.source={file:fileOf(PDF,'vectors.pdf'),fileHash:HASH,revision:'r1'};
+    await h.ui.refresh();h.button('영역 직접 선택').click();
+    await until(()=>h.labeled('라벨'),'region ready');
+    h.button('다음 쪽').click();
+    await until(()=>h.previews.some(p=>p.page===2),'visible second page');
+    h.button('그래프 고치기').click();
+    await until(()=>mounts.length===1,'graph mounted');
+    const request=h.calls.find(c=>c.path==='/api/paper/chart/prepare');
+    assert.equal(request.body.pageIndex,1);
+    assert.deepEqual(request.body.bbox,[0,0,600,800]);
+    assert.equal(mounts[0].scene.pageIndex,1);
+  }finally{delete globalThis.FalsifyChartShape;delete globalThis.FalsifyChartShapeEditor;}
+});
+
+serial('apply owns delayed image preparation before a second invocation',async()=>{
+  const held=[];
+  const figure={id:'f1',type:'figure',pageIndex:0,bbox:[10,20,210,160],caption:'그림'};
+  const h=world({hold:info=>{held.push(info.active);},catalog:{items:[figure],full:{f1:figure},analyses:[],fullAnalyses:{}}});
+  h.source={file:fileOf(PDF,'t.pdf'),fileHash:HASH,revision:'r1'};
+  await h.ui.refresh();
+  h.radios()[0].checked=true;h.radios()[0].dispatchEvent(new Event('change'));
+  await until(()=>all(h.host).some(el=>el.type==='file'),'file');
+  let release;const file=all(h.host).find(el=>el.type==='file');
+  file.files=[{...imagePick(GRID,'grid.png','image/png'),arrayBuffer:()=>new Promise(r=>{release=()=>r(Uint8Array.from(GRID).buffer);})}];
+  file.dispatchEvent(new Event('change'));
+  const apply=h.button('PDF에 적용');
+  apply.dispatchEvent(new Event('click'));apply.dispatchEvent(new Event('click'));
+  release();
+  await until(()=>h.outputs.length===1,'output');
+  await settle();
+  assert.deepEqual(held,[true,false]);
+  assert.equal(h.calls.filter(c=>c.path==='/api/paper/visual/export').length,1);
+});
+
+serial('clear during output digest cannot install or announce stale output',async()=>{
+  const h=world();h.source={file:fileOf(PDF,'t.pdf'),fileHash:HASH,revision:'r1'};
+  await h.ui.refresh();h.radios()[0].checked=true;h.radios()[0].dispatchEvent(new Event('change'));
+  await until(()=>h.labeled('행 1 열 1'),'cell');
+  const input=h.labeled('행 1 열 1');input.value='Z';input.dispatchEvent(new Event('input'));
+  const result=await h.pdfOf(HASH,'delayed');h.exportImpl=()=>result;
+  const subtle=crypto.subtle,original=subtle.digest.bind(subtle);let release,entered;
+  const waiting=new Promise(r=>{entered=r;});
+  subtle.digest=async (...args)=>{entered();await new Promise(r=>{release=r;});return original(...args);};
+  try{
+    h.button('PDF에 적용').click();await waiting;
+    h.source=null;h.ui.clear();const status=h.status();release();await settle();
+    assert.equal(h.outputs.length,0);assert.equal(h.ui.snapshot().outputFileHash,null);assert.equal(h.status(),status);
+  }finally{subtle.digest=original;}
+});
+
+serial('latest list navigation wins and a failed request preserves the page',async()=>{
+  const items=Array.from({length:24},(_,i)=>({id:'f'+i,type:'figure',pageIndex:0,bbox:[1,2,30,40],caption:'항목 '+i}));
+  const pending=[];let delay=false;
+  const h=world({catalog:{items,full:{},analyses:[],fullAnalyses:{}},request:(path,body,next)=>{
+    if(delay&&body?.operation==='list')return new Promise((resolve,reject)=>pending.push({body,resolve:()=>resolve(next()),reject}));
+    return next();
+  }});
+  h.source={file:fileOf(PDF,'t.pdf'),fileHash:HASH,revision:'r1'};await h.ui.refresh();
+  h.button('다음 목록').click();await until(()=>h.radios()[0]?.value==='item:f8','page 2');
+  delay=true;h.button('다음 목록').click();h.button('이전 목록').click();
+  assert.deepEqual(pending.map(x=>x.body.offset),[16,0]);
+  pending[1].resolve();await until(()=>h.radios()[0]?.value==='item:f0','page 1');
+  pending[0].resolve();await settle();assert.equal(h.radios()[0].value,'item:f0');
+  h.button('다음 목록').click();pending[2].reject(new Error('offline'));await settle();
+  assert.equal(h.radios()[0].value,'item:f0');assert.equal(h.ui.snapshot().error,'failed');assert.ok(h.status());
+});
+
+for(const phase of ['export','verify'])serial('clear during old '+phase+' preserves the replacement apply lease',async()=>{
+  const held=[];let active=false;
+  const h=world({hold(info){held.push(info.active);active=info.active;return true;}});
+  const prepare=async revision=>{
+    h.source={file:fileOf(PDF,'t.pdf'),fileHash:HASH,revision};
+    await h.ui.refresh();h.radios()[0].checked=true;h.radios()[0].dispatchEvent(new Event('change'));
+    await until(()=>h.labeled('행 1 열 1'),'cell');
+    const input=h.labeled('행 1 열 1');input.value='Z';input.dispatchEvent(new Event('input'));
+  };
+  await prepare('old');
+  const oldResult=await h.pdfOf(HASH,'old'),newResult=await h.pdfOf(HASH,'new');
+  let releaseOld,releaseNew,exportCount=0,oldDigestEntered=false;
+  h.exportImpl=()=>{
+    exportCount++;
+    if(exportCount===1&&phase==='verify')return oldResult;
+    return new Promise(resolve=>{if(exportCount===1)releaseOld=()=>resolve(oldResult);else releaseNew=()=>resolve(newResult);});
+  };
+  const subtle=crypto.subtle,original=subtle.digest.bind(subtle);
+  if(phase==='verify')subtle.digest=async (...args)=>{
+    if(Buffer.from(args[1]).includes(Buffer.from('%old'))){oldDigestEntered=true;await new Promise(resolve=>{releaseOld=resolve;});}
+    return original(...args);
+  };
+  try{
+    h.button('PDF에 적용').click();h.button('PDF에 적용').dispatchEvent(new Event('click'));
+    await until(()=>phase==='verify'?oldDigestEntered:!!releaseOld,'old pending');
+    assert.equal(exportCount,1);assert.equal(active,true);
+    h.ui.clear();assert.equal(active,false);
+    await prepare('new');h.button('PDF에 적용').click();
+    await until(()=>!!releaseNew,'new pending');
+    const status=h.status();releaseOld();await settle();
+    assert.equal(h.ui.snapshot().applying,true);assert.equal(active,true);
+    assert.equal(h.button('PDF에 적용').disabled,true);assert.equal(h.status(),status);
+    assert.deepEqual(held,[true,false,true]);assert.equal(h.outputs.length,0);
+    releaseNew();await until(()=>h.outputs.length===1&&!h.ui.snapshot().applying,'new complete');
+    assert.deepEqual(held,[true,false,true,false]);assert.equal(active,false);
+  }finally{subtle.digest=original;}
+});
+
+serial('clear abandons pending image preparation without blocking the next draft',async()=>{
+  const figure={id:'f1',type:'figure',pageIndex:0,bbox:[10,20,210,160],caption:'그림'};
+  const h=world({catalog:{items:[figure],full:{f1:figure},analyses:[],fullAnalyses:{}}});
+  h.source={file:fileOf(PDF,'t.pdf'),fileHash:HASH,revision:'old'};
+  await h.ui.refresh();h.radios()[0].checked=true;h.radios()[0].dispatchEvent(new Event('change'));
+  await until(()=>all(h.host).some(el=>el.type==='file'),'file');
+  const file=all(h.host).find(el=>el.type==='file');
+  file.files=[{...imagePick(GRID,'grid.png','image/png'),arrayBuffer:()=>new Promise(()=>{})}];
+  file.dispatchEvent(new Event('change'));h.button('PDF에 적용').dispatchEvent(new Event('click'));
+  assert.equal(h.ui.snapshot().applying,true);h.ui.clear();
+  h.source={file:fileOf(PDF,'t.pdf'),fileHash:HASH,revision:'new'};
+  await h.ui.refresh();h.button('PDF에 적용').dispatchEvent(new Event('click'));
+  await until(()=>!h.ui.snapshot().applying,'new apply completes');
+  assert.match(h.status(),/바꾼 내용이 없습니다/);
+});
+
+serial('clear releases a pending hold without letting its completion release a replacement',async()=>{
+  const held=[];let releaseHold,active=false;
+  const h=world({hold(info){held.push(info.active);active=info.active;if(info.active&&held.length===1)return new Promise(r=>{releaseHold=r;});return true;}});
+  const prepare=async revision=>{
+    h.source={file:fileOf(PDF,'t.pdf'),fileHash:HASH,revision};await h.ui.refresh();
+    h.radios()[0].checked=true;h.radios()[0].dispatchEvent(new Event('change'));
+    await until(()=>h.labeled('행 1 열 1'),'cell');
+    const input=h.labeled('행 1 열 1');input.value='Z';input.dispatchEvent(new Event('input'));
+  };
+  await prepare('old');h.button('PDF에 적용').click();await until(()=>!!releaseHold,'hold pending');
+  h.ui.clear();assert.equal(active,false);
+  await prepare('new');let releaseExport;
+  h.exportImpl=()=>new Promise(r=>{releaseExport=async()=>r(await h.pdfOf(HASH,'new'));});
+  h.button('PDF에 적용').click();await until(()=>!!releaseExport,'new export');
+  releaseHold(true);await settle();
+  assert.equal(active,true);assert.equal(h.ui.snapshot().applying,true);assert.deepEqual(held,[true,false,true]);
+  await releaseExport();await until(()=>!h.ui.snapshot().applying,'new complete');
+  assert.deepEqual(held,[true,false,true,false]);
+});
+
+test('JPEG fallback loads the pure codec lazily without a new script ordering dependency', () => {
+  assert.match(source, /await import\('\.\/paper-visual-codec\.mjs'\)/);
+  assert.ok(source.indexOf("typeof root.createImageBitmap==='function'&&root.document") < source.indexOf("await import('./paper-visual-codec.mjs')"));
+  assert.equal(typeof UI.create, 'function');
 });

@@ -210,6 +210,23 @@ def _default_tables(data, language, issues, versions):
     return True, parsed, []
 
 
+def _upright_page(ocr_bytes, working_lines, language, versions, sideways, height, lines, line_transforms, issues, work_width, work_height):
+    flipped = False
+    if _upside_down(ocr_bytes, working_lines, language):
+        upright = _rotate_png_180(ocr_bytes)
+        if upright is not None:
+            more_issues = []
+            ok, upright_lines, _ = _default_lines(upright, language, more_issues, versions)
+            if ok and upright_lines:
+                flipped = True; ocr_bytes = upright
+                lines = _flip_records(upright_lines, work_width, work_height)
+                if sideways: lines = _remap_lines(lines, height)
+                line_transforms.append({'op':'page-rotate','angle':180,'direction':'clockwise',
+                    'coordinateSpace':'after-page-rotate' if sideways else 'original'})
+                for code in more_issues: _add(issues, code)
+    return flipped, ocr_bytes, lines
+
+
 def _default_page(data, language, height, issues, versions):
     line_issues = []
     line_ok, lines, line_transforms = _default_lines(data, language, line_issues, versions)
@@ -234,18 +251,7 @@ def _default_page(data, language, height, issues, versions):
     working_lines = turned_lines if sideways else lines
     flipped = False
     _, work_width, work_height = _png_geometry(ocr_bytes)
-    if _upside_down(ocr_bytes, working_lines, language):
-        upright = _rotate_png_180(ocr_bytes)
-        if upright is not None:
-            more_issues = []
-            ok, upright_lines, _ = _default_lines(upright, language, more_issues, versions)
-            if ok and upright_lines:
-                flipped = True; ocr_bytes = upright
-                lines = _flip_records(upright_lines, work_width, work_height)
-                if sideways: lines = _remap_lines(lines, height)
-                line_transforms.append({'op':'page-rotate','angle':180,'direction':'clockwise',
-                    'coordinateSpace':'after-page-rotate' if sideways else 'original'})
-                for code in more_issues: _add(issues, code)
+    flipped, ocr_bytes, lines = _upright_page(ocr_bytes, working_lines, language, versions, sideways, height, lines, line_transforms, issues, work_width, work_height)
     table_ok, tables, table_transforms = _default_tables(ocr_bytes, language, issues, versions)
     if flipped:
         tables = _flip_records(tables, work_width, work_height)
@@ -451,29 +457,7 @@ def _invoke(engine, data, names):
     raise TypeError('engine')
 
 
-def _parse_lines(raw, issues):
-    if raw is None:
-        return [], []
-    transforms = _transforms_from(raw, issues)
-    records = _line_records(raw)
-    if records is None:
-        fields = _ocr_fields(raw)
-        if fields is None:
-            _add(issues, 'line-result-type')
-            return None, []
-        boxes, txts, scores = fields
-        count = max(len(boxes), len(txts), len(scores))
-        if len(boxes) != count or len(txts) != count or len(scores) != count:
-            _add(issues, 'line-field-mismatch')
-        records = []
-        for index in range(count):
-            record = {
-                'text': txts[index] if index < len(txts) else None,
-                'box': boxes[index] if index < len(boxes) else None,
-            }
-            if index < len(scores):
-                record['confidence'] = scores[index]
-            records.append(record)
+def _parse_line_records(records, issues, transforms):
     lines = []
     for index, record in enumerate(records):
         text = _text(record.get('text'), issues, 'line-text-type')
@@ -505,6 +489,33 @@ def _parse_lines(raw, issues):
                     'coordinateSpace': 'original',
                 })
         lines.append(line)
+    return lines
+
+
+def _parse_lines(raw, issues):
+    if raw is None:
+        return [], []
+    transforms = _transforms_from(raw, issues)
+    records = _line_records(raw)
+    if records is None:
+        fields = _ocr_fields(raw)
+        if fields is None:
+            _add(issues, 'line-result-type')
+            return None, []
+        boxes, txts, scores = fields
+        count = max(len(boxes), len(txts), len(scores))
+        if len(boxes) != count or len(txts) != count or len(scores) != count:
+            _add(issues, 'line-field-mismatch')
+        records = []
+        for index in range(count):
+            record = {
+                'text': txts[index] if index < len(txts) else None,
+                'box': boxes[index] if index < len(boxes) else None,
+            }
+            if index < len(scores):
+                record['confidence'] = scores[index]
+            records.append(record)
+    lines = _parse_line_records(records, issues, transforms)
     return lines, transforms
 
 
@@ -1059,6 +1070,25 @@ def _bbox_key(bbox):
     return tuple(_json_num(value) for value in bbox)
 
 
+def _transform_record(item, issues):
+    if not isinstance(item, dict) or not isinstance(item.get('op'), str) or not item['op']:
+        _add(issues, 'transform-type')
+        return None
+    record = {'op': item['op']}
+    if 'angle' in item:
+        angle = _num(item.get('angle'))
+        if angle is None:
+            _add(issues, 'transform-type')
+            return None
+        record['angle'] = _json_num(angle)
+    for key in ('lineId', 'coordinateSpace'):
+        if isinstance(item.get(key), str):
+            record[key] = item[key]
+    if record.get('coordinateSpace') not in (None, 'original'):
+        _add(issues, 'transform-coordinate-space')
+    return record
+
+
 def _transforms_from(raw, issues):
     if isinstance(raw, (list, tuple)) or raw is None:
         return []
@@ -1070,22 +1100,8 @@ def _transforms_from(raw, issues):
         return []
     cleaned = []
     for item in raw_list:
-        if not isinstance(item, dict) or not isinstance(item.get('op'), str) or not item['op']:
-            _add(issues, 'transform-type')
-            continue
-        record = {'op': item['op']}
-        if 'angle' in item:
-            angle = _num(item.get('angle'))
-            if angle is None:
-                _add(issues, 'transform-type')
-                continue
-            record['angle'] = _json_num(angle)
-        for key in ('lineId', 'coordinateSpace'):
-            if isinstance(item.get(key), str):
-                record[key] = item[key]
-        if record.get('coordinateSpace') not in (None, 'original'):
-            _add(issues, 'transform-coordinate-space')
-        cleaned.append(record)
+        record = _transform_record(item, issues)
+        if record is not None: cleaned.append(record)
     return cleaned
 
 

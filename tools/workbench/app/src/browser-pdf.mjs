@@ -92,14 +92,7 @@ async function prepareExclusive(request) {
   const bytes = await readBytes(parsed.file);
   checkAbort(request.signal);
   const sourceSha256 = await sha256(bytes);
-  if (parsed.fileHash && parsed.fileHash !== sourceSha256) {
-    throw new BrowserPdfError('stale-source', '원본 PDF 해시가 편집 세션과 다릅니다. 파일을 다시 연 뒤 적용하세요. 출력은 만들지 않았습니다.', {
-      sourceSha256, expectedSha256: parsed.fileHash,
-    });
-  }
-  const enabled = parsed.edits.filter(edit => edit.enabled !== false);
-  if (!enabled.length) throw new BrowserPdfError('no-edits', '적용할 편집이 없습니다. 원본을 변경된 파일로 반환하지 않습니다.');
-  if (enabled.length > LIMITS.maxEdits) throw new BrowserPdfError('limit', `편집은 한 번에 ${LIMITS.maxEdits}개까지입니다.`);
+  const enabled = validateSourceEdits(parsed, sourceSha256);
 
   let doc;
   try {
@@ -112,48 +105,13 @@ async function prepareExclusive(request) {
       checkAbort(request.signal);
       models.push(readPage(doc.loadPage(i)));
     }
-    const plans = [];
-    const failures = [];
-    enabled.forEach((edit, index) => {
-      const result = locate(edit, index, models, pageCount, snapshot);
-      if (result.ok) plans.push(result.plan);
-      else failures.push(result.failure);
-    });
-    const overlaps = overlapping(plans);
-    if (overlaps.length) failures.push(...overlaps);
-    if (failures.length) throw unsupported(failures, models);
+    const {plans, failures} = locateEditPlans(enabled, models, pageCount, snapshot);
     checkAbort(request.signal);
 
     const warnings = [];
-    const byPage = new Map();
-    for (const plan of plans) {
-      const laid = layout(plan, models[plan.pageIndex], doc.loadPage(plan.pageIndex));
-      if (laid.error) failures.push(failure(plan.edit, plan.pageIndex, laid.error));
-      else {
-        plan.layout = laid;
-        if (plan.anchorApproximate) warnings.push(warn('selection-font-metrics', 'warning', plan.pageIndex, plan.edit.id));
-        if (laid.substituted) warnings.push(warn('font-substituted', 'warning', plan.pageIndex, plan.edit.id));
-        if (laid.lines.length > 1) warnings.push(warn('wrapped-after', 'info', plan.pageIndex, plan.edit.id));
-        if (plan.partialLine) warnings.push(warn('extraction-gap', 'info', plan.pageIndex, plan.edit.id));
-        const list = byPage.get(plan.pageIndex) || [];
-        list.push(plan);
-        byPage.set(plan.pageIndex, list);
-      }
-    }
-    if (failures.length) throw unsupported(failures, models);
+    const byPage = layoutEditPlans(plans, models, doc, failures, warnings);
 
-    for (const [pageIndex, group] of byPage) {
-      checkAbort(request.signal);
-      const turned = group.filter(plan => plan.rotation !== 0);
-      if (turned.length) throw unsupported(turned.map(plan => failure(plan.edit, plan.pageIndex, 'rotated-page')), models);
-      const page = doc.loadPage(pageIndex);
-      const selected = new Set(group.flatMap(plan => plan.chars));
-      const protectedBoxes = removalBoxes(models[pageIndex].chars.filter(ch => !selected.has(ch)));
-      for (const plan of group) redact(page, plan.chars, protectedBoxes);
-      page.applyRedactions(false, mupdf.PDFPage.REDACT_IMAGE_NONE, mupdf.PDFPage.REDACT_LINE_ART_NONE, mupdf.PDFPage.REDACT_TEXT_REMOVE);
-      const piece = group.map(plan => showText(doc, page, plan)).join('');
-      if (piece) appendStream(doc, page, piece);
-    }
+    applyPageEdits(byPage, models, doc, request);
     checkAbort(request.signal);
     const saved = doc.saveToBuffer('garbage=compact');
     const out = new Uint8Array(saved.asUint8Array());
@@ -222,6 +180,69 @@ async function prepareExclusive(request) {
   }
 }
 
+function validateSourceEdits(parsed, sourceSha256) {
+  if (parsed.fileHash && parsed.fileHash !== sourceSha256) {
+    throw new BrowserPdfError('stale-source', '원본 PDF 해시가 편집 세션과 다릅니다. 파일을 다시 연 뒤 적용하세요. 출력은 만들지 않았습니다.', {
+      sourceSha256, expectedSha256: parsed.fileHash,
+    });
+  }
+  const enabled = parsed.edits.filter(edit => edit.enabled !== false);
+  if (!enabled.length) throw new BrowserPdfError('no-edits', '적용할 편집이 없습니다. 원본을 변경된 파일로 반환하지 않습니다.');
+  if (enabled.length > LIMITS.maxEdits) throw new BrowserPdfError('limit', `편집은 한 번에 ${LIMITS.maxEdits}개까지입니다.`);
+
+  return enabled;
+}
+
+function locateEditPlans(enabled, models, pageCount, snapshot) {
+    const plans = [];
+    const failures = [];
+    enabled.forEach((edit, index) => {
+      const result = locate(edit, index, models, pageCount, snapshot);
+      if (result.ok) plans.push(result.plan);
+      else failures.push(result.failure);
+    });
+    const overlaps = overlapping(plans);
+    if (overlaps.length) failures.push(...overlaps);
+    if (failures.length) throw unsupported(failures, models);
+    return {plans, failures};
+}
+
+function layoutEditPlans(plans, models, doc, failures, warnings) {
+    const byPage = new Map();
+    for (const plan of plans) {
+      const laid = layout(plan, models[plan.pageIndex], doc.loadPage(plan.pageIndex));
+      if (laid.error) failures.push(failure(plan.edit, plan.pageIndex, laid.error));
+      else {
+        plan.layout = laid;
+        if (plan.anchorApproximate) warnings.push(warn('selection-font-metrics', 'warning', plan.pageIndex, plan.edit.id));
+        if (laid.substituted) warnings.push(warn('font-substituted', 'warning', plan.pageIndex, plan.edit.id));
+        if (laid.lines.length > 1) warnings.push(warn('wrapped-after', 'info', plan.pageIndex, plan.edit.id));
+        if (plan.partialLine) warnings.push(warn('extraction-gap', 'info', plan.pageIndex, plan.edit.id));
+        const list = byPage.get(plan.pageIndex) || [];
+        list.push(plan);
+        byPage.set(plan.pageIndex, list);
+      }
+    }
+    if (failures.length) throw unsupported(failures, models);
+
+    return byPage;
+}
+
+function applyPageEdits(byPage, models, doc, request) {
+    for (const [pageIndex, group] of byPage) {
+      checkAbort(request.signal);
+      const turned = group.filter(plan => plan.rotation !== 0);
+      if (turned.length) throw unsupported(turned.map(plan => failure(plan.edit, plan.pageIndex, 'rotated-page')), models);
+      const page = doc.loadPage(pageIndex);
+      const selected = new Set(group.flatMap(plan => plan.chars));
+      const protectedBoxes = removalBoxes(models[pageIndex].chars.filter(ch => !selected.has(ch)));
+      for (const plan of group) redact(page, plan.chars, protectedBoxes);
+      page.applyRedactions(false, mupdf.PDFPage.REDACT_IMAGE_NONE, mupdf.PDFPage.REDACT_LINE_ART_NONE, mupdf.PDFPage.REDACT_TEXT_REMOVE);
+      const piece = group.map(plan => showText(doc, page, plan)).join('');
+      if (piece) appendStream(doc, page, piece);
+    }
+}
+
 function parseRequest(request) {
   const file = request.file;
   const signal = request.signal;
@@ -284,24 +305,31 @@ function readPage(page) {
   return {chars, images, transform, toPdf, bounds: page.getBounds(), rotation: rotationOf(page)};
 }
 
-function locate(edit, index, models, pageCount, snapshot) {
-  const id = typeof edit?.id === 'string' && edit.id ? edit.id : `edit-${index}`;
-  const pageIndex = edit?.pageIndex;
-  const fail = (code) => ({ok: false, failure: {id, pageIndex: Number.isInteger(pageIndex) ? pageIndex : null, status: 'unapplied', code}});
+function validateEditText(edit, pageIndex, pageCount, fail) {
   if (!edit || typeof edit !== 'object') return fail('invalid-edit');
   if (!Number.isInteger(pageIndex) || pageIndex < 0 || pageIndex >= pageCount) return fail('invalid-page');
   if (typeof edit.before !== 'string' || !edit.before.trim() || edit.before.length > LIMITS.maxChars) return fail('invalid-before');
   if (typeof edit.after !== 'string' || edit.after.length > LIMITS.maxChars) return fail('invalid-after');
+  return null;
+}
+
+function validAnchorRange(anchor) {
+  if (anchor && (anchor.start !== undefined || anchor.end !== undefined)) {
+    if (!Number.isInteger(anchor.start) || !Number.isInteger(anchor.end) || anchor.end <= anchor.start) return false;
+  }
+  return true;
+}
+
+function validateEditAnchor(edit, pageIndex, pageCount, fail) {
   const anchor = edit.anchor && typeof edit.anchor === 'object' ? edit.anchor : null;
   if (anchorConvention(edit, anchor)) return fail('invalid-anchor');
   if (anchor?.bbox && !validBox(anchor.bbox)) return fail('invalid-anchor');
   if (anchor && anchor.occurrence !== undefined && (!Number.isInteger(anchor.occurrence) || anchor.occurrence < 0)) return fail('invalid-anchor');
-  if (anchor && (anchor.start !== undefined || anchor.end !== undefined)) {
-    if (!Number.isInteger(anchor.start) || !Number.isInteger(anchor.end) || anchor.end <= anchor.start) return fail('invalid-anchor');
-  }
-  /* start/end are raw segment offsets. They are not page-string offsets and do not choose a hit. */
-  const model = models[pageIndex];
-  if (model.rotation !== 0) return fail('rotated-page');
+  if (!validAnchorRange(anchor)) return fail('invalid-anchor');
+  return {anchor};
+}
+
+function findAnchoredQuotes(model, edit, anchor) {
   const {text, map} = normalized(model.chars);
   const needle = edit.before.replace(/\s+/g, ' ').trim();
   const hits = [];
@@ -328,10 +356,10 @@ function locate(edit, index, models, pageCount, snapshot) {
     // counts page-global quotes, before geometry, as in the original contract.
     if (requestedOrdinal !== undefined || hits.length > 1) break;
   }
-  const pool = hits;
-  if (!pool.length) return fail(foundQuote ? 'anchor-mismatch' : 'not-found');
-  if (pool.length > 1) return fail('ambiguous');
-  const chars = pool[0].chars;
+  return {hits, foundQuote};
+}
+
+function buildLocatedPlan(edit, id, pageIndex, model, anchor, chars, snapshot, fail) {
   const drawn = chars.filter(ch => ch.c.trim());
   if (!drawn.length) return fail('not-found');
   if (!drawn.every(ch => horizontalLine(chars.filter(item => item.lineId === ch.lineId)))) return fail('rotated-text');
@@ -354,6 +382,26 @@ function locate(edit, index, models, pageCount, snapshot) {
     size: sizes[0], color: drawn[0].color,
     origin: chars[0].pdf, hole: box[1] - box[0], partialLine, rotation: model.rotation,
   }};
+}
+
+function locate(edit, index, models, pageCount, snapshot) {
+  const id = typeof edit?.id === 'string' && edit.id ? edit.id : `edit-${index}`;
+  const pageIndex = edit?.pageIndex;
+  const fail = (code) => ({ok: false, failure: {id, pageIndex: Number.isInteger(pageIndex) ? pageIndex : null, status: 'unapplied', code}});
+  const invalid = validateEditText(edit, pageIndex, pageCount, fail);
+  if (invalid) return invalid;
+  const validated = validateEditAnchor(edit, pageIndex, pageCount, fail);
+  if (validated.ok === false) return validated;
+  const {anchor} = validated;
+  /* start/end are raw segment offsets. They are not page-string offsets and do not choose a hit. */
+  const model = models[pageIndex];
+  if (model.rotation !== 0) return fail('rotated-page');
+  const {hits, foundQuote} = findAnchoredQuotes(model, edit, anchor);
+  const pool = hits;
+  if (!pool.length) return fail(foundQuote ? 'anchor-mismatch' : 'not-found');
+  if (pool.length > 1) return fail('ambiguous');
+  const chars = pool[0].chars;
+  return buildLocatedPlan(edit, id, pageIndex, model, anchor, chars, snapshot, fail);
 }
 
 function layout(plan, model, page) {
@@ -509,6 +557,18 @@ function verify(sourceBytes, outBytes, plans, models, unchanged) {
   catch { throw new BrowserPdfError('engine', '저장 결과를 다시 열 수 없습니다. 파일을 반환하지 않습니다.'); }
   try {
     if (check.countPages() !== models.length) checks.push({pageIndex: null, status: 'failed', code: 'page-count'});
+    verifyUneditedContent(check, plans, models, checks);
+    verifyEditText(check, plans, models, warnings, checks);
+    if (unchanged || (outBytes.length === sourceBytes.length && outBytes.every((byte, index) => byte === sourceBytes[index]))) {
+      checks.push({status: 'failed', code: 'unchanged-output'});
+    }
+  } finally {
+    try { check.destroy(); } catch { /* ignore */ }
+  }
+  return {warnings, checks};
+}
+
+function verifyUneditedContent(check, plans, models, checks) {
     const edited = new Set(plans.map(plan => plan.pageIndex));
     for (let i = 0; i < models.length; i++) {
       const page = check.loadPage(i);
@@ -520,6 +580,9 @@ function verify(sourceBytes, outBytes, plans, models, unchanged) {
         checks.push({pageIndex: i, status: 'failed', code: 'untouched-text'});
       }
     }
+}
+
+function verifyEditText(check, plans, models, warnings, checks) {
     for (const plan of plans) {
       const text = normalizeText(readPage(check.loadPage(plan.pageIndex)).chars);
       const before = plan.edit.before.replace(/\s+/g, ' ').trim();
@@ -533,13 +596,6 @@ function verify(sourceBytes, outBytes, plans, models, unchanged) {
       const expected = Math.max(0, count(sourceText, before) - 1 + count(after, before));
       if (count(text, before) > expected) checks.push({id: plan.edit.id, pageIndex: plan.pageIndex, status: 'failed', code: 'removed-before'});
     }
-    if (unchanged || (outBytes.length === sourceBytes.length && outBytes.every((byte, index) => byte === sourceBytes[index]))) {
-      checks.push({status: 'failed', code: 'unchanged-output'});
-    }
-  } finally {
-    try { check.destroy(); } catch { /* ignore */ }
-  }
-  return {warnings, checks};
 }
 
 function selectedCharIndexes(plans, pageIndex) {
@@ -775,12 +831,17 @@ function base14(fontName, font) {
   const bold = font.isBold();
   const italic = font.isItalic();
   const family = font.isMono() ? 'Courier' : font.isSerif() ? 'Times' : 'Helvetica';
+  const name = base14Style(family, bold, italic);
+  return {name, substituted: true};
+}
+
+function base14Style(family, bold, italic) {
   const name = family === 'Times'
     ? (bold && italic ? 'Times-BoldItalic' : bold ? 'Times-Bold' : italic ? 'Times-Italic' : 'Times-Roman')
     : family === 'Courier'
       ? (bold && italic ? 'Courier-BoldOblique' : bold ? 'Courier-Bold' : italic ? 'Courier-Oblique' : 'Courier')
       : (bold && italic ? 'Helvetica-BoldOblique' : bold ? 'Helvetica-Bold' : italic ? 'Helvetica-Oblique' : 'Helvetica');
-  return {name, substituted: true};
+  return name;
 }
 
 function metrics(name) {

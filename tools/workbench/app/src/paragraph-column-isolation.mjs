@@ -1,7 +1,4 @@
-export function isolateColumns(engine, paragraphs, edits, plan) {
-  const M = engine.M;
-  const api = ["_FPDFText_LoadPage", "_FPDFText_CountChars", "_FPDFText_GetUnicode", "_FPDFText_GetTextObject", "_FPDFText_ClosePage", "_FPDFPage_RemoveObject", "_FPDFPage_InsertObjectAtIndex", "_FPDFPageObj_GetType"];
-  if (plan.failures.length || api.some((k) => typeof M?.[k] !== "function") || ["objectCount","objectAt","objectBounds","paragraphObjects"].some(k=>typeof engine[k]!=="function")) return null;
+function readPageCharacters(engine, M) {
   const tp = M._FPDFText_LoadPage(engine.page);
   if (!tp) return null;
   let chars = [];
@@ -10,6 +7,10 @@ export function isolateColumns(engine, paragraphs, edits, plan) {
   } finally {
     M._FPDFText_ClosePage(tp);
   }
+  return chars;
+}
+
+function normalizeCharacters(chars) {
   let norm = "", map = [];
   for (let i = 0; i < chars.length; i++) {
     let j = i;
@@ -18,6 +19,10 @@ export function isolateColumns(engine, paragraphs, edits, plan) {
     for (let k = 0; k < (/\s/.test(chars[i].ch) ? 1 : chars[i].ch.length); k++) map.push([i, j]);
     i = j;
   }
+  return {norm,map};
+}
+
+function selectEditObjects(edits, chars, norm, map) {
   const selected = new Set();
   for (const edit of edits) {
     const needle = edit.before.replace(/\s+/g, " "), at = norm.indexOf(needle);
@@ -29,46 +34,10 @@ export function isolateColumns(engine, paragraphs, edits, plan) {
       selected.add(c.h);
     }
   }
-  const candidates = new Set(plan.plans.flatMap((p) => p.touched));
-  const foreign = new Set();
-  let side = null, gap = null, gapRight = null;
-  for (const pi of candidates) {
-    const objects = engine.paragraphObjects(paragraphs[pi].id).map((h) => ({ h: h >>> 0, b: engine.objectBounds(h) }));
-    if (objects.some((o) => !o.b || !Number.isFinite(o.b.x) || !Number.isFinite(o.b.w))) return null;
-    const sorted = objects.slice().sort((a, b) => a.b.x - b.b.x);
-    let right = -Infinity, gaps = [];
-    for (const o of sorted) {
-      if (o.b.x - right >= 10) gaps.push([right, o.b.x]);
-      right = Math.max(right, o.b.x + o.b.w);
-    }
-    if (!gaps.length) continue;
-    for (const [a, b] of gaps) {
-      if (!Number.isFinite(a)) continue;
-      const chosen = objects.filter((o) => selected.has(o.h));
-      if (!chosen.length) continue;
-      const left = chosen.every((o) => o.b.x + o.b.w <= a + 0.01), rightSide = chosen.every((o) => o.b.x >= b - 0.01);
-      if (!left && !rightSide) return null;
-      const s = left ? "left" : "right";
-      if (side && (side !== s || Math.abs(gap - a) > 10)) return null;
-      side = s;
-      gap = a;
-      gapRight = b;
-      for (const o of objects) if (left ? o.b.x >= b - 0.01 : o.b.x + o.b.w <= a + 0.01) foreign.add(o.h);
-      break;
-    }
-  }
-  if(foreign.size) for(let i=0;i<engine.objectCount();i++){const o=engine.objectAt(i);if(M._FPDFPageObj_GetType(o.handle)!==1)continue;const b=engine.objectBounds(o.handle);if(b && (side==="right"?b.x+b.w<=gap+0.01:b.x>=gapRight-0.01))foreign.add(o.handle>>>0);}
-  if (!foreign.size) return null;
-  for (const h of selected) {
-    const b = engine.objectBounds(h);
-    if (!b || (side === "left" ? b.x + b.w > gap + 0.01 : b.x < gapRight - 0.01)) return null;
-  }
-  const slots = [];
-  for (let i = 0; i < engine.objectCount(); i++) {
-    const o = engine.objectAt(i);
-    if (o && foreign.has(o.handle >>> 0)) slots.push({ h: o.handle >>> 0, i });
-  }
-  if (slots.length !== foreign.size) return null;
+  return selected;
+}
+
+function detachColumnObjects(engine, M, slots) {
   let detached = [];
   const restore = () => {
     let failed = false;
@@ -99,5 +68,78 @@ export function isolateColumns(engine, paragraphs, edits, plan) {
     throw e;
   }
   return restore;
+}
+
+function columnGaps(objects) {
+    const sorted = objects.slice().sort((a, b) => a.b.x - b.b.x);
+    let right = -Infinity, gaps = [];
+    for (const o of sorted) {
+      if (o.b.x - right >= 10) gaps.push([right, o.b.x]);
+      right = Math.max(right, o.b.x + o.b.w);
+    }
+    return gaps;
+}
+
+function inspectColumnParagraph(engine,paragraphs,pi,selected,foreign,state) {
+    let {side,gap,gapRight} = state;
+    const objects = engine.paragraphObjects(paragraphs[pi].id).map((h) => ({ h: h >>> 0, b: engine.objectBounds(h) }));
+    if (objects.some((o) => !o.b || !Number.isFinite(o.b.x) || !Number.isFinite(o.b.w))) return false;
+    const gaps = columnGaps(objects);
+    if (!gaps.length) return true;
+    for (const [a, b] of gaps) {
+      if (!Number.isFinite(a)) continue;
+      const chosen = objects.filter((o) => selected.has(o.h));
+      if (!chosen.length) continue;
+      const left = chosen.every((o) => o.b.x + o.b.w <= a + 0.01), rightSide = chosen.every((o) => o.b.x >= b - 0.01);
+      if (!left && !rightSide) return false;
+      const s = left ? "left" : "right";
+      if (side && (side !== s || Math.abs(gap - a) > 10)) return false;
+      side = s;
+      gap = a;
+      gapRight = b;
+      for (const o of objects) if (left ? o.b.x >= b - 0.01 : o.b.x + o.b.w <= a + 0.01) foreign.add(o.h);
+      break;
+    }
+    state.side=side;state.gap=gap;state.gapRight=gapRight;
+    return true;
+}
+
+function extendForeignObjects(engine,M,foreign,side,gap,gapRight) {
+  if(foreign.size) for(let i=0;i<engine.objectCount();i++){const o=engine.objectAt(i);if(M._FPDFPageObj_GetType(o.handle)!==1)continue;const b=engine.objectBounds(o.handle);if(b && (side==="right"?b.x+b.w<=gap+0.01:b.x>=gapRight-0.01))foreign.add(o.handle>>>0);}
+}
+
+function columnSlots(engine,selected,foreign,side,gap,gapRight) {
+  for (const h of selected) {
+    const b = engine.objectBounds(h);
+    if (!b || (side === "left" ? b.x + b.w > gap + 0.01 : b.x < gapRight - 0.01)) return null;
+  }
+  const slots = [];
+  for (let i = 0; i < engine.objectCount(); i++) {
+    const o = engine.objectAt(i);
+    if (o && foreign.has(o.handle >>> 0)) slots.push({ h: o.handle >>> 0, i });
+  }
+  if (slots.length !== foreign.size) return null;
+  return slots;
+}
+
+export function isolateColumns(engine, paragraphs, edits, plan) {
+  const M = engine.M;
+  const api = ["_FPDFText_LoadPage", "_FPDFText_CountChars", "_FPDFText_GetUnicode", "_FPDFText_GetTextObject", "_FPDFText_ClosePage", "_FPDFPage_RemoveObject", "_FPDFPage_InsertObjectAtIndex", "_FPDFPageObj_GetType"];
+  if (plan.failures.length || api.some((k) => typeof M?.[k] !== "function") || ["objectCount","objectAt","objectBounds","paragraphObjects"].some(k=>typeof engine[k]!=="function")) return null;
+  const chars = readPageCharacters(engine, M);
+  if (!chars) return null;
+  const {norm, map} = normalizeCharacters(chars);
+  const selected = selectEditObjects(edits, chars, norm, map);
+  if (!selected) return null;
+  const candidates = new Set(plan.plans.flatMap((p) => p.touched));
+  const foreign = new Set();
+  const state={side:null,gap:null,gapRight:null};
+  for (const pi of candidates) if (!inspectColumnParagraph(engine,paragraphs,pi,selected,foreign,state)) return null;
+  const {side,gap,gapRight}=state;
+  extendForeignObjects(engine,M,foreign,side,gap,gapRight);
+  if (!foreign.size) return null;
+  const slots=columnSlots(engine,selected,foreign,side,gap,gapRight);
+  if (!slots) return null;
+  return detachColumnObjects(engine, M, slots);
 }
 

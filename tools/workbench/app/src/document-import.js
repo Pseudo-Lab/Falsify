@@ -103,6 +103,11 @@ export function layoutAliases(items,pageIndex,pageWidth){
     }).filter(s=>s.text);
   });
 }
+function extractPdfPageText(items,length){
+  let text='',marked=0;
+  for(const item of items){if(typeof item.str!=='string')continue;text+=unmapped(item.str,()=>marked++)+(item.hasEOL?'\n':' ');if(text.length+length>LIMITS.chars)fail('추출 텍스트는 1,000,000자까지 지원합니다. 문서를 나누어 가져오세요.');}
+  return {text,marked};
+}
 async function pdf(bytes,{signal,onProgress}){
   if(new TextDecoder().decode(bytes.subarray(0,1024)).indexOf('%PDF-')<0)fail('PDF 서명이 없습니다. 손상된 파일인지 확인하세요.');
   const lib=await import('./vendor/pdf.mjs');check(signal);
@@ -118,8 +123,7 @@ async function pdf(bytes,{signal,onProgress}){
     const segments=[],matchSegments=[],blank=[],glyphPages=[];let length=0,glyphs=0;
     for(let n=1;n<=doc.numPages;n++){
       check(signal);onProgress?.('PDF '+n+' / '+doc.numPages+'페이지 추출 중');
-      const page=await doc.getPage(n);const content=await page.getTextContent();let text='',marked=0;
-      for(const item of content.items){if(typeof item.str!=='string')continue;text+=unmapped(item.str,()=>marked++)+(item.hasEOL?'\n':' ');if(text.length+length>LIMITS.chars)fail('추출 텍스트는 1,000,000자까지 지원합니다. 문서를 나누어 가져오세요.');}
+      const page=await doc.getPage(n);const content=await page.getTextContent();let {text,marked}=extractPdfPageText(content.items,length);
       matchSegments.push(...layoutAliases(content.items,n-1,page.getViewport({scale:1}).width));
       if(marked){glyphs+=marked;glyphPages.push(n);}
       text=text.trim();length+=text.length;if(!text)blank.push(n);segments.push({label:'PDF p. '+n,text});page.cleanup();

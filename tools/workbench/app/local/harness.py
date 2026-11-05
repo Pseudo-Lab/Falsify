@@ -19,9 +19,7 @@ def default(role):
     return {'schema': 'falsify.harness.v1', 'id': 'builtin-' + role, 'name': '기본 ' + role.upper(),
             'version': '1', 'role': role, 'instructions': 'Focus on explicit internal contradictions and quote the exact supporting evidence.', 'maxCalls': 8}
 
-def validate(value, role):
-    if not isinstance(value, dict) or not KEYS <= set(value) or set(value) - KEYS - {'adapter', 'settings'} or value['schema'] != 'falsify.harness.v1' or value['role'] != role:
-        raise ValueError('harness 스키마/역할/허용 필드를 확인하세요.')
+def _validate_harness_fields(value):
     for k in ['id', 'version']:
         if not isinstance(value[k], str) or not re.fullmatch(r'[A-Za-z0-9_.-]{1,80}', value[k]):
             raise ValueError('harness ID/버전은 영문·숫자·._- 1–80자입니다.')
@@ -30,15 +28,23 @@ def validate(value, role):
             raise ValueError('harness 이름/지침 길이 제한 초과')
     if type(value['maxCalls']) is not int or not 1 <= value['maxCalls'] <= 32:
         raise ValueError('harness 호출 한도는 1–32회입니다.')
+
+def _validate_cli_adapter(adapter):
+    if not set(adapter) <= {'type', 'model', 'effort'}: raise ValueError('CLI adapter 필드는 type/model/effort만 허용합니다.')
+    if 'model' in adapter and (type(adapter['model']) is not str or not MODEL_PATTERN.fullmatch(adapter['model'])):
+        raise ValueError('CLI 모델 이름은 영문·숫자·._:- 1–120자입니다.')
+    if 'effort' in adapter and adapter['effort'] not in EFFORTS:
+        raise ValueError('CLI effort는 low/medium/high입니다.')
+
+def validate(value, role):
+    if not isinstance(value, dict) or not KEYS <= set(value) or set(value) - KEYS - {'adapter', 'settings'} or value['schema'] != 'falsify.harness.v1' or value['role'] != role:
+        raise ValueError('harness 스키마/역할/허용 필드를 확인하세요.')
+    _validate_harness_fields(value)
     adapter = value.get('adapter', {'type': 'codex'})
     if not isinstance(adapter, dict): raise ValueError('adapter 객체 필요')
     kind = adapter.get('type')
     if kind in CLI_AGENTS:
-        if not set(adapter) <= {'type', 'model', 'effort'}: raise ValueError('CLI adapter 필드는 type/model/effort만 허용합니다.')
-        if 'model' in adapter and (type(adapter['model']) is not str or not MODEL_PATTERN.fullmatch(adapter['model'])):
-            raise ValueError('CLI 모델 이름은 영문·숫자·._:- 1–120자입니다.')
-        if 'effort' in adapter and adapter['effort'] not in EFFORTS:
-            raise ValueError('CLI effort는 low/medium/high입니다.')
+        _validate_cli_adapter(adapter)
     elif kind == 'wrapper':
         from harness_wrapper import validate_adapter
         validate_adapter(adapter)
@@ -47,22 +53,28 @@ def validate(value, role):
         raise ValueError('자유 settings는 JSON 객체 32,000자 이내입니다. 비밀정보를 넣지 마세요.')
     return dict(value)
 
+def _validate_stdio_adapter(adapter):
+    from pathlib import Path
+    if set(adapter) != {'type', 'executable', 'args'} or not isinstance(adapter['executable'], str) or not Path(adapter['executable']).is_absolute() or not Path(adapter['executable']).is_file():
+        raise ValueError('로컬 adapter executable은 존재하는 절대 경로여야 합니다.')
+    if not isinstance(adapter['args'], list) or len(adapter['args']) > 32 or any(not isinstance(x, str) or len(x) > 2000 or '\0' in x for x in adapter['args']):
+        raise ValueError('adapter args 제한 초과')
+
+def _validate_http_adapter(adapter):
+    from urllib.parse import urlsplit
+    url = adapter.get('url')
+    if set(adapter) != {'type', 'url'} or not isinstance(url, str) or len(url) > 2000: raise ValueError('HTTP adapter 필드 오류')
+    parsed = urlsplit(url)
+    if parsed.scheme != 'https' or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment:
+        raise ValueError('외부 adapter는 자격증명·쿼리 없는 HTTPS URL만 허용합니다.')
+
 def validate_transport(adapter):
     """The stdio/http adapter shapes, also reused as a wrapper target."""
     kind = adapter.get('type')
     if kind == 'stdio':
-        from pathlib import Path
-        if set(adapter) != {'type', 'executable', 'args'} or not isinstance(adapter['executable'], str) or not Path(adapter['executable']).is_absolute() or not Path(adapter['executable']).is_file():
-            raise ValueError('로컬 adapter executable은 존재하는 절대 경로여야 합니다.')
-        if not isinstance(adapter['args'], list) or len(adapter['args']) > 32 or any(not isinstance(x, str) or len(x) > 2000 or '\0' in x for x in adapter['args']):
-            raise ValueError('adapter args 제한 초과')
+        _validate_stdio_adapter(adapter)
     elif kind == 'http':
-        from urllib.parse import urlsplit
-        url = adapter.get('url')
-        if set(adapter) != {'type', 'url'} or not isinstance(url, str) or len(url) > 2000: raise ValueError('HTTP adapter 필드 오류')
-        parsed = urlsplit(url)
-        if parsed.scheme != 'https' or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment:
-            raise ValueError('외부 adapter는 자격증명·쿼리 없는 HTTPS URL만 허용합니다.')
+        _validate_http_adapter(adapter)
     else: raise ValueError('adapter type은 codex/claude/stdio/http/wrapper입니다.')
 
 def digest(value):

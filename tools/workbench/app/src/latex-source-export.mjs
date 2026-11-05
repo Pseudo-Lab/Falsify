@@ -30,17 +30,24 @@ export async function prepareSourceExport({baselineProject,currentProject,change
     if(binding?.bindingScope!=='containing-project'||Object.hasOwn(binding,'projectId')||!f||!/\.(tex|bib)$/i.test(f.path)||!Number.isSafeInteger(binding.start)||!Number.isSafeInteger(binding.end)||binding.start<0||binding.end<binding.start||binding.end>decoder.decode(f.bytes).length||!Array.isArray(binding.evidence)||binding.evidence.some(e=>e.sourceSha256!==baseline.sourcePdfHash))fail('INVALID_BASELINE_BINDING');
     const {bindingScope,...rest}=binding;return {...rest,projectId:baseline.id};
   });
-  let baselinePdfHash=null,state='uncompared',history=null;
-  if(reconstruction!==null){
-    if(reconstruction?.schema==='falsify.reconstruction-lineage.v1'){
-      if(!validLineage(reconstruction,baseline.sourcePdfHash)||reconstruction.projectId!==baseline.id||stable(reconstruction.bindings)!==stable(baselineBindings)||stable(reconstruction.decisions)!==stable(original.decisions))fail('INVALID_RECONSTRUCTION');
-      baselinePdfHash=reconstruction.baselinePdfHash;state='compared-baseline';history=structuredClone(reconstruction);
-    } else if(reconstruction?.schema==='falsify.reconstruction-pending.v1'){
-      const prev=reconstruction.previousProject;
-      if(reconstruction.sourcePdfHash!==baseline.sourcePdfHash||reconstruction.reason!=='files-added'||!validLineage(reconstruction.previous,baseline.sourcePdfHash)||prev?.id!==reconstruction.previous.projectId||descriptorId(prev)!==prev.id||prev.sourcePdfHash!==baseline.sourcePdfHash||prev.origin!==baseline.origin||prev.engine!==baseline.engine||prev.mainFile!==baseline.mainFile||prev.files.some(f=>!baseline.files.some(b=>b.path===f.path&&b.sha256===f.sha256)))fail('INVALID_RECONSTRUCTION');
-      state='pending';history=structuredClone(reconstruction);
-    } else fail('INVALID_RECONSTRUCTION');
+  function validatePending(reconstruction,prev) {
+        if(reconstruction.sourcePdfHash!==baseline.sourcePdfHash||reconstruction.reason!=='files-added'||!validLineage(reconstruction.previous,baseline.sourcePdfHash)||prev?.id!==reconstruction.previous.projectId||descriptorId(prev)!==prev.id||prev.sourcePdfHash!==baseline.sourcePdfHash||prev.origin!==baseline.origin||prev.engine!==baseline.engine||prev.mainFile!==baseline.mainFile||prev.files.some(f=>!baseline.files.some(b=>b.path===f.path&&b.sha256===f.sha256)))fail('INVALID_RECONSTRUCTION');
   }
+  function resolveReconstruction() {
+    let baselinePdfHash=null,state='uncompared',history=null;
+    if(reconstruction!==null){
+      if(reconstruction?.schema==='falsify.reconstruction-lineage.v1'){
+        if(!validLineage(reconstruction,baseline.sourcePdfHash)||reconstruction.projectId!==baseline.id||stable(reconstruction.bindings)!==stable(baselineBindings)||stable(reconstruction.decisions)!==stable(original.decisions))fail('INVALID_RECONSTRUCTION');
+        baselinePdfHash=reconstruction.baselinePdfHash;state='compared-baseline';history=structuredClone(reconstruction);
+      } else if(reconstruction?.schema==='falsify.reconstruction-pending.v1'){
+        const prev=reconstruction.previousProject;
+        validatePending(reconstruction,prev);
+        state='pending';history=structuredClone(reconstruction);
+      } else fail('INVALID_RECONSTRUCTION');
+  }
+    return {baselinePdfHash,state,history};
+  }
+  const {baselinePdfHash,state,history}=resolveReconstruction();
   const metadata={schema:'falsify.reconstruction-source-export.v1',sourcePdfHash:baseline.sourcePdfHash,baselineProjectId:baseline.id,baselinePdfHash,baselineStatus:state,baselineProject:{mainFile:baseline.mainFile,engine:baseline.engine,origin:baseline.origin,files:baseline.files.map(({path,sha256})=>({path,sha256}))},baselineSourceFiles:baseline.files.filter(f=>/\.(tex|bib)$/i.test(f.path)).map(f=>({path:f.path,sha256:f.sha256,encoding:'base64',bytes:b64(f.bytes)})),baselineBindings,baselineMetadata:{...original,bindings:baselineBindings},sourceChanges:structuredClone(changes),reconstruction:history};
   // Old metadata also says containing-project; preserve it only as baseline evidence.
   // Its scope is explicitly resolved by baselineProjectId above.

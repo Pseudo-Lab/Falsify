@@ -10,43 +10,66 @@ export function parseFont(bytes) {
   const u16 = o => { if (o < 0 || o + 2 > bytes.length) bad(); return view.getUint16(o); };
   const u32 = o => { if (o < 0 || o + 4 > bytes.length) bad(); return view.getUint32(o); };
   const tag = o => String.fromCharCode(...bytes.subarray(o, o + 4));
+  function validateHeader() {
   const sig = u32(0);
   if (sig === 0x74746366) throw error('글꼴 컬렉션(TTC/OTC)은 지원하지 않습니다. 단일 TTF 또는 OTF를 선택해 주세요.');
   if (sig !== 0x00010000 && sig !== 0x4f54544f && sig !== 0x74727565) bad();
   const count = u16(4), tables = new Map();
   if (!count || 12 + count * 16 > bytes.length) bad();
+    return {count,tables};
+  }
+  const {count,tables}=validateHeader();
+  function readTables() {
   for (let i = 0; i < count; i++) {
     const p = 12 + i * 16, name = tag(p), offset = u32(p + 8), length = u32(p + 12);
     if (offset > bytes.length || length > bytes.length - offset || tables.has(name)) bad();
     tables.set(name, { offset, length });
   }
+  }
+  readTables();
+  function requiredTables() {
   if (tables.has('fvar')) throw error('가변 글꼴은 지원하지 않습니다. 고정 굵기의 TTF 또는 OTF를 선택해 주세요.');
   const names = tables.get('name'), os2 = tables.get('OS/2'), head = tables.get('head');
   if (!names || names.length < 6 || !os2 || os2.length < 64 || !head || head.length < 46) bad();
+    return {names,os2,head};
+  }
+  const {names,os2,head}=requiredTables();
   const n = names.offset, entries = u16(n + 2), strings = n + u16(n + 4), end = n + names.length;
   if (n + 6 + entries * 12 > end || strings > end) bad();
   const values = new Map();
-  for (let i = 0; i < entries; i++) {
-    const p = n + 6 + i * 12, platform = u16(p), encoding = u16(p + 2), language = u16(p + 4), id = u16(p + 6), length = u16(p + 8), start = strings + u16(p + 10);
-    if (start > end || length > end - start) bad();
-    if (![1, 2, 6, 16, 17].includes(id)) continue;
+  function decodeName(platform,encoding,length,start) {
     let text;
     if (platform === 0 || platform === 3) {
       if (length % 2) bad();
       text = ''; for (let j = 0; j < length; j += 2) text += String.fromCharCode(u16(start + j));
     } else if (platform === 1 && encoding === 0) text = String.fromCharCode(...bytes.subarray(start, start + length));
-    else continue;
+    else return null;
+    return text;
+  }
+  function readNames() {
+  for (let i = 0; i < entries; i++) {
+    const p = n + 6 + i * 12, platform = u16(p), encoding = u16(p + 2), language = u16(p + 4), id = u16(p + 6), length = u16(p + 8), start = strings + u16(p + 10);
+    if (start > end || length > end - start) bad();
+    if (![1, 2, 6, 16, 17].includes(id)) continue;
+    let text;
+    text=decodeName(platform,encoding,length,start);
+    if(text===null)continue;
     text = text.replace(/\0/g, '').trim();
     const score = (platform === 3 ? 4 : platform === 0 ? 3 : 1) + (language === 0x409 ? 2 : 0);
     if (text && (!values.has(id) || values.get(id).score < score)) values.set(id, { text, score });
   }
+  }
+  readNames();
   const get = id => values.get(id)?.text;
   const family = get(16) || get(1), postscriptName = get(6);
   if (!family) bad();
+  function fontMetadata() {
   const weight = u16(os2.offset + 4), fsType = u16(os2.offset + 8), selection = u16(os2.offset + 62), macStyle = u16(head.offset + 44);
   if (weight < 1 || weight > 1000) bad();
   if ((fsType & 0x200) || ((fsType & 0x2) && !(fsType & 0xc))) throw error('이 글꼴은 임베딩 제한 또는 비트맵 전용 제한이 있어 PDF에 사용할 수 없습니다. 다른 글꼴을 선택해 주세요.');
   return { family, ...(postscriptName ? { postscriptName } : {}), weight, italic: Boolean((selection & 1) || (macStyle & 2)), fsType };
+  }
+  return fontMetadata();
 }
 
 async function sha256(bytes) {

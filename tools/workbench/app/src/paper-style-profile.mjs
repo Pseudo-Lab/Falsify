@@ -1,5 +1,11 @@
 const median = values => { const a=values.filter(Number.isFinite).sort((x,y)=>x-y); return a.length ? a[Math.floor(a.length/2)] : null; };
 
+function bodyRhythm(body) {
+  const rhythm=[];
+  for(const b of body) {const lines=b.source?.lines || []; for(let i=1;i<lines.length;i++) {const a=lines[i-1].bbox, z=lines[i].bbox; if(Array.isArray(a) && Array.isArray(z)) {const d=z[1]-a[1]; if(d>0 && d<50) rhythm.push(d);}}}
+  return rhythm;
+}
+
 // These values describe source evidence, not measurements of the output PDF.
 export function deriveLayoutProfile(document, flow) {
   const styles=new Map((document.styles || []).map(s=>[s.id,s]));
@@ -16,8 +22,7 @@ export function deriveLayoutProfile(document, flow) {
     }
     return {size:median(sizes),fontNames:[...new Set(names)]};
   };
-  const rhythm=[];
-  for(const b of body) {const lines=b.source?.lines || []; for(let i=1;i<lines.length;i++) {const a=lines[i-1].bbox, z=lines[i].bbox; if(Array.isArray(a) && Array.isArray(z)) {const d=z[1]-a[1]; if(d>0 && d<50) rhythm.push(d);}}}
+  const rhythm=bodyRhythm(body);
   const bodyStats=stats(body), headingStats=stats(byKind('heading')), captionStats=stats(byKind('caption'));
   // Aggregate observed column-item rectangles, not guessed output bounds.
   const columnGroups=new Map();

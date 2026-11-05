@@ -258,19 +258,7 @@ def _template_check(request, given):
     return []
 
 
-def review(response, request):
-    """Deterministic checks over the model's structured answer. Returns the public draft or raises ProposalError."""
-    if not isinstance(response, dict) or set(response) != set(PROPOSAL_SCHEMA['properties']): raise ProposalError('invalid_proposal')
-    executable = _bounded(response['executable'], 2000).strip()
-    args = response['args']
-    if not isinstance(args, list) or len(args) > 32: raise ProposalError('invalid_proposal')
-    args = [_bounded(a, 2000) for a in args]
-    mode, source, fmt = response['inputMode'], response['outputSource'], response['outputFormat']
-    if mode not in MODES or source not in SOURCES or fmt not in PROPOSAL_FORMATS or response['status'] not in STATUSES:
-        raise ProposalError('invalid_proposal')
-    # Same placeholder rules as harness_wrapper.validate_adapter (the real check at registration).
-    if mode != 'files' and {a for a in args if a in PLACEHOLDERS} - {'{output}'}: raise ProposalError('invalid_proposal')
-    if any(a not in PLACEHOLDERS and PLACEHOLDER_TEXT.search(a) for a in args): raise ProposalError('invalid_proposal')
+def _proposal_io(response, mode, source, fmt):
     given = {'mode': mode}
     template = _bounded(response['inputTemplateJson'], MAX_TEMPLATE_CHARS).strip()
     if (mode == 'template') != bool(template): raise ProposalError('invalid_proposal')
@@ -293,24 +281,27 @@ def review(response, request):
                 _copy_only(t)
             if stage_maps: output['stageMaps'] = stage_maps
     except ValueError: raise ProposalError('invalid_proposal') from None
-    evidence = response['evidence']
-    if not isinstance(evidence, list) or len(evidence) > MAX_EVIDENCE: raise ProposalError('invalid_proposal')
-    spans = _spans(evidence, request)
-    unknowns = response['unknowns']
-    if not isinstance(unknowns, list) or len(unknowns) > MAX_UNKNOWNS: raise ProposalError('invalid_proposal')
-    unknowns = [_bounded(u, MAX_NOTE) for u in unknowns]
-    # Conservative status: the model may only lower confidence, never raise it past what the evidence supports.
+    return given, output
+
+
+def _evidence_downgrades(spans, executable, args, request, fmt, given, output):
+    downgrades = []
+    cited = {(s['field'], s['source']) for s in spans}
+    has = lambda field, sources=EVIDENCE_SOURCES: any((field, s) in cited for s in sources)
+    if fmt == 'unstructured': downgrades.append('unstructured_output')
+    if not executable: downgrades.append('missing_executable')
+    elif not _grounded(executable, args, request): downgrades.append('ungrounded_command')
+    if not has('command', COMMAND_SOURCES): downgrades.append('missing_command_evidence')
+    if not has('input', COMMAND_SOURCES): downgrades.append('missing_input_evidence')
+    if not has('output', ('sample',)): downgrades.append('missing_output_evidence')
+    if ('stageMaps' in output or 'template' in given) and not has('mapping'): downgrades.append('missing_mapping_evidence')
+    return downgrades
+
+
+def _proposal_status(response, request, spans, executable, args, fmt, given, output):
     status, downgrades = response['status'], []
     if status == 'proposed':
-        cited = {(s['field'], s['source']) for s in spans}
-        has = lambda field, sources=EVIDENCE_SOURCES: any((field, s) in cited for s in sources)
-        if fmt == 'unstructured': downgrades.append('unstructured_output')
-        if not executable: downgrades.append('missing_executable')
-        elif not _grounded(executable, args, request): downgrades.append('ungrounded_command')
-        if not has('command', COMMAND_SOURCES): downgrades.append('missing_command_evidence')
-        if not has('input', COMMAND_SOURCES): downgrades.append('missing_input_evidence')
-        if not has('output', ('sample',)): downgrades.append('missing_output_evidence')
-        if ('stageMaps' in output or 'template' in given) and not has('mapping'): downgrades.append('missing_mapping_evidence')
+        downgrades.extend(_evidence_downgrades(spans, executable, args, request, fmt, given, output))
         downgrades += _template_check(request, given)
         if fmt != 'unstructured':
             downgrades += _sample_check(request, output)
@@ -320,6 +311,36 @@ def review(response, request):
             status = 'manual_mapping' if unstructured else 'unknown'
     elif status == 'manual_mapping' and not request['sample'].strip():
         status = 'unknown'
+    return status, downgrades
+
+
+def _proposal_target(response):
+    executable = _bounded(response['executable'], 2000).strip()
+    args = response['args']
+    if not isinstance(args, list) or len(args) > 32: raise ProposalError('invalid_proposal')
+    args = [_bounded(a, 2000) for a in args]
+    mode, source, fmt = response['inputMode'], response['outputSource'], response['outputFormat']
+    if mode not in MODES or source not in SOURCES or fmt not in PROPOSAL_FORMATS or response['status'] not in STATUSES:
+        raise ProposalError('invalid_proposal')
+    # Same placeholder rules as harness_wrapper.validate_adapter (the real check at registration).
+    if mode != 'files' and {a for a in args if a in PLACEHOLDERS} - {'{output}'}: raise ProposalError('invalid_proposal')
+    if any(a not in PLACEHOLDERS and PLACEHOLDER_TEXT.search(a) for a in args): raise ProposalError('invalid_proposal')
+    return executable, args, mode, source, fmt
+
+
+def review(response, request):
+    """Deterministic checks over the model's structured answer. Returns the public draft or raises ProposalError."""
+    if not isinstance(response, dict) or set(response) != set(PROPOSAL_SCHEMA['properties']): raise ProposalError('invalid_proposal')
+    executable, args, mode, source, fmt = _proposal_target(response)
+    given, output = _proposal_io(response, mode, source, fmt)
+    evidence = response['evidence']
+    if not isinstance(evidence, list) or len(evidence) > MAX_EVIDENCE: raise ProposalError('invalid_proposal')
+    spans = _spans(evidence, request)
+    unknowns = response['unknowns']
+    if not isinstance(unknowns, list) or len(unknowns) > MAX_UNKNOWNS: raise ProposalError('invalid_proposal')
+    unknowns = [_bounded(u, MAX_NOTE) for u in unknowns]
+    # Conservative status: the model may only lower confidence, never raise it past what the evidence supports.
+    status, downgrades = _proposal_status(response, request, spans, executable, args, fmt, given, output)
     draft = {'target': {'type': 'stdio', 'executable': executable, 'args': args}, 'input': given, 'output': output}
     return {'status': status, 'downgrades': downgrades, 'summary': _bounded(response['summary'], MAX_SUMMARY),
             'proposal': draft, 'evidence': spans, 'unknowns': unknowns, 'warnings': _warnings(executable, args)}

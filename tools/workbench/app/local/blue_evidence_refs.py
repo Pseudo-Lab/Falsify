@@ -120,6 +120,64 @@ def _fit(cands, budget):
     return refs[:best], best < len(refs)
 
 
+def _preview_candidates(previews, max_span, add):
+    for sid, off, preview in previews:
+        for rel in range(0, len(preview), SLICE):
+            piece = preview[rel:rel + SLICE]
+            if len(piece) > max_span:
+                continue
+            before, after = _context_in(preview, rel, len(piece), _CONTEXT)
+            add(sid, off + rel, piece, before, after)
+        for match in _NUMERIC.finditer(preview):
+            piece = match.group(0)
+            if len(piece) > max_span:
+                continue
+            before, after = _context_in(preview, match.start(), len(piece), _CONTEXT)
+            add(sid, off + match.start(), piece, before, after)
+
+
+def _locate_note(sid, quote, text, previews, spans):
+    positions = _occurrences(text, quote)
+    located = []
+    for pos in positions:
+        end = pos + len(quote)
+        if any(ps == sid and off <= pos and end <= off + len(preview) for ps, off, preview in previews):
+            located.append(pos)
+    # A repeated quote that sits in no delivered preview has no determined offset.
+    if len(positions) != 1 and not located:
+        return []
+    chosen = positions if len(positions) == 1 else located
+    if len(positions) == 1 and not any(s == sid and a <= positions[0] and positions[0] + len(quote) <= b for s, a, b in spans):
+        spans.append((sid, positions[0], positions[0] + len(quote)))
+    return chosen
+
+
+def _note_candidate(item, source, previews, spans, max_note, add, seen_notes):
+    if not isinstance(item, (tuple, list)) or len(item) != 2:
+        return
+    sid, quote = item
+    if not isinstance(sid, str) or not isinstance(quote, str) or not quote.strip() or len(quote) > max_note:
+        return
+    text = source.get(sid)
+    if not isinstance(text, str) or (sid, quote) in seen_notes:
+        return
+    seen_notes.add((sid, quote))
+    chosen = _locate_note(sid, quote, text, previews, spans)
+    for pos in chosen:
+        before, after = '', ''
+        for ps, off, preview in previews:
+            if ps == sid and off <= pos and pos + len(quote) <= off + len(preview):
+                before, after = _context_in(preview, pos - off, len(quote), _CONTEXT)
+                break
+        add(sid, pos, quote, before, after)
+
+
+def _note_candidates(note_quotes, source, previews, spans, max_note, add):
+    seen_notes = set()
+    for item in note_quotes or []:
+        _note_candidate(item, source, previews, spans, max_note, add, seen_notes)
+
+
 def build_evidence_refs(segments, index_entries, note_quotes, budget, max_span=300, max_note=600):
     """Return (refs, truncated, delivered_spans).
 
@@ -141,49 +199,8 @@ def build_evidence_refs(segments, index_entries, note_quotes, budget, max_span=3
         cands.append({'order': order[sid], 'segmentId': sid, 'start': start, 'end': end, 'text': text,
                       'before': before, 'after': after})
 
-    for sid, off, preview in previews:
-        for rel in range(0, len(preview), SLICE):
-            piece = preview[rel:rel + SLICE]
-            if len(piece) > max_span:
-                continue
-            before, after = _context_in(preview, rel, len(piece), _CONTEXT)
-            add(sid, off + rel, piece, before, after)
-        for match in _NUMERIC.finditer(preview):
-            piece = match.group(0)
-            if len(piece) > max_span:
-                continue
-            before, after = _context_in(preview, match.start(), len(piece), _CONTEXT)
-            add(sid, off + match.start(), piece, before, after)
-    seen_notes = set()
-    for item in note_quotes or []:
-        if not isinstance(item, (tuple, list)) or len(item) != 2:
-            continue
-        sid, quote = item
-        if not isinstance(sid, str) or not isinstance(quote, str) or not quote.strip() or len(quote) > max_note:
-            continue
-        text = source.get(sid)
-        if not isinstance(text, str) or (sid, quote) in seen_notes:
-            continue
-        seen_notes.add((sid, quote))
-        positions = _occurrences(text, quote)
-        located = []
-        for pos in positions:
-            end = pos + len(quote)
-            if any(ps == sid and off <= pos and end <= off + len(preview) for ps, off, preview in previews):
-                located.append(pos)
-        # A repeated quote that sits in no delivered preview has no determined offset.
-        if len(positions) != 1 and not located:
-            continue
-        chosen = positions if len(positions) == 1 else located
-        if len(positions) == 1 and not any(s == sid and a <= positions[0] and positions[0] + len(quote) <= b for s, a, b in spans):
-            spans.append((sid, positions[0], positions[0] + len(quote)))
-        for pos in chosen:
-            before, after = '', ''
-            for ps, off, preview in previews:
-                if ps == sid and off <= pos and pos + len(quote) <= off + len(preview):
-                    before, after = _context_in(preview, pos - off, len(quote), _CONTEXT)
-                    break
-            add(sid, pos, quote, before, after)
+    _preview_candidates(previews, max_span, add)
+    _note_candidates(note_quotes, source, previews, spans, max_note, add)
     deduped, seen = [], set()
     for c in cands:
         key = (c['segmentId'], c['start'], c['end'])
@@ -199,6 +216,28 @@ def build_evidence_refs(segments, index_entries, note_quotes, budget, max_span=3
     return refs, truncated, spans
 
 
+def _inside_delivered(delivered_spans, segment_id, start, end):
+    inside = False
+    for span in delivered_spans or []:
+        if isinstance(span, (tuple, list)) and len(span) == 3:
+            sid, a, b = span
+            if sid == segment_id and type(a) is int and type(b) is int and a <= start and end <= b:
+                inside = True
+                break
+    return inside
+
+
+def _validate_ref_binding(ref, anchor, segment_id, source_text):
+    start, end, text = ref.get('start'), ref.get('end'), ref.get('text')
+    if type(start) is not int or type(end) is not int or not isinstance(text, str) or not isinstance(source_text, str):
+        raise ValueError('BLUE 재독 근거 참조가 손상되었습니다.')
+    if ref_id(segment_id, start, end, text) != anchor:
+        raise ValueError('BLUE 재독 근거 참조 ID가 묶인 범위와 일치하지 않습니다.')
+    if not (0 <= start < end <= len(source_text)) or source_text[start:end] != text or end - start != len(text):
+        raise ValueError('BLUE 재독 근거 참조가 원문 위치와 일치하지 않습니다.')
+    return start, end, text
+
+
 def resolve_evidence_ref(anchor, segment_id, source_text, visible_texts, catalog, delivered_spans):
     """Return (start, text) for one catalog id. Never searches the source for the literal."""
     if not isinstance(anchor, str) or not _ID_WELL.fullmatch(anchor):
@@ -208,20 +247,8 @@ def resolve_evidence_ref(anchor, segment_id, source_text, visible_texts, catalog
         raise ValueError('BLUE 재독 근거 참조 ID가 이번 선택에 전달된 목록에 없습니다.')
     if ref.get('segmentId') != segment_id:
         raise ValueError('BLUE 재독 근거 참조 ID의 문단이 대상과 다릅니다.')
-    start, end, text = ref.get('start'), ref.get('end'), ref.get('text')
-    if type(start) is not int or type(end) is not int or not isinstance(text, str) or not isinstance(source_text, str):
-        raise ValueError('BLUE 재독 근거 참조가 손상되었습니다.')
-    if ref_id(segment_id, start, end, text) != anchor:
-        raise ValueError('BLUE 재독 근거 참조 ID가 묶인 범위와 일치하지 않습니다.')
-    if not (0 <= start < end <= len(source_text)) or source_text[start:end] != text or end - start != len(text):
-        raise ValueError('BLUE 재독 근거 참조가 원문 위치와 일치하지 않습니다.')
-    inside = False
-    for span in delivered_spans or []:
-        if isinstance(span, (tuple, list)) and len(span) == 3:
-            sid, a, b = span
-            if sid == segment_id and type(a) is int and type(b) is int and a <= start and end <= b:
-                inside = True
-                break
+    start, end, text = _validate_ref_binding(ref, anchor, segment_id, source_text)
+    inside = _inside_delivered(delivered_spans, segment_id, start, end)
     if not inside:
         raise ValueError('BLUE 재독 근거 참조가 선택 단계에 전달된 범위 밖입니다.')
     if not any(isinstance(v, str) and text in v for v in visible_texts or []):

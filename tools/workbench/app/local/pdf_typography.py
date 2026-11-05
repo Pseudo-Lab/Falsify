@@ -82,12 +82,7 @@ def plan_fit(text, natural, target, size, space_natural, space_range):
         'sourceSpaceSamples': space_range[3], 'adjustedWordGaps': len(spaces) if word else 0,
         'adjustedTrackingGaps': len(others) if tracking else 0}
 
-def verify_fit(chars, after, natural, plan, origin, size, end):
-    """Check extracted replacement glyphs: text, baseline, advances, gaps, glyph widths, extent."""
-    text = ''.join(c['c'] for c in chars).replace('\u00a0', ' ')
-    if text != after: raise ValueError('삽입 글자열 추출 검증 실패')
-    if abs(chars[0]['origin'][0] - origin[0]) > 0.01 or any(abs(c['origin'][1] - origin[1]) > 0.01 for c in chars):
-        raise ValueError('삽입 텍스트의 시작점/기준선이 원본과 다릅니다.')
+def _verify_advances(chars, after, natural, plan, size):
     gaps = []
     for i, (a, b) in enumerate(zip(chars, chars[1:])):
         advance = b['origin'][0] - a['origin'][0]
@@ -95,6 +90,16 @@ def verify_fit(chars, after, natural, plan, origin, size, end):
         if abs(advance - (natural[i] + plan['extras'][i])) > 0.01: raise ValueError('삽입 글자 간격이 계획과 다릅니다.')
         if after[i] == ' ' and advance < plan['spaceFloorPt'] - EPS: raise ValueError('단어 간격이 한도보다 좁습니다.')
         if after[i] != ' ' and advance < natural[i] - MAX_TRACKING_EM * size - EPS: raise ValueError('자간이 한도보다 좁습니다.')
+    return gaps
+
+
+def verify_fit(chars, after, natural, plan, origin, size, end):
+    """Check extracted replacement glyphs: text, baseline, advances, gaps, glyph widths, extent."""
+    text = ''.join(c['c'] for c in chars).replace('\u00a0', ' ')
+    if text != after: raise ValueError('삽입 글자열 추출 검증 실패')
+    if abs(chars[0]['origin'][0] - origin[0]) > 0.01 or any(abs(c['origin'][1] - origin[1]) > 0.01 for c in chars):
+        raise ValueError('삽입 텍스트의 시작점/기준선이 원본과 다릅니다.')
+    gaps = _verify_advances(chars, after, natural, plan, size)
     if chars[-1]['bbox'][2] > end + EPS: raise ValueError('삽입 텍스트가 원래 영역 밖으로 나갑니다.')
     for c, w in zip(chars, natural):
         if abs((c['bbox'][2] - c['bbox'][0]) - w) > 0.01: raise ValueError('삽입 글리프 폭이 원본 글꼴 폭과 다릅니다(가로 비율 변경).')
@@ -130,6 +135,21 @@ def _literal(data, i):
         out.append(c); i += 1
     raise ValueError('content string')
 
+def _word_token(c, word, i, j):
+    if c == 0x2F: return 'name', word[1:].decode('latin-1'), i, j
+    elif re.fullmatch(rb'[+-]?(\d+\.?\d*|\.\d+)', word): return 'num', float(word), i, j
+    else:
+        if word in (b'BI', b'ID'): raise ValueError('inline image')
+        return 'op', word.decode('latin-1'), i, j
+
+
+def _hex_string(data, i):
+    end = data.index(b'>', i)
+    hexs = re.sub(rb'\s', b'', data[i+1:end])
+    if len(hexs) % 2: hexs += b'0'
+    return bytes.fromhex(hexs.decode('ascii')), end + 1
+
+
 def tokens(data):
     """Yield (kind, value, start, end); kind in num/str/name/op/[/]/<</>>. Raises on inline images."""
     i, n = 0, len(data)
@@ -143,20 +163,14 @@ def tokens(data):
             value, end = _literal(data, i); yield 'str', value, i, end; i = end; continue
         if data[i:i+2] in (b'<<', b'>>'): yield data[i:i+2].decode(), None, i, i + 2; i += 2; continue
         if c == 0x3C:
-            end = data.index(b'>', i)
-            hexs = re.sub(rb'\s', b'', data[i+1:end])
-            if len(hexs) % 2: hexs += b'0'
-            yield 'str', bytes.fromhex(hexs.decode('ascii')), i, end + 1; i = end + 1; continue
+            value, end = _hex_string(data, i)
+            yield 'str', value, i, end; i = end; continue
         if c in b'[]': yield chr(c), None, i, i + 1; i += 1; continue
         j = i + 1 if c == 0x2F else i
         while j < n and data[j] not in WS and data[j] not in DELIM: j += 1
         if j == i: raise ValueError('content token')
         word = data[i:j]
-        if c == 0x2F: yield 'name', word[1:].decode('latin-1'), i, j
-        elif re.fullmatch(rb'[+-]?(\d+\.?\d*|\.\d+)', word): yield 'num', float(word), i, j
-        else:
-            if word in (b'BI', b'ID'): raise ValueError('inline image')
-            yield 'op', word.decode('latin-1'), i, j
+        yield _word_token(c, word, i, j)
         i = j
 
 def _mul(m, n):
@@ -165,6 +179,64 @@ def _mul(m, n):
         m[4]*n[0] + m[5]*n[2] + n[4], m[4]*n[1] + m[5]*n[3] + n[5])
 
 IDENTITY = (1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
+
+def _make_show(value, operands, decode, mapping, tm, state, default, size, e, key):
+    last = operands[-1] if operands else (None,)
+    if value == 'Tj' and last[0] == 'str': items = decode(last[1])
+    elif value == 'TJ' and last[0] == 'arr':
+        items = []
+        for k, v in last[1]:
+            if k == 'str': items += decode(v)
+            else: items.append(('k', v))
+    else: raise LookupError(value)
+    glyphs = [v for k, v in items if k == 'g']
+    if any(len(mapping.get(g, '')) != 1 for g in glyphs): raise LookupError('undecodable')
+    m = _mul(tm, state['ctm'])
+    sx, sy = (m[0] ** 2 + m[1] ** 2) ** 0.5 * state['fs'], (m[2] ** 2 + m[3] ** 2) ** 0.5 * state['fs']
+    spacing = any(state[k] != v for k, v in default.items())
+    wrong_size = size is not None and (abs(sx - sy) > 0.01 or abs(sx - size) > 0.01)
+    return (last[2], e, items, ''.join(mapping[g] for g in glyphs).replace(' ', ' '), spacing, wrong_size, key)
+
+
+def _set_font_spacing(value, operands, state):
+    if value == 'Tf':
+        if len(operands) < 2 or operands[-2][0] != 'name' or operands[-1][0] != 'num': raise LookupError('Tf')
+        state['font'], state['fs'] = operands[-2][1], operands[-1][1]
+    elif value in ('Tc', 'Tw', 'Ts', 'Tz'):
+        if not operands or operands[-1][0] != 'num': raise LookupError(value)
+        state[value] = operands[-1][1]
+
+
+def _set_quote_spacing(value, operands, state):
+    # aw ac string ": sets word and character spacing for everything that follows.
+    if len(operands) < 3 or operands[-1][0] != 'str' or operands[-2][0] != 'num' or operands[-3][0] != 'num': raise LookupError(value)
+    state['Tw'], state['Tc'] = operands[-3][1], operands[-2][1]
+
+
+def _apply_text_state(value, operands, state, stack, tm, font, resource):
+    def nums(k):
+        tail = operands[-k:]
+        return [o[1] for o in tail] if len(tail) == k and all(o[0] == 'num' for o in tail) else None
+    if value in ('Tf', 'Tc', 'Tw', 'Ts', 'Tz'):
+        _set_font_spacing(value, operands, state)
+    elif value == 'q': stack.append(dict(state, tm=tm))
+    elif value == 'Q':
+        if not stack: raise LookupError('Q')
+        state = stack.pop(); state.pop('tm')
+    elif value == 'cm':
+        m = nums(6)
+        if m is None: raise LookupError('cm')
+        state['ctm'] = _mul(tuple(m), state['ctm'])
+    elif value == 'BT': tm = IDENTITY
+    elif value == 'Tm':
+        m = nums(6)
+        if m is None: raise LookupError('Tm')
+        tm = tuple(m)
+    elif value in ("'", '"') and font == resource: raise LookupError(value)
+    elif value == '"':
+        _set_quote_spacing(value, operands, state)
+    return state, tm
+
 
 def find_show(data, resource, mapping, before, size=None, code_bytes=1):
     """Locate `before` in consecutive Tj/TJ operators of font `resource` (one source line may be
@@ -195,9 +267,6 @@ def find_show(data, resource, mapping, before, size=None, code_bytes=1):
         return [('g', int.from_bytes(raw[i:i + code_bytes], 'big')) for i in range(0, len(raw), code_bytes)]
     for key, stream in streams:
         operands, array = [], None
-        def nums(k):
-            tail = operands[-k:]
-            return [o[1] for o in tail] if len(tail) == k and all(o[0] == 'num' for o in tail) else None
         for kind, value, s, e in tokens(stream):
             if kind == '[': array = []; operands.append(('[', s)); continue
             if kind == ']':
@@ -208,50 +277,19 @@ def find_show(data, resource, mapping, before, size=None, code_bytes=1):
                 array.append((kind, value)); continue
             if kind != 'op': operands.append((kind, value, s, e)); continue
             font = state['font']
-            if value == 'Tf':
-                if len(operands) < 2 or operands[-2][0] != 'name' or operands[-1][0] != 'num': raise LookupError('Tf')
-                state['font'], state['fs'] = operands[-2][1], operands[-1][1]
-            elif value in ('Tc', 'Tw', 'Ts', 'Tz'):
-                if not operands or operands[-1][0] != 'num': raise LookupError(value)
-                state[value] = operands[-1][1]
-            elif value == 'q': stack.append(dict(state, tm=tm))
-            elif value == 'Q':
-                if not stack: raise LookupError('Q')
-                state = stack.pop(); state.pop('tm')
-            elif value == 'cm':
-                m = nums(6)
-                if m is None: raise LookupError('cm')
-                state['ctm'] = _mul(tuple(m), state['ctm'])
-            elif value == 'BT': tm = IDENTITY
-            elif value == 'Tm':
-                m = nums(6)
-                if m is None: raise LookupError('Tm')
-                tm = tuple(m)
-            elif value in ("'", '"') and font == resource: raise LookupError(value)
-            elif value == '"':
-                # aw ac string ": sets word and character spacing for everything that follows.
-                if len(operands) < 3 or operands[-1][0] != 'str' or operands[-2][0] != 'num' or operands[-3][0] != 'num': raise LookupError(value)
-                state['Tw'], state['Tc'] = operands[-3][1], operands[-2][1]
-            elif value in ('Tj', 'TJ'):
+            if value in ('Tj', 'TJ'):
                 if font != resource: shows.append(None); operands = []; continue
-                last = operands[-1] if operands else (None,)
-                if value == 'Tj' and last[0] == 'str': items = decode(last[1])
-                elif value == 'TJ' and last[0] == 'arr':
-                    items = []
-                    for k, v in last[1]:
-                        if k == 'str': items += decode(v)
-                        else: items.append(('k', v))
-                else: raise LookupError(value)
-                glyphs = [v for k, v in items if k == 'g']
-                if any(len(mapping.get(g, '')) != 1 for g in glyphs): raise LookupError('undecodable')
-                m = _mul(tm, state['ctm'])
-                sx, sy = (m[0] ** 2 + m[1] ** 2) ** 0.5 * state['fs'], (m[2] ** 2 + m[3] ** 2) ** 0.5 * state['fs']
-                spacing = any(state[k] != v for k, v in default.items())
-                wrong_size = size is not None and (abs(sx - sy) > 0.01 or abs(sx - size) > 0.01)
-                shows.append((last[2], e, items, ''.join(mapping[g] for g in glyphs).replace(' ', ' '), spacing, wrong_size, key))
+                show = _make_show(value, operands, decode, mapping, tm, state, default, size, e, key)
+                shows.append(show)
+            else:
+                state, tm = _apply_text_state(value, operands, state, stack, tm, font, resource)
             operands = []
         if array is not None: raise LookupError('array')
     if stack: raise LookupError('unbalanced q')
+    return _find_show_parts(shows, before)
+
+
+def _find_show_parts(shows, before):
     found, runs, run = [], [], []
     for show in shows + [None]:
         if show is None:
@@ -276,6 +314,25 @@ def find_show(data, resource, mapping, before, size=None, code_bytes=1):
     if len(found) > 1: raise LookupError('duplicate')
     return found[0] if found else None
 
+def _rewrite_selection(items, i, count, codes, extras_units, widths_units, out):
+    new_units, old_units, comp = 0.0, 0.0, 0.0
+    taken = 0
+    while i < len(items) and taken < count:
+        k, v = items[i]
+        if k == 'g': old_units += widths_units(v); taken += 1
+        else: old_units -= v
+        i += 1
+    if taken != count: raise LookupError('selection outside operator')
+    while i < len(items) and items[i][0] == 'k': old_units -= items[i][1]; i += 1
+    for code, extra in zip(codes, extras_units):
+        out.append(('g', code)); new_units += widths_units(code) + extra
+        if abs(extra) > 1e-9: out.append(('k', -extra))
+    # Only needed when unselected glyphs of this operator follow the selection.
+    if any(k == 'g' for k, _ in items[i:]): out.append(('k', new_units - old_units))
+    else: comp = None
+    return i, new_units, old_units, comp
+
+
 def rewrite_items(items, index, count, codes, extras_units, widths_units):
     """Replace glyphs index..index+count with `codes` (each followed by its spacing offset) and one
     compensating offset so the glyph after the selection keeps its original position."""
@@ -283,20 +340,8 @@ def rewrite_items(items, index, count, codes, extras_units, widths_units):
     while i < len(items):
         kind, value = items[i]
         if kind == 'g' and g == index and not seen:
-            seen, taken = True, 0
-            while i < len(items) and taken < count:
-                k, v = items[i]
-                if k == 'g': old_units += widths_units(v); taken += 1
-                else: old_units -= v
-                i += 1
-            if taken != count: raise LookupError('selection outside operator')
-            while i < len(items) and items[i][0] == 'k': old_units -= items[i][1]; i += 1
-            for code, extra in zip(codes, extras_units):
-                out.append(('g', code)); new_units += widths_units(code) + extra
-                if abs(extra) > 1e-9: out.append(('k', -extra))
-            # Only needed when unselected glyphs of this operator follow the selection.
-            if any(k == 'g' for k, _ in items[i:]): out.append(('k', new_units - old_units))
-            else: comp = None
+            seen = True
+            i, new_units, old_units, comp = _rewrite_selection(items, i, count, codes, extras_units, widths_units, out)
             continue
         if kind == 'g': g += 1
         out.append((kind, value)); i += 1

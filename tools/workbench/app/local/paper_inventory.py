@@ -52,15 +52,19 @@ class _OverBudget(Exception): pass
 def _sha(data): return hashlib.sha256(data).hexdigest()
 def _text_sha(text): return _sha(text.encode('utf-8'))
 
+def _validate_edit(e):
+    if not isinstance(e, dict) or not isinstance(e.get('id'), str) or not _ID.fullmatch(e['id']) \
+            or type(e.get('pageIndex')) is not int or not 0 <= e['pageIndex'] < LIMITS['maxPages']: raise ValueError('edit')
+    for k in ('before', 'after'):
+        if not isinstance(e.get(k), str) or not e[k].strip() or len(e[k]) > LIMITS['maxTextChars']: raise ValueError('edit text')
+
+
 def _edit_list(edits):
     """The selected edits as given: exact id/pageIndex/before/after, bounded. Raises ValueError (never rewrites)."""
     if not isinstance(edits, (list, tuple)) or not 1 <= len(edits) <= LIMITS['maxEdits']: raise ValueError('edits')
     out = []
     for e in edits:
-        if not isinstance(e, dict) or not isinstance(e.get('id'), str) or not _ID.fullmatch(e['id']) \
-                or type(e.get('pageIndex')) is not int or not 0 <= e['pageIndex'] < LIMITS['maxPages']: raise ValueError('edit')
-        for k in ('before', 'after'):
-            if not isinstance(e.get(k), str) or not e[k].strip() or len(e[k]) > LIMITS['maxTextChars']: raise ValueError('edit text')
+        _validate_edit(e)
         out.append({k: e[k] for k in ('id', 'pageIndex', 'before', 'after')})
     if len({e['id'] for e in out}) != len(out): raise ValueError('edit ids')
     return out
@@ -116,6 +120,35 @@ def _normalized(records):
 def _finite_box(box):
     return len(box) == 4 and all(isinstance(v, (int, float)) and math.isfinite(v) for v in box) and box[0] <= box[2] and box[1] <= box[3]
 
+def _anchor_regions(page, chosen):
+    lines = {}
+    for r in chosen:
+        x0, y0, x1, y1 = r[1]
+        box = lines.setdefault(r[3], [x0, y0, x1, y1])
+        box[:] = [min(box[0], x0), min(box[1], y0), max(box[2], x1), max(box[3], y1)]
+    width, height = page.rect.width, page.rect.height
+    regions = [[round(v, 3) for v in box] for box in lines.values()]
+    if len(regions) > LIMITS['maxRegions']: return None
+    for x0, y0, x1, y1 in regions:
+        if not (x0 < x1 and y0 < y1 and x0 >= -PAGE_OVERHANG and y0 >= -PAGE_OVERHANG and x1 <= width + PAGE_OVERHANG
+                and y1 <= height + PAGE_OVERHANG and x1 - x0 < MAX_REGION_WIDTH * width and y1 - y0 <= MAX_REGION_HEIGHT * height):
+            return None
+    return regions
+
+
+def _select_anchor(records, text, owners, needle):
+    hits, start = [], 0
+    while len(hits) < 2:
+        k = text.find(needle, start)
+        if k < 0: break
+        hits.append(k); start = k + 1
+    if not hits: return 'unavailable', []
+    if len(hits) > 1: return 'ambiguous', []
+    chosen = [records[i] for i in owners[hits[0]:hits[0] + len(needle)] if i is not None]
+    if not chosen or any(not r[4] or _LIGATURE.search(r[0]) or not _finite_box(r[1]) for r in chosen): return 'unavailable', []
+    return 'resolved', chosen
+
+
 def _anchor(page, before, mupdf):
     """(status, regions, styles) for one selected Before on one source page; conservative, never guessed."""
     if not _page_supported(page): return 'unavailable', [], []
@@ -124,29 +157,12 @@ def _anchor(page, before, mupdf):
     try: records = _records(page, mupdf)
     except _OverBudget: return 'unavailable', [], []
     text, owners = _normalized(records)
-    hits, start = [], 0
-    while len(hits) < 2:
-        k = text.find(needle, start)
-        if k < 0: break
-        hits.append(k); start = k + 1
-    if not hits: return 'unavailable', [], []
-    if len(hits) > 1: return 'ambiguous', [], []
-    chosen = [records[i] for i in owners[hits[0]:hits[0] + len(needle)] if i is not None]
-    if not chosen or any(not r[4] or _LIGATURE.search(r[0]) or not _finite_box(r[1]) for r in chosen): return 'unavailable', [], []
+    status, chosen = _select_anchor(records, text, owners, needle)
+    if status != 'resolved': return status, [], []
     styles = list(dict.fromkeys(r[2] for r in chosen))
     if len(styles) != 1: return 'unavailable', [], []   # mixed font/size/color: no single source style to reuse
-    lines = {}
-    for r in chosen:
-        x0, y0, x1, y1 = r[1]
-        box = lines.setdefault(r[3], [x0, y0, x1, y1])
-        box[:] = [min(box[0], x0), min(box[1], y0), max(box[2], x1), max(box[3], y1)]
-    width, height = page.rect.width, page.rect.height
-    regions = [[round(v, 3) for v in box] for box in lines.values()]
-    if len(regions) > LIMITS['maxRegions']: return 'unavailable', [], []
-    for x0, y0, x1, y1 in regions:
-        if not (x0 < x1 and y0 < y1 and x0 >= -PAGE_OVERHANG and y0 >= -PAGE_OVERHANG and x1 <= width + PAGE_OVERHANG
-                and y1 <= height + PAGE_OVERHANG and x1 - x0 < MAX_REGION_WIDTH * width and y1 - y0 <= MAX_REGION_HEIGHT * height):
-            return 'unavailable', [], []
+    regions = _anchor_regions(page, chosen)
+    if regions is None: return 'unavailable', [], []
     font, size, color = styles[0]
     if not font or not math.isfinite(size) or size <= 0: return 'unavailable', [], []
     return 'resolved', regions, [{'font': font, 'size': size, 'color': color}]
@@ -188,6 +204,32 @@ def build_edit_plan(source_bytes, edits):
 
 def _number(v): return type(v) in (int, float) and math.isfinite(v)
 
+def _valid_plan_styles(styles):
+    for s in styles:
+        if not isinstance(s, dict) or set(s) != {'font', 'size', 'color'} or not isinstance(s['font'], str) or not 0 < len(s['font']) <= 128 \
+                or not _number(s['size']) or s['size'] <= 0 or type(s['color']) is not int or not 0 <= s['color'] <= 0xFFFFFF: return False
+    return True
+
+
+def _valid_plan_geometry(regions, styles):
+    for r in regions:
+        if not isinstance(r, list) or len(r) != 4 or not all(_number(v) for v in r) or not (r[0] < r[2] and r[1] < r[3]): return False
+    return _valid_plan_styles(styles)
+
+
+def _validate_plan_entry(got, e):
+    if not isinstance(got, dict) or set(got) != set(EDIT_KEYS) or got['status'] not in EDIT_STATUSES: return None
+    expected = _entry(e)
+    if any(type(got[k]) is not type(expected[k]) or got[k] != expected[k] for k in ('id', 'pageIndex', 'beforeSha256', 'afterSha256')): return None
+    regions, styles = got['regions'], got['styles']
+    if not isinstance(regions, list) or not isinstance(styles, list): return None
+    if got['status'] == 'resolved':
+        if not 1 <= len(regions) <= LIMITS['maxRegions'] or len(styles) != 1: return None
+    elif regions or styles: return None
+    if not _valid_plan_geometry(regions, styles): return None
+    return _entry(e, got['status'], regions, styles)
+
+
 def validate_plan(plan, source_sha256, edits):
     """Strict copy of a plan bound to this source hash and these exact selected edits, else None."""
     try:
@@ -197,20 +239,9 @@ def validate_plan(plan, source_sha256, edits):
                 or plan['sourceSha256'] != source_sha256 or not isinstance(plan['edits'], list) or len(plan['edits']) != len(edits): return None
         entries = []
         for got, e in zip(plan['edits'], edits):
-            if not isinstance(got, dict) or set(got) != set(EDIT_KEYS) or got['status'] not in EDIT_STATUSES: return None
-            expected = _entry(e)
-            if any(type(got[k]) is not type(expected[k]) or got[k] != expected[k] for k in ('id', 'pageIndex', 'beforeSha256', 'afterSha256')): return None
-            regions, styles = got['regions'], got['styles']
-            if not isinstance(regions, list) or not isinstance(styles, list): return None
-            if got['status'] == 'resolved':
-                if not 1 <= len(regions) <= LIMITS['maxRegions'] or len(styles) != 1: return None
-            elif regions or styles: return None
-            for r in regions:
-                if not isinstance(r, list) or len(r) != 4 or not all(_number(v) for v in r) or not (r[0] < r[2] and r[1] < r[3]): return None
-            for s in styles:
-                if not isinstance(s, dict) or set(s) != {'font', 'size', 'color'} or not isinstance(s['font'], str) or not 0 < len(s['font']) <= 128 \
-                        or not _number(s['size']) or s['size'] <= 0 or type(s['color']) is not int or not 0 <= s['color'] <= 0xFFFFFF: return None
-            entries.append(_entry(e, got['status'], regions, styles))
+            entry = _validate_plan_entry(got, e)
+            if entry is None: return None
+            entries.append(entry)
         copy = _plan(source_sha256, entries)
         return copy if copy['status'] == plan['status'] else None
     except (ValueError, TypeError, KeyError, AttributeError):

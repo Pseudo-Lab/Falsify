@@ -1,21 +1,26 @@
-import {build} from 'esbuild';
+import {createRequire} from 'node:module';
 import {createHash} from 'node:crypto';
-import {readFileSync, writeFileSync, mkdirSync, copyFileSync} from 'node:fs';
+import {readFileSync, writeFileSync, mkdirSync, copyFileSync, cpSync, mkdtempSync, rmSync, readdirSync} from 'node:fs';
 import {dirname, join, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
+import {tmpdir} from 'node:os';
 
 const app=resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const args=process.argv.slice(2);
 function arg(name) { const i=args.indexOf(name); if(i<0 || !args[i+1]) throw Error(`Required: ${name}`); return resolve(args[i+1]); }
 const modules=arg('--node-modules'), staticDir=arg('--static-fonts'), sourceFonts=arg('--font-sources');
-const vendor=join(app,'dist/recomposition-vendor');
+const outputIndex=args.indexOf('--output');
+const dist=outputIndex<0 ? join(app,'dist') : arg('--output');
+const {build}=createRequire(join(modules,'esbuild/package.json'))(join(modules,'esbuild'));
+const vendor=join(dist,'recomposition-vendor');
 const readJSON=p=>JSON.parse(readFileSync(p,'utf8'));
 const hash=b=>createHash('sha256').update(b).digest('hex');
+if(readJSON(join(modules,'esbuild/package.json')).version!=='0.28.2') throw Error('Unexpected esbuild version');
 for(const name of ['typst.ts','typst-ts-web-compiler']) {
  const p=readJSON(join(modules,'@myriaddreamin',name,'package.json'));
  if(p.version!=='0.7.0' || p.license!=='Apache-2.0') throw Error(`Unexpected ${name} version or license`);
 }
-const mupdf=readJSON(join(app,'node_modules/mupdf/package.json'));
+const mupdf=readJSON(join(modules,'mupdf/package.json'));
 if(mupdf.version!=='1.28.1') throw Error('Unexpected MuPDF version');
 const proof=readJSON(join(staticDir,'manifest.json'));
 const pinned={
@@ -52,12 +57,30 @@ copyFileSync(join(app,'dist/vendor/standard_fonts/LICENSE_LIBERATION'),join(vend
 copyFileSync(join(modules,'@myriaddreamin/typst.ts/LICENSE'),join(vendor,'LICENSE_TYPST_APACHE'));
 writeFileSync(join(vendor,'static-font-provenance.json'),JSON.stringify(proof,null,2)+'\n');
 writeFileSync(join(vendor,'manifest.json'),JSON.stringify({version:'falsify.recomposition-runtime.v1',compilerModule:'../recomposition-typst.mjs',wasm,fonts},null,2)+'\n');
-const common={bundle:true,format:'esm',platform:'neutral',target:'es2022',legalComments:'eof',nodePaths:[modules]};
-await build({...common,entryPoints:[join(app,'src/recomposition-typst.mjs')],outfile:join(app,'dist/recomposition-typst.mjs')});
-await build({...common,entryPoints:[join(app,'src/paper-recompose-runtime.mjs')],outfile:join(app,'dist/paper-recompose-runtime.mjs')});
-await build({...common,entryPoints:[join(app,'src/paper-recompose-worker.mjs')],outfile:join(app,'dist/paper-recompose-worker-core.mjs'),plugins:[{name:'local-vendors',setup(b){
+// esbuild includes input labels in output. Stage both trees under stable relative
+// names so neither the checkout nor the npm installation path enters bundles.
+const stage=mkdtempSync(join(tmpdir(),'falsify-recomposition-'));
+try {
+cpSync(join(app,'src'),join(stage,'src'),{recursive:true});
+cpSync(modules,join(stage,'node_modules'),{recursive:true});
+const common={bundle:true,format:'esm',platform:'neutral',target:'es2022',legalComments:'eof',absWorkingDir:stage,metafile:true};
+const builds=[];
+builds.push(await build({...common,entryPoints:['src/recomposition-typst.mjs'],outfile:join(dist,'recomposition-typst.mjs')}));
+builds.push(await build({...common,entryPoints:['src/paper-recompose-runtime.mjs'],outfile:join(dist,'paper-recompose-runtime.mjs')}));
+builds.push(await build({...common,entryPoints:['src/paper-recompose-worker.mjs'],outfile:join(dist,'paper-recompose-worker-core.mjs'),plugins:[{name:'local-vendors',setup(b){
  b.onResolve({filter:/^mupdf$/},()=>({path:'./browser-pdf-vendor/mupdf.js',external:true}));
  b.onResolve({filter:/^\.\.\/dist\/blind-pdf\.mjs$/},()=>({path:'./blind-pdf.mjs',external:true}));
-}}]});
-await build({...common,entryPoints:[join(app,'src/paper-recompose-worker-entry.mjs')],outfile:join(app,'dist/paper-recompose-worker.mjs'),external:['./paper-recompose-worker-core.mjs']});
+}}]}));
+builds.push(await build({...common,entryPoints:['src/paper-recompose-worker-entry.mjs'],outfile:join(dist,'paper-recompose-worker.mjs'),external:['./paper-recompose-worker-core.mjs']}));
+const inputs={};
+for(const name of [...new Set(builds.flatMap(b=>Object.keys(b.metafile.inputs)))].sort()) inputs[name]=hash(readFileSync(join(stage,name)));
+const outputs={};
+for(const name of ['recomposition-typst.mjs','paper-recompose-runtime.mjs','paper-recompose-worker-core.mjs','paper-recompose-worker.mjs']) outputs[name]=hash(readFileSync(join(dist,name)));
+for(const name of readdirSync(vendor).sort()) outputs[`recomposition-vendor/${name}`]=hash(readFileSync(join(vendor,name)));
+const packages={};
+for(const name of ['esbuild','@myriaddreamin/typst.ts','@myriaddreamin/typst-ts-web-compiler','mupdf']) packages[name]=hash(readFileSync(join(modules,name,'package.json')));
+const buildFiles={};
+for(const name of ['scripts/build-recomposition-runtime.mjs','vendor-build/package-lock.json']) buildFiles[name]=hash(readFileSync(join(app,name)));
+writeFileSync(join(dist,'recomposition-build-receipt.json'),JSON.stringify({version:1,buildFiles,inputs,packages,outputs},null,2)+'\n');
+} finally { rmSync(stage,{recursive:true,force:true}); }
 console.log('Built recomposition runtime',wasm.sha256);

@@ -2,7 +2,7 @@
 (function(root){
   'use strict';
   const HOST='127.0.0.1',DEFAULT_PORT=7816,WEB_ORIGIN='https://shinick-han.github.io';
-  const PATH=/^\/api\/(?:capabilities|export|paper\/(?:inspect|visual\/export|evidence\/(?:prepare|query|jobs(?:\/[a-f0-9]{32}(?:\/cancel)?)?)|images(?:\/export)?|layout-agent\/(?:step|jobs(?:\/[A-Za-z0-9._-]+(?:\/cancel)?)?))|harness\/profile\/propose|harness\/deploy|(?:red|blue)\/jobs(?:\/[A-Za-z0-9%._~-]+(?:\/cancel)?)?)$/;
+  const PATH=/^\/api\/(?:capabilities|export|paper\/(?:inspect|visual\/export|chart\/(?:prepare|preview|export)|evidence\/(?:prepare|query|jobs(?:\/[a-f0-9]{32}(?:\/cancel)?)?)|images(?:\/export)?|layout-agent\/(?:step|jobs(?:\/[A-Za-z0-9._-]+(?:\/cancel)?)?))|harness\/profile\/propose|harness\/deploy|(?:red|blue)\/jobs(?:\/[A-Za-z0-9%._~-]+(?:\/cancel)?)?)$/;
   // Strict decimal port only; host and scheme are never user input.
   function parsePort(value){const s=String(value??'').trim();if(s==='')return DEFAULT_PORT;if(!/^[1-9][0-9]{3,4}$/.test(s))return null;const n=Number(s);return n>=1024&&n<=65535?n:null;}
   function validToken(t){return typeof t==='string'&&t.length>=16&&t.length<=512&&/^[A-Za-z0-9._~+/-]+=*$/.test(t);}
@@ -24,7 +24,7 @@
   function companionInstance(v){return typeof v==='string'&&/^ci1\.[0-9a-f]{64}$/.test(v)?v:null;}
   function capSnapshot(d){if(!d||typeof d!=='object'||Array.isArray(d)||typeof d.red!=='boolean'||typeof d.blue!=='boolean')return null;
     return Object.freeze({red:d.red,blue:d.blue,pdf:d.pdf===true,officeLayoutVerifiedExport:d.officeLayoutVerifiedExport===true,model:typeof d.model==='string'?d.model.slice(0,80):null,isolation:typeof d.isolation==='string'?d.isolation.slice(0,200):null,
-      paperLayoutJobs:d.paperLayoutJobs===true,cliSelection:d.cliSelection===true,harnessWrapper:d.harnessWrapper===true,harnessDeployment:d.harnessDeployment===true,cliAgents:d.cliSelection===true?agents(d.cliAgents):null,pdfEditor:pdfEditor(d.pdfEditor),paperAnalysis:paperAnalysis(d.paperAnalysis),paperEvidence:paperEvidence(d.paperEvidence),paperEnrichment:paperEnrichment(d.paperEnrichment),imageEditor:imageEditor(d.imageEditor),harnessProfileProposal:profileProposal(d.harnessProfileProposal),workbenchVersion:workbenchVersion(d.workbenchVersion),companionInstance:companionInstance(d.companionInstance)});}
+      paperLayoutJobs:d.paperLayoutJobs===true,cliSelection:d.cliSelection===true,harnessWrapper:d.harnessWrapper===true,harnessDeployment:d.harnessDeployment===true,cliAgents:d.cliSelection===true?agents(d.cliAgents):null,pdfEditor:pdfEditor(d.pdfEditor),paperAnalysis:paperAnalysis(d.paperAnalysis),paperEvidence:paperEvidence(d.paperEvidence),chartEditor:d.chartEditor?.schema==='falsify.chart-edit-plan.v1'&&typeof d.chartEditor.available==='boolean'?Object.freeze({...d.chartEditor}):null,paperEnrichment:paperEnrichment(d.paperEnrichment),imageEditor:imageEditor(d.imageEditor),harnessProfileProposal:profileProposal(d.harnessProfileProposal),workbenchVersion:workbenchVersion(d.workbenchVersion),companionInstance:companionInstance(d.companionInstance)});}
   // Optional advisory PDF pre-analysis from a newer broker: exact descriptor or none. An older broker without it keeps every other path.
   const ANALYSIS_SCHEMA='falsify.pdf-analysis-summary.v1',WORKBENCH_VERSION=/^[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}(?:-[0-9A-Za-z]{1,16}(?:\.[0-9A-Za-z]{1,16}){0,3})?$/;
   function paperAnalysis(d){if(!d||typeof d!=='object'||Array.isArray(d)||Object.keys(d).length!==2||typeof d.available!=='boolean'||d.schema!==ANALYSIS_SCHEMA)return null;return Object.freeze({available:d.available,schema:ANALYSIS_SCHEMA});}
@@ -81,23 +81,33 @@
     function drop(l){if(l){l.alive=false;l.token=null;}}
     // One request against a fixed link snapshot. The token travels only in the Authorization header.
     // An optional caller AbortSignal ends the fetch (deadline or stale result) so the in-flight freeze is always released.
-    async function call(l,path,body,options){
-      if(!l||!l.alive||!l.token)throw new Error(local?'인증된 로컬 작업대 세션이 없습니다.':'로컬 broker에 먼저 연결하세요. 연결 없이는 수동 JSON 교환만 가능합니다.');
-      if(typeof path!=='string'||!PATH.test(path)||/\/\.{1,2}(?:\/|$)/.test(path))throw new Error('허용되지 않은 로컬 경로입니다.');
+    function requestInit(l,body){
       const init={method:body?'POST':'GET',headers:{Authorization:'Bearer '+l.token,...(body?{'Content-Type':'application/json'}:{})},credentials:'omit',redirect:'error',cache:'no-store',referrerPolicy:'no-referrer'};
       if(body)init.body=JSON.stringify(body);
       if(l.remote){init.mode='cors';init.targetAddressSpace='loopback';}
+      return init;
+    }
+    function responseData(res,data,path){
+        if(!res.ok){const e=res.status===401||res.status===403?new Error('로컬 broker가 인증을 거부했습니다 ('+res.status+'). 토큰·포트·--web-origin을 확인하세요.'):new Error(typeof data?.error==='string'?data.error.slice(0,300):'로컬 요청 실패 ('+res.status+')');
+          e.httpStatus=res.status;
+          throw IMAGE_PATH.test(path)?imageError(e,res.status,data):e;}
+        if(!data||typeof data!=='object')throw new Error('로컬 broker 응답이 JSON 객체가 아닙니다.');
+        return data;
+    }
+    function validateRequest(l,path){
+      if(!l||!l.alive||!l.token)throw new Error(local?'인증된 로컬 작업대 세션이 없습니다.':'로컬 broker에 먼저 연결하세요. 연결 없이는 수동 JSON 교환만 가능합니다.');
+      if(typeof path!=='string'||!PATH.test(path)||/\/\.{1,2}(?:\/|$)/.test(path))throw new Error('허용되지 않은 로컬 경로입니다.');
+    }
+    async function call(l,path,body,options){
+      validateRequest(l,path);
+      const init=requestInit(l,body);
       const signal=options&&typeof options==='object'?options.signal:undefined;if(signal)init.signal=signal;
       l.inflight++;if(l===link)changed();
       try{
         let res;try{res=await fetchImpl(l.remote?l.base+path:path,init);}catch{if(signal?.aborted)throw aborted();throw new Error(NETWORK);}
         if(res.redirected||res.type==='opaqueredirect')throw new Error('로컬 broker 리디렉션을 거부했습니다.');
         let data=null;try{data=await res.json();}catch{}if(signal?.aborted)throw aborted();
-        if(!res.ok){const e=res.status===401||res.status===403?new Error('로컬 broker가 인증을 거부했습니다 ('+res.status+'). 토큰·포트·--web-origin을 확인하세요.'):new Error(typeof data?.error==='string'?data.error.slice(0,300):'로컬 요청 실패 ('+res.status+')');
-          e.httpStatus=res.status;
-          throw IMAGE_PATH.test(path)?imageError(e,res.status,data):e;}
-        if(!data||typeof data!=='object')throw new Error('로컬 broker 응답이 JSON 객체가 아닙니다.');
-        return data;
+        return responseData(res,data,path);
       }finally{l.inflight--;if(l===link)changed();}
     }
     function aborted(){const e=new Error('로컬 요청을 중단했습니다.');e.name='AbortError';return e;}
@@ -178,15 +188,21 @@
       if(s.status==='connecting')return 'http://127.0.0.1:'+s.port+' 인증 확인 중';
       if(s.status==='paired')return '페어링됨 · http://127.0.0.1:'+s.port+' · 인증된 capabilities 확인'+detail;
       return '연결 안 됨 · 아래 순서로 내 PC와 연결하거나 수동 JSON 교환을 쓰세요';}
+    function renderLaunchStatus(s){
+      if(launchStatusEl)launchStatusEl.textContent=s.launched&&s.status==='manual'?'포트 '+s.port+'로 연결 앱 열기를 요청했습니다. 브라우저와 로컬 승인 창이 뜨면 고정 웹 출처만 허용하세요. 승인 뒤에는 새로고침이 상태만 다시 확인합니다. 창이 없거나 취소하면 아래 수동 토큰을 쓰세요. 브라우저는 설치 여부를 알려주지 않습니다.':'';
+    }
+    function renderControls(s,linked){
+      if(portEl)portEl.disabled=s.frozen||linked;if(tokenEl)tokenEl.disabled=s.frozen||linked;
+      if(connectEl)connectEl.disabled=s.frozen||linked;if(disconnectEl){disconnectEl.hidden=!linked;disconnectEl.disabled=s.frozen;}
+      if(launchEl){launchEl.hidden=s.mode==='local'||!handler;launchEl.disabled=s.frozen||linked;}if(otherOsEl)otherOsEl.hidden=s.mode==='local'||handler;
+      renderLaunchStatus(s);
+    }
     function render(s=bridge.state()){
       panel.dataset.state=s.status;statusEl.textContent=text(s)+(s.frozen&&s.connected?' · 작업 중이라 연결 변경 잠김':'');
       if(pairEl)pairEl.hidden=s.mode==='local';
       if(feedbackEl){feedbackEl.textContent=s.error;feedbackEl.classList?.toggle('error',!!s.error);}
       const linked=s.status==='paired'||s.status==='connecting';
-      if(portEl)portEl.disabled=s.frozen||linked;if(tokenEl)tokenEl.disabled=s.frozen||linked;
-      if(connectEl)connectEl.disabled=s.frozen||linked;if(disconnectEl){disconnectEl.hidden=!linked;disconnectEl.disabled=s.frozen;}
-      if(launchEl){launchEl.hidden=s.mode==='local'||!handler;launchEl.disabled=s.frozen||linked;}if(otherOsEl)otherOsEl.hidden=s.mode==='local'||handler;
-      if(launchStatusEl)launchStatusEl.textContent=s.launched&&s.status==='manual'?'포트 '+s.port+'로 연결 앱 열기를 요청했습니다. 브라우저와 로컬 승인 창이 뜨면 고정 웹 출처만 허용하세요. 승인 뒤에는 새로고침이 상태만 다시 확인합니다. 창이 없거나 취소하면 아래 수동 토큰을 쓰세요. 브라우저는 설치 여부를 알려주지 않습니다.':'';
+      renderControls(s,linked);
       const p=linked?s.port:parsePort(portEl?.value)??s.port;if(commandEl)commandEl.textContent=command(p,kind);if(launcherEl)launcherEl.textContent=launcher(p,kind);
       for(const a of doc.querySelectorAll?.('[data-bridge-local]')||[])a.href='http://127.0.0.1:'+(s.mode==='local'?s.port:p)+'/';
     }

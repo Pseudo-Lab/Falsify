@@ -43,6 +43,15 @@ class AdapterFailure(ValueError):
         return {'schema': 'falsify.adapter-failure.v1', 'code': self.code,
                 'stage': stage, 'recovery': recovery}
 
+def _check_inherited_sources(sources, root):
+    # A mismatch is meaningful only for fixed first-party source paths and valid recorded digests.
+    for name in ('experiments/selfplay_codex.py', 'app/local/harness_adapter.py'):
+        recorded = sources.get(name)
+        if isinstance(recorded, str) and len(recorded) == 64 and all(c in '0123456789abcdef' for c in recorded):
+            try: current = hashlib.sha256((root / name).read_bytes()).hexdigest()
+            except OSError: continue
+            if current != recorded: raise AdapterFailure('settings_mismatch')
+
 def check_first_party_settings(harness):
     """Check only a known v035 runner's recorded source hashes, without importing or executing it."""
     adapter, settings = harness.get('adapter', {}), harness.get('settings', {})
@@ -56,25 +65,24 @@ def check_first_party_settings(harness):
         return
     sources = settings.get('inheritedSources')
     if not isinstance(sources, dict): return
-    # A mismatch is meaningful only for fixed first-party source paths and valid recorded digests.
-    for name in ('experiments/selfplay_codex.py', 'app/local/harness_adapter.py'):
-        recorded = sources.get(name)
-        if isinstance(recorded, str) and len(recorded) == 64 and all(c in '0123456789abcdef' for c in recorded):
-            try: current = hashlib.sha256((root / name).read_bytes()).hexdigest()
-            except OSError: continue
-            if current != recorded: raise AdapterFailure('settings_mismatch')
+    _check_inherited_sources(sources, root)
 
 def validate_shape(value, schema):
-    kind = schema.get('type')
-    if kind == 'object':
-        if not isinstance(value, dict) or set(value) != set(schema['properties']): raise ValueError('adapter 출력 객체 필드 오류')
-        for k, v in value.items(): validate_shape(v, schema['properties'][k])
-    elif kind == 'array':
-        if not isinstance(value, list) or not schema.get('minItems', 0) <= len(value) <= schema.get('maxItems', 10000): raise ValueError('adapter 출력 배열 제한')
-        for v in value: validate_shape(v, schema['items'])
-    elif kind == 'string' and not isinstance(value, str): raise ValueError('adapter 출력 문자열 필요')
-    elif kind == 'integer' and type(value) is not int: raise ValueError('adapter 출력 정수 필요')
-    if 'enum' in schema and value not in schema['enum']: raise ValueError('adapter 출력 enum 오류')
+    # The CLI uses the same draft and local validation; keep adapter failures fixed and private.
+    from jsonschema import Draft202012Validator
+    from jsonschema.exceptions import ValidationError, SchemaError
+    try:
+        Draft202012Validator.check_schema(schema)
+        Draft202012Validator(schema).validate(value)
+    except (ValidationError, SchemaError) as error:
+        raise ValueError('adapter 출력 schema 오류') from error
+
+
+def cli_failure(code):
+    codes = {'chatgpt_login_required': 'auth_required', 'subscription_login_required': 'auth_required',
+             'FileNotFoundError': 'executable_missing', 'timeout': 'timeout', 'output_limit': 'invalid_output',
+             'response_not_object': 'invalid_output', 'protocol_violation': 'invalid_output'}
+    return AdapterFailure(codes.get(code, 'unknown'))
 
 def invocation(harness, prompt, schema, call, max_calls):
     return {'schema': 'falsify.harness-invocation.v1', 'role': harness['role'],
@@ -120,6 +128,17 @@ def run_stdio(argv, stdin, cwd, stdout_path):
                 p.wait()
     with open(stdout_path, 'rb') as f: return f.read(MAX_OUTPUT_BYTES+1)
 
+def _read_https_response(r, tls, deadline):
+    parts, count = [], 0
+    while count <= MAX_OUTPUT_BYTES:
+        remaining = deadline-time.monotonic()
+        if remaining <= 0: raise TimeoutError()
+        tls.settimeout(remaining)
+        part = r.read1(min(8192,MAX_OUTPUT_BYTES+1-count))
+        if not part: break
+        parts.append(part);count += len(part)
+    return b''.join(parts)
+
 def post_https(url, body, content_type='application/json'):
     """One POST to a public HTTPS address (DNS-pinned, no redirects/auth headers/retry); returns raw body."""
     parsed = urlsplit(url)
@@ -141,15 +160,7 @@ def post_https(url, body, content_type='application/json'):
         tls.settimeout(max(.01, deadline-time.monotonic()))
         r = connection.getresponse()
         if not 200 <= r.status < 300: raise ValueError('HTTP status/redirect rejected')
-        parts, count = [], 0
-        while count <= MAX_OUTPUT_BYTES:
-            remaining = deadline-time.monotonic()
-            if remaining <= 0: raise TimeoutError()
-            tls.settimeout(remaining)
-            part = r.read1(min(8192,MAX_OUTPUT_BYTES+1-count))
-            if not part: break
-            parts.append(part);count += len(part)
-        return b''.join(parts)
+        return _read_https_response(r, tls, deadline)
     except (TimeoutError, socket.timeout): raise AdapterFailure('timeout') from None
     except Exception: raise AdapterFailure('unknown') from None
     finally:

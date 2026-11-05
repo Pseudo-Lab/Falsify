@@ -1,3 +1,11 @@
+function mapTextBoundaries(source,encoding,bom){
+  const normalized=source.replace(/\r\n?/g,'\n');let positions=[],rawPos=0,bytePos=bom;
+  for(const char of source){const length=encoding==='utf-8'?new TextEncoder().encode(char).length:char.length*2;positions.push({rawPos,bytePos,char,length});rawPos+=char.length;bytePos+=length;}
+  const units=[];for(let i=0;i<positions.length;i++){const p=positions[i];if(p.char==='\r'){const next=positions[i+1];units.push({char:'\n',start:p.bytePos,end:next?.char==='\n'?next.bytePos+next.length:p.bytePos+p.length});if(next?.char==='\n')i++;}else units.push({char:p.char,start:p.bytePos,end:p.bytePos+p.length});}
+  const boundaries=[];let offset=0;for(const u of units){boundaries[offset]=u.start;offset+=u.char.length;boundaries[offset]=u.end;}
+  return {normalized,boundaries};
+}
+
 /* Patch the actual text file; preserve its encoding, BOM and every untouched byte. */
 export async function textFile(file, patches){
   const ext=file.name.split('.').pop().toLowerCase();
@@ -6,10 +14,7 @@ export async function textFile(file, patches){
   if(bytes[0]===255&&bytes[1]===254){encoding='utf-16le';bom=2;}else if(bytes[0]===254&&bytes[1]===255){encoding='utf-16be';bom=2;}else if(bytes[0]===239&&bytes[1]===187&&bytes[2]===191)bom=3;
   const source=new TextDecoder(encoding,{fatal:true}).decode(bytes.subarray(bom));
   // Parser normalizes CRLF for extraction. Map each normalized character back to raw byte ranges.
-  const normalized=source.replace(/\r\n?/g,'\n');let positions=[],rawPos=0,bytePos=bom;
-  for(const char of source){const length=encoding==='utf-8'?new TextEncoder().encode(char).length:char.length*2;positions.push({rawPos,bytePos,char,length});rawPos+=char.length;bytePos+=length;}
-  const units=[];for(let i=0;i<positions.length;i++){const p=positions[i];if(p.char==='\r'){const next=positions[i+1];units.push({char:'\n',start:p.bytePos,end:next?.char==='\n'?next.bytePos+next.length:p.bytePos+p.length});if(next?.char==='\n')i++;}else units.push({char:p.char,start:p.bytePos,end:p.bytePos+p.length});}
-  const boundaries=[];let offset=0;for(const u of units){boundaries[offset]=u.start;offset+=u.char.length;boundaries[offset]=u.end;}
+  const {normalized,boundaries}=mapTextBoundaries(source,encoding,bom);
   const edits=patches.map(p=>{const start=normalized.indexOf(p.before);if(start<0||normalized.indexOf(p.before,start+1)>=0)throw new Error('원본 파일의 인용이 없거나 중복됩니다. 변경 위치를 자동으로 추측하지 않습니다.');
     // Text layout preservation here means line endings and unchanged bytes; width/reflow in readers is not guaranteed.
     if(/[\r\n\t]/.test(p.before+p.after))throw new Error('텍스트 보존 경로는 한 줄 안의 변경만 지원합니다. 줄바꿈·탭을 포함한 변경은 차단합니다.');

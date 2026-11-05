@@ -89,10 +89,11 @@ class StoreTests(unittest.TestCase):
                 self.assertTrue(pairing.windows_dacl_is_current_user(pairing._windows_saved_dacl(store.key_path), sid, False))
                 self.assertTrue(pairing.windows_dacl_is_current_user(pairing._windows_saved_dacl(store.directory), sid, True))
                 import subprocess
-                completed = subprocess.run(['icacls', str(store.key_path), '/grant', '*S-1-1-0:R'], check=False, capture_output=True, text=True)
+                completed = subprocess.run(['icacls', str(store.key_path), '/grant', '*S-1-1-0:R'], check=False, capture_output=True)
                 self.assertEqual(completed.returncode, 0)
-                with self.assertRaises(pairing.PairingError):
+                with self.assertRaises(pairing.PairingError) as error:
                     pairing.PairingStore(store.directory).ensure_key()
+                self.assertEqual(error.exception.code, 'pairing_store_permissions')
             else:
                 self.assertEqual(stat.S_IMODE(store.key_path.stat().st_mode), 0o600)
                 self.assertEqual(stat.S_IMODE(store.directory.stat().st_mode), 0o700)
