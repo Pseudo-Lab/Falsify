@@ -488,3 +488,39 @@ Stackbite native Codex GPT-6.1 Terra high Fast 작업자를 최대 3개씩 파�
 최초 Python 전체 실행의982통과·3실패는 보존한다. DocVortex 의존성은 별도 환경에서 확인했고, native 그래프 시간 초과의 최초 원인은 확정하지 않았다. 최종 전체 재실행은 통과했으며 생산 기한을 늘리지 않았다. 200ms 자식 기동 가정은 기준본·수정본 각각16회 중3회 시간 초과로 재현되어 테스트의 clock/분류 검사와 실제 자식 검사를 분리했다. 수치 편집 금지와 숨은 UI를 전제로 한 오래된 저장 가져오기 검사는 기준본에서도 실패함을 확인한 뒤 현재 계약으로 수정했다. 최종 검토에서 사용하지 않는 자기 호출 helper를 제거했다. 각 최초 값과 후속 결과는 ledger에 함께 남긴다.
 
 보고서는 소스 밖 coordination/tech-debt-audit-20261105/implementation/ccn15-20261105/CCN15_REPORT.ko.html이며 원시 수치는 production-ccn-final.json에 있다. 공개 웹·설치본은 alpha.50 유지, 사용자 companion·개인 설정·기록은 변경하지 않았다. 새 커밋의 원격 macOS CI는 아직 실행하지 않았고 기존 Paragraph runtime sourceBuildVerified=false도 유지한다. WorkBite T-0152는 진행 상태를 유지하고 이번 결과만 checkpoint로 남긴다.
+
+## 2026-11-05 alpha.51 공개 배포·설치본·공식 GitHub 동기화 완료
+
+사용자가 CCN 상환 버전의 공개 웹·설치본·GitHub 반영을 요청했다. c490db0c1c09eed9ad2be936ccd087b78a187c1d를 alpha.51로 개인 GitHub main과 chore/ccn15-20261105에 push했다. GitHub Actions 41945173264의 Linux·Windows·macOS ARM/Intel 및 Pages 배포가 모두 성공했다. 같은 커밋의 태그 v0.2.0-alpha.51과 prerelease ZIP·manifest·SHA256SUMS를 공개했다. ZIP은146875949바이트, SHA-256은567f8d37ba108919a97334a01c4d0517c859d1f80fe14202e3fbd05eb0ac1723이다. 공개 변경 자산61개와 다운로드 ZIP·manifest·checksum을 실제 대조했다. Aside에서도 공개 RED 입력·외부 응답 가져오기·RED/BLUE 탐색 표시와 alpha.51 진입 자산 URL을 확인했다.
+
+설치본은 기존 릴리스와 새 ZIP의 파일을 대조한 후211개를 교체했고 전체1254파일이 ZIP과 일치한다. 개인 파일36개와 기존 연결 키를 보존했다. 시작 전7816은 비어 있었으므로 기존 launcher 설정과 절대 server.py 경로로 hidden 실행했다. 새 companion PID70768의 Owned·descriptor·busy=false·workbenchVersion alpha.51을 확인했다. 실제 HTTP 합성 그래프 준비·PNG 미리보기·PDF 생성·되돌리기 원본 바이트 일치가 통과했다. 모델 호출은0회이며 브라우저 재페어링 완료를 주장하지 않는다.
+
+공유 Confluence API는 고정 lockfile로 설치한 Wrangler와 기존 배포 절차를 사용해668d83d7-2740-4fc8-bf09-ce4a130b3768로 교체했다. 변경 전후 변수·secret 항목·D1 binding이 같고 허용된 웹 Origin의 health HTTP200·ready=true를 확인했다. 데이터 migration은 수행하지 않았다. Pseudo-Lab/Falsify의 기존 feat/workbench-html-guide-20261012 브랜치도8518c4a82c531f55a0176ae335ce82404f732e06으로 fast-forward했다. tools/workbench 안의1254개 애플리케이션 Git blob·실행 권한은 공개 커밋과 같으며 기존 출처·팀 안내 overlay2개만 별도다. 팀 main·루트 파일은 변경하지 않았다.
+
+출시 커밋에서도 동일 범위202파일·9883함수·최대CCN15·15초과0·파싱오류0을 재확인했다. Paragraph runtime sourceBuildVerified=false는 유지한다. 배포 영수증은 소스 밖 coordination/tech-debt-audit-20261105/implementation/release-alpha51/deployment-status.json이다. StorageGuardian은 포장용 worktree의 외부 Git 객체 의존성 등록을 거절했으므로 보존하고 상위 보관 lease만 갱신했다. 이 영수증 문서는 로컬 조율 기록이며 공개 릴리스 커밋을 바꾸지 않는다.
+
+## 2026-11-05 CodeGraph 갱신과 기능 중심 UX 감사 후보
+
+사용자 요청으로 alpha.51 대응 소스5ff9153 기준 CodeGraph를 전체 재빌드했다.594파일·14519노드·65107연결이며 최신 상태를 확인했다. dist의 일부 UI·HTML/CSS는 색인 탐색이 파일을 특정하지 못해 실제 제공되는 소스로 보완했다. 제품 코드는 바꾸지 않았다.
+
+Stackbite Codex GPT-6.1 Terra high Fast 작업자를 A 기본 RED/BLUE, B 지원 화면·독립 detector, C 편집기로 나누고 A가 끝난 뒤 D 실제 브라우저 확인을 배치했다. A의 디자인 검토가 끝나기 전에 B detector 결과를 조율 판단에 섞지 않았다. 작업자 원시16건에서 중복1건을 합치고 조율자의 viewport 관찰1건을 추가해 고유16건으로 정리했다. 그중15개 후보는10개 작업 묶음이며, 혼합 legacy 출력1건은 실제 파일 대조를 더 해야 한다. 완료 좌석과 감사용7861–7863 서버는 정리했고 설치본 companion은 건드리지 않았다. native 완료 attestation은 제공되지 않아 산출물·자체 보고·화면 관찰을 대조한 상태로 기록한다.
+
+요청한 anti-defensive-writing·avoid-ai-writing은 문구 키워드가 아니라 중복 결정·이동·복구·불필요한 설명을 줄이는 기준으로 적용했다. 일반 지시문은 기존 평문 편집을 사용하고 고급 JSON·도구는 접는다. 원문/변경 출처, undo, 실제 공유/실행 동의, BLUE 독립성 및 검사 상태는 유지한다. 영어 저자 판별기를 한국어 UI에 적용하지 않았고 문구 편집은0회다. Impeccable 보조 정적 검사1회의6개 신호는 숨은 이미지·CSS override·기존 공항 디자인을 대조해 확정 결함으로 자동 채택하지 않았다. 시각 overlay도 확인되지 않아 표시됐다고 주장하지 않는다.
+
+구현 후보 U1은 입력 후 원문을 첫 화면에 보여주고 모바일 비교/복구를 가까이 두기, U2는 최신 다운로드를 기본 하나로 만들기, U3은 진단을 확인할 쪽/위치로 연결하기, U4는 현재 쪽에서 그림/그래프 선택과 연결 진입을 제공하기다. U5는 외부 응답 자동 가져오기 중복 출처 방지 및 실제 입력 형식과 첨부 안내 일치, U6은 겹침을 같은 자리에서 비교·교체, U7은 직접 편집의 기록 상태·완료/취소, U8은 지시문 복사 복구·불러오기 undo·평문 관리 통합이다. U9는 수동 위치 찾기의 문맥/채택 상태, U10은 빈 기록 화면의 작업 진입점이다. 권장 순서는 U2/U3/U5/U8 → U1/U4/U6/U7 → U9/U10이며 아직 구현을 승인받거나 시작한 상태는 아니다.
+
+합성 TXT/PDF·RED JSON 입력에서 붙여넣기 후 명시 가져오기를 누르면 같은 제안의 출처가1→2개가 됐고, TXT에서도 PDF 첨부 안내가 나왔다. 겹침 거절과 수동 위치 선택의 내부 ID/offset 노출도 확인했다. C는 직접 편집·자동 생성·undo를 관찰했고 D는 미리보기·다운로드 이벤트·BLUE 파일 전환 및390 CSS px 화면을 확인했다. 다운로드/BLUE 바이트 일치, 연결된 그림·표·그래프, 위첨자·각주·AI 배치·실제 공유·검수 상세 및 접근성 전수 검사는 이번에 실행하지 않았다. 기존 fuzzy 후보 PDF 미리보기·자동 생성·undo·그래프 엔진은 재구현 대상에서 뺐다. 상세 후보·완료 조건·범위·캡처는 소스 밖 coordination/tech-debt-audit-20261105/implementation/ux-audit-alpha51-20261105/UX_AUDIT.ko.html과 triage.json에 있다.
+
+감사 종료 시 WorkBite가 기존 owner의 중지/교체로 인증되지 않았다. 다른 저장소나 API로 우회하지 않고 checkpoint 전송을 중지했다. workbite-pending.json에 보관했으며 재인증 후 같은 검증된 workspace와 Task에 기록할 수 있다. Task 상태는 바꾸지 않았다.
+
+## 2026-11-05 프롬프트·편집 UX 구현
+
+사용자가 UX 감사의 10개 묶음 전체를 승인하고 U2·U3·U5·U8부터 병렬 구현하도록 요청했다. Stackbite Codex GPT-6.1 Terra high Fast 작업자를 편집 상태, 외부 응답·지시문·기록, 화면·그림 선택으로 나눴다. 조율자가 작은 커밋을 검토·통합하고 완료한 작업자를 독립 검수와 재현된 회귀 수정에 이어 배치했다. search-first로 기존 DOM·미리보기·편집 이력·원문 위치 API를 재사용했다. anti-defensive-writing과 avoid-ai-writing은 반복 안내와 불필요한 선택 단계를 줄이는 기능 기준으로 적용했다.
+
+현재 결과의 다운로드를 기본 동작으로 두고 이전 결과는 편집이 달라졌거나 생성이 실패했을 때 표시한다. 진단은 확인된 문제와 검사할 수 없었던 조건을 구분하고 실제 페이지로 연결하며 원시 결과는 접힌 상세에 보존한다. 외부 응답의 같은 입력 이벤트를 반복해도 출처가 늘어나지 않는다. 프롬프트는 실제 선택한 파일에 맞춰 복사하고 클립보드 실패 시 완성된 내용 전체를 직접 복사할 수 있다. 지시문 불러오기는 이전 초안으로 되돌릴 수 있다. Harness 지침 편집은 기존 역할별 프롬프트로 연결하고 새 버전을 등록하면서 나머지 실행 설정을 보존한다.
+
+겹치는 변경은 Before·After를 비교해 유지하거나 교체하며, 직접 편집과 제안 선택을 한 번의 실행 취소·다시 실행으로 복원한다. 직접 입력에는 완료·취소와 상태를 가까이 두고 입력창의 실제 크기에 맞춰 배치한다. 위치 선택에는 주변 문장을 보여주며 반복 인용도 검증한 원문 범위로 표시한다. 빈 기록·검수 화면은 RED·BLUE의 기록 생성 경로로 연결한다.
+
+논문을 연 화면은 상단을 압축하고 모바일에서 원본·수정본을 전환한다. 변경 표시는 숨은 쪽의 측정 가능한 기하를 유지해 전환 후에도 이어진다. 현재 원본 쪽과 생성 PDF가 하나의 쪽으로 대응할 때 그 생성본을 그림·그래프 편집 대상으로 이어 쓴다. 분할·누락된 쪽 지도는 자동 대응을 확정하지 않는다. 실제 생성 파일·원본 해시·변경 이력과 BLUE의 PDF 전용 전달을 유지한다.
+
+작업 영수증은 소스 밖 coordination/tech-debt-audit-20261105/implementation/ux-implementation-20261105에 보관한다. 최초 실패와 후속 성공 기록을 함께 남긴다. alpha.52 배포 검증은 release-alpha52의 영수증으로 연결한다. WorkBite T-0152는 owner 인증이 복구되면 실제 완료 사실을 기록한다.

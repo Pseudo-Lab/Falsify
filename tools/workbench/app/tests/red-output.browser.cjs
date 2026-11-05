@@ -50,13 +50,25 @@ const before='shows a modest benefit',after='shows no benefit',marker='FALSIFY R
    // Direct-edit preview uses the same PDF.js text geometry. A pure deletion leaves a caret in After.
    await page.evaluate(({id,before})=>FalsifyPaperWorkspace.acceptProposals([{segmentId:id,before,after:'shows a benefit'}],{origin:'external-ai-import'}),{id:segment.id,before});
    await page.locator('#paper-proposal-list button').first().click();await page.locator('#paper-generate').click();
-   await page.waitForFunction(()=>FalsifyPaperWorkspace.getOutput()&&document.querySelector('#paper-after-stage .paper-change-mark.is-caret'),null,{timeout:120000});
-   r.checks.originalAndAfterMarked=await page.locator('#paper-before-stage .paper-change-mark.is-before').count()>0&&await page.locator('#paper-after-stage .paper-change-mark.is-caret').count()>0;
+   await page.waitForFunction(()=>FalsifyPaperWorkspace.getOutput(),null,{timeout:120000});
+   const paneGeometry=async(stage,mark)=>{
+    await page.locator(stage+' '+mark).first().waitFor({state:'visible',timeout:30000});
+    return page.locator(stage).evaluate((node,selector)=>{const canvas=node.querySelector('canvas').getBoundingClientRect(),marks=[...node.querySelectorAll(selector)];return marks.length>0&&marks.every(item=>{const rect=item.getBoundingClientRect();return rect.width>0&&rect.height>0&&rect.left>=canvas.left-2&&rect.right<=canvas.right+3&&rect.top>=canvas.top-2&&rect.bottom<=canvas.bottom+2;});},mark);
+   };
+   const bar=page.getByRole('group',{name:'원본과 수정본 비교'});
+   if(name==='mobile')await bar.getByRole('button',{name:'원본',exact:true}).click();
+   r.checks.beforeGeometry=await paneGeometry('#paper-before-stage','.paper-change-mark.is-before');
+   if(name==='mobile')await bar.getByRole('button',{name:'수정본',exact:true}).click();
+   r.checks.afterGeometry=await paneGeometry('#paper-after-stage','.paper-change-mark.is-caret');
    const handoffBefore=await page.evaluate(async()=>{const f=FalsifyPaperWorkspace.getOutput().file;return {hash:Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',await f.arrayBuffer()))).map(x=>x.toString(16).padStart(2,'0')).join(''),snapshot:JSON.stringify(FalsifyPaperWorkspace.getEditSnapshot())};});
-   await page.locator('#paper-show-changes').uncheck();r.checks.toggleHides=await page.locator('#paper-before-stage .paper-change-mark').first().isHidden();
+   await page.locator('.visual-details').filter({has:page.locator('#paper-show-changes')}).locator('> summary').click();
+   await page.locator('#paper-show-changes').uncheck();r.checks.toggleHides=await page.locator(name==='mobile'?'#paper-after-stage .paper-change-mark':'#paper-before-stage .paper-change-mark').first().isHidden();
    await page.locator('#paper-show-changes').check();await page.locator('#paper-edits button[data-act=compare]').first().click();
-   r.checks.compareKeepsBothPanes=await page.locator('#paper-after-stage').isVisible()&&await page.locator('#paper-inline').isHidden();
-   r.checks.overlayWithinPage=await page.evaluate(()=>['#paper-before-stage','#paper-after-stage'].every(sel=>{const stage=document.querySelector(sel),canvas=stage.querySelector('canvas').getBoundingClientRect();return [...stage.querySelectorAll('.paper-change-mark')].every(mark=>{const r=mark.getBoundingClientRect();return r.width>0&&r.height>0&&r.left>=canvas.left-2&&r.right<=canvas.right+3&&r.top>=canvas.top-2&&r.bottom<=canvas.bottom+2;});}));
+   if(name==='desktop')r.checks.compareKeepsBothPanes=await page.locator('#paper-before-stage').isVisible()&&await page.locator('#paper-after-stage').isVisible()&&await page.locator('#paper-inline').isHidden();
+   if(name==='mobile'){
+    await bar.getByRole('button',{name:'원본',exact:true}).click();r.checks.beforeAfterCompare=await paneGeometry('#paper-before-stage','.paper-change-mark.is-before');
+    await bar.getByRole('button',{name:'수정본',exact:true}).click();r.checks.afterAfterCompare=await paneGeometry('#paper-after-stage','.paper-change-mark.is-caret');
+   }
    r.geometry=await page.evaluate(()=>[...document.querySelectorAll('#paper-before-stage .paper-change-mark,#paper-after-stage .paper-change-mark')].map(el=>({class:el.className,left:el.style.left,top:el.style.top,width:el.style.width})));
    const handoffAfter=await page.evaluate(async()=>{const f=FalsifyPaperWorkspace.getOutput().file;return {hash:Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',await f.arrayBuffer()))).map(x=>x.toString(16).padStart(2,'0')).join(''),snapshot:JSON.stringify(FalsifyPaperWorkspace.getEditSnapshot())};});
    r.checks.marksNeverChangeBytesOrEdits=JSON.stringify(handoffBefore)===JSON.stringify(handoffAfter);
@@ -65,5 +77,6 @@ const before='shows a modest benefit',after='shows no benefit',marker='FALSIFY R
  }catch(e){r.failure=String(e.stack||e);try{r.status=await page.locator('#red-export-status').innerText();r.importStatus=await page.locator('#import-status').innerText();}catch{}}
   r.checks.noModelPost=r.requests.length===0;r.checks.noPageErrors=r.errors.length===0;r.downloads=r.downloads.map(x=>x.suggestedFilename());await ctx.close();
  }}finally{await browser.close();if(localServer)await new Promise(resolve=>localServer.close(resolve));}
- const report={url,sourceHash:sha(source),results,limitations:['Synthetic fixture and isolated headless contexts only; warnings are not domain approval.']};await fs.writeFile(path.join(out,'red-output-result.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report,null,2));if(results.some(r=>r.failure||Object.values(r.checks).includes(false)))process.exitCode=1;
+ const matchingOutput=results.length===2&&!!results[0].outputHash&&results[0].outputHash===results[1].outputHash;
+ const report={url,sourceHash:sha(source),matchingOutput,results,limitations:['Synthetic fixture and isolated headless contexts only; warnings are not domain approval.']};await fs.writeFile(path.join(out,'red-output-result.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report,null,2));if(!matchingOutput||results.some(r=>r.failure||Object.values(r.checks).includes(false)))process.exitCode=1;
 })().catch(async e=>{console.error(e);if(localServer?.listening)await new Promise(resolve=>localServer.close(resolve));process.exitCode=1;});

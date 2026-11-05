@@ -151,6 +151,29 @@ test('external source excludes synthetic aliases but retains distinct occurrence
   const row=v.get('paper-proposal-list').children[1];assert.equal(v.ws.getExternalResponses().items[1].matchStatus,'missing');assert.equal(row.children[4].children.length,2);
 });
 
+test('manual location shows surrounding text and binds the chosen occurrence without adoption',async()=>{
+  const v=mount(),file=pdfFile(pdfBytes('MARKER-A'));v.file(file);await until(()=>v.ws.getSource()?.fileHash,'source');
+  v.document.dispatchEvent(new CustomEvent('falsify:document',{detail:{file,result:{segments:[{id:'s0',pageIndex:0,text:'First Alpha here. Second Alpha there.'},{id:'s1',pageIndex:1,text:'Elsewhere Alpha ends.'}]}}}));
+  const hash=v.ws.getSource().fileHash;v.ws.acceptExternalResponse({schema:'falsify.external-batch.v1',id:'manual',role:'red',fileHash:hash,raw:'response',items:[{id:'x',kind:'change',before:'Alpha',after:'Beta',matchStatus:'missing',anchor:null}]});
+  const row=v.get('paper-proposal-list').children[0],manual=row.children.find(n=>n.tagName==='details'),select=manual.children.find(n=>n.tagName==='select');
+  assert.equal(select.children.length,4);assert.match(select.children[1].textContent,/1쪽 · First 【Alpha】 here/);assert.match(select.children[3].textContent,/2쪽 · Elsewhere 【Alpha】 ends/);
+  assert.doesNotMatch(select.children[1].textContent,/s0| @ /);const chosen=JSON.parse(select.children[2].value);select.value=select.children[2].value;select.dispatchEvent(new Event('change'));
+  const item=v.ws.getExternalResponses().items[0];assert.equal(item.enabled,false);assert.equal(item.matchStatus,'matched');assert.equal(item.anchor.start,chosen.anchor.start);assert.equal(item.pageIndex,0);
+  assert.match(v.get('paper-proposal-status').textContent,/적용하려면 제안을 선택/);assert.match(v.get('paper-proposal-list').children[0].children[0].children[1].textContent,/선택 안 됨/);
+});
+
+test('manual second repeated quote reaches the real marks planner with its exact source range',async()=>{
+  const M=require('../dist/paper-change-marks.js'),results=[];
+  const marks={paintPage(args){const result=M.ranges(args.items,args.edits,args.side);if(args.edits.some(e=>e.id==='candidate-location'))results.push(result);const layer=args.document.createElement('div');args.container.append(layer);return {...result,layer,count:result.found.length};}};
+  const items=[{str:'Alpha here',transform:[1,0,0,1,10,100],width:60,height:12,hasEOL:true},{str:'Alpha there',transform:[1,0,0,1,10,80],width:60,height:12}];
+  const v=mount({items,changeMarks:marks}),file=pdfFile(pdfBytes('MARKER-A'));v.file(file);await until(()=>v.ws.getSource()?.fileHash&&v.canvas().length,'source page');
+  v.document.dispatchEvent(new CustomEvent('falsify:document',{detail:{file,result:{segments:[{id:'s0',pageIndex:0,text:'Alpha here Alpha there'}]}}}));
+  const hash=v.ws.getSource().fileHash;v.ws.acceptExternalResponse({schema:'falsify.external-batch.v1',id:'manual-preview',role:'red',fileHash:hash,raw:'response',items:[{id:'x',kind:'change',before:'Alpha',after:'Beta',matchStatus:'missing',anchor:null}]});
+  const manual=v.get('paper-proposal-list').children[0].children.find(n=>n.tagName==='details'),select=manual.children.find(n=>n.tagName==='select');select.value=select.children[2].value;select.dispatchEvent(new Event('change'));
+  assert.deepEqual(results.at(-1).found.map(x=>[x.itemIndex,x.start,x.end]),[[1,0,5]]);assert.deepEqual(results.at(-1).missing,[]);
+  assert.equal(v.ws.getExternalResponses().items[0].anchor.start,11);assert.equal(v.ws.getExternalResponses().items[0].enabled,false);
+});
+
 test('workspace imports additively and flush captures selected proposal',async()=>{
   let resolveExport;const requests=[];
   const exporter={prepare(req){requests.push(req);return new Promise(resolve=>{resolveExport=()=>{const bytes=pdfBytes('MARKER-GEN');resolve({file:pdfFile(bytes,'generated.pdf'),sha256:sha(bytes),verification:null,pageMap:null});};});}};
@@ -301,6 +324,33 @@ test('cross-alias external edits require disabling the first selection',async()=
   v.document.dispatchEvent(new CustomEvent('falsify:document',{detail:{file,result:{segments:[{id:'s0',pageIndex:0,text:'Alpha Beta'}],matchSegments:[{id:'layout:p1:page',pageIndex:0,text:'Alpha Beta',itemIndices:[0,1]}]}}}));
   const hash=v.ws.getSource().fileHash;v.ws.acceptExternalResponse({schema:'falsify.external-batch.v1',id:'a',role:'red',fileHash:hash,raw:'r',items:[{id:'x',kind:'change',before:'Alpha',after:'One',segmentId:'s0',pageIndex:0,matchStatus:'matched',anchor:{start:0,end:5}},{id:'y',kind:'change',before:'Alpha Beta',after:'Two',segmentId:'layout:p1:page',pageIndex:0,matchStatus:'matched',anchor:{start:0,end:10}}]});
   let checks=()=>v.get('paper-proposal-list').children.slice(0,2).map(row=>row.children[0].children[0]);let [a,b]=checks();a.checked=true;a.dispatchEvent(new Event('change'));[a,b]=checks();b.checked=true;b.dispatchEvent(new Event('change'));assert.deepEqual(v.ws.getExternalResponses().items.map(x=>x.enabled),[true,false]);assert.match(v.get('paper-proposal-status').textContent,/겹칩니다/);a.checked=false;a.dispatchEvent(new Event('change'));[a,b]=checks();b.checked=true;b.dispatchEvent(new Event('change'));assert.deepEqual(v.ws.getExternalResponses().items.map(x=>x.enabled),[false,true]);
+});
+
+test('conflict replacement is explicit and one undo restores manual and proposal provenance',async()=>{
+  const v=mount({edits:require('../dist/paper-edits.js'),paragraphPdf:paragraphMock('Original paragraph.')});const file=pdfFile(pdfBytes('MARKER-A'));v.file(file);
+  await until(()=>/문단을 클릭/.test(v.get('paper-before-status').textContent),'paragraph');
+  v.document.dispatchEvent(new CustomEvent('falsify:document',{detail:{file,result:{segments:[{id:'s0',pageIndex:0,text:'Original paragraph.'}]}}}));
+  clickParagraph(v);const editor=v.document.activeElement;editor.value='Manual text.';editor.dispatchEvent(new Event('input'));editor.dispatchEvent(new Event('blur'));
+  const hash=v.ws.getSource().fileHash;v.ws.acceptExternalResponse({schema:'falsify.external-batch.v1',id:'replace',role:'red',fileHash:hash,raw:'original response',items:[{id:'x',kind:'change',before:'Original paragraph.',after:'Proposed text.',segmentId:'s0',pageIndex:0,matchStatus:'matched',anchor:{start:0,end:19}}]});
+  let row=v.get('paper-proposal-list').children[0],check=row.children[0].children[0];check.checked=true;check.dispatchEvent(new Event('change'));
+  assert.equal(v.ws.getExternalResponses().items[0].enabled,false);assert.match(textOf(row),/Manual text/);assert.match(textOf(row),/Proposed text/);
+  row.querySelectorAll('button').find(b=>b.textContent.includes('이 제안으로 교체')).click();
+  assert.equal(v.ws.getEditSnapshot().edits[0].enabled,false);assert.equal(v.ws.getExternalResponses().items[0].enabled,true);
+  v.get('paper-undo').click();assert.equal(v.ws.getEditSnapshot().edits[0].enabled,true);assert.equal(v.ws.getExternalResponses().items[0].enabled,false);
+  v.get('paper-redo').click();assert.equal(v.ws.getEditSnapshot().edits[0].enabled,false);assert.equal(v.ws.getExternalResponses().items[0].enabled,true);
+  assert.equal(v.ws.getExternalResponses().batches[0].raw,'original response');assert.equal(v.ws.getEditSnapshot().edits[0].after,'Manual text.');
+});
+
+test('proposal conflict keep and replace preserve distinct choices across undo and redo',async()=>{
+  const v=mount({edits:require('../dist/paper-edits.js')}),file=pdfFile(pdfBytes('MARKER-A'));v.file(file);await until(()=>v.ws.getSource()?.fileHash,'source');
+  v.document.dispatchEvent(new CustomEvent('falsify:document',{detail:{file,result:{segments:[{id:'s0',pageIndex:0,text:'Alpha Beta'}]}}}));
+  const hash=v.ws.getSource().fileHash;v.ws.acceptExternalResponse({schema:'falsify.external-batch.v1',id:'p',role:'red',fileHash:hash,raw:'original',items:[{id:'x',kind:'change',before:'Alpha',after:'One',segmentId:'s0',pageIndex:0,matchStatus:'matched',anchor:{start:0,end:5}},{id:'y',kind:'change',before:'Alpha',after:'Two',segmentId:'s0',pageIndex:0,matchStatus:'matched',anchor:{start:0,end:5}}]});
+  const row=i=>v.get('paper-proposal-list').children[i],choose=i=>{const c=row(i).children[0].children[0];c.checked=true;c.dispatchEvent(new Event('change'));};
+  choose(0);choose(1);row(1).querySelectorAll('button').find(b=>b.textContent==='기존 변경 유지').click();assert.deepEqual(v.ws.getExternalResponses().items.map(x=>x.enabled),[true,false]);
+  choose(1);const staleButton=row(1).querySelectorAll('button').find(b=>b.textContent.includes('이 제안으로 교체'));const edit=row(1).children[1];edit.value='Changed';edit.dispatchEvent(new Event('input'));staleButton.click();assert.deepEqual(v.ws.getExternalResponses().items.map(x=>x.enabled),[true,false]);assert.match(v.get('paper-proposal-status').textContent,/바뀌었습니다/);
+  choose(1);row(1).querySelectorAll('button').find(b=>b.textContent.includes('이 제안으로 교체')).click();assert.deepEqual(v.ws.getExternalResponses().items.map(x=>x.enabled),[false,true]);
+  v.get('paper-undo').click();assert.deepEqual(v.ws.getExternalResponses().items.map(x=>x.enabled),[true,false]);v.get('paper-redo').click();assert.deepEqual(v.ws.getExternalResponses().items.map(x=>x.enabled),[false,true]);
+  assert.equal(v.ws.getExternalResponses().batches[0].raw,'original');
 });
 
 (async()=>{let passed=0;for(const [name,fn] of tests){try{await fn();passed++;console.log('PASS '+name);}catch(e){console.error('FAIL '+name,e);process.exitCode=1;}}console.log(JSON.stringify({passed,total:tests.length}));})();

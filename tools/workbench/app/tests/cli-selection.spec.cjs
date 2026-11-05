@@ -65,8 +65,8 @@ function world(stored){
       classList:{toggle:(c,on)=>{(on??!classes.has(c))?classes.add(c):classes.delete(c);},contains:c=>classes.has(c)},
       setAttribute(k,v){this.attrs[k]=v;},append(...c){for(const x of c){if(x&&typeof x==='object')x.parent=this;this.children.push(x);}},replaceChildren(...c){this.children=[];this.append(...c);},prepend(...c){this.children.unshift(...c);},after(){},remove(){},reset(){},focus(){},
       closest(sel){let n=this;while(n){if(n.tagName===sel.toUpperCase())return n;n=n.parent;}return null;}});
-    Object.defineProperty(e,'innerHTML',{set(){}});Object.defineProperty(e,'firstChild',{get(){return this.children[0]??null;}});return e;}
-  const get=id=>{if(!els.has(id))element('div').id=id;return els.get(id);};
+    Object.defineProperty(e,'parentElement',{get(){return this.parent;}});Object.defineProperty(e,'innerHTML',{set(){}});Object.defineProperty(e,'firstChild',{get(){return this.children[0]??null;}});return e;}
+  const get=id=>{if(!els.has(id)){const e=element('div');e.id=id;if(id==='evaluation-run')element('label').append(e);}return els.get(id);};
   const document=new EventTarget();Object.assign(document,{readyState:'complete',createElement:element,querySelector:s=>s.startsWith('#')?get(s.slice(1)):null,querySelectorAll:()=>[],body:element('body')});
   let state={status:'manual',connected:false,cap:null};
   // VM-realm objects are normalized to this realm so deepStrictEqual compares values only.

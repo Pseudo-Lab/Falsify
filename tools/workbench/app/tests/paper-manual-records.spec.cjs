@@ -259,10 +259,11 @@ test('ledger bridge opens a paper-edit without writing the AI ledger or copying 
       append(...kids){for(const kid of kids){if(kid&&typeof kid==='object') kid.parent=node; node.children.push(kid);}},
       replaceChildren(...kids){node.children=[]; node.append(...kids);},prepend(...kids){node.children.unshift(...kids);},after(){},remove(){},reset(){},focus(){},
       closest(sel){let current=node; while(current){if(current.tagName===String(sel).toUpperCase()) return current; current=current.parent;} return null;}});
+    Object.defineProperty(node,'parentElement',{get(){return node.parent;}});
     Object.defineProperty(node,'innerHTML',{set(){}});
     Object.defineProperty(node,'firstChild',{get(){return node.children[0]??null;}});
     return node;}
-  const get=id=>{if(!els.has(id)) element('div').id=id; return els.get(id);};
+  const get=id=>{if(!els.has(id)){const node=element('div');node.id=id;if(id==='evaluation-run')element('label').append(node);}return els.get(id);};
   const storage=new Map(), writes=[];
   const document=new EventTarget();
   Object.assign(document,{readyState:'complete',currentScript:null,createElement:element,querySelector:sel=>sel.startsWith('#')?get(sel.slice(1)):null,querySelectorAll:()=>[],body:element('body')});

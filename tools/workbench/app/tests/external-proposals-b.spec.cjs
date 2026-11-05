@@ -7,3 +7,10 @@ test('additive duplicates, conflicts, combine, bind and restore',()=>{const c=cr
 test('distinct unlocated BLUE findings remain separate and out-of-range anchors are rejected',()=>{const c=create({fileHash:hash,role:'blue',segments});c.append({schema:'falsify.external-batch.v1',id:'blue',role:'blue',fileHash:hash,raw:'findings',items:[{id:'x',kind:'finding',rationale:'first',matchStatus:'missing'},{id:'y',kind:'finding',rationale:'second',matchStatus:'missing'}]});assert.equal(c.snapshot().items.length,2);const d=create({fileHash:hash,segments});d.append(batch('a',[item('x','changed')]));assert.throws(()=>d.bind('p1',{segmentId:'s',pageIndex:0,before:'value 10 [1]',anchor:{start:13,end:99}}));});
 
 test('BLUE binding updates quote and restore validates the exact range',()=>{const c=create({fileHash:hash,role:'blue',segments});c.append({schema:'falsify.external-batch.v1',id:'b',role:'blue',fileHash:hash,raw:'answer',items:[{id:'x',kind:'finding',quote:'wrong',matchStatus:'missing'}]});c.bind('p1',{segmentId:'s',pageIndex:0,before:'value 10',anchor:{start:13,end:21}});assert.equal(c.snapshot().items[0].quote,'wrong');assert.equal(c.snapshot().items[0].sourceQuote,'value 10');const snap=c.snapshot();snap.items[0].sourceQuote='wrong';assert.throws(()=>c.restore(snap));});
+
+test('atomic selection keeps provenance and rejects invalid changes without mutation',()=>{
+  const c=create({fileHash:hash,segments});c.append(batch('a',[item('x','value 20'),item('y','value 30')]));c.setEnabled('p1',true);
+  const before=c.snapshot();assert.throws(()=>c.setSelection([{id:'p2',enabled:true}]));assert.deepEqual(c.snapshot(),before);
+  c.setSelection([{id:'p1',enabled:false},{id:'p2',enabled:true}]);assert.deepEqual(c.edits().map(x=>x.after),['value 30']);
+  assert.deepEqual(c.snapshot().items[0].sourceRefs,before.items[0].sourceRefs);assert.equal(c.snapshot().batches[0].raw,'original a');
+});

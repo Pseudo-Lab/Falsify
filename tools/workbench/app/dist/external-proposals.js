@@ -46,6 +46,18 @@
       return emit();
     }
     function setEnabled(id,on){enable(find(id),on);return emit();}
+    function validateSelection(changes){
+      if(!Array.isArray(changes)||new Set(changes.map(x=>x.id)).size!==changes.length)throw Error('Invalid selection');
+      const next=clone(items);
+      for(const change of changes){
+        if(!change||typeof change.enabled!=='boolean')throw Error('Invalid selection');
+        const item=next.find(x=>x.id===change.id);if(!item)throw Error('Unknown proposal');
+        if(change.enabled&&role==='red'&&!applicable(item))throw Error('Proposal is not applicable');
+        item.enabled=change.enabled;
+      }
+      validateRestoredOverlap(next);return next;
+    }
+    function setSelection(changes){items=validateSelection(changes);return emit();}
     function update(id,fields){
       const item=find(id),allowed=['after','rationale','evidence','references','attackTypes','uncertainty'];
       for(const k of Object.keys(fields||{}))if(!allowed.includes(k))throw Error('Unsupported field');
@@ -81,7 +93,7 @@
       batches=s.batches;items=s.items;next=Math.max(0,...items.map(x=>/^p\d+$/.test(x.id)?Number(x.id.slice(1)):0))+1;return emit();
     }
     function edits(){return clone(items.filter(x=>role==='red'&&x.enabled&&x.kind==='change'&&x.matchStatus==='matched'&&valid(x)&&x.after!==x.before).map(x=>({id:x.id,enabled:true,before:x.before,after:x.after,segmentId:x.segmentId,pageIndex:x.pageIndex,anchor:x.anchor,origin:x.origin||'external-ai-import',sourceRefs:x.sourceRefs})));}
-    return {append,snapshot:snap,setEnabled,update,bind,combine,restore,edits,subscribe(fn){listeners.add(fn);return()=>listeners.delete(fn);}};
+    return {append,snapshot:snap,setEnabled,setSelection,validateSelection,update,bind,combine,restore,edits,subscribe(fn){listeners.add(fn);return()=>listeners.delete(fn);}};
   }
   return {create};
 });

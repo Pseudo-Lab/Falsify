@@ -329,6 +329,18 @@
       const row={...current,enabled,updatedAt:at,history:capHistory(current.history,{revision:state.nextRevision,at,after:current.after,enabled,anchor})};
       commit(state,state.edits.map(item=>item.id===id?row:item));
     }
+    // One history entry can disable several conflicting edits while preserving each row.
+    function disableBatch(ids){
+      if(!Array.isArray(ids)||new Set(ids).size!==ids.length)fail('invalid','편집 ID 목록이 올바르지 않습니다.');
+      const selected=new Set(ids);for(const id of ids)if(!findEdit(state,id).enabled)fail('invalid','이미 꺼진 편집입니다.');
+      const at=clock(),next=state.edits.map(row=>{
+        if(!selected.has(row.id))return row;
+        const anchor=clone(row.anchor),enabled=false;
+        return {...row,enabled,updatedAt:at,history:capHistory(row.history,{revision:state.nextRevision,at,after:row.after,enabled,anchor})};
+      });
+      commit(state,next);
+    }
+    function historyTarget(direction){const list=direction==='undo'?state.past:direction==='redo'?state.future:[];return list.length?clone(list[list.length-1]):null;}
     function undo(){if(!state.past.length)fail('undo-empty','되돌릴 편집이 없습니다.');state.future.push({revision:state.revision,edits:clone(state.edits)});const prev=state.past.pop();state.revision=prev.revision;state.edits=prev.edits;emit(state);}
     function redo(){if(!state.future.length)fail('redo-empty','다시 실행할 편집이 없습니다.');state.past.push({revision:state.revision,edits:clone(state.edits)});const nxt=state.future.pop();state.revision=nxt.revision;state.edits=nxt.edits;emit(state);}
     function subscribe(fn,onError){
@@ -338,7 +350,7 @@
       state.subs.add(sub);let dead=false;
       return function unsubscribe(){if(dead)return;dead=true;state.subs.delete(sub);};
     }
-    return Object.freeze({id:sessionId,snapshot,addSegments,add,update,remove,setEnabled,undo,redo,subscribe});
+    return Object.freeze({id:sessionId,snapshot,addSegments,add,update,remove,setEnabled,disableBatch,historyTarget,undo,redo,subscribe});
   }
   function draft(input){
     allowKeys(input,['snapshot','now'],['snapshot'],'malformed','초안');

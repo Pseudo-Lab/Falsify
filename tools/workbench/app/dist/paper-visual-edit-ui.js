@@ -543,7 +543,7 @@
     return mapPixelBox(cell.bbox,analysis&&analysis.bbox,image&&image.width,image&&image.height);
   }
 
-  function create({host,getSource,getSession,onOutput,onChange,hold}={}){
+  function create({host,getSource,getSession,onOutput,onChange,hold,getSelectionPage}={}){
     if(!host||typeof host.append!=='function'||typeof getSource!=='function'||typeof getSession!=='function'||typeof onOutput!=='function')throw new TypeError('시각 편집 화면 설정이 올바르지 않습니다.');
     const doc=host.ownerDocument||root.document;
     if(!doc||typeof doc.createElement!=='function')throw new TypeError('시각 편집 화면 설정이 올바르지 않습니다.');
@@ -567,7 +567,7 @@
     retry.hidden=true;
     const layout=el('div','visual-edit-layout');
     const sourceColumn=el('div','visual-edit-column');
-    const sourceTitle=el('h3',null,'원본');
+    const sourceTitle=el('h3',null,'편집 대상 PDF');
     const list=el('div','visual-edit-list');
     list.setAttribute('role','radiogroup');
     list.setAttribute('aria-label','원본 표와 그림');
@@ -589,7 +589,16 @@
     savedPager.append(savedPrev,savedNext,savedPos);
     const pickPage=el('button','button secondary','영역 직접 선택');
     pickPage.type='button';
-    sourceColumn.append(sourceTitle,list,listPager,pickPage,savedTitle,saved,savedPager);
+    const pickGraph=el('button','button secondary','그래프 영역 선택');pickGraph.type='button';
+    const connect=el('button','button secondary','내 PC 연결');
+    connect.type='button';
+    connect.addEventListener('click',()=>{
+      const panel=doc.querySelector?.('.visual-connection-details');
+      if(!panel)return;
+      for(let parent=panel.parentElement;parent;parent=parent.parentElement)if(parent.tagName==='DETAILS')parent.open=true;
+      panel.open=true;panel.scrollIntoView?.({block:'nearest'});panel.querySelector?.('summary')?.focus?.({preventScroll:true});
+    });
+    sourceColumn.append(sourceTitle,list,listPager,pickPage,pickGraph,connect,savedTitle,saved,savedPager);
     const work=el('div','visual-edit-work');
     const workBody=el('div','visual-edit-body');
     const compare=el('p','form-feedback visual-edit-compare','');
@@ -691,6 +700,8 @@
       blueBtn.hidden=!outputReady();
       retry.disabled=lock;
       pickPage.disabled=lock||!paperId;
+      pickGraph.disabled=pickPage.disabled;
+      connect.hidden=!!paperId;
       listPrev.disabled=lock||listPage<=0;
       listNext.disabled=lock||(listPage+1)*LIST_PAGE>=listTotal;
       savedPrev.disabled=lock||savedPage<=0;
@@ -1168,27 +1179,49 @@
       if(current)return !sameJson(current,state.original);
       return JSON.stringify(state.editor)!==JSON.stringify(editorFromChart(state.original));
     }
-    async function selectPage(){
+    function currentPage(src){
+      if(typeof getSelectionPage==='function'){
+        try{const page=getSelectionPage(src);return Number.isSafeInteger(page)&&page>=0?page:null;}catch{return null;}
+      }
+      const workspace=root.FalsifyPaperWorkspace;
+      const source=workspace?.getSource?.();
+      if(!source||source.file!==src?.file||source.fileHash!==src.fileHash)return null;
+      const page=workspace.getPageIndex?.();
+      return Number.isSafeInteger(page)&&page>=0?page:null;
+    }
+    async function selectPage(graphIntent=false){
       if(parentBusy||applying||!paperId)return;
-      const token=generation,mine=++selectSerial,src=currentSource();
+      const token=generation,mine=++selectSerial,src=currentSource(),pageIndex=currentPage(src);
+      if(pageIndex===null){say(status,'현재 쪽과 편집 대상 PDF의 대응을 확인할 수 없습니다.',true);return;}
       try{
-        const view=await root.FalsifyBlueVisual.previewBluePage({file:src.file,fileHash:src.fileHash,page:1});
-        if(!live(token,src)||mine!==selectSerial)return;
+        const view=await root.FalsifyBlueVisual.previewBluePage({file:src.file,fileHash:src.fileHash,page:pageIndex+1});
+        if(!live(token,src)||mine!==selectSerial||currentPage(src)!==pageIndex)return;
         selectedKey='figure:page-region';paintLists();
-        await paintFigure({id:'page-region',pageIndex:0,bbox:[0,0,view.width,view.height]},token,mine);
-        say(status,'페이지에서 고칠 영역을 드래그하세요.');
+        await paintFigure({id:'page-region',pageIndex,bbox:[0,0,view.width,view.height],graphIntent},token,mine,()=>currentPage(src)===pageIndex);
+        if(live(token,src)&&mine===selectSerial&&currentPage(src)===pageIndex)say(status,'편집 대상 PDF에서 고칠 영역을 드래그하세요.');
       }catch{if(token===generation)say(status,TEXT.previewFailed,true);}
     }
     pickPage.addEventListener('click',()=>{void selectPage();});
-    async function paintFigure(item,token,mine){
+    pickGraph.addEventListener('click',()=>{void selectPage(true);});
+    const originalAction=el('button','button secondary','그림·그래프 영역 선택');
+    originalAction.type='button';
+    doc.querySelector?.('.paper-edit-tools')?.append(originalAction);
+    originalAction.addEventListener('click',()=>{
+      if(!paperId){connect.click();return;}
+      host.scrollIntoView?.({block:'start'});
+      void selectPage();
+    });
+    async function paintFigure(item,token,mine,stillCurrent=()=>true){
       chartState=null;
       const rendered=await renderRegion(item.pageIndex,item.bbox);
-      if(!selectionCurrent(token,mine))return;
+      if(!selectionCurrent(token,mine)||!stillCurrent())return;
       if(!rendered){say(status,TEXT.previewFailed,true);errorCode='preview';return;}
-      figureState={key:'figure:'+item.id,opId:'figure-'+item.id,itemId:item.id,pageIndex:item.pageIndex,bbox:item.bbox.slice(),beforeSha:rendered.sha256,beforePng:rendered.bytes,uploaded:null,crop:null,label:null,afterPng:null,page:item.pageIndex+1};
+      figureState={key:'figure:'+item.id,opId:'figure-'+item.id,itemId:item.id,pageIndex:item.pageIndex,bbox:item.bbox.slice(),beforeSha:rendered.sha256,beforePng:rendered.bytes,uploaded:null,crop:null,label:null,afterPng:null,page:item.pageIndex+1,graphIntent:!!item.graphIntent};
+      const fig=figureState;
       paintFigureControls();
       setImages(rendered.bytes,null);
-      await loadPreview(token,mine);
+      await loadPreview(token,mine,stillCurrent);
+      if(!stillCurrent()&&figureState===fig){figureState=null;workBody.replaceChildren();}
     }
     function paintFigureControls(){
       const fig=figureState;
@@ -1201,6 +1234,12 @@
       prev.type='button';next.type='button';
       nav.append(prev,next,pageLabel);
       const stage=el('div','visual-edit-stage');
+      const cancel=el('button','button secondary','영역 선택 취소');
+      cancel.type='button';
+      cancel.addEventListener('click',()=>{
+        selectSerial++;figureState=null;selectedKey=null;workBody.replaceChildren();
+        paintLists();say(status,'영역 선택을 취소했습니다.');
+      });
       const fileLabel=el('label','button secondary','바꿀 이미지');
       const file=el('input');
       file.type='file';
@@ -1250,9 +1289,10 @@
         try{await paintShape({analysisId:'region-'+chosen.key+'-p'+pageIndex+'-'+bbox.join(','),pageIndex,bbox},generation,selectSerial);}
         catch{if(figureState===chosen){paintFigureControls();say(status,'곡선을 읽지 못했습니다. 그래프 전체가 들어오도록 영역을 선택하세요.',true);}}
       });dynamic.push(shapeButton);
-      panel.append(title,shapeButton,nav,stage,fileLabel,labelInput,labelBtn,advanced);
+      fig.shapeButton=shapeButton;
+      panel.append(title,shapeButton,nav,stage,cancel,fileLabel,labelInput,labelBtn,advanced);
       workBody.replaceChildren(panel);
-      dynamic.push(prev,next,file,labelBtn,useRegion,useCrop);
+      dynamic.push(prev,next,file,labelBtn,useRegion,useCrop,cancel);
       prev.addEventListener('click',()=>{if(fig.page>1)void setPage(fig.page-1);});
       next.addEventListener('click',()=>{if(!fig.pages||fig.page<fig.pages)void setPage(fig.page+1);});
       let drag=null;
@@ -1301,7 +1341,7 @@
         return {x:roundPt(x),y:roundPt(y)};
       }
     }
-    async function loadPreview(token,mine){
+    async function loadPreview(token,mine,stillCurrent=()=>true){
       const fig=figureState;
       if(!fig)return;
       const src=currentSource();
@@ -1349,9 +1389,9 @@
     }
     async function updateFigureBbox(bbox){
       const fig=figureState;
-      const token=generation,mine=selectSerial;
-      const rendered=await renderRegion(fig.page-1,bbox);
-      if(!selectionCurrent(token,mine)||figureState!==fig)return;
+      const token=generation,mine=selectSerial,page=fig.page;
+      const rendered=await renderRegion(page-1,bbox);
+      if(!selectionCurrent(token,mine)||figureState!==fig||fig.page!==page)return;
       if(!rendered){say(status,TEXT.region,true);return;}
       fig.pageIndex=fig.page-1;
       fig.bbox=bbox.slice();
@@ -1360,6 +1400,7 @@
       fig.label=null;
       paintOverlay(bbox);
       await composeFigure();
+      if(fig.graphIntent&&figureState===fig&&!fig.shapeButton.hidden){fig.graphIntent=false;fig.shapeButton.click();}
     }
     async function onFile(file){
       if(!file||!figureState||parentBusy||applying)return;

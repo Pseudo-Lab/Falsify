@@ -58,6 +58,15 @@ check('enable and remove participate in undo and redo',()=>{
   unsub();s.undo();assert.equal(seen.length,6);
 });
 
+check('batch disable validates before one undoable history change',()=>{
+  const s=session([seg('s0','unique claim and another claim',0)]),a=s.add(edit()),b=s.add(edit({before:'another claim',after:'other claim'}));
+  const before=s.snapshot();assert.throws(()=>s.disableBatch([a,'missing']));assert.deepEqual(s.snapshot(),before);
+  let emitted=0;s.subscribe(()=>emitted++);s.disableBatch([a,b]);assert.equal(emitted,1);assert.ok(s.snapshot().edits.every(e=>!e.enabled));
+  s.undo();assert.ok(s.snapshot().edits.every(e=>e.enabled));assert.equal(s.snapshot().edits[0].origin,'human');
+  s.redo();assert.ok(s.snapshot().edits.every(e=>!e.enabled));
+  const rev=s.snapshot().revision;s.disableBatch([]);assert.notEqual(s.snapshot().revision,rev);s.undo();assert.equal(s.snapshot().revision,rev);
+});
+
 check('a new edit after undo invalidates redo and does not reuse that revision',()=>{
   const s=session([seg('s0','unique claim in the source',0)]);
   const id=s.add(edit());

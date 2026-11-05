@@ -40,14 +40,32 @@
       }
       return {start,end,caret};
   }
+  // Bind a candidate only when its complete source segment maps uniquely to the page.
+  function validLocation(location,quote){
+    if(!location||typeof location.text!=='string'||!Number.isSafeInteger(location.start)||!Number.isSafeInteger(location.end))return false;
+    const {text,start,end}=location;return start>=0&&end>start&&end<=text.length&&text.slice(start,end)===quote;
+  }
+  function anchoredOffset(location,quote,wanted,hay){
+    if(!validLocation(location,quote))return -1;
+    const {text,start}=location;
+    const source=mapped(text),base=hay.value.indexOf(source.value);
+    if(!source.value||base<0||hay.value.indexOf(source.value,base+1)>=0)return -1;
+    const normalized=mapped(quote),lead=normalized.value.indexOf(wanted);
+    const firstStart=start+normalized.starts[lead],lastEnd=start+normalized.ends[lead+wanted.length-1];
+    const first=source.starts.findIndex(offset=>offset===firstStart),last=source.ends.findIndex(offset=>offset===lastEnd);
+    if(first<0||last<first)return -1;
+    if(source.value.slice(first,last+1)!==wanted)return -1;
+    return base+first;
+  }
   function collectRanges(edit,side,index,hay,found,missing){
       if(edit.enabled===false)return;
       const delta=difference(mapped(String(edit.before||'')).value.trim(),mapped(String(edit.after||'')).value.trim());if(!delta.changed)return;
       const quote=String(edit[side]||''),needle=mapped(quote),wanted=needle.value.trim();
       if(!wanted){missing.push(edit.id);return;}
-      const lead=needle.value.indexOf(wanted),at=hay.value.indexOf(wanted);
-      // Repeated phrases are not guessed. They remain available in the text comparison.
-      if(at<0||hay.value.indexOf(wanted,at+1)>=0){missing.push(edit.id);return;}
+      const anchored=side==='before'&&edit.location;
+      const at=anchored?anchoredOffset(edit.location,quote,wanted,hay):hay.value.indexOf(wanted);
+      // Repeated phrases require a uniquely mapped source segment and exact range.
+      if(at<0||(!anchored&&hay.value.indexOf(wanted,at+1)>=0)){missing.push(edit.id);return;}
       const {start,end,caret}=changeBounds(delta,side,wanted,hay,at);
       let pieces=index.spans.filter(s=>caret?s.start<=start&&s.end>=start:s.end>start&&s.start<end);
       if(caret)pieces=pieces.slice(-1);

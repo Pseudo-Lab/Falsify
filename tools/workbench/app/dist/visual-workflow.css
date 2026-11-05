@@ -65,3 +65,43 @@
 .visual-advanced-execution>.role-step{margin-top:16px}
 .visual-advanced-execution .visual-connection{margin:16px 0}
 @media(max-width:640px){.blue-handoff-ready{flex-direction:column;align-items:stretch}.blue-handoff-ready .button{width:100%}}
+
+/* Keep the selected paper and page controls close to the intake. */
+.paper-intake:has(#paper-workspace:not([hidden])) .step-head{margin-bottom:4px}
+.paper-intake:has(#paper-workspace:not([hidden])) .visual-drop{margin:4px 0}
+.paper-intake:has(#paper-workspace:not([hidden])) .visual-file-label{padding:6px 10px!important;gap:10px}
+.paper-intake:has(#paper-workspace:not([hidden])) .visual-paper{flex-basis:32px;min-height:42px}
+.paper-intake:has(#paper-workspace:not([hidden])) .visual-paper canvas{width:32px;max-height:42px}
+.paper-intake:has(#paper-workspace:not([hidden])) .visual-file-title{font-size:14px}
+.paper-intake:has(#paper-workspace:not([hidden])) .visual-file-copy{gap:0}
+.paper-workspace:not([hidden]){margin-top:6px;padding-top:6px}
+.paper-workspace:not([hidden])>.section-heading,.paper-workspace:not([hidden])>.section-heading+p{display:none}
+.paper-workspace:not([hidden])>.paper-font-tools{margin:4px 0}
+.paper-workspace:not([hidden])>.paper-compare-tools{margin-top:4px}
+.paper-workspace:not([hidden])>.paper-toolbar{margin-top:4px}
+.paper-workspace:not([hidden]) .form-feedback:empty{display:none}
+@media(max-width:820px){
+body:has(.rail [data-view=workbench][aria-current=page]) .wayfinding{padding-top:5px;padding-bottom:5px}
+body:has(.rail [data-view=workbench][aria-current=page]) .sign-message p{display:none}
+body:has(.rail [data-view=workbench][aria-current=page]) .content{padding-top:8px}
+}
+
+.paper-intake:has(#paper-workspace:not([hidden])) #import-status:not(.error){display:none}
+.paper-workspace:not([hidden]) .paper-edit-tools span{display:none}
+.paper-workspace:not([hidden]) .paper-edit-tools{margin-top:4px}
+.paper-workspace:not([hidden]) .paper-toolbar{gap:4px}
+.paper-workspace:not([hidden]) .paper-toolbar .button{min-height:44px;padding:6px 8px}
+
+/* A loaded RED paper keeps its airport sign while giving the page room. */
+@media(min-width:821px){
+body:has(#view-workbench:not([hidden]) #paper-workspace:not([hidden])) .topbar{height:44px}
+body:has(#view-workbench:not([hidden]) #paper-workspace:not([hidden])) .wayfinding{padding-top:4px;padding-bottom:4px}
+body:has(#view-workbench:not([hidden]) #paper-workspace:not([hidden])) .gate-code{font-size:30px;min-width:48px}
+body:has(#view-workbench:not([hidden]) #paper-workspace:not([hidden])) .sign-message h1{font-size:17px}
+body:has(#view-workbench:not([hidden]) #paper-workspace:not([hidden])) .sign-message p{display:none}
+body:has(#view-workbench:not([hidden]) #paper-workspace:not([hidden])) .sign-action{max-width:none;padding:0;white-space:nowrap;min-height:44px}
+body:has(#view-workbench:not([hidden]) #paper-workspace:not([hidden])) .content{padding-top:8px}
+.paper-intake:has(#paper-workspace:not([hidden]))>.step-head{display:none}
+.paper-intake #paper-workspace:not([hidden]) .paper-page-jump{display:inline-flex;margin:0}
+.paper-workspace:not([hidden]) .paper-compare{margin-top:4px}
+}

@@ -1306,6 +1306,45 @@ test('ui-audit-repair: table blur schedules the committed cell identity',async()
   assert.equal(instances.at(-1).specs.at(-1).edits[0].id,v.ws.getEditSnapshot().edits[0].id);assert.doesNotMatch(v.get('paper-generate-status').textContent,/겹/);
 });
 
+test('direct editor controls cancel or commit without interrupting IME',async()=>{
+  const v=mount({paragraphPdf:paragraphMock('Original paragraph.')});v.file(pdfFile(pdfBytes('MARKER-A')));
+  await until(()=>/문단을 클릭/.test(v.get('paper-before-status').textContent),'paragraph');
+  clickParagraph(v);let editor=v.document.activeElement;
+  editor.value='Discarded';editor.dispatchEvent(new Event('input'));
+  const status=v.created.find(n=>n.tagName==='span'&&n.dataset.directStatus==='');assert.match(status.textContent,/입력 중/);
+  const cancel=v.created.find(n=>n.tagName==='button'&&n.textContent==='입력 취소');cancel.click();assert.equal(v.ws.getEditSnapshot().edits.length,0);
+  clickParagraph(v);editor=v.document.activeElement;editor.value='Saved';editor.dispatchEvent(new Event('input'));
+  const done=v.created.filter(n=>n.tagName==='button'&&n.textContent==='완료').at(-1);done.click();assert.equal(v.ws.getEditSnapshot().edits[0].after,'Saved');
+  v.get('paper-undo').click();assert.equal(v.ws.getEditSnapshot().edits.length,0);v.get('paper-redo').click();assert.equal(v.ws.getEditSnapshot().edits[0].after,'Saved');
+  clickParagraph(v);editor=v.document.activeElement;editor.value='IME text';editor.dispatchEvent(new Event('compositionstart'));editor.dispatchEvent(new Event('input'));
+  keydown(editor,{key:'Escape',isComposing:true});assert.equal(v.document.activeElement,editor);editor.dispatchEvent(new Event('compositionend'));
+  keydown(editor,{key:'Escape'});assert.equal(v.ws.getEditSnapshot().edits[0].after,'Saved');
+});
+
+test('current page and previous download follow source and generation state',async()=>{
+  const instances=[],key=spec=>JSON.stringify(spec.edits);
+  const generation={key,create(callbacks){const instance={callbacks,specs:[],schedule(spec){this.specs.push(structuredClone(spec));},dispose(){},flush(){return new Promise(()=>{});}};instances.push(instance);return instance;}};
+  const v=mount({generation});assert.equal(v.ws.getPageIndex(),null);
+  v.file(pdfFile(pdfBytes('MARKER-A')));await until(()=>v.ws.getSource()&&v.edits.last,'source');
+  v.edits.last.add({pageIndex:0,before:'Alpha',after:'Beta',origin:'human'});await until(()=>instances.length,'generation');
+  assert.equal(v.ws.getPageIndex(),0);v.get('paper-page-next').click();await until(()=>v.ws.getPageIndex()===1,'page two');
+  const g=instances.at(-1),spec=g.specs.at(-1),file=pdfFile(pdfBytes('MARKER-GEN'));
+  g.callbacks.onResult({file,sha256:sha(pdfBytes('MARKER-GEN')),edits:spec.edits,verification:{status:'failed',checks:[{code:'paragraph-link-unverified',pageIndex:0,status:'failed'},{code:'figure-changed',pageIndex:1,status:'failed'},{code:'expected-text-uncomputable',pageIndex:0,status:'failed'},{code:'future-unknown-check',pageIndex:0,status:'failed'}]},warnings:[],revision:1},{spec,key:key(spec)});
+  g.callbacks.onState({key:key(spec),phase:'ready'});
+  const unverified=v.created.find(n=>n.tagName==='div'&&n.textContent.includes('미확인 · 인용 링크'));
+  const failed=v.created.find(n=>n.tagName==='div'&&n.textContent.includes('확인된 문제 · 그림이 바뀜'));
+  assert.ok(unverified&&failed);assert.ok(v.created.some(n=>n.tagName==='div'&&n.textContent==='미확인 · 검사 결과를 확인하세요'));
+  assert.ok(v.created.some(n=>n.tagName==='pre'&&n.textContent.includes('expected-text-uncomputable')));unverified.querySelector('button').click();await until(()=>v.ws.getPageIndex()===0,'diagnostic page');
+  assert.equal(v.ws.getOutput().verification.status,'failed');assert.ok(v.created.some(n=>n.tagName==='pre'&&n.textContent.includes('paragraph-link-unverified')));
+  const previous=v.created.find(n=>n.tagName==='button'&&n.textContent.startsWith('이전 생성본 다운로드'));
+  assert.ok(previous);assert.equal(previous.hidden,true);
+  v.edits.last.update(v.ws.getEditSnapshot().edits[0].id,{after:'Gamma'});
+  assert.equal(previous.hidden,false);previous.click();assert.equal(v.downloads.at(-1),file);
+  const current=instances.at(-1).specs.at(-1);instances.at(-1).callbacks.onState({key:key(current),phase:'error',error:new Error('failure')});
+  assert.match(previous.textContent,/최근 생성 실패/);assert.equal(v.ws.getOutput().file,file);
+  v.ws.dispose();assert.equal(v.ws.getPageIndex(),null);
+});
+
 test('source blob writes wait for transaction completion and reuse their connection',async()=>{
   const previous=globalThis.indexedDB;let opens=0,closes=0,abort=true;
   globalThis.indexedDB={open(){opens++;const req={};setImmediate(()=>{req.result={objectStoreNames:{contains:()=>true},close(){closes++;},transaction(){const tx={objectStore(){return {openCursor(){const q={};setImmediate(()=>{q.result=null;q.onsuccess?.();setImmediate(()=>tx.oncomplete?.());});return q;},put(){const q={};setImmediate(()=>{q.onsuccess?.();setImmediate(()=>abort?tx.onabort?.():tx.oncomplete?.());});return q;}};}};return tx;}};req.onsuccess();});return req;}};

@@ -48,3 +48,32 @@ test('DOM range painter uses the measured glyph rectangle and does not mark an a
   const ambiguous=M.paintPage({document:doc,container,items:[{str:'Claim62 continues Claim62 continues'}],divs,edits:[{id:'a',before:'Claim62 continues',after:'Claim63 continues'}],side:'before'});
   assert.equal(ambiguous.count,0);assert.deepEqual(ambiguous.missing,['a']);
 });
+
+test('candidate exact range marks only the selected second repeated quote',()=>{
+  const text='Alpha here Alpha there',edit={id:'candidate',before:'Alpha',after:'',location:{text,start:11,end:16}};
+  const runs=[{str:'Alpha here',hasEOL:true},{str:'Alpha there'}];
+  const result=M.ranges(runs,[edit],'before');assert.deepEqual(result.missing,[]);assert.deepEqual(result.found.map(x=>[x.itemIndex,x.start,x.end]),[[1,0,5]]);
+  const invalid={...edit,location:{text,start:0,end:4}};assert.deepEqual(M.ranges(runs,[invalid],'before').missing,['candidate']);
+  const repeatedSegment=[{str:text+' '+text}];assert.deepEqual(M.ranges(repeatedSegment,[edit],'before').missing,['candidate']);
+  assert.deepEqual(M.ranges(runs,[{...edit,location:undefined}],'before').missing,['candidate']);
+});
+
+test('candidate painter places the mark on the second rendered text run',()=>{
+  const doc={createElement(){return {dataset:{},style:{},children:[],setAttribute(){},append(x){this.children.push(x);},className:''};},createRange(){return {setStart(node,i){this.node=node;this.start=i;},setEnd(node,i){this.end=i;},getClientRects(){return [{left:this.node.left,top:10,right:this.node.left+20,width:20,height:8}];}};}};
+  const container={append(){},getBoundingClientRect(){return {left:0,top:0};}},text='Alpha here Alpha there';
+  const items=[{str:'Alpha here',hasEOL:true},{str:'Alpha there'}],divs=[{dataset:{},firstChild:{nodeType:3,textContent:items[0].str,left:10}},{dataset:{},firstChild:{nodeType:3,textContent:items[1].str,left:120}}];
+  const result=M.paintPage({document:doc,container,items,divs,edits:[{id:'candidate',before:'Alpha',after:'',location:{text,start:11,end:16}}],side:'before'});
+  assert.equal(result.count,1);assert.equal(result.layer.children[0].style.left,'120px');assert.equal(result.found[0].itemIndex,1);
+});
+
+test('anchored repeated quote trims boundary whitespace only after validating the exact source range',()=>{
+  const text='Alpha here Alpha there',items=[{str:text}];
+  for(const [before,start,end] of [[' Alpha',10,16],['Alpha ',11,17],[' Alpha ',10,17]]){
+    const edit={id:'p',before,after:'',location:{text,start,end}};
+    const result=M.ranges(items,[edit],'before');assert.deepEqual(result.missing,[]);assert.deepEqual(result.found.map(x=>[x.itemIndex,x.start,x.end]),[[0,11,16]]);
+    const wrong={...edit,location:{text,start:start-1,end:end-1}};assert.deepEqual(M.ranges(items,[wrong],'before').missing,['p']);
+  }
+  const spaced='Alpha here  \n Alpha  there',before=' \n Alpha  ',start=11,end=start+before.length;
+  const result=M.ranges([{str:spaced}],[{id:'p',before,after:'',location:{text:spaced,start,end}}],'before');
+  assert.deepEqual(result.missing,[]);assert.deepEqual(result.found.map(x=>[x.start,x.end]),[[spaced.lastIndexOf('Alpha'),spaced.lastIndexOf('Alpha')+5]]);
+});

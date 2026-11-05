@@ -39,6 +39,13 @@
     }
     throw Error('변경 기록은 JSON 파일로 저장하세요.');
   }
+  function mappedPage(map,page){
+    const rows=Array.isArray(map)?map.filter(row=>row?.sourcePageIndex===page):[];
+    if(rows.length!==1||!Number.isSafeInteger(rows[0].outputPageIndex)||rows[0].outputPageIndex<0)return null;
+    if(!Array.isArray(rows[0].continuationPageIndices)||rows[0].continuationPageIndices.length)return null;
+    if(map.filter(row=>row?.outputPageIndex===rows[0].outputPageIndex||row?.continuationPageIndices?.includes(rows[0].outputPageIndex)).length!==1)return null;
+    return rows[0].outputPageIndex;
+  }
   function mount(){
     const doc=root.document,host=doc?.getElementById('red-visual-edit-host'),section=doc?.getElementById('red-visual-section');
     const B=root.FalsifyLocalBridge;
@@ -59,9 +66,19 @@
       const ws=root.FalsifyPaperWorkspace,original=ws?.getSource?.();
       if(!original?.file||!original.fileHash||!(/\.pdf$/i.test(original.file.name)||original.file.type==='application/pdf'))return null;
       const current=ws.getCurrentOutput?.();
+      const snapshot=ws.getEditSnapshot?.();
+      if(snapshot?.edits?.some(edit=>edit.enabled!==false)&&(!current?.file||current.originalSourceSha256!==original.fileHash))return null;
       const selected=current?.file&&current.originalSourceSha256===original.fileHash?{file:current.file,fileHash:current.sha256}:original;
-      return {file:selected.file,fileHash:selected.fileHash,revision:String(ws.getEditSnapshot?.()?.revision??0),name:selected.file.name,
+      return {file:selected.file,fileHash:selected.fileHash,revision:String(snapshot?.revision??0),name:selected.file.name,
         segments:selected.fileHash===original.fileHash?original.segments:[]};
+    }
+    function selectionPage(src){
+      const ws=root.FalsifyPaperWorkspace,original=ws?.getSource?.(),page=ws?.getPageIndex?.();
+      if(!src||!original||!Number.isSafeInteger(page)||page<0)return null;
+      if(src.file===original.file&&src.fileHash===original.fileHash)return page;
+      const current=ws.getCurrentOutput?.();
+      if(!current||current.file!==src.file||current.sha256!==src.fileHash||current.originalSourceSha256!==original.fileHash)return null;
+      return mappedPage(current.pageMap,page);
     }
     function sync(){
       editor?.setBusy?.(redBusy||enrichmentBusy);
@@ -105,7 +122,7 @@
         if(source()?.fileHash===src.fileHash){lastRecordHash=output.outputFileHash;say('변경 전후와 위치를 사람 편집 기록에 남겼습니다.');}
       }catch{say('PDF는 준비됐습니다. 전체 변경 기록은 JSON으로 저장하세요.');}
     }
-    editor=root.FalsifyVisualEditUI.create({host,getSource:source,getSession:()=>B.session(),hold:request=>{if(!request)return hold();if(request.active){editorRelease=hold();return !!editorRelease;}editorRelease?.();editorRelease=null;return true;},onChange:value=>{stagedChanges=structuredClone(value.changes||[]);},onOutput});
+    editor=root.FalsifyVisualEditUI.create({host,getSource:source,getSelectionPage:selectionPage,getSession:()=>B.session(),hold:request=>{if(!request)return hold();if(request.active){editorRelease=hold();return !!editorRelease;}editorRelease?.();editorRelease=null;return true;},onChange:value=>{stagedChanges=structuredClone(value.changes||[]);},onOutput});
     if(root.FalsifyPaperEnrichmentUI&&analysisHost){
       enrichment=root.FalsifyPaperEnrichmentUI.create({host:analysisHost,getSource:source,getSession:()=>B.session(),getCapabilities:()=>B.capabilities(),preparePaper:prepare,
         onBusyChange:value=>{enrichmentBusy=!!value;sync();},

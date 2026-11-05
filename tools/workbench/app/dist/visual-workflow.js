@@ -66,12 +66,41 @@
     }
     intake('#paper-file','red');intake('#doc-blue-file','blue');
 
+    document.addEventListener('falsify:reveal-prompt',event=>{
+      const role=event.detail?.role;if(role!=='red'&&role!=='blue')return;
+      const prompt=$('#external-'+role+' .prompt-instructions textarea');if(!prompt)return;
+      for(let parent=prompt.parentElement;parent;parent=parent.parentElement)if(parent.tagName==='DETAILS')parent.open=true;
+      prompt.focus();
+    });
+
     const paper=$('#paper-workspace');
     if(paper){
       const visibility=()=>{paper.hidden=!globalThis.FalsifyPaperWorkspace?.getSource?.();};
       document.addEventListener('falsify:paper-workspace-source',visibility);visibility();
       // External AI import is a first-class route, alongside direct editing and local execution.
     }
+
+    function setupPaperCompare(){
+      const compare=paper?.querySelector('.paper-compare');if(!compare)return;
+      const bar=el('div','visual-compare-bar');bar.setAttribute('role','group');bar.setAttribute('aria-label','원본과 수정본 비교');
+      const before=button('file-text','원본',()=>show('before'));
+      const after=button('file-text','수정본',()=>show('after'));
+      function show(side){compare.dataset.mobileSide=side;before.setAttribute('aria-pressed',String(side==='before'));after.setAttribute('aria-pressed',String(side==='after'));}
+      bar.append(before,after);
+      for(const id of ['paper-undo','paper-current-download']){const control=$('#'+id);if(control)bar.append(control);}
+      compare.after(bar);show('before');
+      const settings=disclosure('글꼴 · 변경 표시 · 확대',[]);
+      for(const selector of ['.paper-font-tools','.paper-compare-tools']){const node=paper.querySelector(selector);if(node)settings.append(node);}
+      const zoom=el('div','paper-toolbar');
+      for(const id of ['paper-original-download','paper-zoom-out','paper-zoom-label','paper-zoom-in']){const node=$('#'+id);if(node)zoom.append(node);}
+      settings.append(zoom);bar.after(settings);
+      paper.addEventListener('click',event=>{
+        const edit=event.target.closest?.('#paper-edits button[data-act="edit"]');
+        if(edit&&!edit.disabled)show('before');
+      },true);
+      paper.addEventListener('focusin',event=>{if(event.target.closest?.('#paper-inline'))show('before');});
+    }
+    setupPaperCompare();
 
     // Fold extracted text, never the real result or editing controls.
     const preview=$('#import-preview');if(preview){const d=disclosure('논문 내용 보기',[]);d.classList.add('visual-extraction');preview.before(d);d.append(preview);d.hidden=preview.hidden;new MutationObserver(()=>{d.hidden=preview.hidden;}).observe(preview,{attributes:true,attributeFilter:['hidden']});}

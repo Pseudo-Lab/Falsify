@@ -116,6 +116,7 @@ function world(over={}){
   };
   globalThis.FalsifyBlueVisual={async previewBluePage(args){
     previews.push(args);
+    if(over.previewWait)await over.previewWait();
     const canvas=element('canvas');
     canvas.getBoundingClientRect=()=>({left:0,top:0,width:300,height:400,right:300,bottom:400});
     return {canvas,page:args.page,pages:3,width:600,height:800,wholeFits:true,fileHash:args.fileHash};
@@ -124,6 +125,7 @@ function world(over={}){
     fromAnalysis(){return over.chart||chart([{x:1,y:2},{x:3,y:4}]);},
     async render(args){renders.push(args);return {png:Uint8Array.from(WHITE),width:64,height:32};}
   };
+  globalThis.FalsifyPaperWorkspace={getSource:()=>source,getPageIndex:()=>over.pageIndex??0};
   const host=element('div');
   host.ownerDocument={createElement:tag=>element(tag)};
   const session={request(path,body,options){
@@ -588,7 +590,72 @@ serial('a page region can be edited without an automatically detected figure',as
   await until(()=>h.labeled('라벨'),'page editor');
   assert.equal(h.previews.length,2);
   assert.equal(h.ui.snapshot().pending,0);
+  h.button('영역 선택 취소').click();
+  assert.equal(h.labeled('라벨'),undefined);
+  assert.equal(h.ui.snapshot().pending,0);
   assert.equal(h.calls.some(call=>call.path==='/api/paper/visual/export'),false);
+});
+
+serial('page picker uses the matching workspace page and rejects a different file',async()=>{
+  const h=world({catalog:{items:[],full:{},analyses:[],fullAnalyses:{}},pageIndex:1});
+  h.source={file:fileOf(PDF,'vectors.pdf'),fileHash:HASH,revision:'r1'};
+  await h.ui.refresh();h.button('영역 직접 선택').click();
+  await until(()=>h.labeled('라벨'),'second page editor');
+  assert.equal(h.previews[0].page,2);
+  assert.equal(h.calls.find(c=>c.body.operation==='render').body.pageIndex,1);
+  globalThis.FalsifyPaperWorkspace.getSource=()=>({file:fileOf(PDF,'other.pdf'),fileHash:HASH});
+  const count=h.previews.length;h.button('영역 직접 선택').click();await settle();
+  assert.equal(h.previews.length,count);
+});
+
+serial('page navigation during preview cancels the old selection',async()=>{
+  let release;const gate=new Promise(resolve=>{release=resolve;});let page=0;
+  const h=world({catalog:{items:[],full:{},analyses:[],fullAnalyses:{}},previewWait:()=>gate});
+  h.source={file:fileOf(PDF,'vectors.pdf'),fileHash:HASH,revision:'r1'};
+  globalThis.FalsifyPaperWorkspace.getPageIndex=()=>page;
+  await h.ui.refresh();h.button('영역 직접 선택').click();
+  page=1;release();await settle();
+  assert.equal(h.calls.some(c=>c.body.operation==='render'),false);
+  assert.equal(h.labeled('라벨'),undefined);
+});
+
+serial('page change during the displayed selection preview clears the old picker',async()=>{
+  let release,attempt=0,page=0;const gate=new Promise(resolve=>{release=resolve;});
+  const h=world({catalog:{items:[],full:{},analyses:[],fullAnalyses:{}},previewWait:()=>++attempt===2?gate:Promise.resolve()});
+  h.source={file:fileOf(PDF,'vectors.pdf'),fileHash:HASH,revision:'r1'};
+  globalThis.FalsifyPaperWorkspace.getPageIndex=()=>page;
+  await h.ui.refresh();h.button('영역 직접 선택').click();
+  await until(()=>attempt===2,'second preview');page=1;release();await settle();
+  assert.equal(h.labeled('라벨'),undefined);
+  assert.equal(h.ui.snapshot().pending,0);
+});
+
+serial('stale page preview cannot clear a newer picker',async()=>{
+  let release,attempt=0,page=0;const gate=new Promise(resolve=>{release=resolve;});
+  const h=world({catalog:{items:[],full:{},analyses:[],fullAnalyses:{}},previewWait:()=>++attempt===2?gate:Promise.resolve()});
+  h.source={file:fileOf(PDF,'vectors.pdf'),fileHash:HASH,revision:'r1'};
+  globalThis.FalsifyPaperWorkspace.getPageIndex=()=>page;
+  await h.ui.refresh();h.button('영역 직접 선택').click();
+  await until(()=>attempt===2,'first picker preview');page=1;h.button('영역 직접 선택').click();
+  await until(()=>attempt===4,'second picker preview');release();await settle();
+  assert.ok(h.labeled('라벨'));
+  assert.equal(h.previews.at(-1).page,2);
+});
+
+serial('graph region selection opens shape editor with the drawn page and bounds',async()=>{
+  const mounts=[];globalThis.FalsifyChartShape={};
+  globalThis.FalsifyChartShapeEditor={create:args=>{mounts.push(args);return {destroy(){}};}};
+  try{
+    const h=world({pageIndex:1,catalog:{items:[],full:{},analyses:[],fullAnalyses:{}},shapeScene:{sceneId:'s',series:[{id:'a',points:[{x:1,y:2}]}]}});
+    h.source={file:fileOf(PDF,'vectors.pdf'),fileHash:HASH,revision:'r1'};
+    await h.ui.refresh();h.button('그래프 영역 선택').click();
+    await until(()=>all(h.host).some(el=>el.className.includes('visual-edit-stage'))&&h.previews.length===2,'graph picker');
+    const stage=all(h.host).find(el=>el.className.includes('visual-edit-stage'));
+    stage.dispatchEvent(pointer('pointerdown',10,20));stage.dispatchEvent(pointer('pointerup',110,120));
+    await until(()=>mounts.length===1,'shape editor');
+    const request=h.calls.find(c=>c.path==='/api/paper/chart/prepare');
+    assert.equal(request.body.pageIndex,1);assert.deepEqual(request.body.bbox,[20,40,220,240]);
+  }finally{delete globalThis.FalsifyChartShape;delete globalThis.FalsifyChartShapeEditor;}
 });
 
 serial('graph edit binds to the visible page after page navigation',async()=>{
