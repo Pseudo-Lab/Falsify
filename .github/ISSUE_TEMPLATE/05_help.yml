@@ -1,0 +1,35 @@
+name: "🙋 질문과 막힌 것"
+description: "안 되는 것이나 궁금한 것을 올립니다"
+title: "[질문] 한 줄 요약"
+labels: ["질문"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        막혀 있는 것을 혼자 붙들지 마세요. 같은 데서 막히는 분이 대개 더 있습니다.
+
+        급하면 카카오톡이나 Discord에 먼저 올리셔도 됩니다. 다만 **다시 찾아볼 만한 것은 여기에** 남겨 주시면 다음 사람이 덜 헤맵니다.
+
+  - type: textarea
+    id: what
+    attributes:
+      label: 무엇이 막혔나
+      description: "하려던 것과 실제로 일어난 것을 적어 주세요."
+      placeholder: |
+        하려던 것: 변조본을 Codex에 넣어 판정시키려 했습니다.
+        일어난 것: 보안을 이유로 답을 거부했습니다.
+    validations:
+      required: true
+
+  - type: textarea
+    id: tried
+    attributes:
+      label: 해 본 것
+      description: "이미 시도해 본 것이 있으면 적어 주세요. 없으면 비워 두셔도 됩니다."
+
+  - type: textarea
+    id: env
+    attributes:
+      label: 환경
+      description: "쓰신 도구와 버전, 운영체제를 적어 주세요. 오류 메시지가 있으면 그대로 붙여 주세요."
+      placeholder: "macOS, Codex CLI 0.157.0"

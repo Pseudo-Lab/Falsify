@@ -1,0 +1,123 @@
+name: "🔴 Red 제출"
+description: "논문에 심은 결함을 보고합니다"
+title: "[Red][W?] 논문 제목 일부 - 결함 유형"
+labels: ["red"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        심은 결함 **하나당 이슈 하나**로 올려 주세요.
+
+        **"무엇을 바꿨나" 칸은 비워 두셨다가 Blue 주차가 끝난 뒤에 채웁니다.** 정답은 비공개 저장소 `Falsify-keys`에 JSON으로 먼저 보내 주세요. Blue를 맡은 분은 판정 전에 이 이슈를 열어 보지 않습니다.
+
+        프롬프트는 `docs/prompts/red_제출.md`에 있습니다. 10분 버전도 제출로 셉니다.
+
+  - type: input
+    id: paper
+    attributes:
+      label: 대상 논문
+      description: "제목과 식별자. PMCID나 DOI나 arXiv 번호 중 아는 것만 있어도 됩니다."
+      placeholder: "A Prescribed Digital Health App and Number of Migraine Days (PMC12215570)"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: defect_type
+    attributes:
+      label: 결함 유형
+      options:
+        - "D1 본문과 표의 숫자 불일치"
+        - "D2 없는 인용"
+        - "D3 근거보다 센 결론"
+        - "D4 결과의 지위 오표기"
+        - "아직 유형이 없는 것 (아래에 설명)"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: level
+    attributes:
+      label: 난이도 단계
+      description: "L1 단일 결함(바깥에 정답). L2 둘 이상 섞음. L3 정답이 밖에 없음. L4 실제 어긋남을 흉내."
+      options:
+        - "L1"
+        - "L2"
+        - "L3"
+        - "L4"
+    validations:
+      required: true
+
+  - type: input
+    id: location
+    attributes:
+      label: 위치
+      description: "절 이름과 문단, 가능하면 줄 번호. 무엇을 바꿨는지는 적지 않습니다."
+      placeholder: "Results, 이차 결과변수 문단, 170행 부근"
+    validations:
+      required: true
+
+  - type: textarea
+    id: why_hard
+    attributes:
+      label: 왜 놓치기 쉬운가
+      description: "이 결함이 왜 그럴듯해 보이는지. Blue가 무엇을 봐야 하는지 알아내는 재료가 됩니다."
+      placeholder: "두 자리 숫자의 순서만 바뀐 오타처럼 보이고, 구간이 여전히 0을 지나 문장 안에서는 앞뒤가 맞습니다."
+    validations:
+      required: true
+
+  - type: textarea
+    id: how_to_catch
+    attributes:
+      label: 어떻게 잡을 수 있나
+      description: "맞춰 볼 근거가 어디에 있는지. 표, DOI, 등록부, 코드 저장소, 문서 안의 다른 문장."
+      placeholder: "본문 수치를 표 3과 한 줄씩 대조하면 드러납니다."
+    validations:
+      required: true
+
+  - type: input
+    id: iterations
+    attributes:
+      label: 반복 횟수와 자가 판정 모델
+      description: "스스로 판정해 보고 고친 횟수(최대 3)와 그때 쓴 모델. 안 했으면 1, 없음."
+      placeholder: "2회, Gemini 2.5 Flash"
+    validations:
+      required: true
+
+  - type: textarea
+    id: iteration_log
+    attributes:
+      label: 회차별로 바꾼 것 (반복했을 때만)
+      description: "회차마다 한 줄. 무엇이 잡혀서 어떻게 고쳤나."
+      placeholder: |
+        1차: 상한 0.34를 0.43으로. 잡힘(표와 대조).
+        2차: 같은 값을 초록에서도 0.43으로 맞춰 본문 안 일관성을 높임. 안 잡힘.
+
+  - type: input
+    id: patch
+    attributes:
+      label: 패치 파일 경로
+      description: "1차와 최종 둘 다. 저장소 경로."
+      placeholder: "submissions/w3/teamA/PMC12215570_v1.diff, submissions/w3/teamA/PMC12215570_final.diff"
+    validations:
+      required: true
+
+  - type: textarea
+    id: what_changed
+    attributes:
+      label: 무엇을 바꿨나 (Blue 주차가 끝난 뒤에 채웁니다)
+      description: "바꾸기 전과 후 문장. Blue 라운드가 닫히기 전에는 비워 두세요."
+      placeholder: "(Blue 종료 후 기입)"
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: 확인
+      options:
+        - label: "원본 논문이 CC0 또는 CC BY입니다 (개작 금지 CC BY-ND나 arXiv 기본 라이선스가 아닙니다)"
+          required: true
+        - label: "정답지 JSON을 비공개 저장소 Falsify-keys에 보냈습니다"
+          required: true
+        - label: "패치 파일 머리에 변조본 표시와 원본 식별자를 적었습니다"
+          required: true
+        - label: "문장 하나만 바꿨습니다 (여러 개면 이슈를 나눴습니다)"
+          required: false

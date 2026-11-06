@@ -1,0 +1,38 @@
+{
+  "data": {
+    "repository": {
+      "discussions": {
+        "nodes": [
+          {
+            "number": 12,
+            "title": "[W2] 마무리 한마디",
+            "url": "https://github.com/Pseudo-Lab/Falsify/discussions/12",
+            "body": "💡 W2 빌더 한마디",
+            "createdAt": "2026-10-12T12:00:00Z",
+            "author": {"login": "builder"},
+            "category": {"name": "마무리 한마디"},
+            "comments": {"nodes": []}
+          },
+          {
+            "number": 17,
+            "title": "[W3] 마무리 한마디",
+            "url": "https://github.com/Pseudo-Lab/Falsify/discussions/17",
+            "body": "➡️ 다음 주는 Blue 주차라 판정 CSV 열을 먼저 확인하겠습니다",
+            "createdAt": "2026-10-19T12:50:00Z",
+            "author": {"login": "builder"},
+            "category": {"name": "마무리 한마디"},
+            "comments": {
+              "nodes": [
+                {"author": {"login": "alice"}, "createdAt": "2026-10-19T13:05:00Z", "body": "💡 표 3과 본문을 한 줄씩 대조하니 숫자 오타가 바로 보였습니다"},
+                {"author": {"login": "bob"}, "createdAt": "2026-10-19T13:07:30Z", "body": "🧱 DOI 조회는 됐는데 제목 대조를 자동화하지 못했습니다"},
+                {"author": {"login": "alice"}, "createdAt": "2026-10-19T13:09:00Z", "body": "💡 하나 더. 등록부에 없는 분석은 '사전 지정'이 아닙니다"},
+                {"author": {"login": "carol"}, "createdAt": "2026-10-19T13:11:00Z", "body": "오늘은 짝 화면으로만 참여했습니다"},
+                {"author": {"login": "dave"}, "createdAt": "2026-10-19T14:59:59Z", "body": "  패치 적용이 처음엔 안 됐는데 줄 끝 공백 문제였습니다"}
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}

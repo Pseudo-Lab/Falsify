@@ -1,0 +1,104 @@
+name: "🔵 Blue 판정"
+description: "변조본을 판정한 결과를 보고합니다"
+title: "[Blue][W?] 대상 논문 또는 Red 이슈 번호"
+labels: ["blue"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        판정을 **마친 뒤에** 올려 주세요. 올리기 전에 대응하는 Red 이슈와 원본 논문을 보지 않습니다.
+
+        **못 잡은 것과 오탐을 적는 칸이 가장 중요합니다.** 성적이 아니라 무엇이 뚫렸는지를 모으는 것이 목적입니다. 확인필요가 많아도 괜찮습니다.
+
+        프롬프트는 `docs/prompts/blue_판정.md`에 있습니다. 결과 CSV와 판정 기록(`transcript.md`)도 같이 올려 주세요. 10분 버전(유형 하나만)도 제출로 셉니다.
+
+  - type: input
+    id: target
+    attributes:
+      label: 판정한 대상
+      description: "변조본 파일 경로나 대응하는 Red 이슈 번호."
+      placeholder: "#12, submissions/w3/teamA/PMC12215570_final.diff 적용본"
+    validations:
+      required: true
+
+  - type: input
+    id: tool
+    attributes:
+      label: 무엇으로 판정했나
+      description: "모델 이름과 버전, 또는 직접 만든 탐지기 이름. 사람이 직접 봤으면 '사람'."
+      placeholder: "Codex CLI 0.157.0 (gpt-6-astra), 원본 없이 변조본만 제공"
+    validations:
+      required: true
+
+  - type: input
+    id: iterations
+    attributes:
+      label: 판정 반복 횟수
+      description: "프롬프트나 탐지기를 고쳐 다시 돌린 횟수. 최대 3. 처음 한 번이면 1."
+      placeholder: "1"
+    validations:
+      required: true
+
+  - type: textarea
+    id: found
+    attributes:
+      label: 잡은 것
+      description: "찾아낸 결함. 라벨(맞음 / 아님 / 확인필요)과 근거를 함께."
+      placeholder: |
+        - 170행 HIT-6 신뢰구간 상한. 아님. 본문 0.43, 표 3은 0.34
+        - 258행 참고문헌 13번 제목. 아님. Crossref 조회 제목과 불일치
+    validations:
+      required: true
+
+  - type: textarea
+    id: missed
+    attributes:
+      label: 못 잡은 것
+      description: "놓친 결함. 없으면 '없음'. 왜 놓쳤다고 보는지도."
+      placeholder: "D4 지위 오표기를 놓쳤습니다. 등록부를 조회하지 않고 본문 안에서만 판단했습니다."
+    validations:
+      required: true
+
+  - type: textarea
+    id: false_positive
+    attributes:
+      label: 오탐
+      description: "결함이 아닌데 결함이라고 찍은 것. 없으면 '없음'."
+      placeholder: "참고문헌 30번을 없는 문헌으로 찍었는데, Crossref에 없을 뿐 DataCite에는 있었습니다."
+    validations:
+      required: true
+
+  - type: input
+    id: files
+    attributes:
+      label: 결과 파일 경로
+      description: "CSV와 판정 기록."
+      placeholder: "results/w4/teamB.csv, results/w4/teamB/transcript.md"
+    validations:
+      required: true
+
+  - type: input
+    id: cost
+    attributes:
+      label: 걸린 시간과 비용
+      description: "대략이면 됩니다. 토큰 수를 아시면 함께."
+      placeholder: "2분 46초, 51,292 토큰"
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: 알게 된 것
+      description: "다음 라운드에 반영할 만한 것."
+      placeholder: "표와 본문을 한 줄씩 대조하도록 지시문에 적어 주면 D1 재현율이 올라갑니다."
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: 확인
+      options:
+        - label: "판정 전에 원본 논문을 보지 않았습니다"
+          required: true
+        - label: "대응하는 Red 이슈와 정답지를 판정 전에 열어 보지 않았습니다"
+          required: true
+        - label: "다시 돌릴 때 정답을 보고 고치지 않았습니다"
+          required: true

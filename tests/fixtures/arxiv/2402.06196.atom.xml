@@ -1,0 +1,43 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<feed xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/" xmlns:arxiv="http://arxiv.org/schemas/atom" xmlns="http://www.w3.org/2005/Atom">
+  <id>https://arxiv.org/api/lnqMk+8o5xnG9jSEUjTwGRTGJ9k</id>
+  <title>arXiv Query: search_query=&amp;id_list=2402.06196&amp;start=0&amp;max_results=10</title>
+  <updated>2026-10-08T16:06:57Z</updated>
+  <link href="https://arxiv.org/api/query?search_query=&amp;start=0&amp;max_results=10&amp;id_list=2402.06196" type="application/atom+xml"/>
+  <opensearch:itemsPerPage>10</opensearch:itemsPerPage>
+  <opensearch:totalResults>1</opensearch:totalResults>
+  <opensearch:startIndex>0</opensearch:startIndex>
+  <entry>
+    <id>http://arxiv.org/abs/2402.06196v3</id>
+    <title>Large Language Models: A Survey</title>
+    <updated>2025-03-23T14:51:01Z</updated>
+    <link href="https://arxiv.org/abs/2402.06196v3" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2402.06196v3" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Large Language Models (LLMs) have drawn a lot of attention due to their strong performance on a wide range of natural language tasks, since the release of ChatGPT in November 2022. LLMs' ability of general-purpose language understanding and generation is acquired by training billions of model's parameters on massive amounts of text data, as predicted by scaling laws \cite{kaplan2020scaling,hoffmann2022training}. The research area of LLMs, while very recent, is evolving rapidly in many different ways. In this paper, we review some of the most prominent LLMs, including three popular LLM families (GPT, LLaMA, PaLM), and discuss their characteristics, contributions and limitations. We also give an overview of techniques developed to build, and augment LLMs. We then survey popular datasets prepared for LLM training, fine-tuning, and evaluation, review widely used LLM evaluation metrics, and compare the performance of several popular LLMs on a set of representative benchmarks. Finally, we conclude the paper by discussing open challenges and future research directions.</summary>
+    <category term="cs.CL" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.AI" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2024-02-09T05:37:09Z</published>
+    <arxiv:primary_category term="cs.CL"/>
+    <author>
+      <name>Shervin Minaee</name>
+    </author>
+    <author>
+      <name>Tomas Mikolov</name>
+    </author>
+    <author>
+      <name>Narjes Nikzad</name>
+    </author>
+    <author>
+      <name>Meysam Chenaghlu</name>
+    </author>
+    <author>
+      <name>Richard Socher</name>
+    </author>
+    <author>
+      <name>Xavier Amatriain</name>
+    </author>
+    <author>
+      <name>Jianfeng Gao</name>
+    </author>
+  </entry>
+</feed>

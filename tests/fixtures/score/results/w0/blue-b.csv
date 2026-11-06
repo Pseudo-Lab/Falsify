@@ -1,0 +1,6 @@
+paper_id,team,judge_type,model,iteration,location,defect_type,label,evidence,time_sec,tokens,is_holdout
+PMC12215570,blue-b,human,,1,L143,D1,맞음,CI 상한이 표와 다름,900,0,false
+PMC12215570,blue-b,human,,1,L258,D2,확인필요,DOI 는 열리는데 제목이 조금 다른 듯,900,0,false
+PMC12215570,blue-b,human,,1,L131,D4,맞음,등록부 확인,900,0,false
+PMC12215570,blue-b,human,,1,L60,D1,맞음,표 1 설명이 어색함,900,0,false
+PMC00000002,blue-b,human,,1,L88,D3,아님,문제 없음,400,0,true

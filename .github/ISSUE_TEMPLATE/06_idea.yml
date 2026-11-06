@@ -1,0 +1,25 @@
+name: "💡 아이디어"
+description: "떠오른 것을 30초 안에 올립니다"
+title: "[아이디어] 한 줄"
+labels: ["idea"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        아무 때나 올려 주세요. 매주 모임에서 빌더가 훑어서 **바로 써 본다 / 적어 둔다 / 보류** 중 하나로 라벨을 바꿉니다. 이슈는 닫지 않으니 결과를 보실 수 있습니다. 채택되면 기여 원장에 이름이 남습니다.
+
+  - type: textarea
+    id: what
+    attributes:
+      label: 무엇을
+      description: "한 줄이면 됩니다."
+      placeholder: "Blue 프롬프트에 '표의 행 수를 먼저 세라'를 넣으면 D1을 더 잘 잡을 것 같습니다."
+    validations:
+      required: true
+
+  - type: textarea
+    id: where
+    attributes:
+      label: 어디에 쓰면 좋을까
+      description: "규칙, 프롬프트, 결함 유형, 운영 방식, 도구 중 어디쯤인지. 모르면 비워 두세요."
+      placeholder: "blue_판정.md 프롬프트"

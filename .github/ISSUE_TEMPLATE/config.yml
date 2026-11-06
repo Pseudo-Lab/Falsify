@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 💬 가볍게 이야기 나누기
+    url: https://github.com/Pseudo-Lab/Falsify/discussions
+    about: 결정이 필요 없는 토론, 자료 공유, 잡담은 Discussions에서 합니다
+  - name: 🎧 매주 모임
+    url: https://discord.com/channels/944032730050621450/1068784766595387412
+    about: 매주 월요일 21시, Discord Room-GH

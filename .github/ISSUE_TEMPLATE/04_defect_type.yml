@@ -1,0 +1,67 @@
+name: "🧩 새 결함 유형 제안"
+description: "D1~D3으로 설명되지 않는 결함을 제안합니다"
+title: "[유형] 한 줄 이름"
+labels: ["결함유형"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        겪어 본 결함이 기존 유형에 안 들어가면 올려 주세요. 선택 트랙 T4의 재료가 됩니다.
+
+        **가장 중요한 칸은 "맞춰 볼 근거가 어디 있나"입니다.** 참값이 파일이나 문서에 있으면 기계로 대조할 수 있고, 없으면 사람이 읽어야 합니다. 이 구분이 탐지기를 만들 수 있는지를 가릅니다.
+
+  - type: input
+    id: name
+    attributes:
+      label: 유형 이름
+      description: "한 줄로 지어 주세요."
+      placeholder: "결과의 지위 오표기"
+    validations:
+      required: true
+
+  - type: textarea
+    id: definition
+    attributes:
+      label: 정의
+      description: "무엇이 틀린 것인지 한두 문장으로 적어 주세요."
+      placeholder: "숫자와 분석 내용은 맞는데, 그 분석이 사전에 정해진 것이라고 서술한 경우. 실제로는 결과를 본 뒤에 정했다."
+    validations:
+      required: true
+
+  - type: textarea
+    id: example
+    attributes:
+      label: 겪은 사례
+      description: "실제로 만난 상황을 적어 주세요. 회사나 개인을 특정하지 않아도 됩니다."
+      placeholder: "학습에 쓴 라벨셋과 평가에 쓴 라벨셋이 달랐는데, 논문을 제출하고 동료심사를 받는 중에 발견했습니다."
+    validations:
+      required: true
+
+  - type: dropdown
+    id: ground_truth
+    attributes:
+      label: 맞춰 볼 근거가 어디 있나
+      options:
+        - "문서 안에 있다 (본문과 표, 본문과 부록처럼)"
+        - "문서 밖에 있다 (등록부, DOI 메타데이터, 코드 저장소처럼)"
+        - "코드나 로그에 있다"
+        - "어디에도 없다 (사람이 판단해야 한다)"
+        - "모르겠다"
+    validations:
+      required: true
+
+  - type: textarea
+    id: why_missed
+    attributes:
+      label: 왜 D1~D3으로 안 잡히나
+      description: "기존 유형과 무엇이 다른지 적어 주세요."
+      placeholder: "숫자가 다 맞아서 숫자 대조에 안 걸리고, 인용도 멀쩡하고, 결론의 강도도 근거에 맞습니다. 틀린 것은 그 분석을 뭐라고 부르는지입니다."
+    validations:
+      required: true
+
+  - type: textarea
+    id: detector
+    attributes:
+      label: 탐지기 초안
+      description: "어떻게 잡을 수 있을지 떠오르는 것이 있으면 적어 주세요. 없어도 괜찮습니다."
+      placeholder: "원고에서 '사전 지정', '사전 등록' 표현이 들어간 문장을 뽑아 임상시험 등록부 항목과 대조합니다."

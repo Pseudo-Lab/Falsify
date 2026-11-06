@@ -1,0 +1,19 @@
+--- corpus/raw/PMC00000001.md
++++ submissions/w3/team-a/PMC00000001.md
+@@ -3,6 +3,6 @@
+ ## Abstract
+
+ The difference was 0.38 days (95% CI, −0.32 to 1.08; P = .29).
+-Most secondary outcomes showed no difference.
++Most secondary outcomes showed no difference, although the app improved self-efficacy.
+
+ ## Results
+@@ -9,6 +9,6 @@
+
+-HIT-6 score difference was −1.06 (95% CI, −2.46 to 0.34; P = .17).
++HIT-6 score difference was −1.06 (95% CI, −2.46 to 0.43; P = .17).
+
+ ## References
+
+-1. Raffaelli B, et al. Determining the evolution of headache. JMIR Mhealth Uhealth. 2021;9(7):e26401.
++1. Raffaelli B, et al. Effectiveness of a smartphone app for migraine: a prospective study. JMIR Mhealth Uhealth. 2021;9(7):e26401.

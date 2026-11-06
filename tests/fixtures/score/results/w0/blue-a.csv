@@ -1,0 +1,7 @@
+paper_id,team,judge_type,model,iteration,location,defect_type,label,evidence,time_sec,tokens,is_holdout
+PMC12215570,blue-a,model,codex,1,L142,D1,맞음,본문 HIT-6 CI 상한 0.43 과 표 3 의 0.34 불일치,166,41000,false
+PMC12215570,blue-a,model,codex,1,L258,D2,맞음,DOI 10.2196/26401 의 Crossref 제목이 참고문헌 13 과 다름,166,41000,false
+PMC12215570,blue-a,model,codex,1,L221,D3,맞음,자기효능감 P=.07 인데 고찰은 개선했다고 단정,166,41000,false
+PMC12215570,blue-a,model,codex,1,L131,D4,맞음,DRKS00024174 에 조절효과 분석 없음,166,41000,false
+PMC00000002,blue-a,model,codex,1,L40,D1,맞음,표 2 와 본문 n 불일치,90,20000,true
+PMC00000002,blue-a,model,codex,1,L88,D3,아님,결론은 결과 범위 안,90,20000,true

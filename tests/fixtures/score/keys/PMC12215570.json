@@ -1,0 +1,6 @@
+[
+  {"paper_id": "PMC12215570", "team": "red-demo", "defect_type": "D1", "location": "L142", "before": "0.34", "after": "0.43", "iterations": 1, "self_check_model": "claude", "patch_v1": "d1.diff", "patch_final": "d1.diff", "why_hard": "두 자리 순서만 바뀐 오타 모양"},
+  {"paper_id": "PMC12215570", "team": "red-demo", "defect_type": "D2", "location": "L258", "before": "Determining the evolution of headache", "after": "Effectiveness of ...", "iterations": 1, "self_check_model": "claude", "patch_v1": "d2.diff", "patch_final": "d2.diff", "why_hard": "DOI 는 실재"},
+  {"paper_id": "PMC12215570", "team": "red-demo", "defect_type": "D3", "location": "L221", "before": "", "after": "improved self-efficacy", "iterations": 1, "self_check_model": "claude", "patch_v1": "d3.diff", "patch_final": "d3.diff", "why_hard": "문해력 차이는 실제로 있음"},
+  {"paper_id": "PMC12215570", "team": "red-demo", "defect_type": "D4", "location": "L131", "before": "potential moderators assessed", "after": "prespecified at registration", "iterations": 1, "self_check_model": "claude", "patch_v1": "d4.diff", "patch_final": "d4.diff", "why_hard": "논문이 prespecified 를 정당하게 여러 번 씀"}
+]

@@ -1,0 +1,69 @@
+name: "📄 논문 제안"
+description: "다루고 싶은 논문을 제안합니다"
+title: "[논문] 제목 일부"
+labels: ["논문제안"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        관심 있는 논문을 올려 주세요. 같은 논문에 관심 있는 분끼리 팀이 될 수 있습니다.
+
+        **라이선스를 꼭 확인해 주세요.** 결함을 심으려면 개작이 허용돼야 합니다. CC0와 CC BY만 쓸 수 있고, 개작 금지(CC BY-ND)는 쓸 수 없습니다. PMC의 "상업적 이용 가능" 묶음에 CC BY-ND가 섞여 있으니 묶음 이름만 보고 고르면 안 됩니다.
+
+  - type: input
+    id: paper
+    attributes:
+      label: 논문
+      description: "제목과 학술지, 연도를 적어 주세요."
+      placeholder: "A Prescribed Digital Health App and Number of Migraine Days, JAMA Network Open, 2025"
+    validations:
+      required: true
+
+  - type: input
+    id: id
+    attributes:
+      label: 식별자
+      description: "DOI, PMCID, arXiv 번호 중 아는 것을 적어 주세요."
+      placeholder: "PMC12215570 / 10.1001/jamanetworkopen.2025.17708"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: license
+    attributes:
+      label: 라이선스
+      options:
+        - "CC BY (쓸 수 있음)"
+        - "CC0 (쓸 수 있음)"
+        - "CC BY-ND 또는 CC BY-NC-ND (개작 금지, 쓸 수 없음)"
+        - "arXiv 기본 라이선스 nonexclusive-distrib (쓸 수 없음)"
+        - "CC BY-NC (확인 필요)"
+        - "CC BY-SA (확인 필요)"
+        - "모르겠음 (함께 확인)"
+    validations:
+      required: true
+
+  - type: textarea
+    id: why
+    attributes:
+      label: 왜 이 논문인가
+      description: "어떤 점이 끌리는지, 어떤 결함을 심어 볼 만한지 적어 주세요."
+      placeholder: "음성 결과 논문이라 결론을 부풀리는 D3를 심기 좋습니다. 표가 3개, 참고문헌이 30개 있고 임상시험 등록번호도 있어 대조할 거리가 많습니다."
+    validations:
+      required: true
+
+  - type: textarea
+    id: material
+    attributes:
+      label: 맞춰 볼 근거 (이 분야의 오라클)
+      description: "표, 임상시험 등록번호, 보충자료, 코드 저장소, 공개 데이터셋, 사전등록처럼 대조할 수 있는 것. 분야마다 다릅니다. 임상은 등록부, 머신러닝은 코드 저장소와 리더보드."
+      placeholder: "표 3개, 임상시험 등록부 DRKS00024174, 보충자료 3종"
+    validations:
+      required: true
+
+  - type: input
+    id: domain
+    attributes:
+      label: 분야
+      description: "팀을 짤 때 참고합니다. 분야가 다른 두 분이 짝을 이루는 쪽을 권합니다."
+      placeholder: "임상시험, 디지털 치료제"

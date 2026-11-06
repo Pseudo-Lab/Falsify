@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<OAI-PMH xmlns="http://www.openarchives.org/OAI/2.0/" 
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://www.openarchives.org/OAI/2.0/ http://www.openarchives.org/OAI/2.0/OAI-PMH.xsd">
+    <responseDate>2026-10-07T10:37:13Z</responseDate>
+                <request verb="GetRecord" identifier="oai:arXiv.org:2402.06196" metadataPrefix="arXiv">http://oaipmh.arxiv.org/oai</request>
+
+
+    <GetRecord>
+                <record>
+                <header>
+        <identifier>oai:arXiv.org:2402.06196</identifier>
+        <datestamp>2025-03-25</datestamp>
+            <setSpec>cs:cs:CL</setSpec>
+            <setSpec>cs:cs:AI</setSpec>
+    </header>
+
+            <metadata>
+                        <arXiv xmlns="http://arxiv.org/OAI/arXiv/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://arxiv.org/OAI/arXiv/ https://oaipmh.arxiv.org/OAI/arXiv.xsd">
+        <id>2402.06196</id>
+        <created>2025-03-23</created>
+            <updated>2025-03-25</updated>
+        <authors>
+                <author>
+                    <keyname>Minaee</keyname>
+                        <forenames>Shervin</forenames>
+                </author>
+                <author>
+                    <keyname>Mikolov</keyname>
+                        <forenames>Tomas</forenames>
+                </author>
+                <author>
+                    <keyname>Nikzad</keyname>
+                        <forenames>Narjes</forenames>
+                </author>
+                <author>
+                    <keyname>Chenaghlu</keyname>
+                        <forenames>Meysam</forenames>
+                </author>
+                <author>
+                    <keyname>Socher</keyname>
+                        <forenames>Richard</forenames>
+                </author>
+                <author>
+                    <keyname>Amatriain</keyname>
+                        <forenames>Xavier</forenames>
+                </author>
+                <author>
+                    <keyname>Gao</keyname>
+                        <forenames>Jianfeng</forenames>
+                </author>
+        </authors>
+        <title>Large Language Models: A Survey</title>
+            <categories>cs.CL cs.AI</categories>
+            <license>http://creativecommons.org/licenses/by/4.0/</license>
+            <abstract>Large Language Models (LLMs) have drawn a lot of attention due to their strong performance on a wide range of natural language tasks, since the release of ChatGPT in November 2022. LLMs&#39; ability of general-purpose language understanding and generation is acquired by training billions of model&#39;s parameters on massive amounts of text data, as predicted by scaling laws \cite{kaplan2020scaling,hoffmann2022training}. The research area of LLMs, while very recent, is evolving rapidly in many different ways. In this paper, we review some of the most prominent LLMs, including three popular LLM families (GPT, LLaMA, PaLM), and discuss their characteristics, contributions and limitations. We also give an overview of techniques developed to build, and augment LLMs. We then survey popular datasets prepared for LLM training, fine-tuning, and evaluation, review widely used LLM evaluation metrics, and compare the performance of several popular LLMs on a set of representative benchmarks. Finally, we conclude the paper by discussing open challenges and future research directions.</abstract>
+    </arXiv>
+
+            </metadata>
+        </record>
+
+    </GetRecord>
+</OAI-PMH>
