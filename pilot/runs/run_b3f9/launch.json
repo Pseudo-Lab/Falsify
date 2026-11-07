@@ -1,0 +1,31 @@
+{
+  "captured_by": "tools/run_case.py",
+  "captured_at": "2026-10-18T09:25:32+00:00",
+  "command": [
+    "python",
+    "-m",
+    "tools.run_case",
+    "--case",
+    "run_b3f9"
+  ],
+  "cwd": "C:\\Users\\Public\\dropfusion-edu",
+  "case_id": "run_b3f9",
+  "schedule": "schedule/cases.jsonl",
+  "schedule_sha256": "d192ddb25ac5f00f1cb6ee31ac022de1c14f50ec6c39cb7c34d96be9e0c97854",
+  "overrides": [
+    "seed=1733"
+  ],
+  "child_command": [
+    "python",
+    "-m",
+    "src.pipeline",
+    "run_id=run_b3f9",
+    "hydra.run.dir=runs/run_b3f9",
+    "seed=1733"
+  ],
+  "source_commit": "ff77e8b4b58ad90eede0e5d1eec18342cdc8fb51",
+  "source_dirty": false,
+  "data_tree": "7bfce0412a9c825b15377e02a3ebba65ea3f1aa1",
+  "python_version": "3.13.14",
+  "environment_sha256": "6e975d506d8532e35c23e4888af025b31c2708c33063472e62d13457ddb5bed3"
+}

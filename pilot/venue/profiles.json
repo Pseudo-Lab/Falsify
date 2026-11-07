@@ -1,0 +1,45 @@
+{
+  "profiles": [
+    {
+      "schema_version": "dropfusion.venue_profile/1.0",
+      "profile_id": "AMF",
+      "name": "Aster Methods Forum",
+      "track": "methods",
+      "stage": "initial",
+      "profile_version": "edu-1.0",
+      "language": "en",
+      "educational_fiction": true,
+      "rules": {
+        "abstract": {
+          "max_whitespace_words": 180,
+          "structure": "single unstructured paragraph"
+        },
+        "main_pages_max": 8,
+        "columns": 2,
+        "included_in_page_limit": [
+          "title",
+          "abstract",
+          "main text",
+          "tables",
+          "figures"
+        ],
+        "excluded_after_main": [
+          "references",
+          "appendices",
+          "checklist"
+        ],
+        "citations": "bracketed numeric in first-appearance order",
+        "anonymous_initial": true,
+        "required_sections": [
+          "Limitations",
+          "Ethics Statement",
+          "Data Availability",
+          "Code Availability",
+          "Reproducibility Checklist"
+        ],
+        "fiction_notice_required": true
+      },
+      "note": "Fixed educational profile; not a real journal policy."
+    }
+  ]
+}

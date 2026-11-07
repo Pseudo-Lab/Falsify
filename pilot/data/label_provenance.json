@@ -1,0 +1,58 @@
+{
+  "schema_version": "1.0",
+  "builder": "src/labels.py::build_labels",
+  "horizon_days": 180,
+  "inputs": [
+    "event_day",
+    "followup_end_day"
+  ],
+  "rules": [
+    "observed event with 0 < event_day <= 180 -> y=1, observed=true",
+    "otherwise followup_end_day >= 180 -> y=0, observed=true",
+    "otherwise -> y=null, observed=false (right-censored before day 180)"
+  ],
+  "per_task": {
+    "SYN_T01": {
+      "n_subjects": 1200,
+      "n_observed": 1087,
+      "n_unobserved": 113,
+      "n_positive": 181,
+      "n_negative": 906
+    },
+    "SYN_T02": {
+      "n_subjects": 1200,
+      "n_observed": 1086,
+      "n_unobserved": 114,
+      "n_positive": 176,
+      "n_negative": 910
+    },
+    "SYN_T03": {
+      "n_subjects": 1200,
+      "n_observed": 1088,
+      "n_unobserved": 112,
+      "n_positive": 264,
+      "n_negative": 824
+    },
+    "SYN_T04": {
+      "n_subjects": 1200,
+      "n_observed": 1092,
+      "n_unobserved": 108,
+      "n_positive": 279,
+      "n_negative": 813
+    },
+    "SYN_T05": {
+      "n_subjects": 1200,
+      "n_observed": 1090,
+      "n_unobserved": 110,
+      "n_positive": 341,
+      "n_negative": 749
+    },
+    "SYN_T06": {
+      "n_subjects": 1200,
+      "n_observed": 1103,
+      "n_unobserved": 97,
+      "n_positive": 461,
+      "n_negative": 642
+    }
+  }
+}

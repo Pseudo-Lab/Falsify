@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="610" viewBox="0 0 1120 610">
+<title>Figure 3 Synthetic task AUROC with subject bootstrap intervals</title>
+<desc>Educational fictional synthetic study. Primary run run_52xe, seed 1733. Six task AUROC estimates and their macro mean, with recorded 95 percent subject bootstrap intervals. Planned 240 subjects, scored 223, abstained 17.</desc>
+<rect width="100%" height="100%" fill="white"/>
+<g font-family="Arial, sans-serif" fill="#172b3a">
+<text x="42" y="42" font-size="23" font-weight="bold">Synthetic outcome discrimination</text>
+<text x="42" y="72" font-size="15">Educational fiction · run_52xe · seed 1733 · internal test split</text>
+<text x="42" y="98" font-size="14">240 planned / 223 scored / 17 abstained; observed labels only</text>
+<text x="830" y="125" font-size="14" font-weight="bold">AUROC [95% CI]</text>
+<line x1="190.00" y1="126" x2="190.00" y2="474" stroke="#e6ebef"/>
+<text x="190.00" y="498" text-anchor="middle" font-size="13">0.0</text>
+<line x1="308.00" y1="126" x2="308.00" y2="474" stroke="#e6ebef"/>
+<text x="308.00" y="498" text-anchor="middle" font-size="13">0.2</text>
+<line x1="426.00" y1="126" x2="426.00" y2="474" stroke="#e6ebef"/>
+<text x="426.00" y="498" text-anchor="middle" font-size="13">0.4</text>
+<line x1="544.00" y1="126" x2="544.00" y2="474" stroke="#e6ebef"/>
+<text x="544.00" y="498" text-anchor="middle" font-size="13">0.6</text>
+<line x1="662.00" y1="126" x2="662.00" y2="474" stroke="#e6ebef"/>
+<text x="662.00" y="498" text-anchor="middle" font-size="13">0.8</text>
+<line x1="780.00" y1="126" x2="780.00" y2="474" stroke="#e6ebef"/>
+<text x="780.00" y="498" text-anchor="middle" font-size="13">1.0</text>
+<line x1="485.00" y1="126" x2="485.00" y2="474" stroke="#aab5bc" stroke-dasharray="5 5"/>
+<text x="42" y="155" font-size="16" font-weight="normal">SYN_T01</text>
+<line x1="633.61" y1="150" x2="712.99" y2="150" stroke="#246c86" stroke-width="3"/>
+<line x1="633.61" y1="144" x2="633.61" y2="156" stroke="#246c86" stroke-width="2"/>
+<line x1="712.99" y1="144" x2="712.99" y2="156" stroke="#246c86" stroke-width="2"/>
+<circle cx="675.12" cy="150" r="6" fill="#246c86"/>
+<text x="830" y="155" font-size="16" font-weight="normal">0.822 [0.752, 0.886]</text>
+<text x="42" y="203" font-size="16" font-weight="normal">SYN_T02</text>
+<line x1="568.02" y1="198" x2="684.20" y2="198" stroke="#246c86" stroke-width="3"/>
+<line x1="568.02" y1="192" x2="568.02" y2="204" stroke="#246c86" stroke-width="2"/>
+<line x1="684.20" y1="192" x2="684.20" y2="204" stroke="#246c86" stroke-width="2"/>
+<circle cx="630.29" cy="198" r="6" fill="#246c86"/>
+<text x="830" y="203" font-size="16" font-weight="normal">0.746 [0.641, 0.838]</text>
+<text x="42" y="251" font-size="16" font-weight="normal">SYN_T03</text>
+<line x1="611.91" y1="246" x2="698.39" y2="246" stroke="#246c86" stroke-width="3"/>
+<line x1="611.91" y1="240" x2="611.91" y2="252" stroke="#246c86" stroke-width="2"/>
+<line x1="698.39" y1="240" x2="698.39" y2="252" stroke="#246c86" stroke-width="2"/>
+<circle cx="657.44" cy="246" r="6" fill="#246c86"/>
+<text x="830" y="251" font-size="16" font-weight="normal">0.792 [0.715, 0.862]</text>
+<text x="42" y="299" font-size="16" font-weight="normal">SYN_T04</text>
+<line x1="588.36" y1="294" x2="682.96" y2="294" stroke="#246c86" stroke-width="3"/>
+<line x1="588.36" y1="288" x2="588.36" y2="300" stroke="#246c86" stroke-width="2"/>
+<line x1="682.96" y1="288" x2="682.96" y2="300" stroke="#246c86" stroke-width="2"/>
+<circle cx="638.85" cy="294" r="6" fill="#246c86"/>
+<text x="830" y="299" font-size="16" font-weight="normal">0.761 [0.675, 0.836]</text>
+<text x="42" y="347" font-size="16" font-weight="normal">SYN_T05</text>
+<line x1="459.50" y1="342" x2="562.08" y2="342" stroke="#246c86" stroke-width="3"/>
+<line x1="459.50" y1="336" x2="459.50" y2="348" stroke="#246c86" stroke-width="2"/>
+<line x1="562.08" y1="336" x2="562.08" y2="348" stroke="#246c86" stroke-width="2"/>
+<circle cx="512.55" cy="342" r="6" fill="#246c86"/>
+<text x="830" y="347" font-size="16" font-weight="normal">0.547 [0.457, 0.631]</text>
+<text x="42" y="395" font-size="16" font-weight="normal">SYN_T06</text>
+<line x1="543.12" y1="390" x2="637.77" y2="390" stroke="#246c86" stroke-width="3"/>
+<line x1="543.12" y1="384" x2="543.12" y2="396" stroke="#246c86" stroke-width="2"/>
+<line x1="637.77" y1="384" x2="637.77" y2="396" stroke="#246c86" stroke-width="2"/>
+<circle cx="591.23" cy="390" r="6" fill="#246c86"/>
+<text x="830" y="395" font-size="16" font-weight="normal">0.680 [0.599, 0.759]</text>
+<text x="42" y="443" font-size="16" font-weight="bold">Macro mean</text>
+<line x1="597.82" y1="438" x2="637.60" y2="438" stroke="#b04a2f" stroke-width="3"/>
+<line x1="597.82" y1="432" x2="597.82" y2="444" stroke="#b04a2f" stroke-width="2"/>
+<line x1="637.60" y1="432" x2="637.60" y2="444" stroke="#b04a2f" stroke-width="2"/>
+<circle cx="617.58" cy="438" r="6" fill="#b04a2f"/>
+<text x="830" y="443" font-size="16" font-weight="bold">0.815 [0.691, 0.759]</text>
+<text x="485.0" y="529" text-anchor="middle" font-size="16">AUROC on continuous subject scores</text>
+<text x="42" y="565" font-size="13">Intervals: 1,000 subject bootstrap resamples; seed 2718; percentile method.</text>
+<text x="42" y="590" font-size="13">These synthetic results provide no evidence of clinical diagnostic validity.</text>
+</g>
+</svg>

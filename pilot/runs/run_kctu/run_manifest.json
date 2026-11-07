@@ -1,0 +1,48 @@
+{
+  "run_id": "run_kctu",
+  "case_id": "run_kctu",
+  "source_commit": "ff77e8b4b58ad90eede0e5d1eec18342cdc8fb51",
+  "started_at": "2026-10-18T09:27:41+00:00",
+  "ended_at": "2026-10-18T09:27:58+00:00",
+  "exit_code": 0,
+  "seed": 1729,
+  "overrides": [
+    "data.labels.unknown_policy=negative"
+  ],
+  "config_system": {
+    "name": "hydra",
+    "version": "1.3.7"
+  },
+  "effective_config_sha256": "171fb3bf6e73442f8507d783971a0a0280d787b27e265fd0b6cfbdd51e28380a",
+  "hydra_config_file_sha256": "c3a7ea7300e58fad22d45d27f0dccc313be95b52c5c1959413be1e2b3b18a197",
+  "data_sha256": "d10dbabdfdfbc6a9649b091097671eb77821bbbc3aa75aa63386be6ad6b6d658",
+  "split_id": "split_c321a741e9",
+  "split_members_sha256": "605bb83366b4d96eef846ea2fdc353e0fa7e8474c78e00da1e1dd79441bc1142",
+  "predictions_sha256": "0e90b13a75b18a41afb215ff38ace7d5ad171e4f7b3bc9cbe478b0fda204c1b4",
+  "metrics_sha256": "ddf3a425efdcaf11e963f61f936bec36e9cfb7041083a28ba243c0142e70659f",
+  "checkpoint_sha256": "88f2963257ac1db9e27178e7b9ed6be719334b0170369396bb5777ff7e5b7c75",
+  "checkpoint_params_sha256": "8a9b0885783e27544f3ab16388dd3189e4009ed335a76d2b09f51c8647f2c754",
+  "environment_sha256": "6e975d506d8532e35c23e4888af025b31c2708c33063472e62d13457ddb5bed3",
+  "outputs": {
+    ".hydra/config.yaml": "c3a7ea7300e58fad22d45d27f0dccc313be95b52c5c1959413be1e2b3b18a197",
+    ".hydra/hydra.yaml": "8e8bd7905052bcbce24bba7b2716dd009bc1317ecab625e19b15211868dfecc7",
+    ".hydra/overrides.yaml": "424615c7fb87b99a68ce1aa0339deaa7e3e88146ae818379fc6afd5340c61d76",
+    "attention_summary.csv": "1cdf492c7a94b7cbed115775a430ac4e2c7c8f445c650e600923e95815eccc16",
+    "checkpoint.npz": "88f2963257ac1db9e27178e7b9ed6be719334b0170369396bb5777ff7e5b7c75",
+    "checkpoint_index.jsonl": "d0fe92fe4d0cff4d7d14b79d59cd5320b27fc21bc2dd6474f48813868e728787",
+    "console.log": "832f6c77672f62943a467139ab4853693abd94ccd02ccf6b5d2f6bce179c6737",
+    "epoch_metrics.csv": "665078365053aca92786eaa14ab83ff84a8994b027b036d385cc0cd850aa6b25",
+    "events.jsonl": "bb8c318bf29150830bd9b8fbeb4906cb31eafa3326e16aa2b3c00b7611be40af",
+    "fit_membership.csv": "857959e892ca0b49e284d26a9f6cfd1ccc7fb9855214e0cabdc97729f08f492e",
+    "flow.csv": "68a463fa6945d96ce2bc36f2f7862651481c2f5f7b790e06153730ea30f7baf8",
+    "inputs.json": "74600a8af1361a2f25cf883db40d853743fce3bcff6dc108c9842f42d269a66b",
+    "launch.json": "eac77da019fe259f1a824d8aa2a7ed14858e620df19749554aad1e010d6c7730",
+    "metrics.json": "ddf3a425efdcaf11e963f61f936bec36e9cfb7041083a28ba243c0142e70659f",
+    "pipeline.log": "832f6c77672f62943a467139ab4853693abd94ccd02ccf6b5d2f6bce179c6737",
+    "predictions.csv": "0e90b13a75b18a41afb215ff38ace7d5ad171e4f7b3bc9cbe478b0fda204c1b4",
+    "preprocess_state.npz": "a8fde530a92b873c5c8515fb4a4858c9402e773504bed70d4dc011521f2969d7",
+    "selection.json": "d5e52a5b04dc072771920dfb2dd3559bfb77417ae8c91faf09865627c7d64e7e",
+    "source.tar": "fc101b0133e4fb8aea35c8c695f9ac2b16e9e27b78ef65a1c8db3deb258bbc7b",
+    "source_index.json": "24838fe9c0e9b4314d51f902e0d055b9b24a793240bd653773ba3601bcab0da7"
+  }
+}

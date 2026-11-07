@@ -1,0 +1,59 @@
+{
+  "step_id": "step-A",
+  "execution_mode": "staged",
+  "staged_note": "Reconstructed handoff record for this exercise, not a transcript of a model call; model identity and call times are therefore null.",
+  "parent_step_id": null,
+  "input_commit": "8ffe2bf608c93974e1d9c656e828f913a2666d80",
+  "inputs": [
+    {
+      "path": "task_contract.yaml",
+      "sha256": "a7954eb8e6d846ac59ee2666e98f2358b3fce871d6064caf0ba2da82081f493e"
+    },
+    {
+      "path": "protocol/analysis_plan.yaml",
+      "sha256": "dc60a3c86a8764f524537e95b8f592236b1df07090255c4ed96275038c60a6e5"
+    },
+    {
+      "path": "protocol/terminology_and_masks.md",
+      "sha256": "061b673d407f40f920b4cedaab9e96d86a59a2238c9093202f3092139b6b9c0c"
+    },
+    {
+      "path": "data/feature_dictionary.json",
+      "sha256": "434e73865a362662f1766450f085a41c04313c39693fa7c3050a310f633161b5"
+    },
+    {
+      "path": "data/label_dictionary.json",
+      "sha256": "fb0dea6f2d6322cc231cd0938b3323ead2e3d01e4e7ca4e03cfa7f460fa87af2"
+    },
+    {
+      "path": "data/generation_manifest.json",
+      "sha256": "29f4b670ef6555ca40065754891e8c59f7e5d5d076717aa2bfa6926053848850"
+    },
+    {
+      "path": "evidence/reference_registry.json",
+      "sha256": "6a800b36db2ec73c8eb8e417e2be518abdd1f54ba24864b243a0acabf2eea260"
+    }
+  ],
+  "prompt_sha256": "63cf8b029368f26330825a8b1026155f619b121af37b94f652f2a63454727d63",
+  "requested_operations": [
+    "draft Korean manuscript text from repository definitions",
+    "leave run-dependent values as TBD",
+    "cite only registered references"
+  ],
+  "model_provider": null,
+  "model_id": null,
+  "model_version": null,
+  "sampling_parameters": null,
+  "started_at": null,
+  "ended_at": null,
+  "staged_at": "2026-10-18T09:22:21+00:00",
+  "response_sha256": "89774f5ed03cac049db6f7c9ba74b4c468b56438cb47be988d3be08576a1fc1a",
+  "outputs": [
+    {
+      "path": "author/author_draft_ko.md",
+      "sha256": "47f874d8232e89614229729bb62a2a0b73044008156c58da3c2f08de69d850ea"
+    }
+  ],
+  "review_status": "accepted_with_open_items",
+  "output_commit_reference": null
+}

@@ -1,0 +1,93 @@
+{
+  "schema_version": "1.0",
+  "purpose": "inputs fixed before the scheduled runs",
+  "schedule": {
+    "path": "schedule/cases.jsonl",
+    "sha256": "d192ddb25ac5f00f1cb6ee31ac022de1c14f50ec6c39cb7c34d96be9e0c97854",
+    "cases": {
+      "run_3tjm": [],
+      "run_52xe": [
+        "seed=1733"
+      ],
+      "run_7fba": [],
+      "run_9dqr": [
+        "data.features.allow_post_index=true"
+      ],
+      "run_adnm": [],
+      "run_b3f9": [
+        "seed=1733"
+      ],
+      "run_kctu": [
+        "data.labels.unknown_policy=negative"
+      ],
+      "run_m72s": [
+        "seed=1741"
+      ],
+      "run_r9my": [
+        "report.denominator_scope=scored"
+      ],
+      "run_ras4": [
+        "seed=1741"
+      ],
+      "run_sdvz": [
+        "preprocess.fit_scope=all"
+      ],
+      "run_sgap": [
+        "model.kind=linear",
+        "split.unit=specimen_id"
+      ],
+      "run_sh3j": [],
+      "run_xapp": [],
+      "run_yy4a": [
+        "model.kind=linear"
+      ],
+      "run_zabx": [
+        "selection.threshold_split=test"
+      ]
+    }
+  },
+  "data": {
+    "data/subjects.csv": "c2d857ca924f7b19d58b4b962c378b1396c90f273ff66ab7959daef2ba808000",
+    "data/specimens.csv": "9a3c3ce354a975db0f55dccdbf0add02ae38602bd30ffc3517c89eb8f796878c",
+    "data/modality_crosswalk.csv": "91d998c9102306b18097f4a20ef582d4c18eeb1a3d650139e2d67e9f4d5c9d40",
+    "data/protein.csv": "2bbf524fc7d1cecac9fa5f6ab60cd9642a84976309060bee697b88b1f0f9b86b",
+    "data/rna.csv": "179239ee1f6fd16fddb8633811535f0d3c798739bb040dd0c54bf9d3f89d28ae",
+    "data/labels.csv": "748c4dd1ee85500ffcdf37819d09eb2d63788a9d86346e86fa6ebd3eecbb4281",
+    "data/observation_mask.csv": "6c92171d728ad8114320ff786f863eefb7c0021422c79cbfb02d7edb499f3acf",
+    "data/modality_mask.csv": "9933e33d8f7f10515294cd6653babeb64318dd9288003dee20bc7448565dbb6e",
+    "data/feature_dictionary.json": "434e73865a362662f1766450f085a41c04313c39693fa7c3050a310f633161b5",
+    "data/label_dictionary.json": "fb0dea6f2d6322cc231cd0938b3323ead2e3d01e4e7ca4e03cfa7f460fa87af2",
+    "data/label_provenance.json": "65d5da0c563b5bee020d528ac0e9201c19f2e4f3bf443ca75553759aa9708a4f",
+    "data/generation_manifest.json": "29f4b670ef6555ca40065754891e8c59f7e5d5d076717aa2bfa6926053848850"
+  },
+  "data_note": "data/pairing_preview.csv is an example output and is not read by the runs",
+  "source_files": {
+    "configs/config.yaml": "d4f7b1dadbe1cb8007a70a9dfea4f62eb055a5be6e87fa091f6bc31589994dbc",
+    "configs/data/synthetic.yaml": "d34cb8cae2fc023a27eff4aca0e75de1242c357e2a9548e6670c8da239ef759d",
+    "configs/model/fusion.yaml": "40f823c747febf185b962aa460b749cf1f77a4ad90bb5274c755ae1a4f572c8f",
+    "environment.lock": "43f4ac46e63cf31eb185475fb16e6cd23c9486e8c57070f496870e2aa5cec17e",
+    "protocol/analysis_plan.yaml": "dc60a3c86a8764f524537e95b8f592236b1df07090255c4ed96275038c60a6e5",
+    "protocol/terminology_and_masks.md": "061b673d407f40f920b4cedaab9e96d86a59a2238c9093202f3092139b6b9c0c",
+    "pyproject.toml": "8e67e0925c30e3c91b598449a819e2243bc4f9136fcd1d96d009e92f1080878f",
+    "schedule/cases.jsonl": "d192ddb25ac5f00f1cb6ee31ac022de1c14f50ec6c39cb7c34d96be9e0c97854",
+    "src/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "src/evaluate.py": "9b6ad17afdf76758283dabe37e92a59aaf68217be7f65142f1b7c11370e6118a",
+    "src/generate.py": "ba417fb16ed08cc41c66842cf5e6fe695a81d85d6a84f298a0caa9b2c67c9f7b",
+    "src/io_utils.py": "e03b19012f254fd973bbd9a80011ca5a15fbf0102b8c3e8be060c38a7b78b68a",
+    "src/labels.py": "13b3b5deea73b2a7b6aaa56ff164b4530e3e0ca5b0c93a9adc262e9513b425af",
+    "src/model.py": "0cbcf6f0a751ea0a0241bb5b9ade43a753b670b43ed49076f1998c3e3936df40",
+    "src/pairing.py": "e71cdd77575d7777a15cb0c54950ddd9b613942849f9105799fce768fe74b362",
+    "src/pipeline.py": "af8fba6e641f786dd1c8c5fc4b2bed5710ac6b3341431608e045e1c3df572bdf",
+    "src/prepare.py": "9cdda89340b6339df10b1d1bc9368dbd6f3289fa0826dde40337e85071a5da9a",
+    "src/report.py": "74475c02abf87cb27f62cbc91f0dc284968a7b36992f1e0408efb2bf1827b7f6",
+    "src/schema.py": "bf2a82db24b75ed4e7274ba9864f026a7d120a5a750f70edc5a4026509204458",
+    "src/split.py": "b3ccba933f2a92212f75337e964c140380fe2a41246ca7385f1f17b457aca780",
+    "src/train.py": "8d31cd0643a621434df4771c42ad0bb9d096cc493ed2e7247f9bdd90b541fd6e",
+    "tools/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "tools/recompute_metrics.py": "a7a780a2a7387c0983fb3d25feb5c8f5b6e00408e73444e6780e723c5630404d",
+    "tools/run_case.py": "3170f3b3861e40738bc4ecfd37e664a09ad944bfd8638e1540b741271df49c5a",
+    "tools/verify_contracts.py": "7e368e5381fd39cb5f94f27be7e27dfaaf775bf204332974443ad3d5f1e8ad73"
+  },
+  "environment_lock_sha256": "43f4ac46e63cf31eb185475fb16e6cd23c9486e8c57070f496870e2aa5cec17e",
+  "execution": "one CPU process per case via python -m tools.run_case --case <case_id>; each case id is run once"
+}

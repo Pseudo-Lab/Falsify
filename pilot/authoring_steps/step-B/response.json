@@ -1,0 +1,26 @@
+{
+  "step_id": "step-B",
+  "outputs": [
+    {
+      "path": "author/author_draft_ko.md",
+      "sha256": "0e1697992ac183b51106bb4321578921439f3a069d33a73f3dd42988a57262ae"
+    },
+    {
+      "path": "author/author_requested_edits.md",
+      "sha256": "e3dcf8f1fa8ff0e0c2df12ad3ff801fc4c1ee29c6ec018730aa70507c1bd3e74"
+    }
+  ],
+  "cited_run_ids": [
+    "run_3tjm",
+    "run_52xe",
+    "run_7fba",
+    "run_adnm",
+    "run_b3f9",
+    "run_m72s",
+    "run_ras4",
+    "run_sh3j",
+    "run_xapp",
+    "run_yy4a"
+  ],
+  "summary": "Korean manuscript with results filled from the archived runs, corrected method statements and the editing scope for the English version."
+}

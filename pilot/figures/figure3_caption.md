@@ -1,0 +1,3 @@
+# Figure 3 Synthetic task AUROC and macro mean
+
+The primary attention run (`run_52xe`, seed 1733) was evaluated on held-out synthetic subjects using only observed labels and the mean of available aliquot scores per subject. Points show AUROC; bars show the recorded 95% subject bootstrap intervals (1,000 resamples, seed 2718, percentile method). Of 240 planned test subjects, 223 had scores and 17 abstained. Task-specific included counts are 188–192. The macro estimate is an unweighted mean across the six tasks. `figure3_source.csv` links each point to the unchanged metric artifact and prediction hash. These are educational synthetic results, with no clinical validation claim.
