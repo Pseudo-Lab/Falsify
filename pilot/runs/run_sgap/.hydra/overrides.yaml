@@ -1,0 +1,3 @@
+- run_id=run_sgap
+- model.kind=linear
+- split.unit=specimen_id

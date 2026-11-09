@@ -1,0 +1,48 @@
+{
+  "run_id": "run_r9my",
+  "case_id": "run_r9my",
+  "source_commit": "ff77e8b4b58ad90eede0e5d1eec18342cdc8fb51",
+  "started_at": "2026-10-18T09:27:23+00:00",
+  "ended_at": "2026-10-18T09:27:39+00:00",
+  "exit_code": 0,
+  "seed": 1729,
+  "overrides": [
+    "report.denominator_scope=scored"
+  ],
+  "config_system": {
+    "name": "hydra",
+    "version": "1.3.7"
+  },
+  "effective_config_sha256": "824f970b006f6482388146f413de561c7571ae414d564ade017de30346a3c56a",
+  "hydra_config_file_sha256": "b16d7b48c34839423f4496b58adfded4baf51a05c5094e97c094fcf18da02a91",
+  "data_sha256": "d10dbabdfdfbc6a9649b091097671eb77821bbbc3aa75aa63386be6ad6b6d658",
+  "split_id": "split_c321a741e9",
+  "split_members_sha256": "605bb83366b4d96eef846ea2fdc353e0fa7e8474c78e00da1e1dd79441bc1142",
+  "predictions_sha256": "6ec55a27a128ad475904fa72777e3f622d8b69db75d1387fcfe99e0e62af174b",
+  "metrics_sha256": "1e169a2bdc7bd76b72ad1f091e4fd74b41f6e0b412eaeebe8689bc47363e199f",
+  "checkpoint_sha256": "88f2963257ac1db9e27178e7b9ed6be719334b0170369396bb5777ff7e5b7c75",
+  "checkpoint_params_sha256": "8a9b0885783e27544f3ab16388dd3189e4009ed335a76d2b09f51c8647f2c754",
+  "environment_sha256": "6e975d506d8532e35c23e4888af025b31c2708c33063472e62d13457ddb5bed3",
+  "outputs": {
+    ".hydra/config.yaml": "b16d7b48c34839423f4496b58adfded4baf51a05c5094e97c094fcf18da02a91",
+    ".hydra/hydra.yaml": "34819918dcfedb3a8a0a66e27ea09be4ec5fb1c42364bd2984c21d85bd0a0744",
+    ".hydra/overrides.yaml": "8b219d7bb59f111739002ed05998bc96e7a3da9419c23f2a8eefb626eb97a772",
+    "attention_summary.csv": "1cdf492c7a94b7cbed115775a430ac4e2c7c8f445c650e600923e95815eccc16",
+    "checkpoint.npz": "88f2963257ac1db9e27178e7b9ed6be719334b0170369396bb5777ff7e5b7c75",
+    "checkpoint_index.jsonl": "d0fe92fe4d0cff4d7d14b79d59cd5320b27fc21bc2dd6474f48813868e728787",
+    "console.log": "c750d31a9d35915999a5f5f41cdaa420a93b46d8504ed2de46a1f00898d8a73e",
+    "epoch_metrics.csv": "665078365053aca92786eaa14ab83ff84a8994b027b036d385cc0cd850aa6b25",
+    "events.jsonl": "d699d335dbfc78bef782d258810581dfeec4652c0bd5de030463f18428583653",
+    "fit_membership.csv": "857959e892ca0b49e284d26a9f6cfd1ccc7fb9855214e0cabdc97729f08f492e",
+    "flow.csv": "287aac9ddbae075c0bd6ac6f41c99aec5c84242f1e4db6283c57da11c1fa1ea1",
+    "inputs.json": "0decdb15fe09f9f5b40657c12b3eb392921c0273b6e34bedb49172493781fa37",
+    "launch.json": "37ec33a2b143696ff59e78bb366fb8df8ec082d310e772df78ebd26d2f01f8db",
+    "metrics.json": "1e169a2bdc7bd76b72ad1f091e4fd74b41f6e0b412eaeebe8689bc47363e199f",
+    "pipeline.log": "c750d31a9d35915999a5f5f41cdaa420a93b46d8504ed2de46a1f00898d8a73e",
+    "predictions.csv": "6ec55a27a128ad475904fa72777e3f622d8b69db75d1387fcfe99e0e62af174b",
+    "preprocess_state.npz": "a8fde530a92b873c5c8515fb4a4858c9402e773504bed70d4dc011521f2969d7",
+    "selection.json": "d5e52a5b04dc072771920dfb2dd3559bfb77417ae8c91faf09865627c7d64e7e",
+    "source.tar": "fc101b0133e4fb8aea35c8c695f9ac2b16e9e27b78ef65a1c8db3deb258bbc7b",
+    "source_index.json": "24838fe9c0e9b4314d51f902e0d055b9b24a793240bd653773ba3601bcab0da7"
+  }
+}

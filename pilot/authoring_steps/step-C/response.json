@@ -1,0 +1,20 @@
+{
+  "step_id": "step-C",
+  "execution_mode": "staged",
+  "record_kind": "assembled editorial artifact record; not a raw model-call transcript",
+  "outputs": [
+    {
+      "path": "paper/manuscript_en.md",
+      "sha256": "e3d7c956d9f4454e93521e4543900ab321c8e96d50aee66e7c02847da5bd812a"
+    },
+    {
+      "path": "paper/references.bib",
+      "sha256": "6cd284f1d2ab05b4c1357cb7635de09fe9397c941e1919ef5fb34625dec25b79"
+    },
+    {
+      "path": "figures/figure3.svg",
+      "sha256": "3db72d562e53a8d1599ac9470d8757955d2b3f9407ad63b7582ff7c7dfb82f80"
+    }
+  ],
+  "summary": "English editorial output, result and run references, and bibliography prepared for independent final review."
+}

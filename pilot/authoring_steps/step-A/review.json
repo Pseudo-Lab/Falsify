@@ -1,0 +1,26 @@
+{
+  "step_id": "step-A",
+  "review_status": "accepted_with_open_items",
+  "checks": [
+    {
+      "check": "every result value is a TBD placeholder",
+      "status": "pass"
+    },
+    {
+      "check": "cited works are entries of evidence/reference_registry.json",
+      "status": "pass"
+    },
+    {
+      "check": "methods text compared with protocol/analysis_plan.yaml, configs and src/",
+      "status": "pass"
+    },
+    {
+      "check": "educational-fiction notice present",
+      "status": "pass"
+    }
+  ],
+  "open_items": [
+    "results, denominators and run ids to be filled from executed runs",
+    "the attention model has two modality tokens; any attention summary in the results must be stated at modality level"
+  ]
+}

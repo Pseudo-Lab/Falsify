@@ -1,0 +1,16 @@
+{
+  "per_task_auroc": {
+    "TASK_A": 0.7777777777777778,
+    "TASK_B": 0.8571428571428572
+  },
+  "per_task_n": {
+    "TASK_A": 6,
+    "TASK_B": 8
+  },
+  "per_task_prevalence": {
+    "TASK_A": 0.5,
+    "TASK_B": 0.125
+  },
+  "macro_auroc": 0.8174603174603174,
+  "micro_auroc_for_contrast": 0.85
+}

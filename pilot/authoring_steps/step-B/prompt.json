@@ -1,0 +1,16 @@
+{
+  "step_id": "step-B",
+  "role": "results write-up (Korean)",
+  "request": "Fill every run-dependent value of author/author_draft_ko.md from the archived run capsules (runs/<run_id>/metrics.json, flow.csv, selection.json, epoch_metrics.csv, attention_summary.csv) and the stored split summary. Report failures and abstentions as recorded. Keep limitations. Correct method statements that do not match the code or the capsules. Cite each value with its run id.",
+  "inputs": [
+    "author/author_draft_ko.md (previous version)",
+    "runs/*/metrics.json",
+    "runs/*/flow.csv",
+    "runs/*/selection.json",
+    "runs/*/epoch_metrics.csv",
+    "runs/*/attention_summary.csv",
+    "splits/*/summary.csv",
+    "protocol/analysis_plan.yaml",
+    "configs/"
+  ]
+}

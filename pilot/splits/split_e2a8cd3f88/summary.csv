@@ -1,0 +1,4 @@
+split,n_specimens,n_subjects,overlap_subjects
+train,1440,1008,576
+val,480,434,388
+test,480,434,388

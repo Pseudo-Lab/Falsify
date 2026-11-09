@@ -1,0 +1,7 @@
+case,event_day,followup_end_day,y,observed
+event_day_30,30,365,1,true
+event_day_179,179,365,1,true
+event_day_180,180,365,1,true
+event_day_181,181,365,0,true
+no_event_full_followup,,365,0,true
+censored_day_90_no_event,,90,,false

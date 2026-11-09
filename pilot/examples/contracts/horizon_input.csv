@@ -1,0 +1,7 @@
+case,event_day,followup_end_day
+event_day_30,30,365
+event_day_179,179,365
+event_day_180,180,365
+event_day_181,181,365
+no_event_full_followup,,365
+censored_day_90_no_event,,90

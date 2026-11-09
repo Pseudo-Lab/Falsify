@@ -1,0 +1,21 @@
+[project]
+name = "dropfusion-edu"
+version = "0.1.0"
+description = "Educational fiction: synthetic multi-omics fusion study for research-safety-gate exercises"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy",
+    "pandas",
+    "torch",
+    "scikit-learn",
+    "hydra-core",
+    "omegaconf",
+    "PyYAML",
+]
+
+[project.optional-dependencies]
+test = ["pytest"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-p no:cacheprovider"

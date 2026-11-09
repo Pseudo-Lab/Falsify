@@ -1,0 +1,10 @@
+{
+  "step_id": "step-C",
+  "review_status": "pending_independent_final_review",
+  "checked": [
+    "Output hashes resolve to actual supplied files.",
+    "No model identity or call time asserted without verification.",
+    "Final scientific, fidelity and profile review remains necessary."
+  ],
+  "content_approval": null
+}

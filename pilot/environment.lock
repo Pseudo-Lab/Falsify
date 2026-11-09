@@ -1,0 +1,32 @@
+# Locked environment used for all runs (CPU only, no network access needed at run time).
+# python 3.13.14 (CPython, 64-bit)
+antlr4-python3-runtime==4.9.3
+colorama==0.4.6
+filelock==3.18.0
+fsspec==2025.7.0
+hydra-core==1.3.7
+iniconfig==2.3.1
+Jinja2==3.1.6
+joblib==1.6.0
+MarkupSafe==3.0.2
+mpmath==1.3.0
+networkx==3.5
+numpy==2.3.2
+omegaconf==2.3.1
+packaging==25.0
+pandas==2.3.1
+pluggy==1.6.0
+Pygments==2.21.0
+pytest==9.1.1
+python-dateutil==2.9.0.post0
+pytz==2025.2
+PyYAML==6.0.3
+scikit-learn==1.9.1
+scipy==1.16.1
+setuptools==80.9.0
+six==1.17.0
+sympy==1.14.0
+threadpoolctl==3.7.0
+torch==2.7.1
+typing_extensions==4.14.1
+tzdata==2025.2

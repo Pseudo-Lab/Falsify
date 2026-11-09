@@ -1,0 +1,111 @@
+{
+  "schema_version": "1.0",
+  "generator": "src/generate.py",
+  "generator_version": "1.0",
+  "seed": 1729,
+  "synthetic_only": true,
+  "wet_lab_assay_performed": false,
+  "human_participants": false,
+  "parameters": {
+    "n_subjects": 1200,
+    "n_aliquots": 2,
+    "site_ids": [
+      "SITE_A",
+      "SITE_B",
+      "SITE_C"
+    ],
+    "site_probs": [
+      0.4,
+      0.35,
+      0.25
+    ],
+    "latent_dim": 4,
+    "site_latent_shift_sd": 0.25,
+    "n_protein": 24,
+    "n_rna_baseline": 95,
+    "protein": {
+      "offset": 5.0,
+      "loading_sd": 0.9,
+      "subject_sd": 0.6,
+      "batch_sd": 0.3,
+      "technical_sd": 0.35
+    },
+    "rna": {
+      "offset": 8.0,
+      "n_informative": 30,
+      "loading_sd": 0.7,
+      "subject_sd": 0.8,
+      "batch_sd": 0.4,
+      "technical_sd": 0.5
+    },
+    "task_base_rates": [
+      0.06,
+      0.1,
+      0.15,
+      0.22,
+      0.3,
+      0.4
+    ],
+    "task_weight_sd": 0.8,
+    "site_task_effect_sd": 0.3,
+    "late_event_prob": 0.08,
+    "late_event_day_range": [
+      181,
+      400
+    ],
+    "censor_prob": 0.12,
+    "censor_day_range": [
+      15,
+      179
+    ],
+    "complete_followup_range": [
+      180,
+      400
+    ],
+    "post_index_feature": {
+      "name": "followup_peak_synthetic",
+      "available_day": 30,
+      "per_event": 1.2,
+      "subject_sd": 0.6,
+      "technical_sd": 0.3,
+      "offset": 2.0
+    },
+    "subject_failure_prob": 0.06,
+    "protein_missing_prob": 0.07,
+    "rna_missing_prob": 0.07,
+    "cell_missing_prob": 0.015
+  },
+  "counts": {
+    "subjects": 1200,
+    "specimens": 2400,
+    "protein_rows": 2085,
+    "rna_rows": 2076,
+    "features": 120,
+    "tasks": 6
+  },
+  "outputs": {
+    "subjects.csv": "c2d857ca924f7b19d58b4b962c378b1396c90f273ff66ab7959daef2ba808000",
+    "specimens.csv": "9a3c3ce354a975db0f55dccdbf0add02ae38602bd30ffc3517c89eb8f796878c",
+    "modality_crosswalk.csv": "91d998c9102306b18097f4a20ef582d4c18eeb1a3d650139e2d67e9f4d5c9d40",
+    "protein.csv": "2bbf524fc7d1cecac9fa5f6ab60cd9642a84976309060bee697b88b1f0f9b86b",
+    "rna.csv": "179239ee1f6fd16fddb8633811535f0d3c798739bb040dd0c54bf9d3f89d28ae",
+    "labels.csv": "748c4dd1ee85500ffcdf37819d09eb2d63788a9d86346e86fa6ebd3eecbb4281",
+    "observation_mask.csv": "6c92171d728ad8114320ff786f863eefb7c0021422c79cbfb02d7edb499f3acf",
+    "modality_mask.csv": "9933e33d8f7f10515294cd6653babeb64318dd9288003dee20bc7448565dbb6e",
+    "feature_dictionary.json": "434e73865a362662f1766450f085a41c04313c39693fa7c3050a310f633161b5",
+    "label_dictionary.json": "fb0dea6f2d6322cc231cd0938b3323ead2e3d01e4e7ca4e03cfa7f460fa87af2",
+    "label_provenance.json": "65d5da0c563b5bee020d528ac0e9201c19f2e4f3bf443ca75553759aa9708a4f"
+  },
+  "producer": {
+    "source_sha256": {
+      "src/generate.py": "ba417fb16ed08cc41c66842cf5e6fe695a81d85d6a84f298a0caa9b2c67c9f7b",
+      "src/labels.py": "13b3b5deea73b2a7b6aaa56ff164b4530e3e0ca5b0c93a9adc262e9513b425af",
+      "src/pairing.py": "e71cdd77575d7777a15cb0c54950ddd9b613942849f9105799fce768fe74b362",
+      "src/schema.py": "bf2a82db24b75ed4e7274ba9864f026a7d120a5a750f70edc5a4026509204458",
+      "src/io_utils.py": "e03b19012f254fd973bbd9a80011ca5a15fbf0102b8c3e8be060c38a7b78b68a"
+    },
+    "python": "3.13.14",
+    "numpy": "2.3.2",
+    "pandas": "2.3.1"
+  }
+}

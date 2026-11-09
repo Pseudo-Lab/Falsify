@@ -1,0 +1,85 @@
+[2026-10-18 18:27:06,639][__main__][INFO] - resolved config:
+data:
+  horizon_days: 180
+  features:
+    allow_post_index: true
+  labels:
+    unknown_policy: mask
+  missing_modality:
+    one: masked_token
+    both: abstain
+model:
+  kind: attention
+  width: 16
+  heads: 2
+  max_epochs: 20
+  learning_rate: 0.001
+  batch_size: 64
+  optimizer: adam
+run_id: run_9dqr
+data_dir: data
+splits_dir: splits
+seed: 1729
+split:
+  unit: subject_id
+  fractions:
+  - 0.6
+  - 0.2
+  - 0.2
+  seed: 1729
+preprocess:
+  fit_scope: train
+  imputer: median
+  scaler: standard
+selection:
+  checkpoint_split: val
+  threshold_split: val
+  threshold_grid:
+    start: 0.05
+    stop: 0.95
+    step: 0.01
+report:
+  denominator_scope: planned
+evaluation:
+  split: test
+  unit: subject_id
+  averaging: macro
+  bootstrap_unit: subject_id
+  n_bootstrap: 1000
+  bootstrap_seed: 2718
+  ci_level: 0.95
+
+[2026-10-18 18:27:06,640][__main__][INFO] - start {'run_id': 'run_9dqr', 'seed': 1729}
+[2026-10-18 18:27:06,666][__main__][INFO] - data_loaded {'data_sha256': 'd10dbabdfdfbc6a9649b091097671eb77821bbbc3aa75aa63386be6ad6b6d658'}
+[2026-10-18 18:27:06,680][__main__][INFO] - paired {'n_specimens': 2400, 'join_key': 'canonical_specimen_id'}
+[2026-10-18 18:27:06,685][__main__][INFO] - split_assigned {'split_id': 'split_c321a741e9', 'unit': 'subject_id'}
+[2026-10-18 18:27:06,686][__main__][INFO] - features_selected {'n_features': 120, 'n_protein': 24, 'n_rna': 96, 'allow_post_index': True}
+[2026-10-18 18:27:06,709][__main__][INFO] - preprocess_fit {'fit_scope': 'train', 'n_fit_specimens': 1440}
+[2026-10-18 18:27:06,720][__main__][INFO] - train_start {'model': 'attention', 'train_role': 'train', 'n_train_specimens': 1336, 'validation_role': 'val', 'n_val_specimens': 454}
+[2026-10-18 18:27:07,564][__main__][INFO] - epoch_end {'epoch': 1, 'train_loss': 0.6812291860083471, 'val_loss': 0.6574271321296692, 'params_sha256': 'ca07ffded057df0170d1ad48bb4cbe220efaf3baf70dcb34762389a5247900da'}
+[2026-10-18 18:27:07,584][__main__][INFO] - epoch_end {'epoch': 2, 'train_loss': 0.6286086511345818, 'val_loss': 0.6102983951568604, 'params_sha256': '978a04bc7c416d500cf789e9abb1a7508f080538964280406b742cbe6bf654f6'}
+[2026-10-18 18:27:07,605][__main__][INFO] - epoch_end {'epoch': 3, 'train_loss': 0.5751681333671276, 'val_loss': 0.5584458708763123, 'params_sha256': '2a1e3685334ef78bf8afeb3bcbe5a69ffc918bdf3e291492c00d8ac1040fe5c7'}
+[2026-10-18 18:27:07,625][__main__][INFO] - epoch_end {'epoch': 4, 'train_loss': 0.5167103380670209, 'val_loss': 0.5025690197944641, 'params_sha256': 'a16c9257c528bab2b0e9b619b4a5aab8c7fd124893bb46ed9540f1d0b833f517'}
+[2026-10-18 18:27:07,645][__main__][INFO] - epoch_end {'epoch': 5, 'train_loss': 0.46957213539006953, 'val_loss': 0.46491971611976624, 'params_sha256': '5872a897a1757372257af531e5c987ae4683dd7c16672b429cb25ca8f8854cad'}
+[2026-10-18 18:27:07,665][__main__][INFO] - epoch_end {'epoch': 6, 'train_loss': 0.43928828155356364, 'val_loss': 0.44612938165664673, 'params_sha256': '776563fba6552181798d8cb2cc0ec5aa5ddf5a1ffb5e7267c26b4eec05d3a12e'}
+[2026-10-18 18:27:07,684][__main__][INFO] - epoch_end {'epoch': 7, 'train_loss': 0.420520286071262, 'val_loss': 0.43503519892692566, 'params_sha256': 'ac66e03a0a503362d6220f2b385fbdd86c1464e915cfbb7bdacb82d7a0471f6a'}
+[2026-10-18 18:27:07,704][__main__][INFO] - epoch_end {'epoch': 8, 'train_loss': 0.40726321726845055, 'val_loss': 0.4295899271965027, 'params_sha256': '24c6bc4b381411761d29c707c2f4b5fba8cf2820c30a5b9cfb6fe47ecb2a74f1'}
+[2026-10-18 18:27:07,726][__main__][INFO] - epoch_end {'epoch': 9, 'train_loss': 0.3978122755275932, 'val_loss': 0.42741361260414124, 'params_sha256': '9c3345836e8f314b36fa7534071c562f20a6249cf11b7eb1b75b7f3fa859daad'}
+[2026-10-18 18:27:07,746][__main__][INFO] - epoch_end {'epoch': 10, 'train_loss': 0.3906160522615031, 'val_loss': 0.42659029364585876, 'params_sha256': 'c3002826761c20de36e61e9e95c566a1335edc499f0113c7a63a70e503bf8bed'}
+[2026-10-18 18:27:07,766][__main__][INFO] - epoch_end {'epoch': 11, 'train_loss': 0.38517163893896256, 'val_loss': 0.42809781432151794, 'params_sha256': '1a12282d5de0dd2d4557808b4d4817affee58ec4d0b497fe5f3357d5f705999d'}
+[2026-10-18 18:27:07,786][__main__][INFO] - epoch_end {'epoch': 12, 'train_loss': 0.38082118477469945, 'val_loss': 0.4288857877254486, 'params_sha256': '4ef57908eca98c093017b29c14c006909525823718598653524715c72d7eb74e'}
+[2026-10-18 18:27:07,805][__main__][INFO] - epoch_end {'epoch': 13, 'train_loss': 0.3760622126070834, 'val_loss': 0.4295944273471832, 'params_sha256': '6c750f8f20dad2311873a29a1b87f79218fd52aaf10ffde8f387af30d383a8da'}
+[2026-10-18 18:27:07,825][__main__][INFO] - epoch_end {'epoch': 14, 'train_loss': 0.37224532301913926, 'val_loss': 0.4314606189727783, 'params_sha256': '9721d076845f471d2ecd9f7b3cabd8c7f79c833f2caf4487b53a57cff5adcf74'}
+[2026-10-18 18:27:07,847][__main__][INFO] - epoch_end {'epoch': 15, 'train_loss': 0.36880994763279423, 'val_loss': 0.43184518814086914, 'params_sha256': '238e26293de750478c3ae3b5f174b4447732d67c57f0159d59bb35a1108ce13f'}
+[2026-10-18 18:27:07,867][__main__][INFO] - epoch_end {'epoch': 16, 'train_loss': 0.3651274733201286, 'val_loss': 0.43387100100517273, 'params_sha256': '638e3488e0e930b56072db0d8d3079bbecfbfbf65da2e19285dc373e3f09a244'}
+[2026-10-18 18:27:07,887][__main__][INFO] - epoch_end {'epoch': 17, 'train_loss': 0.36194057725349893, 'val_loss': 0.43569278717041016, 'params_sha256': 'd0b50209a3f4a528d69f6a7a4067f86ad0e8b17b6ec5f3bcf9f7d3436dc6ab41'}
+[2026-10-18 18:27:07,907][__main__][INFO] - epoch_end {'epoch': 18, 'train_loss': 0.3586637071740121, 'val_loss': 0.43935948610305786, 'params_sha256': '4680e90b83e23aba959c39e7787a08e3a4ea3b10e27a1ea9ab9680e85186c80f'}
+[2026-10-18 18:27:07,927][__main__][INFO] - epoch_end {'epoch': 19, 'train_loss': 0.3556363796028737, 'val_loss': 0.4408346116542816, 'params_sha256': '642b4cc0fe32630e55c2a7679269d365797f39e8819e571937b5e70f0060cdd2'}
+[2026-10-18 18:27:07,946][__main__][INFO] - epoch_end {'epoch': 20, 'train_loss': 0.35301778347678825, 'val_loss': 0.4432852864265442, 'params_sha256': 'c11d9ef8a09152c2b50c4dbd1a8abb6e65401fb1a3d15403430c50c0d1ed996f'}
+[2026-10-18 18:27:07,948][__main__][INFO] - checkpoint_selected {'split': 'val', 'epoch': 10, 'val_loss': 0.42659029364585876}
+[2026-10-18 18:27:07,975][__main__][INFO] - scored {'split': 'val', 'role': 'threshold_selection', 'n_specimens': 480, 'n_abstain_specimens': 26}
+[2026-10-18 18:27:07,988][__main__][INFO] - threshold_selected {'split': 'val'}
+[2026-10-18 18:27:08,054][__main__][INFO] - scored {'split': 'train', 'role': 'recorded', 'n_specimens': 1440, 'n_abstain_specimens': 104}
+[2026-10-18 18:27:08,075][__main__][INFO] - scored {'split': 'test', 'role': 'evaluation', 'n_specimens': 480, 'n_abstain_specimens': 35}
+[2026-10-18 18:27:21,091][__main__][INFO] - evaluated {'split': 'test', 'unknown_policy': 'mask', 'macro_auroc': 0.8101098716509519}
+[2026-10-18 18:27:21,103][__main__][INFO] - end {'status': 'ok'}

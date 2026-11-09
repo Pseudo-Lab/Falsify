@@ -1,0 +1,30 @@
+{
+  "step_id": "step-B",
+  "review_status": "accepted",
+  "checks": [
+    {
+      "check": "every archived run recomputes from frozen predictions, labels and masks (tools.recompute_metrics, see recompute_check.csv)",
+      "status": "pass"
+    },
+    {
+      "check": "every cited value traced to the named run's metrics.json, flow.csv, selection.json, epoch_metrics.csv or attention_summary.csv",
+      "status": "pass"
+    },
+    {
+      "check": "no placeholder left",
+      "status": "pass"
+    },
+    {
+      "check": "attention reported at modality-token level only",
+      "status": "pass"
+    },
+    {
+      "check": "one reviewer correction applied before acceptance: config key named run_id (not run.run_id)",
+      "status": "applied"
+    }
+  ],
+  "step_a_follow_up": {
+    "note": "The step-A draft (output first committed in the commit below) contained method statements that did not match the code (data-seed source, bootstrap pool, attention granularity, configuration system, optimizer and batch size). They are corrected in this step; the step-A review entry marked the methods comparison as pass, which this follow-up supersedes.",
+    "step_a_output_commit": "290b31db6c94369ae8dd87b105f2cdda3fcbc3a9"
+  }
+}

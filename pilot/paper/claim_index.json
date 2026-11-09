@@ -1,0 +1,1584 @@
+{
+  "schema_version": "dropfusion.claim_index/1.0",
+  "release_id": "dropfusion-edu-pilot-1",
+  "claims": [
+    {
+      "claim_id": "C01",
+      "locator": {
+        "path": "paper/manuscript_en.md",
+        "sha256": "e3d7c956d9f4454e93521e4543900ab321c8e96d50aee66e7c02847da5bd812a",
+        "start_line": 15,
+        "end_line": 15,
+        "start_char": 2629,
+        "end_char_exclusive": 2786,
+        "start_utf8_byte": 2646,
+        "end_utf8_byte_exclusive": 2803,
+        "quote": "Multi-head self-attention, introduced by Vaswani and colleagues for sequence representation learning [2], can also be adapted to tabular multimodal features."
+      },
+      "run_ids": [],
+      "endpoint": null,
+      "population": null,
+      "metric": null,
+      "pdf_locator": {
+        "path": "paper/paper.pdf",
+        "sha256": "613e564ad09c2540704c599958abfecaa981683b163639e7f1b5aedeb5e2e168",
+        "pages": [
+          1
+        ],
+        "canonical_text_path": "paper/manuscript_en.md",
+        "canonical_span": "locator field"
+      },
+      "artifact_bindings": []
+    },
+    {
+      "claim_id": "C02",
+      "locator": {
+        "path": "paper/manuscript_en.md",
+        "sha256": "e3d7c956d9f4454e93521e4543900ab321c8e96d50aee66e7c02847da5bd812a",
+        "start_line": 152,
+        "end_line": 152,
+        "start_char": 23031,
+        "end_char_exclusive": 23151,
+        "start_utf8_byte": 23174,
+        "end_utf8_byte_exclusive": 23294,
+        "quote": "the reported test performance evaluates previously unseen subjects, with no subject shared between training and testing."
+      },
+      "run_ids": [
+        "run_sgap"
+      ],
+      "endpoint": "SYN_T01–SYN_T06",
+      "population": "synthetic study; exact scope is the cited text and run",
+      "metric": null,
+      "pdf_locator": {
+        "path": "paper/paper.pdf",
+        "sha256": "613e564ad09c2540704c599958abfecaa981683b163639e7f1b5aedeb5e2e168",
+        "pages": [
+          4
+        ],
+        "canonical_text_path": "paper/manuscript_en.md",
+        "canonical_span": "locator field"
+      },
+      "artifact_bindings": [
+        {
+          "run_id": "run_sgap",
+          "path": "runs/run_sgap/metrics.json",
+          "sha256": "7dbbee7fe27b0b21d5f17ac384cac94be2dbed5abda4ae2ddac9efe9532b1115"
+        },
+        {
+          "run_id": "run_sgap",
+          "path": "runs/run_sgap/inputs.json",
+          "sha256": "80b3da468b0c5418b2e45362a5ddb4a64fcc5bca58393e046da54a5d4c0f77db"
+        },
+        {
+          "run_id": "run_sgap",
+          "path": "runs/run_sgap/predictions.csv",
+          "sha256": "2f16399f4f41845b43559b101c0ca29e3e49155b8e99c54b95ff2beda019e4a5"
+        }
+      ]
+    },
+    {
+      "claim_id": "C03",
+      "locator": {
+        "path": "paper/manuscript_en.md",
+        "sha256": "e3d7c956d9f4454e93521e4543900ab321c8e96d50aee66e7c02847da5bd812a",
+        "start_line": 63,
+        "end_line": 63,
+        "start_char": 9958,
+        "end_char_exclusive": 10007,
+        "start_utf8_byte": 9983,
+        "end_utf8_byte_exclusive": 10032,
+        "quote": "There is no subject overlap between these splits."
+      },
+      "run_ids": [
+        "run_52xe"
+      ],
+      "endpoint": "SYN_T01–SYN_T06",
+      "population": "synthetic study; exact scope is the cited text and run",
+      "metric": null,
+      "pdf_locator": {
+        "path": "paper/paper.pdf",
+        "sha256": "613e564ad09c2540704c599958abfecaa981683b163639e7f1b5aedeb5e2e168",
+        "pages": [
+          2
+        ],
+        "canonical_text_path": "paper/manuscript_en.md",
+        "canonical_span": "locator field"
+      },
+      "artifact_bindings": [
+        {
+          "run_id": "run_52xe",
+          "path": "runs/run_52xe/metrics.json",
+          "sha256": "230a935d40458cc2b6734253667c43775b3c9b2b6e95221880925a209073781e"
+        },
+        {
+          "run_id": "run_52xe",
+          "path": "runs/run_52xe/inputs.json",
+          "sha256": "5f3572b28dc8c6b857d05a15ab28a1f69d186ad3f662d042951a14ee2fa42c41"
+        },
+        {
+          "run_id": "run_52xe",
+          "path": "runs/run_52xe/predictions.csv",
+          "sha256": "054e5d4c1205e6993511b3a39e661201265a7bc00196e361d72912ec1dd9e63e"
+        }
+      ]
+    },
+    {
+      "claim_id": "C04",
+      "locator": {
+        "path": "paper/manuscript_en.md",
+        "sha256": "e3d7c956d9f4454e93521e4543900ab321c8e96d50aee66e7c02847da5bd812a",
+        "start_line": 9,
+        "end_line": 9,
+        "start_char": 882,
+        "end_char_exclusive": 967,
+        "start_utf8_byte": 884,
+        "end_utf8_byte_exclusive": 969,
+        "quote": "validated simultaneous quantification of proteins and RNA from a single drop of blood"
+      },
+      "run_ids": [],
+      "endpoint": null,
+      "population": null,
+      "metric": null,
+      "pdf_locator": {
+        "path": "paper/paper.pdf",
+        "sha256": "613e564ad09c2540704c599958abfecaa981683b163639e7f1b5aedeb5e2e168",
+        "pages": [
+          1
+        ],
+        "canonical_text_path": "paper/manuscript_en.md",
+        "canonical_span": "locator field"
+      },
+      "artifact_bindings": []
+    },
+    {
+      "claim_id": "C05",
+      "locator": {
+        "path": "paper/manuscript_en.md",
+        "sha256": "e3d7c956d9f4454e93521e4543900ab321c8e96d50aee66e7c02847da5bd812a",
+        "start_line": 3,
+        "end_line": 3,
+        "start_char": 379,
+        "end_char_exclusive": 527,
+        "start_utf8_byte": 381,
+        "end_utf8_byte_exclusive": 529,
+        "quote": "No patients were recruited, human specimens collected, wet-laboratory measurements performed, medical records accessed or clinical trials conducted."
+      },
+      "run_ids": [],
+      "endpoint": null,
+      "population": null,
+      "metric": null,
+      "pdf_locator": {
+        "path": "paper/paper.pdf",
+        "sha256": "613e564ad09c2540704c599958abfecaa981683b163639e7f1b5aedeb5e2e168",
+        "pages": [
+          1
+        ],
+        "canonical_text_path": "paper/manuscript_en.md",
+        "canonical_span": "locator field"
+      },
+      "artifact_bindings": []
+    },
+    {
+      "claim_id": "C06",
+      "locator": {
+        "path": "paper/manuscript_en.md",
+        "sha256": "e3d7c956d9f4454e93521e4543900ab321c8e96d50aee66e7c02847da5bd812a",
+        "start_line": 25,
+        "end_line": 25,
+        "start_char": 4373,
+        "end_char_exclusive": 4445,
+        "start_utf8_byte": 4390,
+        "end_utf8_byte_exclusive": 4462,
+        "quote": "their article appeared online in September 2018 and in a 2019 issue [3]."
+      },
+      "run_ids": [],
+      "endpoint": null,
+      "population": null,
+      "metric": null,
+      "pdf_locator": {
+        "path": "paper/paper.pdf",
+        "sha256": "613e564ad09c2540704c599958abfecaa981683b163639e7f1b5aedeb5e2e168",
+        "pages": [
+          1
+        ],
+        "canonical_text_path": "paper/manuscript_en.md",
+        "canonical_span": "locator field"
+      },
+      "artifact_bindings": []
+    },
+    {
+      "claim_id": "C07",
+      "locator": {
+        "path": "paper/manuscript_en.md",
+        "sha256": "e3d7c956d9f4454e93521e4543900ab321c8e96d50aee66e7c02847da5bd812a",
+        "start_line": 125,
+        "end_line": 125,
+        "start_char": 19310,
+        "end_char_exclusive": 19315,
+        "start_utf8_byte": 19387,
+        "end_utf8_byte_exclusive": 19392,
+        "quote": "0.815"
+      },
+      "run_ids": [
+        "run_52xe"
+      ],
+      "endpoint": "SYN_T01–SYN_T06",
+      "population": "synthetic study; exact scope is the cited text and run",
+      "metric": "macro AUROC",
+      "pdf_locator": {
+        "path": "paper/paper.pdf",
+        "sha256": "613e564ad09c2540704c599958abfecaa981683b163639e7f1b5aedeb5e2e168",
+        "pages": [
+          4
+        ],
+        "canonical_text_path": "paper/manuscript_en.md",
+        "canonical_span": "locator field"
+      },
+      "artifact_bindings": [
+        {
+          "run_id": "run_52xe",
+          "path": "runs/run_52xe/metrics.json",
+          "sha256": "230a935d40458cc2b6734253667c43775b3c9b2b6e95221880925a209073781e"
+        },
+        {
+          "run_id": "run_52xe",
+          "path": "runs/run_52xe/inputs.json",
+          "sha256": "5f3572b28dc8c6b857d05a15ab28a1f69d186ad3f662d042951a14ee2fa42c41"
+        },
+        {
+          "run_id": "run_52xe",
+          "path": "runs/run_52xe/predictions.csv",
+          "sha256": "054e5d4c1205e6993511b3a39e661201265a7bc00196e361d72912ec1dd9e63e"
+        }
+      ]
+    },
+    {
+      "claim_id": "C08",
+      "locator": {
+        "path": "paper/manuscript_en.md",
+        "sha256": "e3d7c956d9f4454e93521e4543900ab321c8e96d50aee66e7c02847da5bd812a",
+        "start_line": 65,
+        "end_line": 65,
+        "start_char": 10514,
+        "end_char_exclusive": 10590,
+        "start_utf8_byte": 10539,
+        "end_utf8_byte_exclusive": 10615,
+        "quote": "Validation and test data receive the transformations fixed on training data."
+      },
+      "run_ids": [
+        "run_xapp"
+      ],
+      "endpoint": "SYN_T01–SYN_T06",
+      "population": "synthetic study; exact scope is the cited text and run",
+      "metric": null,
+      "pdf_locator": {
+        "path": "paper/paper.pdf",
+        "sha256": "613e564ad09c2540704c599958abfecaa981683b163639e7f1b5aedeb5e2e168",
+        "pages": [
+          2
+        ],
+        "canonical_text_path": "paper/manuscript_en.md",
+        "canonical_span": "locator field"
+      },
+      "artifact_bindings": [
+        {
+          "run_id": "run_xapp",
+          "path": "runs/run_xapp/metrics.json",
+          "sha256": "f32ee2285b388a4a062cd019c90bf8016d19bc5025bba5a78810501c4834b6ce"
+        },
+        {
+          "run_id": "run_xapp",
+          "path": "runs/run_xapp/inputs.json",
+          "sha256": "2cfc96b267f9af903ae6f4fcc25fa11a876bc3ccd6762b1e6da39277f4ab2fde"
+        },
+        {
+          "run_id": "run_xapp",
+          "path": "runs/run_xapp/predictions.csv",
+          "sha256": "706c0992c16236adefcb0ff665e835910bb3d2fc166ffc472eea97f4e36b7835"
+        }
+      ]
+    },
+    {
+      "claim_id": "C09",
+      "locator": {
+        "path": "paper/manuscript_en.md",
+        "sha256": "e3d7c956d9f4454e93521e4543900ab321c8e96d50aee66e7c02847da5bd812a",
+        "start_line": 154,
+        "end_line": 154,
+        "start_char": 23171,
+        "end_char_exclusive": 23274,
+        "start_utf8_byte": 23314,
+        "end_utf8_byte_exclusive": 23417,
+        "quote": "the preprocessing statistics used for the reported test results were fitted only on training specimens."
+      },
+      "run_ids": [
+        "run_sdvz"
+      ],
+      "endpoint": "SYN_T01–SYN_T06",
+      "population": "synthetic study; exact scope is the cited text and run",
+      "metric": null,
+      "pdf_locator": {
+        "path": "paper/paper.pdf",
+        "sha256": "613e564ad09c2540704c599958abfecaa981683b163639e7f1b5aedeb5e2e168",
+        "pages": [
+          4
+        ],
+        "canonical_text_path": "paper/manuscript_en.md",
+        "canonical_span": "locator field"
+      },
+      "artifact_bindings": [
+        {
+          "run_id": "run_sdvz",
+          "path": "runs/run_sdvz/metrics.json",
+          "sha256": "a47ff0e8003fcff3e3cf27b25ee1a18e693c8a5c55c679c7e007e218763a0932"
+        },
+        {
+          "run_id": "run_sdvz",
+          "path": "runs/run_sdvz/inputs.json",
+          "sha256": "ba8accccd95d5930bf5ac91f09c4d91c2710e4cb7b1e7abd344e176bd95dfb97"
+        },
+        {
+          "run_id": "run_sdvz",
+          "path": "runs/run_sdvz/predictions.csv",
+          "sha256": "ba89213499d101976cbc069aaf0d47c4cadc23d44e56b7989247f3bb10844694"
+        }
+      ]
+    },
+    {
+      "claim_id": "C10",
+      "locator": {
+        "path": "paper/manuscript_en.md",
+        "sha256": "e3d7c956d9f4454e93521e4543900ab321c8e96d50aee66e7c02847da5bd812a",
+        "start_line": 89,
+        "end_line": 89,
+        "start_char": 14252,
+        "end_char_exclusive": 14340,
+        "start_utf8_byte": 14279,
+        "end_utf8_byte_exclusive": 14367,
+        "quote": "All scheduled reference seed results are retained, with no retrospective seed exclusion."
+      },
+      "run_ids": [
+        "run_xapp",
+        "run_52xe",
+        "run_ras4"
+      ],
+      "endpoint": "SYN_T01–SYN_T06",
+      "population": "synthetic study; exact scope is the cited text and run",
+      "metric": null,
+      "pdf_locator": {
+        "path": "paper/paper.pdf",
+        "sha256": "613e564ad09c2540704c599958abfecaa981683b163639e7f1b5aedeb5e2e168",
+        "pages": [
+          3
+        ],
+        "canonical_text_path": "paper/manuscript_en.md",
+        "canonical_span": "locator field"
+      },
+      "artifact_bindings": [
+        {
+          "run_id": "run_xapp",
+          "path": "runs/run_xapp/metrics.json",
+          "sha256": "f32ee2285b388a4a062cd019c90bf8016d19bc5025bba5a78810501c4834b6ce"
+        },
+        {
+          "run_id": "run_xapp",
+          "path": "runs/run_xapp/inputs.json",
+          "sha256": "2cfc96b267f9af903ae6f4fcc25fa11a876bc3ccd6762b1e6da39277f4ab2fde"
+        },
+        {
+          "run_id": "run_xapp",
+          "path": "runs/run_xapp/predictions.csv",
+          "sha256": "706c0992c16236adefcb0ff665e835910bb3d2fc166ffc472eea97f4e36b7835"
+        },
+        {
+          "run_id": "run_52xe",
+          "path": "runs/run_52xe/metrics.json",
+          "sha256": "230a935d40458cc2b6734253667c43775b3c9b2b6e95221880925a209073781e"
+        },
+        {
+          "run_id": "run_52xe",
+          "path": "runs/run_52xe/inputs.json",
+          "sha256": "5f3572b28dc8c6b857d05a15ab28a1f69d186ad3f662d042951a14ee2fa42c41"
+        },
+        {
+          "run_id": "run_52xe",
+          "path": "runs/run_52xe/predictions.csv",
+          "sha256": "054e5d4c1205e6993511b3a39e661201265a7bc00196e361d72912ec1dd9e63e"
+        },
+        {
+          "run_id": "run_ras4",
+          "path": "runs/run_ras4/metrics.json",
+          "sha256": "8b402915bac2e52327501e6f778d68d3d4cfbfe448d32e3a0786cdf9ef61122c"
+        },
+        {
+          "run_id": "run_ras4",
+          "path": "runs/run_ras4/inputs.json",
+          "sha256": "5f08874a4d4c3398f5a5486ca55e98c045acdc543c1ca489eef39909938bb1c1"
+        },
+        {
+          "run_id": "run_ras4",
+          "path": "runs/run_ras4/predictions.csv",
+          "sha256": "5877e565aaf72fb64df96429b20d48d3653ba64bd17f2e561d75a5bc28a9848f"
+        }
+      ]
+    },
+    {
+      "claim_id": "C11",
+      "locator": {
+        "path": "paper/manuscript_en.md",
+        "sha256": "e3d7c956d9f4454e93521e4543900ab321c8e96d50aee66e7c02847da5bd812a",
+        "start_line": 33,
+        "end_line": 33,
+        "start_char": 5770,
+        "end_char_exclusive": 5870,
+        "start_utf8_byte": 5787,
+        "end_utf8_byte_exclusive": 5887,
+        "quote": "Example and Sample describe a blood-drop diagnostic framework in *OmniDrop Universal Diagnosis* [7]."
+      },
+      "run_ids": [],
+      "endpoint": null,
+      "population": null,
+      "metric": null,
+      "pdf_locator": {
+        "path": "paper/paper.pdf",
+        "sha256": "613e564ad09c2540704c599958abfecaa981683b163639e7f1b5aedeb5e2e168",
+        "pages": [
+          1
+        ],
+        "canonical_text_path": "paper/manuscript_en.md",
+        "canonical_span": "locator field"
+      },
+      "artifact_bindings": []
+    },
+    {
+      "claim_id": "C12",
+      "locator": {
+        "path": "paper/manuscript_en.md",
+        "sha256": "e3d7c956d9f4454e93521e4543900ab321c8e96d50aee66e7c02847da5bd812a",
+        "start_line": 91,
+        "end_line": 91,
+        "start_char": 14938,
+        "end_char_exclusive": 15041,
+        "start_utf8_byte": 14965,
+        "end_utf8_byte_exclusive": 15068,
+        "quote": "AP uses `average_precision_score`, with task-specific positive counts and prevalence reported [10, 12]."
+      },
+      "run_ids": [
+        "run_52xe"
+      ],
+      "endpoint": "SYN_T01–SYN_T06",
+      "population": "synthetic study; exact scope is the cited text and run",
+      "metric": "as specified in the cited text",
+      "pdf_locator": {
+        "path": "paper/paper.pdf",
+        "sha256": "613e564ad09c2540704c599958abfecaa981683b163639e7f1b5aedeb5e2e168",
+        "pages": [
+          3
+        ],
+        "canonical_text_path": "paper/manuscript_en.md",
+        "canonical_span": "locator field"
+      },
+      "artifact_bindings": [
+        {
+          "run_id": "run_52xe",
+          "path": "runs/run_52xe/metrics.json",
+          "sha256": "230a935d40458cc2b6734253667c43775b3c9b2b6e95221880925a209073781e"
+        },
+        {
+          "run_id": "run_52xe",
+          "path": "runs/run_52xe/inputs.json",
+          "sha256": "5f3572b28dc8c6b857d05a15ab28a1f69d186ad3f662d042951a14ee2fa42c41"
+        },
+        {
+          "run_id": "run_52xe",
+          "path": "runs/run_52xe/predictions.csv",
+          "sha256": "054e5d4c1205e6993511b3a39e661201265a7bc00196e361d72912ec1dd9e63e"
+        }
+      ]
+    },
+    {
+      "claim_id": "C13",
+      "locator": {
+        "path": "paper/manuscript_en.md",
+        "sha256": "e3d7c956d9f4454e93521e4543900ab321c8e96d50aee66e7c02847da5bd812a",
+        "start_line": 186,
+        "end_line": 186,
+        "start_char": 27080,
+        "end_char_exclusive": 27136,
+        "start_utf8_byte": 27249,
+        "end_utf8_byte_exclusive": 27305,
+        "quote": "These results support prediction of every human disease."
+      },
+      "run_ids": [],
+      "endpoint": null,
+      "population": null,
+      "metric": null,
+      "pdf_locator": {
+        "path": "paper/paper.pdf",
+        "sha256": "613e564ad09c2540704c599958abfecaa981683b163639e7f1b5aedeb5e2e168",
+        "pages": [
+          5
+        ],
+        "canonical_text_path": "paper/manuscript_en.md",
+        "canonical_span": "locator field"
+      },
+      "artifact_bindings": []
+    },
+    {
+      "claim_id": "C14",
+      "locator": {
+        "path": "paper/manuscript_en.md",
+        "sha256": "e3d7c956d9f4454e93521e4543900ab321c8e96d50aee66e7c02847da5bd812a",
+        "start_line": 87,
+        "end_line": 87,
+        "start_char": 13727,
+        "end_char_exclusive": 13847,
+        "start_utf8_byte": 13754,
+        "end_utf8_byte_exclusive": 13874,
+        "quote": "Validation subject scores and observed labels determine the threshold maximizing F1; ties select the smallest threshold."
+      },
+      "run_ids": [
+        "run_52xe"
+      ],
+      "endpoint": "SYN_T01–SYN_T06",
+      "population": "synthetic study; exact scope is the cited text and run",
+      "metric": "as specified in the cited text",
+      "pdf_locator": {
+        "path": "paper/paper.pdf",
+        "sha256": "613e564ad09c2540704c599958abfecaa981683b163639e7f1b5aedeb5e2e168",
+        "pages": [
+          3
+        ],
+        "canonical_text_path": "paper/manuscript_en.md",
+        "canonical_span": "locator field"
+      },
+      "artifact_bindings": [
+        {
+          "run_id": "run_52xe",
+          "path": "runs/run_52xe/metrics.json",
+          "sha256": "230a935d40458cc2b6734253667c43775b3c9b2b6e95221880925a209073781e"
+        },
+        {
+          "run_id": "run_52xe",
+          "path": "runs/run_52xe/inputs.json",
+          "sha256": "5f3572b28dc8c6b857d05a15ab28a1f69d186ad3f662d042951a14ee2fa42c41"
+        },
+        {
+          "run_id": "run_52xe",
+          "path": "runs/run_52xe/predictions.csv",
+          "sha256": "054e5d4c1205e6993511b3a39e661201265a7bc00196e361d72912ec1dd9e63e"
+        }
+      ]
+    },
+    {
+      "claim_id": "C15",
+      "locator": {
+        "path": "paper/manuscript_en.md",
+        "sha256": "e3d7c956d9f4454e93521e4543900ab321c8e96d50aee66e7c02847da5bd812a",
+        "start_line": 73,
+        "end_line": 73,
+        "start_char": 11841,
+        "end_char_exclusive": 11952,
+        "start_utf8_byte": 11866,
+        "end_utf8_byte_exclusive": 11977,
+        "quote": "Two-head scaled dot-product self-attention uses a head dimension of 8 and `key_padding_mask = (mask == 0)` [2]."
+      },
+      "run_ids": [],
+      "endpoint": null,
+      "population": null,
+      "metric": null,
+      "pdf_locator": {
+        "path": "paper/paper.pdf",
+        "sha256": "613e564ad09c2540704c599958abfecaa981683b163639e7f1b5aedeb5e2e168",
+        "pages": [
+          2
+        ],
+        "canonical_text_path": "paper/manuscript_en.md",
+        "canonical_span": "locator field"
+      },
+      "artifact_bindings": []
+    },
+    {
+      "claim_id": "C16",
+      "locator": {
+        "path": "paper/manuscript_en.md",
+        "sha256": "e3d7c956d9f4454e93521e4543900ab321c8e96d50aee66e7c02847da5bd812a",
+        "start_line": 156,
+        "end_line": 156,
+        "start_char": 23294,
+        "end_char_exclusive": 23366,
+        "start_utf8_byte": 23437,
+        "end_utf8_byte_exclusive": 23509,
+        "quote": "the reported predictions use only features available at the index visit."
+      },
+      "run_ids": [
+        "run_9dqr"
+      ],
+      "endpoint": "SYN_T01–SYN_T06",
+      "population": "synthetic study; exact scope is the cited text and run",
+      "metric": null,
+      "pdf_locator": {
+        "path": "paper/paper.pdf",
+        "sha256": "613e564ad09c2540704c599958abfecaa981683b163639e7f1b5aedeb5e2e168",
+        "pages": [
+          5
+        ],
+        "canonical_text_path": "paper/manuscript_en.md",
+        "canonical_span": "locator field"
+      },
+      "artifact_bindings": [
+        {
+          "run_id": "run_9dqr",
+          "path": "runs/run_9dqr/metrics.json",
+          "sha256": "e3e8d9a87d845dc118e8a0f0576f5880e0f8d3c844a281ed3bd4b4296b03975d"
+        },
+        {
+          "run_id": "run_9dqr",
+          "path": "runs/run_9dqr/inputs.json",
+          "sha256": "bf0558e2f79435c95b29615917999de43c572dbd5b6b6f55aa9bced5b4820690"
+        },
+        {
+          "run_id": "run_9dqr",
+          "path": "runs/run_9dqr/predictions.csv",
+          "sha256": "94564be54e764b998a8bdd64e258ebf79689a4bd4f250de6420017b8dc258876"
+        }
+      ]
+    },
+    {
+      "claim_id": "C17",
+      "locator": {
+        "path": "paper/manuscript_en.md",
+        "sha256": "e3d7c956d9f4454e93521e4543900ab321c8e96d50aee66e7c02847da5bd812a",
+        "start_line": 174,
+        "end_line": 174,
+        "start_char": 25306,
+        "end_char_exclusive": 25372,
+        "start_utf8_byte": 25466,
+        "end_utf8_byte_exclusive": 25532,
+        "quote": "No biological intervention or functional validation was performed."
+      },
+      "run_ids": [],
+      "endpoint": null,
+      "population": null,
+      "metric": null,
+      "pdf_locator": {
+        "path": "paper/paper.pdf",
+        "sha256": "613e564ad09c2540704c599958abfecaa981683b163639e7f1b5aedeb5e2e168",
+        "pages": [
+          5
+        ],
+        "canonical_text_path": "paper/manuscript_en.md",
+        "canonical_span": "locator field"
+      },
+      "artifact_bindings": []
+    },
+    {
+      "claim_id": "C18",
+      "locator": {
+        "path": "paper/manuscript_en.md",
+        "sha256": "e3d7c956d9f4454e93521e4543900ab321c8e96d50aee66e7c02847da5bd812a",
+        "start_line": 49,
+        "end_line": 49,
+        "start_char": 8328,
+        "end_char_exclusive": 8466,
+        "start_utf8_byte": 8351,
+        "end_utf8_byte_exclusive": 8489,
+        "quote": "The preview produced by `examples/paired_preview.py` likewise aligns the two sides of `data/pairing_preview.csv` by canonical specimen ID."
+      },
+      "run_ids": [],
+      "endpoint": null,
+      "population": null,
+      "metric": null,
+      "pdf_locator": {
+        "path": "paper/paper.pdf",
+        "sha256": "613e564ad09c2540704c599958abfecaa981683b163639e7f1b5aedeb5e2e168",
+        "pages": [
+          2
+        ],
+        "canonical_text_path": "paper/manuscript_en.md",
+        "canonical_span": "locator field"
+      },
+      "artifact_bindings": []
+    },
+    {
+      "claim_id": "C19",
+      "locator": {
+        "path": "paper/manuscript_en.md",
+        "sha256": "e3d7c956d9f4454e93521e4543900ab321c8e96d50aee66e7c02847da5bd812a",
+        "start_line": 101,
+        "end_line": 101,
+        "start_char": 16197,
+        "end_char_exclusive": 16326,
+        "start_utf8_byte": 16224,
+        "end_utf8_byte_exclusive": 16353,
+        "quote": "Of 240 planned test subjects, 223 had at least one scored aliquot, giving coverage 92.9% (approximately 0.929), and 17 abstained."
+      },
+      "run_ids": [
+        "run_52xe"
+      ],
+      "endpoint": "SYN_T01–SYN_T06",
+      "population": "synthetic study; exact scope is the cited text and run",
+      "metric": "as specified in the cited text",
+      "pdf_locator": {
+        "path": "paper/paper.pdf",
+        "sha256": "613e564ad09c2540704c599958abfecaa981683b163639e7f1b5aedeb5e2e168",
+        "pages": [
+          3
+        ],
+        "canonical_text_path": "paper/manuscript_en.md",
+        "canonical_span": "locator field"
+      },
+      "artifact_bindings": [
+        {
+          "run_id": "run_52xe",
+          "path": "runs/run_52xe/metrics.json",
+          "sha256": "230a935d40458cc2b6734253667c43775b3c9b2b6e95221880925a209073781e"
+        },
+        {
+          "run_id": "run_52xe",
+          "path": "runs/run_52xe/inputs.json",
+          "sha256": "5f3572b28dc8c6b857d05a15ab28a1f69d186ad3f662d042951a14ee2fa42c41"
+        },
+        {
+          "run_id": "run_52xe",
+          "path": "runs/run_52xe/predictions.csv",
+          "sha256": "054e5d4c1205e6993511b3a39e661201265a7bc00196e361d72912ec1dd9e63e"
+        }
+      ]
+    },
+    {
+      "claim_id": "C20",
+      "locator": {
+        "path": "paper/manuscript_en.md",
+        "sha256": "e3d7c956d9f4454e93521e4543900ab321c8e96d50aee66e7c02847da5bd812a",
+        "start_line": 180,
+        "end_line": 180,
+        "start_char": 26086,
+        "end_char_exclusive": 26223,
+        "start_utf8_byte": 26249,
+        "end_utf8_byte_exclusive": 26386,
+        "quote": "Held-out subject performance is internal evaluation under that generator, not external validation in independent hospital cohorts [3, 4]."
+      },
+      "run_ids": [],
+      "endpoint": null,
+      "population": null,
+      "metric": null,
+      "pdf_locator": {
+        "path": "paper/paper.pdf",
+        "sha256": "613e564ad09c2540704c599958abfecaa981683b163639e7f1b5aedeb5e2e168",
+        "pages": [
+          5
+        ],
+        "canonical_text_path": "paper/manuscript_en.md",
+        "canonical_span": "locator field"
+      },
+      "artifact_bindings": []
+    },
+    {
+      "claim_id": "C21",
+      "locator": {
+        "path": "paper/manuscript_en.md",
+        "sha256": "e3d7c956d9f4454e93521e4543900ab321c8e96d50aee66e7c02847da5bd812a",
+        "start_line": 174,
+        "end_line": 174,
+        "start_char": 25410,
+        "end_char_exclusive": 25437,
+        "start_utf8_byte": 25570,
+        "end_utf8_byte_exclusive": 25597,
+        "quote": "establish disease causation"
+      },
+      "run_ids": [
+        "run_52xe"
+      ],
+      "endpoint": "SYN_T01–SYN_T06",
+      "population": "synthetic study; exact scope is the cited text and run",
+      "metric": null,
+      "pdf_locator": {
+        "path": "paper/paper.pdf",
+        "sha256": "613e564ad09c2540704c599958abfecaa981683b163639e7f1b5aedeb5e2e168",
+        "pages": [
+          5
+        ],
+        "canonical_text_path": "paper/manuscript_en.md",
+        "canonical_span": "locator field"
+      },
+      "artifact_bindings": [
+        {
+          "run_id": "run_52xe",
+          "path": "runs/run_52xe/metrics.json",
+          "sha256": "230a935d40458cc2b6734253667c43775b3c9b2b6e95221880925a209073781e"
+        },
+        {
+          "run_id": "run_52xe",
+          "path": "runs/run_52xe/inputs.json",
+          "sha256": "5f3572b28dc8c6b857d05a15ab28a1f69d186ad3f662d042951a14ee2fa42c41"
+        },
+        {
+          "run_id": "run_52xe",
+          "path": "runs/run_52xe/predictions.csv",
+          "sha256": "054e5d4c1205e6993511b3a39e661201265a7bc00196e361d72912ec1dd9e63e"
+        }
+      ]
+    },
+    {
+      "claim_id": "C22",
+      "locator": {
+        "path": "paper/manuscript_en.md",
+        "sha256": "e3d7c956d9f4454e93521e4543900ab321c8e96d50aee66e7c02847da5bd812a",
+        "start_line": 178,
+        "end_line": 178,
+        "start_char": 25629,
+        "end_char_exclusive": 25767,
+        "start_utf8_byte": 25789,
+        "end_utf8_byte_exclusive": 25928,
+        "quote": "We neither performed nor validated simultaneous protein/RNA extraction and quantification from a blood drop, including a 10 μL sample [1]."
+      },
+      "run_ids": [],
+      "endpoint": null,
+      "population": null,
+      "metric": null,
+      "pdf_locator": {
+        "path": "paper/paper.pdf",
+        "sha256": "613e564ad09c2540704c599958abfecaa981683b163639e7f1b5aedeb5e2e168",
+        "pages": [
+          5
+        ],
+        "canonical_text_path": "paper/manuscript_en.md",
+        "canonical_span": "locator field"
+      },
+      "artifact_bindings": []
+    },
+    {
+      "claim_id": "C23",
+      "locator": {
+        "path": "paper/manuscript_en.md",
+        "sha256": "e3d7c956d9f4454e93521e4543900ab321c8e96d50aee66e7c02847da5bd812a",
+        "start_line": 158,
+        "end_line": 158,
+        "start_char": 23386,
+        "end_char_exclusive": 23467,
+        "start_utf8_byte": 23529,
+        "end_utf8_byte_exclusive": 23610,
+        "quote": "the reported test F1 uses thresholds fixed on validation subjects before testing."
+      },
+      "run_ids": [
+        "run_zabx"
+      ],
+      "endpoint": "SYN_T01–SYN_T06",
+      "population": "synthetic study; exact scope is the cited text and run",
+      "metric": "as specified in the cited text",
+      "pdf_locator": {
+        "path": "paper/paper.pdf",
+        "sha256": "613e564ad09c2540704c599958abfecaa981683b163639e7f1b5aedeb5e2e168",
+        "pages": [
+          5
+        ],
+        "canonical_text_path": "paper/manuscript_en.md",
+        "canonical_span": "locator field"
+      },
+      "artifact_bindings": [
+        {
+          "run_id": "run_zabx",
+          "path": "runs/run_zabx/metrics.json",
+          "sha256": "0acfe06c69044419e3eaaf0c39abb644d9c4793def41a99971bebcab2181553c"
+        },
+        {
+          "run_id": "run_zabx",
+          "path": "runs/run_zabx/inputs.json",
+          "sha256": "2160d4ba9c7bccd4eee07212e95f124796c9e166358760a3b5d11e6a8768d7f5"
+        },
+        {
+          "run_id": "run_zabx",
+          "path": "runs/run_zabx/predictions.csv",
+          "sha256": "62b382f0dc1bc819728b96cbd2fd16c0bcb830ef585952b6cac59fac6d3a58ee"
+        }
+      ]
+    },
+    {
+      "claim_id": "C24",
+      "locator": {
+        "path": "paper/manuscript_en.md",
+        "sha256": "e3d7c956d9f4454e93521e4543900ab321c8e96d50aee66e7c02847da5bd812a",
+        "start_line": 218,
+        "end_line": 218,
+        "start_char": 30690,
+        "end_char_exclusive": 30896,
+        "start_utf8_byte": 30865,
+        "end_utf8_byte_exclusive": 31071,
+        "quote": "Pajouheshnia, R., Groenwold, R. H. H., Peelen, L. M., Moons, K. G. M. and Reitsma, J. B. How variation in predictor measurement affects the discriminative ability and transportability of a prediction model."
+      },
+      "run_ids": [],
+      "endpoint": null,
+      "population": null,
+      "metric": null,
+      "pdf_locator": {
+        "path": "paper/paper.pdf",
+        "sha256": "613e564ad09c2540704c599958abfecaa981683b163639e7f1b5aedeb5e2e168",
+        "pages": [
+          6
+        ],
+        "canonical_text_path": "paper/manuscript_en.md",
+        "canonical_span": "locator field"
+      },
+      "artifact_bindings": []
+    },
+    {
+      "claim_id": "C25",
+      "locator": {
+        "path": "paper/manuscript_en.md",
+        "sha256": "e3d7c956d9f4454e93521e4543900ab321c8e96d50aee66e7c02847da5bd812a",
+        "start_line": 160,
+        "end_line": 160,
+        "start_char": 23487,
+        "end_char_exclusive": 23622,
+        "start_utf8_byte": 23630,
+        "end_utf8_byte_exclusive": 23765,
+        "quote": "the reported coverage of 1.000 represents all planned test subjects, with no entirely abstaining subjects omitted from its denominator."
+      },
+      "run_ids": [
+        "run_r9my"
+      ],
+      "endpoint": "SYN_T01–SYN_T06",
+      "population": "synthetic study; exact scope is the cited text and run",
+      "metric": "as specified in the cited text",
+      "pdf_locator": {
+        "path": "paper/paper.pdf",
+        "sha256": "613e564ad09c2540704c599958abfecaa981683b163639e7f1b5aedeb5e2e168",
+        "pages": [
+          5
+        ],
+        "canonical_text_path": "paper/manuscript_en.md",
+        "canonical_span": "locator field"
+      },
+      "artifact_bindings": [
+        {
+          "run_id": "run_r9my",
+          "path": "runs/run_r9my/metrics.json",
+          "sha256": "1e169a2bdc7bd76b72ad1f091e4fd74b41f6e0b412eaeebe8689bc47363e199f"
+        },
+        {
+          "run_id": "run_r9my",
+          "path": "runs/run_r9my/inputs.json",
+          "sha256": "0decdb15fe09f9f5b40657c12b3eb392921c0273b6e34bedb49172493781fa37"
+        },
+        {
+          "run_id": "run_r9my",
+          "path": "runs/run_r9my/predictions.csv",
+          "sha256": "6ec55a27a128ad475904fa72777e3f622d8b69db75d1387fcfe99e0e62af174b"
+        }
+      ]
+    },
+    {
+      "claim_id": "C26",
+      "locator": {
+        "path": "paper/manuscript_en.md",
+        "sha256": "e3d7c956d9f4454e93521e4543900ab321c8e96d50aee66e7c02847da5bd812a",
+        "start_line": 65,
+        "end_line": 65,
+        "start_char": 10591,
+        "end_char_exclusive": 10772,
+        "start_utf8_byte": 10616,
+        "end_utf8_byte_exclusive": 10797,
+        "quote": "Loading the entire CSV before selecting training indices, or transforming and evaluating the test set with a fixed transformer, does not itself constitute fitting on test data [10]."
+      },
+      "run_ids": [],
+      "endpoint": null,
+      "population": null,
+      "metric": null,
+      "pdf_locator": {
+        "path": "paper/paper.pdf",
+        "sha256": "613e564ad09c2540704c599958abfecaa981683b163639e7f1b5aedeb5e2e168",
+        "pages": [
+          2
+        ],
+        "canonical_text_path": "paper/manuscript_en.md",
+        "canonical_span": "locator field"
+      },
+      "artifact_bindings": []
+    },
+    {
+      "claim_id": "C27",
+      "locator": {
+        "path": "paper/manuscript_en.md",
+        "sha256": "e3d7c956d9f4454e93521e4543900ab321c8e96d50aee66e7c02847da5bd812a",
+        "start_line": 129,
+        "end_line": 129,
+        "start_char": 20338,
+        "end_char_exclusive": 20408,
+        "start_utf8_byte": 20421,
+        "end_utf8_byte_exclusive": 20495,
+        "quote": "macro AUROC mean±sample SD was 0.7250±0.0003, with range 0.7247–0.7253"
+      },
+      "run_ids": [
+        "run_xapp",
+        "run_52xe",
+        "run_ras4"
+      ],
+      "endpoint": "SYN_T01–SYN_T06",
+      "population": "synthetic study; exact scope is the cited text and run",
+      "metric": "macro AUROC",
+      "pdf_locator": {
+        "path": "paper/paper.pdf",
+        "sha256": "613e564ad09c2540704c599958abfecaa981683b163639e7f1b5aedeb5e2e168",
+        "pages": [
+          4
+        ],
+        "canonical_text_path": "paper/manuscript_en.md",
+        "canonical_span": "locator field"
+      },
+      "artifact_bindings": [
+        {
+          "run_id": "run_xapp",
+          "path": "runs/run_xapp/metrics.json",
+          "sha256": "f32ee2285b388a4a062cd019c90bf8016d19bc5025bba5a78810501c4834b6ce"
+        },
+        {
+          "run_id": "run_xapp",
+          "path": "runs/run_xapp/inputs.json",
+          "sha256": "2cfc96b267f9af903ae6f4fcc25fa11a876bc3ccd6762b1e6da39277f4ab2fde"
+        },
+        {
+          "run_id": "run_xapp",
+          "path": "runs/run_xapp/predictions.csv",
+          "sha256": "706c0992c16236adefcb0ff665e835910bb3d2fc166ffc472eea97f4e36b7835"
+        },
+        {
+          "run_id": "run_52xe",
+          "path": "runs/run_52xe/metrics.json",
+          "sha256": "230a935d40458cc2b6734253667c43775b3c9b2b6e95221880925a209073781e"
+        },
+        {
+          "run_id": "run_52xe",
+          "path": "runs/run_52xe/inputs.json",
+          "sha256": "5f3572b28dc8c6b857d05a15ab28a1f69d186ad3f662d042951a14ee2fa42c41"
+        },
+        {
+          "run_id": "run_52xe",
+          "path": "runs/run_52xe/predictions.csv",
+          "sha256": "054e5d4c1205e6993511b3a39e661201265a7bc00196e361d72912ec1dd9e63e"
+        },
+        {
+          "run_id": "run_ras4",
+          "path": "runs/run_ras4/metrics.json",
+          "sha256": "8b402915bac2e52327501e6f778d68d3d4cfbfe448d32e3a0786cdf9ef61122c"
+        },
+        {
+          "run_id": "run_ras4",
+          "path": "runs/run_ras4/inputs.json",
+          "sha256": "5f08874a4d4c3398f5a5486ca55e98c045acdc543c1ca489eef39909938bb1c1"
+        },
+        {
+          "run_id": "run_ras4",
+          "path": "runs/run_ras4/predictions.csv",
+          "sha256": "5877e565aaf72fb64df96429b20d48d3653ba64bd17f2e561d75a5bc28a9848f"
+        }
+      ]
+    },
+    {
+      "claim_id": "C28",
+      "locator": {
+        "path": "paper/manuscript_en.md",
+        "sha256": "e3d7c956d9f4454e93521e4543900ab321c8e96d50aee66e7c02847da5bd812a",
+        "start_line": 186,
+        "end_line": 186,
+        "start_char": 27137,
+        "end_char_exclusive": 27222,
+        "start_utf8_byte": 27306,
+        "end_utf8_byte_exclusive": 27391,
+        "quote": "The model is ready for immediate diagnostic deployment in primary and emergency care."
+      },
+      "run_ids": [],
+      "endpoint": null,
+      "population": null,
+      "metric": null,
+      "pdf_locator": {
+        "path": "paper/paper.pdf",
+        "sha256": "613e564ad09c2540704c599958abfecaa981683b163639e7f1b5aedeb5e2e168",
+        "pages": [
+          5
+        ],
+        "canonical_text_path": "paper/manuscript_en.md",
+        "canonical_span": "locator field"
+      },
+      "artifact_bindings": []
+    },
+    {
+      "claim_id": "C29",
+      "locator": {
+        "path": "paper/manuscript_en.md",
+        "sha256": "e3d7c956d9f4454e93521e4543900ab321c8e96d50aee66e7c02847da5bd812a",
+        "start_line": 109,
+        "end_line": 109,
+        "start_char": 17216,
+        "end_char_exclusive": 17330,
+        "start_utf8_byte": 17243,
+        "end_utf8_byte_exclusive": 17363,
+        "quote": "| SYN_T01 | 207 | 33 | 190 | 41 | 0.216 | 0.35 | 0.822 (0.752–0.886) | 0.590 (0.442–0.728) | 0.472 (0.324–0.604) |"
+      },
+      "run_ids": [
+        "run_52xe"
+      ],
+      "endpoint": "SYN_T01",
+      "population": "synthetic study; exact scope is the cited text and run",
+      "metric": "as specified in the cited text",
+      "pdf_locator": {
+        "path": "paper/paper.pdf",
+        "sha256": "613e564ad09c2540704c599958abfecaa981683b163639e7f1b5aedeb5e2e168",
+        "pages": [
+          3
+        ],
+        "canonical_text_path": "paper/manuscript_en.md",
+        "canonical_span": "locator field"
+      },
+      "artifact_bindings": [
+        {
+          "run_id": "run_52xe",
+          "path": "runs/run_52xe/metrics.json",
+          "sha256": "230a935d40458cc2b6734253667c43775b3c9b2b6e95221880925a209073781e"
+        },
+        {
+          "run_id": "run_52xe",
+          "path": "runs/run_52xe/inputs.json",
+          "sha256": "5f3572b28dc8c6b857d05a15ab28a1f69d186ad3f662d042951a14ee2fa42c41"
+        },
+        {
+          "run_id": "run_52xe",
+          "path": "runs/run_52xe/predictions.csv",
+          "sha256": "054e5d4c1205e6993511b3a39e661201265a7bc00196e361d72912ec1dd9e63e"
+        }
+      ]
+    },
+    {
+      "claim_id": "C30",
+      "locator": {
+        "path": "tables/run_registry.csv",
+        "sha256": "8027b7d786a85548c50f4d5f3aa2f638d1293fe0c8c0af14a05c89962043dac8",
+        "start_line": 9,
+        "end_line": 9,
+        "start_char": 3454,
+        "end_char_exclusive": 3494,
+        "start_utf8_byte": 3454,
+        "end_utf8_byte_exclusive": 3494,
+        "quote": "f5ce7fe2e8399fcb2bc6b157e970b8fe2b70bf48"
+      },
+      "run_ids": [
+        "run_m72s"
+      ],
+      "endpoint": "SYN_T01–SYN_T06",
+      "population": "synthetic study; exact scope is the cited text and run",
+      "metric": null,
+      "pdf_locator": {
+        "path": "paper/paper.pdf",
+        "sha256": "613e564ad09c2540704c599958abfecaa981683b163639e7f1b5aedeb5e2e168",
+        "pages": [],
+        "canonical_text_path": "tables/run_registry.csv",
+        "canonical_span": "locator field"
+      },
+      "artifact_bindings": [
+        {
+          "run_id": "run_m72s",
+          "path": "runs/run_m72s/metrics.json",
+          "sha256": "67c01b08ca4d553f745da16c91202a8a8efcd420d10d4220f7fab7b2a4ec995f"
+        },
+        {
+          "run_id": "run_m72s",
+          "path": "runs/run_m72s/inputs.json",
+          "sha256": "779120ed3da37f48e9996ff882d96e8650366a26e048c6b3726d1ca426b4df3a"
+        },
+        {
+          "run_id": "run_m72s",
+          "path": "runs/run_m72s/predictions.csv",
+          "sha256": "6b24ef1738d656432bf4176114a87a5083effdeadcd4b5db9e192f668d953e6e"
+        }
+      ]
+    },
+    {
+      "claim_id": "C31",
+      "locator": {
+        "path": "paper/manuscript_en.md",
+        "sha256": "e3d7c956d9f4454e93521e4543900ab321c8e96d50aee66e7c02847da5bd812a",
+        "start_line": 93,
+        "end_line": 93,
+        "start_char": 15250,
+        "end_char_exclusive": 15335,
+        "start_utf8_byte": 15277,
+        "end_utf8_byte_exclusive": 15362,
+        "quote": "The 95% intervals use a subject cluster bootstrap with 1,000 resamples and seed 2718."
+      },
+      "run_ids": [
+        "run_52xe"
+      ],
+      "endpoint": "SYN_T01–SYN_T06",
+      "population": "synthetic study; exact scope is the cited text and run",
+      "metric": "as specified in the cited text",
+      "pdf_locator": {
+        "path": "paper/paper.pdf",
+        "sha256": "613e564ad09c2540704c599958abfecaa981683b163639e7f1b5aedeb5e2e168",
+        "pages": [
+          3
+        ],
+        "canonical_text_path": "paper/manuscript_en.md",
+        "canonical_span": "locator field"
+      },
+      "artifact_bindings": [
+        {
+          "run_id": "run_52xe",
+          "path": "runs/run_52xe/metrics.json",
+          "sha256": "230a935d40458cc2b6734253667c43775b3c9b2b6e95221880925a209073781e"
+        },
+        {
+          "run_id": "run_52xe",
+          "path": "runs/run_52xe/inputs.json",
+          "sha256": "5f3572b28dc8c6b857d05a15ab28a1f69d186ad3f662d042951a14ee2fa42c41"
+        },
+        {
+          "run_id": "run_52xe",
+          "path": "runs/run_52xe/predictions.csv",
+          "sha256": "054e5d4c1205e6993511b3a39e661201265a7bc00196e361d72912ec1dd9e63e"
+        }
+      ]
+    },
+    {
+      "claim_id": "C32",
+      "locator": {
+        "path": "paper/manuscript_en.md",
+        "sha256": "e3d7c956d9f4454e93521e4543900ab321c8e96d50aee66e7c02847da5bd812a",
+        "start_line": 162,
+        "end_line": 162,
+        "start_char": 23642,
+        "end_char_exclusive": 23751,
+        "start_utf8_byte": 23785,
+        "end_utf8_byte_exclusive": 23894,
+        "quote": "all zero-valued labels included in the reported evaluation represent confirmed event absence within 180 days."
+      },
+      "run_ids": [
+        "run_kctu"
+      ],
+      "endpoint": "SYN_T01–SYN_T06",
+      "population": "synthetic study; exact scope is the cited text and run",
+      "metric": null,
+      "pdf_locator": {
+        "path": "paper/paper.pdf",
+        "sha256": "613e564ad09c2540704c599958abfecaa981683b163639e7f1b5aedeb5e2e168",
+        "pages": [
+          5
+        ],
+        "canonical_text_path": "paper/manuscript_en.md",
+        "canonical_span": "locator field"
+      },
+      "artifact_bindings": [
+        {
+          "run_id": "run_kctu",
+          "path": "runs/run_kctu/metrics.json",
+          "sha256": "ddf3a425efdcaf11e963f61f936bec36e9cfb7041083a28ba243c0142e70659f"
+        },
+        {
+          "run_id": "run_kctu",
+          "path": "runs/run_kctu/inputs.json",
+          "sha256": "74600a8af1361a2f25cf883db40d853743fce3bcff6dc108c9842f42d269a66b"
+        },
+        {
+          "run_id": "run_kctu",
+          "path": "runs/run_kctu/predictions.csv",
+          "sha256": "0e90b13a75b18a41afb215ff38ace7d5ad171e4f7b3bc9cbe478b0fda204c1b4"
+        }
+      ]
+    },
+    {
+      "claim_id": "C33",
+      "locator": {
+        "path": "paper/manuscript_en.md",
+        "sha256": "e3d7c956d9f4454e93521e4543900ab321c8e96d50aee66e7c02847da5bd812a",
+        "start_line": 217,
+        "end_line": 217,
+        "start_char": 30461,
+        "end_char_exclusive": 30506,
+        "start_utf8_byte": 30634,
+        "end_utf8_byte_exclusive": 30679,
+        "quote": "Vaswani, A. et al. Attention Is All You Need."
+      },
+      "run_ids": [],
+      "endpoint": null,
+      "population": null,
+      "metric": null,
+      "pdf_locator": {
+        "path": "paper/paper.pdf",
+        "sha256": "613e564ad09c2540704c599958abfecaa981683b163639e7f1b5aedeb5e2e168",
+        "pages": [
+          6
+        ],
+        "canonical_text_path": "paper/manuscript_en.md",
+        "canonical_span": "locator field"
+      },
+      "artifact_bindings": []
+    },
+    {
+      "claim_id": "C34",
+      "locator": {
+        "path": "paper/manuscript_en.md",
+        "sha256": "e3d7c956d9f4454e93521e4543900ab321c8e96d50aee66e7c02847da5bd812a",
+        "start_line": 168,
+        "end_line": 168,
+        "start_char": 23970,
+        "end_char_exclusive": 24118,
+        "start_utf8_byte": 24113,
+        "end_utf8_byte_exclusive": 24262,
+        "quote": "Its attention layer therefore produces a 2×2 modality-token weight matrix per head, not weights for individual proteins, transcripts or proteoforms."
+      },
+      "run_ids": [],
+      "endpoint": null,
+      "population": null,
+      "metric": null,
+      "pdf_locator": {
+        "path": "paper/paper.pdf",
+        "sha256": "613e564ad09c2540704c599958abfecaa981683b163639e7f1b5aedeb5e2e168",
+        "pages": [
+          5
+        ],
+        "canonical_text_path": "paper/manuscript_en.md",
+        "canonical_span": "locator field"
+      },
+      "artifact_bindings": []
+    },
+    {
+      "claim_id": "C35",
+      "locator": {
+        "path": "figures/figure3.svg",
+        "sha256": "3db72d562e53a8d1599ac9470d8757955d2b3f9407ad63b7582ff7c7dfb82f80",
+        "start_line": 64,
+        "end_line": 64,
+        "start_char": 5076,
+        "end_char_exclusive": 5081,
+        "start_utf8_byte": 5079,
+        "end_utf8_byte_exclusive": 5084,
+        "quote": "0.815"
+      },
+      "run_ids": [
+        "run_52xe"
+      ],
+      "endpoint": "SYN_T01–SYN_T06",
+      "population": "synthetic study; exact scope is the cited text and run",
+      "metric": "macro AUROC",
+      "pdf_locator": {
+        "path": "paper/paper.pdf",
+        "sha256": "613e564ad09c2540704c599958abfecaa981683b163639e7f1b5aedeb5e2e168",
+        "pages": [
+          4
+        ],
+        "canonical_text_path": "figures/figure3.svg",
+        "canonical_span": "locator field"
+      },
+      "artifact_bindings": [
+        {
+          "run_id": "run_52xe",
+          "path": "runs/run_52xe/metrics.json",
+          "sha256": "230a935d40458cc2b6734253667c43775b3c9b2b6e95221880925a209073781e"
+        },
+        {
+          "run_id": "run_52xe",
+          "path": "runs/run_52xe/inputs.json",
+          "sha256": "5f3572b28dc8c6b857d05a15ab28a1f69d186ad3f662d042951a14ee2fa42c41"
+        },
+        {
+          "run_id": "run_52xe",
+          "path": "runs/run_52xe/predictions.csv",
+          "sha256": "054e5d4c1205e6993511b3a39e661201265a7bc00196e361d72912ec1dd9e63e"
+        }
+      ]
+    },
+    {
+      "claim_id": "C36",
+      "locator": {
+        "path": "paper/manuscript_en.md",
+        "sha256": "e3d7c956d9f4454e93521e4543900ab321c8e96d50aee66e7c02847da5bd812a",
+        "start_line": 57,
+        "end_line": 57,
+        "start_char": 9073,
+        "end_char_exclusive": 9171,
+        "start_utf8_byte": 9098,
+        "end_utf8_byte_exclusive": 9196,
+        "quote": "A subject whose follow-up ends before day 180 without an event has `y = null`, `observed = false`."
+      },
+      "run_ids": [],
+      "endpoint": null,
+      "population": null,
+      "metric": null,
+      "pdf_locator": {
+        "path": "paper/paper.pdf",
+        "sha256": "613e564ad09c2540704c599958abfecaa981683b163639e7f1b5aedeb5e2e168",
+        "pages": [
+          2
+        ],
+        "canonical_text_path": "paper/manuscript_en.md",
+        "canonical_span": "locator field"
+      },
+      "artifact_bindings": []
+    },
+    {
+      "claim_id": "C37",
+      "locator": {
+        "path": "paper/manuscript_en.md",
+        "sha256": "e3d7c956d9f4454e93521e4543900ab321c8e96d50aee66e7c02847da5bd812a",
+        "start_line": 174,
+        "end_line": 174,
+        "start_char": 25442,
+        "end_char_exclusive": 25500,
+        "start_utf8_byte": 25602,
+        "end_utf8_byte_exclusive": 25660,
+        "quote": "validate therapeutic targets for clinical drug development"
+      },
+      "run_ids": [
+        "run_52xe"
+      ],
+      "endpoint": "SYN_T01–SYN_T06",
+      "population": "synthetic study; exact scope is the cited text and run",
+      "metric": null,
+      "pdf_locator": {
+        "path": "paper/paper.pdf",
+        "sha256": "613e564ad09c2540704c599958abfecaa981683b163639e7f1b5aedeb5e2e168",
+        "pages": [
+          5
+        ],
+        "canonical_text_path": "paper/manuscript_en.md",
+        "canonical_span": "locator field"
+      },
+      "artifact_bindings": [
+        {
+          "run_id": "run_52xe",
+          "path": "runs/run_52xe/metrics.json",
+          "sha256": "230a935d40458cc2b6734253667c43775b3c9b2b6e95221880925a209073781e"
+        },
+        {
+          "run_id": "run_52xe",
+          "path": "runs/run_52xe/inputs.json",
+          "sha256": "5f3572b28dc8c6b857d05a15ab28a1f69d186ad3f662d042951a14ee2fa42c41"
+        },
+        {
+          "run_id": "run_52xe",
+          "path": "runs/run_52xe/predictions.csv",
+          "sha256": "054e5d4c1205e6993511b3a39e661201265a7bc00196e361d72912ec1dd9e63e"
+        }
+      ]
+    },
+    {
+      "claim_id": "C38",
+      "locator": {
+        "path": "paper/manuscript_en.md",
+        "sha256": "e3d7c956d9f4454e93521e4543900ab321c8e96d50aee66e7c02847da5bd812a",
+        "start_line": 190,
+        "end_line": 190,
+        "start_char": 27524,
+        "end_char_exclusive": 27576,
+        "start_utf8_byte": 27693,
+        "end_utf8_byte_exclusive": 27745,
+        "quote": "No real or invented IRB approval number is assigned."
+      },
+      "run_ids": [],
+      "endpoint": null,
+      "population": null,
+      "metric": null,
+      "pdf_locator": {
+        "path": "paper/paper.pdf",
+        "sha256": "613e564ad09c2540704c599958abfecaa981683b163639e7f1b5aedeb5e2e168",
+        "pages": [
+          5
+        ],
+        "canonical_text_path": "paper/manuscript_en.md",
+        "canonical_span": "locator field"
+      },
+      "artifact_bindings": []
+    },
+    {
+      "claim_id": "C39",
+      "locator": {
+        "path": "paper/manuscript_en.md",
+        "sha256": "e3d7c956d9f4454e93521e4543900ab321c8e96d50aee66e7c02847da5bd812a",
+        "start_line": 99,
+        "end_line": 99,
+        "start_char": 15862,
+        "end_char_exclusive": 15988,
+        "start_utf8_byte": 15889,
+        "end_utf8_byte_exclusive": 16015,
+        "quote": "The subject split contained 720/240/240 training/validation/test subjects, with 1,440/480/480 aliquots and no subject overlap."
+      },
+      "run_ids": [
+        "run_52xe"
+      ],
+      "endpoint": "SYN_T01–SYN_T06",
+      "population": "synthetic study; exact scope is the cited text and run",
+      "metric": null,
+      "pdf_locator": {
+        "path": "paper/paper.pdf",
+        "sha256": "613e564ad09c2540704c599958abfecaa981683b163639e7f1b5aedeb5e2e168",
+        "pages": [
+          3
+        ],
+        "canonical_text_path": "paper/manuscript_en.md",
+        "canonical_span": "locator field"
+      },
+      "artifact_bindings": [
+        {
+          "run_id": "run_52xe",
+          "path": "runs/run_52xe/metrics.json",
+          "sha256": "230a935d40458cc2b6734253667c43775b3c9b2b6e95221880925a209073781e"
+        },
+        {
+          "run_id": "run_52xe",
+          "path": "runs/run_52xe/inputs.json",
+          "sha256": "5f3572b28dc8c6b857d05a15ab28a1f69d186ad3f662d042951a14ee2fa42c41"
+        },
+        {
+          "run_id": "run_52xe",
+          "path": "runs/run_52xe/predictions.csv",
+          "sha256": "054e5d4c1205e6993511b3a39e661201265a7bc00196e361d72912ec1dd9e63e"
+        }
+      ]
+    },
+    {
+      "claim_id": "C40",
+      "locator": {
+        "path": "paper/manuscript_en.md",
+        "sha256": "e3d7c956d9f4454e93521e4543900ab321c8e96d50aee66e7c02847da5bd812a",
+        "start_line": 181,
+        "end_line": 181,
+        "start_char": 26506,
+        "end_char_exclusive": 26630,
+        "start_utf8_byte": 26673,
+        "end_utf8_byte_exclusive": 26797,
+        "quote": "AUROC, AP and F1 therefore describe the scored-and-observed subset, alongside the coverage limits of the planned population."
+      },
+      "run_ids": [
+        "run_52xe"
+      ],
+      "endpoint": "SYN_T01–SYN_T06",
+      "population": "synthetic study; exact scope is the cited text and run",
+      "metric": "as specified in the cited text",
+      "pdf_locator": {
+        "path": "paper/paper.pdf",
+        "sha256": "613e564ad09c2540704c599958abfecaa981683b163639e7f1b5aedeb5e2e168",
+        "pages": [
+          5
+        ],
+        "canonical_text_path": "paper/manuscript_en.md",
+        "canonical_span": "locator field"
+      },
+      "artifact_bindings": [
+        {
+          "run_id": "run_52xe",
+          "path": "runs/run_52xe/metrics.json",
+          "sha256": "230a935d40458cc2b6734253667c43775b3c9b2b6e95221880925a209073781e"
+        },
+        {
+          "run_id": "run_52xe",
+          "path": "runs/run_52xe/inputs.json",
+          "sha256": "5f3572b28dc8c6b857d05a15ab28a1f69d186ad3f662d042951a14ee2fa42c41"
+        },
+        {
+          "run_id": "run_52xe",
+          "path": "runs/run_52xe/predictions.csv",
+          "sha256": "054e5d4c1205e6993511b3a39e661201265a7bc00196e361d72912ec1dd9e63e"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,2 @@
+# Store every file byte-for-byte (no end-of-line conversion) so hashes are reproducible.
+* -text

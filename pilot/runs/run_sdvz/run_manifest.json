@@ -1,0 +1,48 @@
+{
+  "run_id": "run_sdvz",
+  "case_id": "run_sdvz",
+  "source_commit": "ff77e8b4b58ad90eede0e5d1eec18342cdc8fb51",
+  "started_at": "2026-10-18T09:26:28+00:00",
+  "ended_at": "2026-10-18T09:26:44+00:00",
+  "exit_code": 0,
+  "seed": 1729,
+  "overrides": [
+    "preprocess.fit_scope=all"
+  ],
+  "config_system": {
+    "name": "hydra",
+    "version": "1.3.7"
+  },
+  "effective_config_sha256": "231402378ab3e8277251caeeffd8b67eae291b3e3e57bb49da68bdeec9402ba1",
+  "hydra_config_file_sha256": "7a5c77f9d405dd5fe7fdb9b3fca3280c6c8bbe4b59d6b6df507c2f3a5090a088",
+  "data_sha256": "d10dbabdfdfbc6a9649b091097671eb77821bbbc3aa75aa63386be6ad6b6d658",
+  "split_id": "split_c321a741e9",
+  "split_members_sha256": "605bb83366b4d96eef846ea2fdc353e0fa7e8474c78e00da1e1dd79441bc1142",
+  "predictions_sha256": "ba89213499d101976cbc069aaf0d47c4cadc23d44e56b7989247f3bb10844694",
+  "metrics_sha256": "a47ff0e8003fcff3e3cf27b25ee1a18e693c8a5c55c679c7e007e218763a0932",
+  "checkpoint_sha256": "33dc436aae117da577f8bbba173b7dfac8a4edb1ca8cbb8d31f1229808481c87",
+  "checkpoint_params_sha256": "f84c35ac238f2a8ff8f1119866d678cf7b3dfbad59214b2fc164ccc70dd3db4b",
+  "environment_sha256": "6e975d506d8532e35c23e4888af025b31c2708c33063472e62d13457ddb5bed3",
+  "outputs": {
+    ".hydra/config.yaml": "7a5c77f9d405dd5fe7fdb9b3fca3280c6c8bbe4b59d6b6df507c2f3a5090a088",
+    ".hydra/hydra.yaml": "b057cdba40d8e5610fc6e2c4a5065a80001739b754ebbfbe17306d68103d5f0b",
+    ".hydra/overrides.yaml": "5f9ac21319b32886c0a0de8886c8995b5f3bf8ec065363529a4e9014dc6db3fc",
+    "attention_summary.csv": "32b51bb7b763629fb7a99772a68e659c336a5cc352037ec124a52cabab8494bf",
+    "checkpoint.npz": "33dc436aae117da577f8bbba173b7dfac8a4edb1ca8cbb8d31f1229808481c87",
+    "checkpoint_index.jsonl": "c9a5a34fb62f2e7e2e96d5f6ec1bbb753969800a25b2d95af20c5afd05addd5e",
+    "console.log": "10a19d1a78faaa7a4e53dcff11fa65fb40a8513e0325980af172283bb2fe6213",
+    "epoch_metrics.csv": "debfed64eade5ef61654bf676185244ae525b057f88e6bd7ef1a8fd90b154d18",
+    "events.jsonl": "c8ccffe9581f10ea03b1bb3372c0b61dd8cce9838cb818f4aea65f85fa89bb95",
+    "fit_membership.csv": "d265056760dd69846c9ca78f24a7c363471b2c8f7bf1f7f3df111b9d0bebf161",
+    "flow.csv": "66da1921b092aa8a1e9e0a8f22bcdea9a0767597a575397eb9c3d1d90826c9fe",
+    "inputs.json": "ba8accccd95d5930bf5ac91f09c4d91c2710e4cb7b1e7abd344e176bd95dfb97",
+    "launch.json": "9af781f5e9abf1af4de7b49d61f647f49aa6b3320e30dfa577336fb5fc77ba99",
+    "metrics.json": "a47ff0e8003fcff3e3cf27b25ee1a18e693c8a5c55c679c7e007e218763a0932",
+    "pipeline.log": "10a19d1a78faaa7a4e53dcff11fa65fb40a8513e0325980af172283bb2fe6213",
+    "predictions.csv": "ba89213499d101976cbc069aaf0d47c4cadc23d44e56b7989247f3bb10844694",
+    "preprocess_state.npz": "b285f5d0a71c215fcd480770ed2196af30f1ddfd9245f44bcaf4d667b86cb1e5",
+    "selection.json": "2bb41c469b815efb13877478596978a74f875da97232361369755c1f8c28c923",
+    "source.tar": "fc101b0133e4fb8aea35c8c695f9ac2b16e9e27b78ef65a1c8db3deb258bbc7b",
+    "source_index.json": "24838fe9c0e9b4314d51f902e0d055b9b24a793240bd653773ba3601bcab0da7"
+  }
+}
