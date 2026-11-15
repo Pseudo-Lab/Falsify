@@ -406,19 +406,57 @@ def default_engine():
         return _default_engine
 
 
-def _geometry_result(geometry,image):
+def _apply_zero_series_guard(status, issues, numeric, columns, axes, options=None, geometry=None):
+    from paper_chart_printed import is_degenerate_zero_series
+    if not is_degenerate_zero_series(numeric, columns, axes=axes, options=options, geometry=geometry):
+        return status, list(issues)
+    updated = list(issues)
+    for code in ('axis_calibration_required', 'degenerate_zero_series'):
+        if code not in updated:
+            updated.append(code)
+    return 'partial', updated
+
+
+def _printed_spans_from_options(options, geometry):
+    spans = []
+    if isinstance(options, dict):
+        for key, source in (('textSpans', 'pdf-text'), ('ocrLines', 'ocr')):
+            items = options.get(key)
+            if isinstance(items, (list, tuple)):
+                spans.extend({'text': item.get('text'), 'bbox': item.get('bbox') or item.get('box'), 'source': item.get('source') or source} if isinstance(item, dict) else item for item in items)
+    if isinstance(geometry, dict) and isinstance(geometry.get('ocrLines'), (list, tuple)):
+        spans.extend({'text': item.get('text'), 'bbox': item.get('bbox') or item.get('box'), 'source': item.get('source') or 'ocr'} if isinstance(item, dict) else item for item in geometry['ocrLines'])
+    return spans
+
+
+def _attach_printed_and_reconcile(result, geometry=None, options=None):
+    from paper_chart_printed import parse_printed_values, reconcile_printed_and_digitized
+    spans = _printed_spans_from_options(options, geometry)
+    printed = parse_printed_values(spans)
+    opt = options if isinstance(options, dict) else {}
+    should_attach = bool(printed) or geometry is not None or any(k in opt for k in ('textSpans', 'ocrLines', 'reconcile'))
+    if not should_attach:
+        return result
+    series_list = geometry.get('series') if isinstance(geometry, dict) else None
+    result['printedValues'] = printed
+    result['reconciliation'] = reconcile_printed_and_digitized(printed, series_list=series_list, numeric_cells=result.get('numericCells'))
+    return result
+
+
+def _geometry_result(geometry, image, options=None):
     from paper_chart_vectors import rows_from_geometry
     columns,rows,numeric=rows_from_geometry(geometry)
     axes=geometry['axes']
     yaxes=[side for side in ('left','right') if side in axes]
-    result=_result(geometry['status'],image,geometry['issues'],'',
+    status, issues = _apply_zero_series_guard(geometry['status'], geometry['issues'], numeric, columns, axes, options=options, geometry=geometry)
+    result=_result(status,image,issues,'',
         {'engine':geometry.get('provenance',{}).get('engine','opencv+rapidocr'),'model':None if geometry.get('provenance') else 'en_PP-OCRv5_rec_mobile','revision':geometry.get('provenance',{}).get('revision','geometry-2'),
          'device':'cpu','method':geometry.get('provenance',{}).get('method','ocr-tick-pixel-calibration')},columns,rows,numeric,
         None,'xy',{'x':{'label':None,'scale':axes['x']['scale'],'unit':None},
                    'y':{'label':None,'scale':axes[yaxes[0]]['scale'] if len(yaxes)==1 else 'multiple','unit':None}})
     result['geometry']=geometry
     result['pointKind']=geometry.get('pointKind','curve-sample')
-    return result
+    return _attach_printed_and_reconcile(result, geometry=geometry, options=options)
 
 
 def _extract_geometry(png_bytes, options, image, title, axes):
@@ -426,7 +464,7 @@ def _extract_geometry(png_bytes, options, image, title, axes):
         from paper_plottracer import trace_geometry
         geometry=trace_geometry(png_bytes,manual=options.get('chartOptions'))
         if geometry['status'] in ('ready','partial') and geometry['series']:
-            return _geometry_result(geometry,image)
+            return _geometry_result(geometry, image, options=options)
     except (ImportError,OSError):
         geometry={'status':'unavailable','issues':['plottracer-runtime-missing'],'series':[],'axes':{}}
     # A model's parseable table is not an alternative axis calibration.
@@ -436,7 +474,7 @@ def _extract_geometry(png_bytes, options, image, title, axes):
         ['series','axis','x','y'],[],[],title,'xy',axes)
     result['geometry']=geometry
     result['pointKind']='curve-sample'
-    return result
+    return _attach_printed_and_reconcile(result, geometry=geometry, options=options)
 
 
 def _table_lines_and_title(raw, title):
@@ -451,27 +489,13 @@ def _table_lines_and_title(raw, title):
     return table_lines, title
 
 
-def extract_chart(png_bytes, engine=None, options=None):
-    """Return a falsify.chart-data.v1 dict. See the module docstring for injection."""
-    image, image_issue = _image_info(png_bytes)
-    if image_issue:
-        return _unavailable(image, [image_issue], '', {'engine': None, 'model': None,
-            'revision': None, 'device': None, 'method': None})
-    if options is None:
-        options = {}
-    elif type(options) is not dict:
-        return _unavailable(image, ['options must be a dict'], '', {'engine': None, 'model': None,
-            'revision': None, 'device': None, 'method': None})
-    title, chart_type, axes, issues = _grounding(options)
-    geometry=None
-    if engine is None:
-        return _extract_geometry(png_bytes, options, image, title, axes)
-    selected = default_engine() if engine is None else engine
-    try:
-        raw = _invoke(selected, png_bytes, options)
-    except Exception as exc:
-        issues.append('engine failure: %s: %s' % (type(exc).__name__, exc))
-        return _unavailable(image, issues, '', _provenance(selected), title, chart_type, axes)
+def _select_engine(engine):
+    if engine == 'deplot':
+        return default_engine()
+    return engine
+
+
+def _build_table_result(selected, png_bytes, raw, image, issues, title, chart_type, axes, options):
     provenance = _provenance(selected)
     if type(raw) is not str:
         issues.append('engine returned non-string output')
@@ -496,9 +520,32 @@ def extract_chart(png_bytes, engine=None, options=None):
     numeric, numeric_issues = _numeric_cells(rows)
     issues.extend(numeric_issues)
     status = 'partial' if issues else 'ready'
-    result=_result(status, image, issues, raw, provenance, columns, rows, numeric, title, chart_type, axes)
-    if geometry is not None:result['geometry']=geometry
-    return result
+    status, issues = _apply_zero_series_guard(status, issues, numeric, columns, axes, options=options)
+    result = _result(status, image, issues, raw, provenance, columns, rows, numeric, title, chart_type, axes)
+    return _attach_printed_and_reconcile(result, options=options)
+
+
+def extract_chart(png_bytes, engine=None, options=None):
+    """Return a falsify.chart-data.v1 dict. See the module docstring for injection."""
+    image, image_issue = _image_info(png_bytes)
+    if image_issue:
+        return _unavailable(image, [image_issue], '', {'engine': None, 'model': None,
+            'revision': None, 'device': None, 'method': None})
+    if options is None:
+        options = {}
+    elif type(options) is not dict:
+        return _unavailable(image, ['options must be a dict'], '', {'engine': None, 'model': None,
+            'revision': None, 'device': None, 'method': None})
+    title, chart_type, axes, issues = _grounding(options)
+    if engine is None:
+        return _extract_geometry(png_bytes, options, image, title, axes)
+    selected = _select_engine(engine)
+    try:
+        raw = _invoke(selected, png_bytes, options)
+    except Exception as exc:
+        issues.append('engine failure: %s: %s' % (type(exc).__name__, exc))
+        return _unavailable(image, issues, '', _provenance(selected), title, chart_type, axes)
+    return _build_table_result(selected, png_bytes, raw, image, issues, title, chart_type, axes, options)
 
 
 def result_keys():

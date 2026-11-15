@@ -78,11 +78,16 @@
 .falsify-shape-radius {
   pointer-events: none;
 }
+.falsify-shape-halo.is-selected { stroke-opacity: 0.22; }
+.falsify-shape-hit { cursor: grab; }
+.falsify-shape-hit:hover { stroke: rgba(29, 26, 22, 0.18); }
 .falsify-shape-radius {
   fill: rgba(29, 26, 22, 0.08);
   stroke: rgba(29, 26, 22, 0.55);
   stroke-width: 1;
 }
+.falsify-shape-handle-guide { stroke: #777064; stroke-width: 1px; vector-effect: non-scaling-stroke; pointer-events: none; }
+.falsify-shape-handle-hit { cursor: pointer; }
 .falsify-shape-handle {
   fill: #fffdf8;
   stroke: #1d1a16;
@@ -97,6 +102,7 @@
   stroke: #fffdf8;
   cursor: move;
 }
+.falsify-shape-precision[hidden], .falsify-shape-button[hidden] { display: none; }
 .falsify-shape-precision {
   background: #fffdf8;
   border: 1px solid #d9d2c5;

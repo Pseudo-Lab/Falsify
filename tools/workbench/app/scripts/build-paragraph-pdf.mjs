@@ -20,10 +20,15 @@ copyFileSync(join(source, 'runtime/candidate-manifest.json'), join(vendor, 'cand
 for (const name of ['NOTICE.md', 'LICENSE', 'NOTICE', 'THIRD_PARTY_NOTICES.md', 'UPSTREAM.json', 'overlay.json', 'licenses', 'patches', 'build-source']) cpSync(join(source, name), join(vendor, name), {recursive: true});
 const modules = ['editor.mjs', 'quality.mjs', 'pagination.mjs', 'inline-preservation.mjs', 'continuation-template.mjs',
   'document-flow.mjs', 'document-flow-band.mjs', 'document-flow-links.mjs', 'document-flow-underlines.mjs'];
+const overlay = JSON.parse(readFileSync(join(source, 'overlay.json'), 'utf8'));
+if (overlay.patch) {
+  const patchBytes = readFileSync(join(source, overlay.patch));
+  if (digest(patchBytes) !== overlay.patchSha256) throw new Error('Overlay patch digest mismatch: ' + overlay.patch);
+}
 writeFileSync(join(vendor, 'manifest.json'), JSON.stringify({
   schema: 'falsify.paragraph-pdf.vendor.v1', license: 'AGPL-3.0-only',
-  sourceModuleBase: 'cd4ba2cdd68ae7e51198f615bd4ac6130206b162',
-  sourceModuleOverlay: JSON.parse(readFileSync(join(source, 'overlay.json'), 'utf8')),
+  sourceModuleBase: '8f3bef68aa50364aec79fb19d07887dfed7addee',
+  sourceModuleOverlay: overlay,
   upstream: manifest.upstream, sourcePatches: manifest.sourcePatches,
   artifacts: manifest.artifacts, sourceBuildVerified: false,
   trust: 'locally-supplied-hash-verified-artifacts',

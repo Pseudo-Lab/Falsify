@@ -27,3 +27,21 @@ test('real matcher preserves reported quote and source span through proposal rel
     assert.equal(suggested.matchStatus,'suggested');assert.equal(suggested.anchor,null);
   } finally { delete globalThis.FalsifyPaperAnchors; }
 });
+
+test('red exchange handles structured tableEdits/visualEdits and gates visual prompt schema',()=>{
+  const defaultPrompt=X.buildPrompt({role:'red',segments});
+  assert.doesNotMatch(defaultPrompt,/tableEdits/);
+  const optInPrompt=X.buildPrompt({role:'red',segments,includeVisualSchema:true});
+  assert.match(optInPrompt,/tableEdits/);
+  assert.match(optInPrompt,/visualEdits/);
+  const batch=X.parse(JSON.stringify({
+    fileHash:'hash',
+    tableEdits:[{pageIndex:0,tableId:'t1',row:0,column:0,before:'12%',after:'15%'}],
+    visualEdits:[{pageIndex:0,figureId:'f1',series:'s',pointIndex:0,before:12,after:15}]
+  }),{role:'red',segments,fileHash:'hash',tables:[{id:'t1',pageIndex:0,cells:[{row:0,column:0,text:'12%'}]}]});
+  assert.equal(batch.items.length,2);
+  assert.equal(batch.items[0].kind,'table-cell');
+  assert.equal(batch.items[0].matchStatus,'matched');
+  assert.equal(batch.items[1].kind,'chart-point');
+  assert.equal(batch.items[1].visualTarget.afterValue,15);
+});

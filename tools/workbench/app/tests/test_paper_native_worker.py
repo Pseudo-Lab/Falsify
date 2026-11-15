@@ -1,4 +1,5 @@
 import hashlib
+import json
 import subprocess
 import sys
 import threading
@@ -56,5 +57,14 @@ class NativeWorkerTests(unittest.TestCase):
     def test_nested_dispatch_is_inline(self):
         with patch.object(native, '_IN_WORKER', True), patch.object(native, '_dispatch', return_value='inline'), patch.object(native.subprocess, 'Popen', side_effect=AssertionError('nested child')):
             self.assertEqual(native.run('verify', []), 'inline')
+
+    def test_fixed_hyphenated_codes_survive_worker_transport(self):
+        for code in ('nested-form', 'bad-bbox', 'ambiguous-path', 'native_timeout'):
+            with self.subTest(code=code), self.assertRaisesRegex(ValueError, '^'+code+'$'):
+                native._worker_response([json.dumps({'ok': False, 'error': code}).encode()])
+        with self.assertRaisesRegex(ValueError, '^bad-plot$'):
+            native.run('chart_prepare', [self.source(), 0, [0, 0, 10, 10], {'plotBbox': [5, 5, 1, 1]}, None])
+        with self.assertRaisesRegex(ValueError, '^native_worker_failed$'):
+            native._worker_response([json.dumps({'ok': False, 'error': 'private/path with details'}).encode()])
 
 if __name__ == '__main__': unittest.main()

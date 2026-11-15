@@ -37,6 +37,13 @@ from datetime import datetime, timezone
 
 import pymupdf
 
+from paper_table_logical import (
+    bind_logical_tables,
+    cell_text_with_superscripts,
+    classify_figures,
+    extract_page_spans,
+)
+
 pymupdf.no_recommend_layout()
 
 SCHEMA = 'falsify.paper-evidence.v1'
@@ -158,7 +165,7 @@ def _header_flags(table, placed):
     return flags if any_true else unknown
 
 
-def _table_cells(grid, placed, extract, headers):
+def _table_cells(grid, placed, extract, headers, spans=None):
     cells = []
     for r, c, box in placed:
         col_span = _col_span(grid, r, c, box)
@@ -166,8 +173,13 @@ def _table_cells(grid, placed, extract, headers):
         rounded = _round_box(box)
         if rounded is None:
             raise RuntimeError('bbox')
-        cells.append({'row': r, 'column': c, 'rowSpan': row_span, 'columnSpan': col_span,
-            'text': _cell_text(extract, r, c), 'bbox': rounded, 'header': headers[(r, c)]})
+        raw_text = _cell_text(extract, r, c)
+        text, had_sup = cell_text_with_superscripts(box, spans, raw_text)
+        entry = {'row': r, 'column': c, 'rowSpan': row_span, 'columnSpan': col_span,
+            'text': text, 'bbox': rounded, 'header': headers[(r, c)]}
+        if had_sup:
+            entry['richText'] = text
+        cells.append(entry)
     return cells
 
 
@@ -183,13 +195,13 @@ def _table_grid(table):
     return grid, width
 
 
-def _table_from_engine(table):
+def _table_from_engine(table, spans=None):
     grid, width = _table_grid(table)
     if grid is None: return None
     extract = table.extract()
     placed = [(r, c, cell) for r, row in enumerate(grid) for c, cell in enumerate(row) if cell is not None]
     headers = _header_flags(table, placed)
-    cells = _table_cells(grid, placed, extract, headers)
+    cells = _table_cells(grid, placed, extract, headers, spans=spans)
     if not cells:
         return None
     return {'bbox': _round_box(pymupdf.Rect(table.bbox)) or _union(cell['bbox'] for cell in cells),
@@ -202,7 +214,7 @@ def _union(boxes):
         round(max(b[2] for b in boxes), 3), round(max(b[3] for b in boxes), 3)]
 
 
-def _collect_tables(page):
+def _collect_tables(page, spans=None):
     found = _find_tables(page)
     tables, failed = [], False
     for table in list(getattr(found, 'tables', None) or []):
@@ -210,7 +222,7 @@ def _collect_tables(page):
             failed = True
             break
         try:
-            payload = _table_from_engine(table)
+            payload = _table_from_engine(table, spans=spans)
         except Exception:
             failed = True
             continue
@@ -219,8 +231,36 @@ def _collect_tables(page):
     return tables, failed
 
 
-def _collect_images(page):
-    info = page.get_image_info() or []
+def _xref_sha(doc, xref, sha_cache):
+    if not isinstance(xref, int) or xref <= 0 or doc is None or not hasattr(doc, 'xref_stream'):
+        return None
+    if sha_cache is not None and xref in sha_cache:
+        return sha_cache[xref]
+    try:
+        stream = doc.xref_stream(xref)
+        digest = _sha(stream) if stream else None
+    except Exception:
+        digest = None
+    if sha_cache is not None:
+        sha_cache[xref] = digest
+    return digest
+
+
+def _image_digest_info(image, doc, sha_cache):
+    digest = image.get('digest')
+    raw_digest = bytes(digest) if isinstance(digest, (bytes, bytearray)) and digest else None
+    repeat_key = raw_digest.hex() if raw_digest else None
+    img_sha = _xref_sha(doc, image.get('xref'), sha_cache)
+    if img_sha is None and raw_digest is not None:
+        img_sha = _sha(raw_digest)
+    return img_sha, repeat_key or img_sha
+
+
+def _collect_images(page, doc=None, sha_cache=None):
+    try:
+        info = page.get_image_info(xrefs=True) or []
+    except TypeError:
+        info = page.get_image_info() or []
     figures, seen, failed = [], set(), False
     for image in info:
         if len(figures) >= MAX_FIGURES_PER_PAGE:
@@ -233,11 +273,17 @@ def _collect_images(page):
         if key in seen:
             continue
         seen.add(key)
-        figures.append({'bbox': box})
+        img_sha, repeat_key = _image_digest_info(image, doc, sha_cache)
+        figures.append({'bbox': box, 'imageSha256': img_sha, '_repeat_key': repeat_key})
     return figures, failed
 
 
 def _collect_lines(page):
+    lines, _spans = _collect_text_data(page)
+    return lines
+
+
+def _collect_text_data(page):
     data = page.get_text('dict', flags=pymupdf.TEXT_MEDIABOX_CLIP) or {}
     lines = []
     for block in data.get('blocks', []):
@@ -248,7 +294,7 @@ def _collect_lines(page):
             box = _round_box(line.get('bbox'))
             if text and box is not None:
                 lines.append((box, text))
-    return lines
+    return lines, extract_page_spans(data)
 
 
 def _center_inside(box, regions):
@@ -292,32 +338,33 @@ def _attach_captions(items, lines):
         used_labels.add(j)
 
 
-def _detect_page(page):
+def _detect_page(page, doc=None, sha_cache=None):
     """Tables, images and caption lines in unrotated page space, plus the matrix into page.rect."""
     rotation = page.rotation % 360
+    page_height = float(page.rect.height)
     matrix = _matrix(page)
     cropped = _cropped_or_offset(page)
     if rotation:
         page.set_rotation(0)
     try:
         try:
-            tables, table_failed = _collect_tables(page)
+            lines, spans = _collect_text_data(page)
+            line_failed = False
+        except Exception:
+            lines, spans, line_failed = [], [], True
+        try:
+            tables, table_failed = _collect_tables(page, spans=spans)
         except Exception:
             tables, table_failed = [], True
         try:
-            images, image_failed = _collect_images(page)
+            images, image_failed = _collect_images(page, doc=doc, sha_cache=sha_cache)
         except Exception:
             images, image_failed = [], True
-        try:
-            lines = _collect_lines(page)
-            line_failed = False
-        except Exception:
-            lines, line_failed = [], True
     finally:
         if rotation:
             page.set_rotation(rotation)
     return {'tables': tables, 'images': images, 'lines': lines, 'matrix': matrix, 'rotation': rotation,
-        'cropped': cropped, 'failed': table_failed or image_failed, 'line_failed': line_failed}
+        'pageHeight': page_height, 'cropped': cropped, 'failed': table_failed or image_failed, 'line_failed': line_failed}
 
 
 def _provenance(method, rotation, cropped, caption):
@@ -343,6 +390,17 @@ def _record_page_limitations(limitations, detected, index):
         limitations['rotated'].append(index)
     if detected['cropped']:
         limitations['cropped'].append(index)
+
+
+def _finalize_items(items, page_heights, page_lines):
+    classify_figures(items, page_heights)
+    for item in items:
+        item.pop('_repeat_key', None)
+    bind_logical_tables(items, page_heights, page_lines)
+    return sum(
+        item['meta']['type'] == 'figure' and item['meta'].get('classification') == 'decorative'
+        for item in items
+    )
 
 
 def _validate_clip_bbox(bbox, page):
@@ -458,6 +516,8 @@ class EvidenceStore:
                     body = copy.deepcopy(item['meta'])
                     if item['table'] is not None:
                         body['table'] = copy.deepcopy(item['table'])
+                    if item.get('logical_table') is not None:
+                        body['logicalTable'] = copy.deepcopy(item['logical_table'])
                     return body
         raise KeyError('item')
 
@@ -564,19 +624,21 @@ class EvidenceStore:
         doc = self._open(raw)
         page_count = doc.page_count
         limitations = {'failed': [], 'lines': [], 'budget': [], 'rotated': [], 'cropped': []}
-        items = []
+        items, page_heights, page_lines, sha_cache = [], {}, {}, {}
         try:
             for index in range(page_count):
                 if len(items) >= MAX_ITEMS:
                     limitations['budget'].append(index)
                     continue
                 try:
-                    detected = _detect_page(doc[index])
+                    detected = _detect_page(doc[index], doc=doc, sha_cache=sha_cache)
                 except Exception:
                     limitations['failed'].append(index)
                     continue
                 _record_page_limitations(limitations, detected, index)
+                page_heights[index] = detected['pageHeight']
                 page_items = self._page_items(index, detected)
+                page_lines[index] = detected.get('mappedLines', ())
                 room = MAX_ITEMS - len(items)
                 if len(page_items) > room:
                     limitations['budget'].append(index)
@@ -584,6 +646,10 @@ class EvidenceStore:
                 items.extend(page_items)
         finally:
             doc.close()
+        decorative_count = _finalize_items(items, page_heights, page_lines)
+        return self._build_extracted_record(raw, file_hash, page_count, limitations, items, decorative_count)
+
+    def _build_extracted_record(self, raw, file_hash, page_count, limitations, items, decorative_count):
         now = self._clock()
         paper_id = _new_id(())
         codes = []
@@ -595,7 +661,8 @@ class EvidenceStore:
         summary = {'schema': SCHEMA, 'paperId': paper_id, 'fileHash': file_hash, 'status': status,
             'pageCount': page_count, 'counts': {
                 'tables': sum(item['meta']['type'] == 'table' for item in items),
-                'figures': sum(item['meta']['type'] == 'figure' for item in items)},
+                'figures': sum(item['meta']['type'] == 'figure' for item in items),
+                'decorativeCount': decorative_count},
             'engine': ENGINE, 'limitations': codes, 'expiresAt': _iso(now + self._ttl)}
         return {'paper_id': paper_id, 'file_hash': file_hash, 'pdf': raw, 'expires_at': now + self._ttl,
             'seq': 0, 'summary': summary, 'items': items}
@@ -619,18 +686,26 @@ class EvidenceStore:
         for image in detected['images']:
             mapped = _map_box(image['bbox'], matrix)
             if mapped is not None:
-                drafts.append({'type': 'figure', 'bbox': mapped, 'table': None})
-        _attach_captions(drafts, [(_map_box(box, matrix), text) for box, text in detected['lines'] if _map_box(box, matrix)])
+                drafts.append({'type': 'figure', 'bbox': mapped, 'table': None,
+                    'imageSha256': image.get('imageSha256'), '_repeat_key': image.get('_repeat_key')})
+        mapped_lines = [(_map_box(box, matrix), text) for box, text in detected['lines'] if _map_box(box, matrix)]
+        detected['mappedLines'] = mapped_lines
+        _attach_captions(drafts, mapped_lines)
         existing = set()
         items = []
         for draft in drafts:
             caption = draft.get('caption')
             method = 'Page.find_tables' if draft['type'] == 'table' else 'Page.get_image_info'
-            items.append({'meta': {'id': _new_id(existing, 't' if draft['type'] == 'table' else 'f'),
+            meta = {'id': _new_id(existing, 't' if draft['type'] == 'table' else 'f'),
                 'type': draft['type'], 'pageIndex': index, 'bbox': draft['bbox'], 'caption': caption,
-                'provenance': _provenance(method, detected['rotation'], detected['cropped'], caption)},
-                'table': draft['table']})
-            existing.add(items[-1]['meta']['id'])
+                'provenance': _provenance(method, detected['rotation'], detected['cropped'], caption)}
+            if draft['type'] == 'figure' and draft.get('imageSha256'):
+                meta['imageSha256'] = draft['imageSha256']
+            entry = {'meta': meta, 'table': draft['table']}
+            if draft.get('_repeat_key'):
+                entry['_repeat_key'] = draft['_repeat_key']
+            items.append(entry)
+            existing.add(meta['id'])
         items.sort(key=lambda item: (item['meta']['bbox'][1], item['meta']['bbox'][0], item['meta']['type'] != 'table'))
         return items
 

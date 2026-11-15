@@ -39,3 +39,6 @@
 .paper-visual-edit .visual-edit-layout{grid-template-columns:1fr}
 .paper-visual-edit .visual-edit-point{grid-template-columns:repeat(2,minmax(0,1fr))}
 }
+
+.paper-visual-edit .visual-edit-layout.visual-edit-focused{grid-template-columns:minmax(0,1fr)}
+ .paper-visual-edit .visual-edit-column[hidden]{display:none}

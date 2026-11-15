@@ -3032,7 +3032,14 @@ function sourceUnderline(engine, h, pageIndex, annotationModel) {
     M._free(matrix);
     M._FPDFText_ClosePage(tp);
   }
-  if (!(size3 > 0) || right - left > 2 * size3 + 0.02) fail4("document_flow_underline_too_long");
+  if (!(size3 > 0)) fail4("document_flow_underline_too_long");
+  if (right - left > 2 * size3 + 0.02) {
+    const sorted = [...owned].sort((a, b) => a.index - b.index), first = sorted[0], last = sorted.at(-1), tol = 0.25 * size3 + 0.02;
+    const overlaps2 = (box, rect2) => Math.min(box.r, rect2[2]) - Math.max(box.l, rect2[0]) > 1e-4 && Math.min(box.t, rect2[3]) - Math.max(box.b, rect2[1]) > 1e-4;
+    if (sorted.some((c) => c.generated || !c.object || c.box.l < left - tol || c.box.r > right + tol || c.box.b < baseline - tol || c.box.t > baseline + 2 * size3 + tol) || Math.abs(first.box.l - left) > tol || Math.abs(last.box.r - right) > tol || sorted.some((c, i) => i && (c.index <= sorted[i - 1].index || c.box.l < sorted[i - 1].box.l - 0.02 || c.box.l - sorted[i - 1].box.r > size3)) || chars.some((c) => c.box && !owned.includes(c) && c.index > first.index && c.index < last.index) || chars.some((c) => c.box && !owned.includes(c) && sorted.some((o) => o.object === c.object)) || annotationModel.annotations.some((a) => a !== link && a.sourcePageIndex === pageIndex && Array.isArray(a.rect) && owned.some((c) => overlaps2(c.box, a.rect)))) fail4("document_flow_underline_too_long");
+    const quads = new Set(sorted.map((c) => [c.box.l, c.box.r, c.box.b, c.box.t].join(",")));
+    if (quads.size !== sorted.length) fail4("document_flow_underline_ownership_ambiguous");
+  }
   const objects = list(M, engine.page), order = objects.indexOf(h >>> 0), text3 = M._FPDFText_LoadPage(engine.page);
   let owners;
   try {
@@ -3145,6 +3152,21 @@ function checkDocumentFlowPageBudget(e) {
     if (text3) M._FPDFText_ClosePage(text3);
   }
 }
+function adjacentSourceRuns(engine, a, b) {
+  if (!a.baselines.length || !b.baselines.length || !(a.size > 0 && b.size > 0)) return false;
+  const left = a.handles.map((h, i) => ({ box: engine.objectBounds(h), slot: a.slots[i] }));
+  const right = b.handles.map((h, i) => ({ box: engine.objectBounds(h), slot: b.slots[i] }));
+  if ([...left, ...right].some((x) => !x.box || !Number.isInteger(x.slot))) return false;
+  const shared = a.baselines.filter((y) => b.baselines.some((z) => Math.abs(y - z) <= 0.01));
+  if (!shared.length) return false;
+  const onLine = (xs, y) => xs.filter(({ box }) => box.y <= y + 1 && box.y + box.h >= y - 0.01);
+  return shared.every((y) => {
+    const l = onLine(left, y), r = onLine(right, y);
+    if (!l.length || !r.length || Math.max(...l.map((x) => x.slot)) >= Math.min(...r.map((x) => x.slot))) return false;
+    const gap = Math.min(...r.map((x) => x.box.x)) - Math.max(...l.map((x) => x.box.x + x.box.w));
+    return gap >= 0 && gap <= 2 * Math.max(a.size, b.size);
+  });
+}
 function deriveDocumentFlowBand(engine, sourcePageIndex, captureLayout, annotationModel = null) {
   engine.loadPage(sourcePageIndex);
   checkDocumentFlowPageBudget(engine);
@@ -3155,8 +3177,9 @@ function deriveDocumentFlowBand(engine, sourcePageIndex, captureLayout, annotati
   const body = ctx.paras.filter((q) => q.role === "body" && q.box);
   if (!body.length || body.some((q) => !q.editable || q.sharesObjects || !q.topLevel)) fail5("document_flow_body_unsupported");
   for (let i = 0; i < body.length; i++) for (let j = i + 1; j < body.length; j++) {
-    const a = body[i].box, b = body[j].box;
-    if (Math.min(a.top, b.top) - Math.max(a.top - a.h, b.top - b.h) > 1) fail5("document_flow_table_or_columns_unsupported");
+    const a = body[i], b = body[j];
+    if (Math.min(a.box.top, b.box.top) - Math.max(a.box.top - a.box.h, b.box.top - b.box.h) > 1 && !adjacentSourceRuns(engine, a, b))
+      fail5("document_flow_table_or_columns_unsupported");
   }
   const edgeTop = ctx.paras.filter((q) => q.role !== "body" && q.box && q.box.top < ctx.pageH / 2).map((q) => q.box.top + 2);
   const handles = body.flatMap((q) => q.handles);
@@ -7471,12 +7494,12 @@ init_paragraph_pdf_crypto();
 // src/paragraph-vendor/overlay.json
 var overlay_default = {
   schema: "falsify.paragraph-editor.overlay.v1",
-  base: "cd4ba2cdd68ae7e51198f615bd4ac6130206b162",
-  commit: "483a9abbd72ed2a7f853b5c0aaf2f2beaad16c5c",
-  branch: "feature/fitr-native-wire-20261027",
+  base: "8f3bef68aa50364aec79fb19d07887dfed7addee",
+  commit: "8f3bef68aa50364aec79fb19d07887dfed7addee",
+  branch: "main",
   repository: "https://github.com/Shinick-Han/falsify-pdf-editor",
   patch: "patches/paragraph-flow-overlay.patch",
-  patchSha256: "b0eb108bae54d22a0a44e33e92e5736de2621788d40c8d7ce6b5aace4cc2864e"
+  patchSha256: "0f170f578391e868b39f54cf02fc4e313325cefc1adb8ec84a7a9b9faf95b845"
 };
 
 // src/paragraph-pdf-runtime.mjs

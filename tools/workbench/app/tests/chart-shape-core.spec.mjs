@@ -42,6 +42,30 @@ function host(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
+test('local deformation follows linked stroke junctions and tile seams without moving a nearby independent curve', () => {
+  const left = line(2, 26, 50);
+  const right = line(2, 26, 50).map(p => ({...p, x: p.x + 50}));
+  const input = scene([
+    {id: 'left', points: left}, {id: 'right', points: right},
+    {id: 'other', points: line(2, 51, 54)},
+  ]);
+  input.curveLinks = [[['left', 25], ['right', 0]]];
+  const operation = {id: 'd', kind: 'deform', seriesId: 'left', center: [50, 50], radius: 20, dx: 0, dy: -10};
+  const result = api.applyPlan(input, [operation]);
+  const [a, b, other] = result.scene.series;
+  assert.equal(a.points[25].y, 40);
+  assert.equal(b.points[0].y, 40);
+  assert.ok(b.points[1].y < 50);
+  assert.equal(a.points[0].y, 50);
+  assert.equal(b.points[25].y, 50);
+  assert.deepEqual(host(other), input.series[2]);
+  assert.deepEqual(host(api.linkedSeriesIds(input, 'left')).sort(), ['left', 'right']);
+  const history = api.createHistory(input);
+  history.apply([operation]);
+  assert.deepEqual(host(history.undo()), input);
+  assert.deepEqual(host(history.redo()), host(result.scene));
+});
+
 test('pinned Gaussian source and the esbuild bundle load without a browser or Node backend', () => {
   assert.equal(api.UPSTREAM_COMMIT, '5a87af23408aedf00e35e43ca6648a20cf6455bd');
   assert.equal(api.PROFILE, 'gaussian');

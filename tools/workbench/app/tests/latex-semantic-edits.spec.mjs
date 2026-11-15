@@ -162,3 +162,28 @@ test('patched mixed sentence compiles to the expected PDF text',async t=>{
   assert.equal(output.status,0,output.stderr);assert.match(output.stdout,/An revised claim63 remains provisional\./);
  } finally {rmSync(dir,{recursive:true,force:true});}
 });
+
+test('natbib, biblatex and preamble macros allow adjacent edits without corrupting macros or citations',async()=>{
+ const nat=await actualPatch(
+  '\\documentclass{article}\n\\usepackage{natbib}\n\\begin{document}Early \\citep[e.g.][p.~4]{smith2020} results hold.\\end{document}',
+  'Early results hold.',
+  'Initial results hold.'
+ );
+ assert.equal(nat.proposal.status,'matched');
+ assert.match(nat.source,/Initial \\citep\[e\.g\.\]\[p\.~4\]\{smith2020\} results hold\./);
+
+ const bib=await actualPatch(
+  '\\documentclass{article}\n\\usepackage{biblatex}\n\\newcommand{\\sys}{BetaNet}\n\\begin{document}System \\sys{} and \\autocite[see][]{k1} show gains.\\end{document}',
+  'System BetaNet and  show gains.',
+  'Method BetaNet and  show strong gains.'
+ );
+ assert.equal(bib.proposal.status,'matched');
+ assert.match(bib.source,/Method \\sys\{\} and \\autocite\[see\]\[\]\{k1\} show strong gains\./);
+
+ const blocked=await actualPatch(
+  '\\documentclass{article}\n\\newcommand{\\sys}{BetaNet}\n\\begin{document}System \\sys is tested.\\end{document}',
+  'System BetaNet is tested.',
+  'System GammaNet is tested.'
+ );
+ assert.equal(blocked.proposal.status,'unresolved');
+});

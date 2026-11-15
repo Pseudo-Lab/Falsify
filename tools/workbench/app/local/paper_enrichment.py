@@ -177,7 +177,14 @@ def _map_boxes(data, region, width, height):
         for series in geometry.get('series',[]):
             for item in series.get('points',[]):
                 if not native_point(item): item['sourcePoint']=point([item['xPixel'],item['yPixel']])
+    _map_printed_boxes(out, mapped)
     return out
+
+
+def _map_printed_boxes(out, mapped):
+    for item in out.get('printedValues', []):
+        if isinstance(item, dict) and item.get('bbox') is not None:
+            item['sourceBbox'] = mapped(item.get('bbox'))
 
 
 def _validate_result(result, request, image):
@@ -204,14 +211,44 @@ def _render_analysis(store, request, cancelled):
     return image, dpi
 
 
+def _collect_vector_printed_spans(source_bytes, request, image, result, options):
+    from paper_chart_printed import extract_pdf_text_spans
+    spans = list(result.get('printedSpans') or [])
+    if not spans:
+        spans.extend(extract_pdf_text_spans(source_bytes, request['pageIndex'], image['bbox'], image['width'], image['height']))
+    opt_ocr = options.get('ocrLines') if isinstance(options, dict) else None
+    for item in opt_ocr if isinstance(opt_ocr, (list, tuple)) else ():
+        if isinstance(item, dict):
+            spans.append({'text': item.get('text'), 'bbox': item.get('bbox') or item.get('box'), 'source': item.get('source') or 'ocr'})
+        else:
+            spans.append(item)
+    return spans
+
+
+def _attach_vector_printed(source_bytes, request, image, result, options):
+    if not isinstance(result, dict):
+        return result
+    from paper_chart_printed import parse_printed_values, reconcile_printed_and_digitized
+    spans = _collect_vector_printed_spans(source_bytes, request, image, result, options)
+    printed = list(result.get('printedValues') or []) or parse_printed_values(spans)
+    geometry = result.get('geometry') if isinstance(result.get('geometry'), dict) else {}
+    series_list = geometry.get('series') or []
+    if not printed and not series_list:
+        return result
+    result['printedValues'] = printed
+    result['reconciliation'] = reconcile_printed_and_digitized(printed, series_list=series_list, numeric_cells=result.get('numericCells'))
+    return result
+
+
 def _chart_vector_result(store, request, image, dpi, result, options, cancelled):
     from paper_native_worker import run
     spec = options if isinstance(options, dict) else {}
-    result = run('chart_vectors', [store.source_bytes(request['paperId'], request['fileHash']),
+    source_bytes = store.source_bytes(request['paperId'], request['fileHash'])
+    result = run('chart_vectors', [source_bytes,
         {'page_index':request['pageIndex'], 'crop':image['bbox'], 'dpi':dpi, 'width':image['width'],
          'height':image['height'], 'raster':result, 'calibration':spec.get('calibration'),
          'series':spec.get('series'), 'plot_bbox':spec.get('plotBbox')}], cancelled=cancelled)
-    return result
+    return _attach_vector_printed(source_bytes, request, image, result, options)
 
 
 def analyze(data, *, store=None, runner=None, cancelled=None, progress=None):

@@ -7,6 +7,67 @@ const union = boxes => [Math.min(...boxes.map(b=>b[0])),Math.min(...boxes.map(b=
 const norm = s => s.replace(/\s+/gu,' ').trim();
 const fontIdentity = name => String(name).replace(/^[A-Z]{6}\+/u,'');
 
+const lineSize = l => l.chars.length ? l.chars.reduce((s,c)=>s+c.size,0)/l.chars.length : 10;
+const roundBox = b => b.map(x=>Math.round(x*100)/100);
+function medianSize(pages) {
+  const sizes = pages.flatMap(p=>p.lines.filter(l=>l.horizontal&&l.chars.length).map(lineSize)).sort((a,b)=>a-b);
+  return sizes.length ? sizes[Math.floor(sizes.length/2)] : 10;
+}
+function isTwoColumnPage(page,profile) {
+  if(profile?.columnCount===2) return true;
+  if(profile?.columnCount===1) return false;
+  const mid=page.bounds[2]/2;
+  const left=page.lines.filter(l=>l.horizontal && l.bbox[2]<=mid+6).length;
+  const right=page.lines.filter(l=>l.horizontal && l.bbox[0]>=mid-6).length;
+  return left>=2 && right>=2;
+}
+function classifyColumn(b,mid,twoCol) {
+  if(!twoCol) return 'left';
+  if(b[0]<mid-12 && b[2]>mid+12) return 'full';
+  return b[0]>=mid-12 ? 'right' : 'left';
+}
+const colsOverlap=(a,b)=>a==='full'||b==='full'||a===b;
+function geometricFootersForPage(page,mid,twoCol,med) {
+  const h=page.bounds[3], bands=[], seenCols=new Set(), seenLines=new Set();
+  for(const rule of page.horizontalRules || []) {
+    const col=classifyColumn(rule,mid,twoCol);
+    const fl=page.lines.filter(l=>l.horizontal && colsOverlap(classifyColumn(l.bbox,mid,twoCol),col) && l.bbox[1]>=rule[1]-2 && l.bbox[3]<=h-10 && lineSize(l)<=med*0.92 && !/^\d+$/.test(norm(l.text)));
+    if(!fl.length) continue;
+    seenCols.add(col);
+    for(const l of fl) seenLines.add(l);
+    bands.push({bbox:union([rule,...fl.map(l=>l.bbox)]),column:col,lines:new Set(fl),ruleY:rule[1],source:'observed-footnote-rule-and-text'});
+  }
+  const smallBottom=page.lines.filter(l=>l.horizontal && !seenLines.has(l) && l.bbox[1]>=h*0.78 && l.bbox[3]<=h-10 && lineSize(l)<=med*0.92 && !/^\d+$/.test(norm(l.text)));
+  const byCol=new Map();
+  for(const l of smallBottom) {const col=classifyColumn(l.bbox,mid,twoCol); if(!seenCols.has(col)&&!seenCols.has('full')) {if(!byCol.has(col)) byCol.set(col,[]); byCol.get(col).push(l);}}
+  for(const [col,fl] of byCol) bands.push({bbox:union(fl.map(l=>l.bbox)),column:col,lines:new Set(fl),ruleY:null,source:'observed-footnote-typography'});
+  return bands;
+}
+function profileFootersForPage(page,profile,mid,twoCol) {
+  const out=[];
+  for(const f of [...(profile?.footers||[]),...(profile?.footnotes||[])]) {
+    if(f?.pageIndex!==page.pageIndex || !valid(f.bbox)) continue;
+    const col=f.column || classifyColumn(f.bbox,mid,twoCol), fNorm=f.text ? norm(f.text) : '';
+    const inside=new Set(page.lines.filter(l=>l.horizontal && contains(f.bbox,l.bbox) && (!fNorm || (norm(l.text) && fNorm.includes(norm(l.text))))));
+    out.push({bbox:f.bbox,column:col,lines:inside,hasText:Boolean(fNorm),ruleY:null,source:f.source || 'profile-footer-geometry'});
+  }
+  return out;
+}
+function inspectFootnotes(pages,profile,add) {
+  const med=medianSize(pages);
+  for(const page of pages) {
+    const twoCol=isTwoColumnPage(page,profile), mid=page.bounds[2]/2;
+    const profBands=profileFootersForPage(page,profile,mid,twoCol);
+    const geoBands=geometricFootersForPage(page,mid,twoCol,med).filter(g=>!profBands.some(p=>colsOverlap(p.column,g.column) && Math.abs(p.bbox[1]-g.bbox[1])<20));
+    for(const fb of [...profBands,...geoBands]) {
+      const hits=page.lines.filter(l=>l.horizontal && !fb.lines.has(l) && (!contains(fb.bbox,l.bbox) || fb.hasText || fb.ruleY!==null) && colsOverlap(classifyColumn(l.bbox,mid,twoCol),fb.column) && (lineSize(l)>med*0.92 || (fb.ruleY!==null && l.bbox[1]<fb.ruleY-1)) && l.bbox[3]>fb.bbox[1]+1 && l.bbox[1]<fb.bbox[3]-1);
+      if(!hits.length) continue;
+      const bodyBbox=union(hits.map(h=>h.bbox)), deltaBp=Math.round((bodyBbox[3]-fb.bbox[1]+6)*100)/100;
+      add('footnote-body-overlap',page.pageIndex,union([fb.bbox,bodyBbox]),8,{column:fb.column,deltaBp,footnoteBbox:roundBox(fb.bbox),bodyBbox:roundBox(bodyBbox),source:fb.source});
+    }
+  }
+}
+
 /** Optional profile: bodyFontSize, bodyFontNames, captions [{text, assetPageIndex, assetBbox}], columns.
  * Metadata nominates a relationship; both caption text and an image placement must be observed independently. */
 export function inspectLayoutQuality({bytes,mupdf,profile={},sourceBytes,sourcePageIndexes}={}) {
@@ -53,7 +114,8 @@ export function inspectLayoutQuality({bytes,mupdf,profile={},sourceBytes,sourceP
         }
         }
         inspectPaintGeometry();
-        pages.push({pageIndex:p,bounds,lines,images,vectorCount:vectors.length,unsupportedClips});
+        const horizontalRules=vectors.filter(b=>b[1]>=bounds[3]*0.68 && b[3]-b[1]<=3 && b[2]-b[0]>=20 && b[2]-b[0]<=bounds[2]*0.92);
+        pages.push({pageIndex:p,bounds,lines,images,horizontalRules,vectorCount:vectors.length,unsupportedClips});
       } finally {dev?.destroy();st?.destroy();page.destroy();}
     }
     for(let p=0;p<doc.countPages();p++)inspectPage(p);
@@ -125,6 +187,7 @@ export function inspectLayoutQuality({bytes,mupdf,profile={},sourceBytes,sourceP
     }
     }
     inspectColumns();
+    inspectFootnotes(pages,profile,add);
     // Sparse-page evidence is separate from defect penalties. The ratio measures
     // structured text box area, not visible ink or whitespace by itself. Source
     // comparison requires an explicit output-to-source mapping and source bytes.

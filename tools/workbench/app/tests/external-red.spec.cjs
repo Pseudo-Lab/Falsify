@@ -374,4 +374,22 @@ test('real paper-edits accepts overlap, CRLF slices, the selected occurrence, an
   assert.equal(storedMax.before.length,4000);
 });
 
+test('structured table-cell and chart-point proposals preserve backward compatibility and parse tables/figures',()=>{
+  const tableHash='a'.repeat(64);
+  const tableSrc=[{id:'t1',pageIndex:0,cells:[{row:0,column:1,text:'81.2%',bbox:[10,20,40,35]}]}];
+  const figSrc=[{id:'f1',pageIndex:0,bbox:[0,0,100,100],chart:{series:[{id:'s1',points:[{x:1,y:2}]}]}}];
+  const res=run(JSON.stringify({
+    tableEdits:[{pageIndex:0,tableId:'t1',row:0,column:1,before:'81.2%',after:'95.0%'}],
+    visualEdits:[{pageIndex:0,figureId:'f1',series:'s1',pointIndex:0,before:2,after:5}]
+  }),[{id:'s0',label:'PDF p. 1',pageIndex:0,text:ALPHA}],tableHash);
+  assert.equal(res.proposals.length,2);
+  const resolvedT=R.resolveTableEdit({pageIndex:0,tableId:'t1',row:0,column:1,before:'81.2%',after:'95.0%'},{tables:tableSrc});
+  assert.equal(resolvedT.status,'matched');
+  assert.equal(resolvedT.anchor,null);
+  assert.deepEqual(resolvedT.tableTarget.bbox,[10,20,40,35]);
+  const resolvedV=R.resolveVisualEdit({pageIndex:0,figureId:'f1',series:'s1',pointIndex:0,before:2,after:5},{figures:figSrc});
+  assert.equal(resolvedV.status,'matched');
+  assert.equal(resolvedV.visualTarget.afterValue,5);
+});
+
 console.log(JSON.stringify({passed:checks,scope:'external-red parser'}));

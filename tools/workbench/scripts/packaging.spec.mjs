@@ -104,6 +104,12 @@ test('only both exact paragraph runtime files with matching notices are shippabl
   const result = verifyParagraphRuntime(root);
   assert.equal(result.wasmSha256, PARAGRAPH_WASM_SHA256);
   assert.equal(result.sourceBuildVerified, false);
+  const vendorManifest = JSON.parse(readFileSync(join(root, 'app/dist/paragraph-vendor/manifest.json'), 'utf8'));
+  const overlay = JSON.parse(readFileSync(join(root, 'app/src/paragraph-vendor/overlay.json'), 'utf8'));
+  assert.equal(vendorManifest.sourceBuildVerified, false);
+  assert.equal(vendorManifest.sourceModuleBase, '8f3bef68aa50364aec79fb19d07887dfed7addee');
+  assert.deepEqual(vendorManifest.sourceModuleOverlay, overlay);
+  assert.equal(createHash('sha256').update(readFileSync(join(root, 'app/src/paragraph-vendor', overlay.patch))).digest('hex'), overlay.patchSha256);
   assertShippableSource([...PARAGRAPH_WASM], root);
   assert.throws(() => assertShippableSource([PARAGRAPH_WASM[0]], root), /both source and shipped/);
   assert.throws(() => assertShippableSource([...PARAGRAPH_WASM, 'app/dist/paragraph-vendor/unknown.wasm'], root), /Unexpected private\/binary/);

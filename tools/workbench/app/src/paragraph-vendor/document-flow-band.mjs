@@ -14,6 +14,26 @@ export function checkDocumentFlowPageBudget(e) {
   finally {if(text)M._FPDFText_ClosePage(text);}
 }
 
+// Permit a split source paragraph only when leading runs and the
+// following paragraph share a measured baseline and touch
+// within the same 2em limit used by the staged row check. All ownership,
+// paint-order and geometry facts come from the immutable source page.
+export function adjacentSourceRuns(engine, a, b) {
+  if(!a.baselines.length || !b.baselines.length || !(a.size>0 && b.size>0))return false;
+  const left=a.handles.map((h,i)=>({box:engine.objectBounds(h),slot:a.slots[i]}));
+  const right=b.handles.map((h,i)=>({box:engine.objectBounds(h),slot:b.slots[i]}));
+  if([...left,...right].some(x=>!x.box || !Number.isInteger(x.slot)))return false;
+  const shared=a.baselines.filter(y=>b.baselines.some(z=>Math.abs(y-z)<=.01));
+  if(!shared.length)return false;
+  const onLine=(xs,y)=>xs.filter(({box})=>box.y<=y+1 && box.y+box.h>=y-.01);
+  return shared.every(y=>{
+    const l=onLine(left,y),r=onLine(right,y);
+    if(!l.length||!r.length||Math.max(...l.map(x=>x.slot))>=Math.min(...r.map(x=>x.slot)))return false;
+    const gap=Math.min(...r.map(x=>x.box.x))-Math.max(...l.map(x=>x.box.x+x.box.w));
+    return gap>=0 && gap<=2*Math.max(a.size,b.size);
+  });
+}
+
 export function deriveDocumentFlowBand(engine, sourcePageIndex, captureLayout, annotationModel = null) {
   engine.loadPage(sourcePageIndex);
   checkDocumentFlowPageBudget(engine);
@@ -24,8 +44,9 @@ export function deriveDocumentFlowBand(engine, sourcePageIndex, captureLayout, a
   const body=ctx.paras.filter(q=>q.role==='body'&&q.box);
   if(!body.length||body.some(q=>!q.editable||q.sharesObjects||!q.topLevel))fail('document_flow_body_unsupported');
   for(let i=0;i<body.length;i++)for(let j=i+1;j<body.length;j++){
-    const a=body[i].box,b=body[j].box;
-    if(Math.min(a.top,b.top)-Math.max(a.top-a.h,b.top-b.h)>1)fail('document_flow_table_or_columns_unsupported');
+    const a=body[i],b=body[j];
+    if(Math.min(a.box.top,b.box.top)-Math.max(a.box.top-a.box.h,b.box.top-b.box.h)>1 && !adjacentSourceRuns(engine,a,b))
+      fail('document_flow_table_or_columns_unsupported');
   }
   const edgeTop=ctx.paras.filter(q=>q.role!=='body'&&q.box&&q.box.top<ctx.pageH/2).map(q=>q.box.top+2);
   const handles=body.flatMap(q=>q.handles);

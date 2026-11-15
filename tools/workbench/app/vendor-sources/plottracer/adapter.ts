@@ -4,6 +4,8 @@ import {runColorTrace} from './engine/colorTraceRun';
 import {colorFilter, type RGB} from './algorithms/colorFilter';
 import {pointsFromColumnRuns} from './algorithms/segmentFill';
 import {findLines} from './algorithms/findLines/lines';
+import {skeletonize} from './algorithms/findLines/raster';
+import {skeletonGraph} from './algorithms/findLines/graph';
 import {Calibration} from './core/calibration';
 import {XYAxes} from './core/axes/xy';
 
@@ -19,10 +21,48 @@ function trace(binary:string,width:number,height:number,colorsJson:string,region
   for(let i=0;i<binary.length;i++)rgba[i]=binary.charCodeAt(i);
   maxPoints=Math.max(3,Math.min(5000,Math.floor(maxPoints)));
   const box={x0:region.x,y0:region.y,x1:region.x+region.width,y1:region.y+region.height};
-  const series=region.route==='auto'
+  const series=region.route==='edit-network'
+    ?colors.map((c:any)=>editNetwork(rgba,width,height,c,region))
+    :region.route==='auto'
     ?colors.map((c:any)=>routeSeries(rgba,width,height,c,region,box))
     :colors.map((c:any)=>legacySeries(rgba,width,height,c,region,box,maxPoints));
   return JSON.stringify({engine:'plottracer',revision:UPSTREAM_COMMIT,series});
+}
+
+// Editing needs every connected stroke, including short joins and error bars.
+// Measurement's findLines deliberately prunes those; keep that route unchanged.
+function editNetwork(rgba:Uint8Array,width:number,height:number,c:any,region:any){
+  if(typeof c.id!=='string'||!Array.isArray(c.rgb)||c.rgb.length!==3||!c.rgb.every((n:unknown)=>finite(n)&&n>=0&&n<=255))throw Error('invalid-color');
+  // The editor supplies an ink mask including pale edge coverage. Its tile
+  // boundary must survive: local background estimation erodes open tile ends.
+  const filtered=colorFilter(rgba,width,height,c.rgb,TOLERANCE,'foreground',region);
+  const graph=skeletonGraph(skeletonize(filtered.mask,width,height),width,height);
+  if(!hasErrorCaps(graph,width)){
+    const box={x0:region.x,y0:region.y,x1:region.x+region.width,y1:region.y+region.height};
+    const found=findLines(rgba,width,height,c.rgb,box,{contour:false});
+    return {id:c.id,rgb:c.rgb,pixels:[],places:found.places,unresolved:found.unresolved,
+      lines:found.lines.map(line=>({...line,nodes:[null,null],endKinds:[null,null]}))};
+  }
+  const lines=graph.edges.filter(e=>e.pix.length>=2).map(e=>{
+    const points=e.pix.map(([y,x])=>[x,y]);
+    if(e.a!==null)points[0]=graph.nodes[e.a].c;
+    if(e.b!==null)points[points.length-1]=graph.nodes[e.b].c;
+    return {points,gaps:[],nodes:[e.a,e.b],endKinds:[e.a===null?null:graph.nodes[e.a].kind,e.b===null?null:graph.nodes[e.b].kind]};
+  });
+  return {id:c.id,rgb:c.rgb,pixels:[],lines,places:[],unresolved:[]};
+}
+
+function hasErrorCaps(graph:ReturnType<typeof skeletonGraph>,width:number){
+  return graph.nodes.some((node,id)=>{
+    const edges=graph.edges.filter(e=>e.a===id||e.b===id);
+    if(edges.length!==3)return false;
+    const vectors=edges.map(e=>{
+      const point=e.a===id?e.pix[e.pix.length-1]:e.pix[0];
+      return [point[1]-node.c[0],point[0]-node.c[1]];
+    });
+    const caps=vectors.filter(([x,y])=>Math.abs(y)<Math.abs(x)*.4&&Math.abs(x)<=Math.max(12,width*.03));
+    return caps.length===2&&caps[0][0]*caps[1][0]<0&&vectors.some(([x,y])=>Math.abs(y)>Math.abs(x)*2);
+  });
 }
 
 function legacySeries(rgba:Uint8Array,width:number,height:number,c:any,region:any,box:any,maxPoints:number){

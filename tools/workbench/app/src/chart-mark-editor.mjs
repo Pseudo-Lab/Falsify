@@ -193,6 +193,7 @@ export function create(options = {}) {
   const core = resolveCore(options.core);
   const onChange = typeof options.onChange === 'function' ? options.onChange : null;
   const onCommit = typeof options.onCommit === 'function' ? options.onCommit : null;
+  const onGestureChange = typeof options.onGestureChange === 'function' ? options.onGestureChange : null;
   const onRequestExport = typeof options.onRequestExport === 'function' ? options.onRequestExport : null;
   const listeners = [];
   let opSeq = 0;
@@ -223,6 +224,7 @@ export function create(options = {}) {
   redoButton.textContent = '다시 실행';
   compareButton.textContent = '원본 비교';
   exportButton.textContent = '내보내기';
+  exportButton.hidden = options.embedded === true;
   for (const button of [undoButton, redoButton, compareButton, exportButton]) {
     button.setAttribute('aria-label', button.textContent);
   }
@@ -248,7 +250,7 @@ export function create(options = {}) {
 
   const precision = h(doc, 'details', 'falsify-mark-precision');
   const summary = h(doc, 'summary');
-  summary.textContent = '좌표 (px)';
+  summary.textContent = '선택한 항목의 정밀 좌표 (px)';
   const note = h(doc, 'p', 'falsify-mark-note');
   note.textContent = 'x (px)와 y (px)는 자르기 그림의 픽셀입니다. 막대는 값 끝만 움직이고 기준선과 너비는 유지됩니다.';
   const table = h(doc, 'table', 'falsify-mark-table');
@@ -362,14 +364,35 @@ export function create(options = {}) {
     return null;
   }
 
+  function nearestScatter(scene, point, fallback) {
+    const rect = stage.getBoundingClientRect();
+    const sx = rect.width / state.size.width, sy = rect.height / state.size.height;
+    let best = fallback, distance = Infinity;
+    for (const series of scene.series || []) {
+      if (markKind(series) !== 'scatter') continue;
+      series.points.forEach((item, index) => {
+        if (!finite(item?.x) || !finite(item?.y)) return;
+        const d = Math.hypot((item.x - point.x) * sx, (item.y - point.y) * sy);
+        const radius = finite(item.radius) ? item.radius : (finite(series.radius) ? series.radius : series.style?.radius ?? 5);
+        if (d <= Math.max(1, radius) * Math.max(sx, sy) + 12 && d < distance) {
+          distance = d;
+          best = {seriesId: series.id, index, kind: 'scatter', handle: 'point'};
+        }
+      });
+    }
+    return best;
+  }
+
   function renderTable(scene) {
     const active = doc.activeElement;
-    const focus = active && precisionBody.contains?.(active) ? [active.getAttribute('data-series-id'), active.getAttribute('data-index'), active.getAttribute('data-axis')] : null;
+    if (state.selection && active && precisionBody.contains?.(active)) return;
     precisionBody.replaceChildren();
+    precision.hidden = !state.selection;
     for (const series of scene.series || []) {
+      if (series.id !== state.selection?.seriesId) continue;
       const kind = markKind(series);
       series.points.forEach((point, index) => {
-        if (!finite(point?.x) || !finite(point?.y)) return;
+        if (index !== state.selection.index || !finite(point?.x) || !finite(point?.y)) return;
         const row = h(doc, 'tr');
         const name = h(doc, 'td');
         name.textContent = series.name || series.id;
@@ -393,7 +416,6 @@ export function create(options = {}) {
             input.readOnly = true;
             input.setAttribute('readonly', '');
           }
-          if (focus && focus[0] === String(series.id) && focus[1] === String(index) && focus[2] === axis) queueMicrotask(() => { if (!state.destroyed && doc.activeElement === doc.body) input.focus?.(); });
           cell.append(input);
           row.append(cell);
         }
@@ -432,7 +454,7 @@ export function create(options = {}) {
             'data-kind': 'bar',
             'data-handle': 'body',
           }));
-          svg.append(attrs(s(doc, 'circle', point.axis === 'x' ? 'falsify-mark-handle is-horizontal' : 'falsify-mark-handle'), {
+          if (selected) svg.append(attrs(s(doc, 'circle', point.axis === 'x' ? 'falsify-mark-handle is-horizontal' : 'falsify-mark-handle'), {
             cx: formatNumber(point.x),
             cy: formatNumber(point.y),
             r: '7',
@@ -459,6 +481,12 @@ export function create(options = {}) {
           'data-index': index,
           'data-kind': 'scatter',
           'data-handle': 'point',
+        }));
+        svg.append(attrs(s(doc, 'circle', 'falsify-mark-hit'), {
+          cx: formatNumber(point.x), cy: formatNumber(point.y), r: formatNumber(Math.max(1, radius)),
+          fill: 'transparent', stroke: 'transparent', 'stroke-width': '24',
+          'vector-effect': 'non-scaling-stroke', 'pointer-events': 'all',
+          'data-series-id': series.id, 'data-index': index, 'data-kind': 'scatter', 'data-handle': 'point',
         }));
       });
     }
@@ -492,7 +520,8 @@ export function create(options = {}) {
   function operationFor(pointer) {
     const gesture = state.gesture;
     if (!gesture) return null;
-    const next = movedPoint(gesture.origin, gesture.kind, pointer);
+    const adjusted = {x: gesture.origin.x + pointer.x - gesture.start.x, y: gesture.origin.y + pointer.y - gesture.start.y};
+    const next = movedPoint(gesture.origin, gesture.kind, adjusted);
     if (samePoint(gesture.origin, next)) return null;
     return {
       id: gesture.id,
@@ -548,10 +577,12 @@ export function create(options = {}) {
       render();
       onChange?.({scene: body.scene, operations: body.operations, revision: body.revision});
       onCommit?.({scene: body.scene, operations: body.operations, revision: body.revision});
+      onGestureChange?.(false);
       return;
     }
     render();
-    if (!commit && gesture.previewed) emitChange();
+    if (gesture.previewed) emitChange();
+    onGestureChange?.(false);
   }
 
   function beginGesture(event,point,series,mark,kind,origin) {
@@ -564,9 +595,11 @@ export function create(options = {}) {
       kind,
       origin: {x: origin.x, y: origin.y, axis: origin.axis, baseline: origin.baseline, width: origin.width, radius: origin.radius},
       pointerId: event.pointerId,
+      start: point,
       holder,
       operation() { return operationFor(holder.current); },
     };
+    onGestureChange?.(true);
     if (event.pointerId != null && typeof stage.setPointerCapture === 'function') {
       try { stage.setPointerCapture(event.pointerId); } catch { /* already released */ }
     }
@@ -575,20 +608,17 @@ export function create(options = {}) {
   function onPointerDown(event) {
     if (state.destroyed || state.compare || state.gesture) return;
     if (event.button != null && event.button !== 0) return;
-    const mark = markFrom(event.target);
+    let mark = markFrom(event.target);
     const point = eventPoint(event);
     if (!mark || !point) return;
     const scene = history.scene();
+    if (mark.kind === 'scatter') mark = nearestScatter(scene, point, mark);
     const series = seriesById(scene, mark.seriesId);
     const origin = series?.points?.[mark.index];
     if (!origin || !finite(origin.x) || !finite(origin.y)) return;
     const kind = mark.kind || markKind(series);
     state.selection = {seriesId: series.id, index: mark.index, kind};
-    const draggable = kind === 'scatter' || mark.handle === 'value';
-    if (!draggable) {
-      render();
-      return;
-    }
+    try { root.focus?.({preventScroll: true}); } catch { root.focus?.(); }
     beginGesture(event,point,series,mark,kind,origin);
     render();
     emitChange();
@@ -633,6 +663,11 @@ export function create(options = {}) {
     setStatus('다시 실행했습니다.');
   }
 
+  function canMoveSelectedByKey(key, mod) {
+    return !mod && !!state.selection && !state.gesture && !state.compare
+      && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(key);
+  }
+
   function onKeyDown(event) {
     if (state.destroyed || event.target?.tagName === 'INPUT') return;
     const key = String(event.key || '');
@@ -648,10 +683,30 @@ export function create(options = {}) {
       redo();
       return;
     }
+    if (canMoveSelectedByKey(key, mod)) {
+      event.preventDefault?.();
+      moveSelectedByKey(key, event.shiftKey ? 10 : 1);
+      return;
+    }
     if (key === 'Escape' && state.gesture) {
       event.preventDefault?.();
       endGesture(false);
     }
+  }
+
+  function moveSelectedByKey(key, step) {
+    const {seriesId, index, kind} = state.selection;
+    const point = seriesById(history.scene(), seriesId)?.points?.[index];
+    if (!point) return;
+    const pointer = {x: point.x + (key === 'ArrowRight' ? step : key === 'ArrowLeft' ? -step : 0),
+      y: point.y + (key === 'ArrowDown' ? step : key === 'ArrowUp' ? -step : 0)};
+    const next = movedPoint(point, kind, pointer);
+    if (samePoint(point, next)) return;
+    history.apply([{id: nextId(), kind: 'set-values', seriesId, points: [{index, ...next}]}]);
+    const body = snapshot();
+    render();
+    onChange?.({scene: body.scene, operations: body.operations, revision: body.revision});
+    onCommit?.({scene: body.scene, operations: body.operations, revision: body.revision});
   }
 
   function onPrecisionChange(event) {
@@ -677,13 +732,13 @@ export function create(options = {}) {
   }
 
   function toggleCompare() {
+    if (state.gesture) endGesture(false);
     if (!state.originalPng) {
       state.compare = false;
       render();
       setStatus('비교할 원본 이미지가 없습니다.');
       return;
     }
-    if (state.gesture) endGesture(false);
     state.compare = !state.compare;
     render();
   }
@@ -730,12 +785,9 @@ export function create(options = {}) {
     redo,
     destroy() {
       if (state.destroyed) return;
+      if (state.gesture) endGesture(false);
       dropPreviewFrame();
       state.destroyed = true;
-      if (state.gesture) {
-        release(state.gesture.pointerId);
-        state.gesture = null;
-      }
       for (const off of listeners) off();
       listeners.length = 0;
       if (typeof root.remove === 'function') root.remove();
@@ -819,9 +871,8 @@ export const EDITOR_CSS = `/* Falsify chart mark editor. No remote assets. */
 .falsify-mark-stage.is-comparing .falsify-mark-svg {
   visibility: hidden;
 }
-.falsify-mark-bar {
-  cursor: pointer;
-}
+.falsify-mark-bar { cursor: ns-resize; }
+.falsify-mark-bar:hover, .falsify-mark-point:hover { stroke: #1d1a16; stroke-width: 3px; }
 .falsify-mark-handle {
   fill: #fffdf8;
   stroke: #1d1a16;
@@ -832,10 +883,12 @@ export const EDITOR_CSS = `/* Falsify chart mark editor. No remote assets. */
 .falsify-mark-handle.is-horizontal {
   cursor: ew-resize;
 }
+.falsify-mark-hit { cursor: move; }
 .falsify-mark-point {
   cursor: move;
   vector-effect: non-scaling-stroke;
 }
+.falsify-mark-precision[hidden], .falsify-mark-button[hidden] { display: none; }
 .falsify-mark-precision {
   background: #fffdf8;
   border: 1px solid #d9d2c5;

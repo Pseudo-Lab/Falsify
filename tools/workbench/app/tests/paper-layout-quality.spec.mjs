@@ -87,3 +87,26 @@ test('source coordinates and subset font names do not claim output geometry afte
   const noBody=inspectLayoutQuality({bytes,mupdf,profile:{coordinateSpace:'source',bodyFontSize:12,bodyFontNames:['ABCDEF+SourceFont']}});
   assert.ok(!noBody.issues.some(i=>i.type==='small-body-text'||i.type==='body-font-deviation'));assert.equal(noBody.coverage.profile.bodyLines.skipped,1);
 });
+
+test('footnote-body-overlap detects collisions in right column, full width and page 2',()=>{
+  const d=new mupdf.PDFDocument(),font=d.addSimpleFont(new mupdf.Font('Helvetica'));
+  const line=(t,x,y,size=10)=>`BT /F ${size} Tf ${x} ${y} Td (${t}) Tj ET\n`;
+  const rule=(x0,y,x1)=>`0.5 w ${x0} ${y} m ${x1} ${y} l S\n`;
+  const p1=line('Left column normal body line top.',40,700)+line('Left column normal body line mid.',40,650)
+   +line('Right column top body text line.',320,700)+line('Right column colliding body line!',320,100)
+   +rule(320,115,440)+line('1 Right column footnote text.',320,96,8);
+  const p2=line('Page 2 left overlapping body line!',40,95)+line('Page 2 right colliding body line!',320,95)
+   +rule(40,110,560)+line('Full-width copyright notice on page two.',40,90,8);
+  d.insertPage(-1,d.addPage([0,0,600,800],0,{Font:{F:font}},p1));
+  d.insertPage(-1,d.addPage([0,0,600,800],0,{Font:{F:font}},p2));
+  const buf=d.saveToBuffer(),bytes=buf.asUint8Array().slice();buf.destroy();d.destroy();
+  const r=inspectLayoutQuality({bytes,mupdf,profile:{columnCount:2}});
+  const overlaps=r.issues.filter(i=>i.type==='footnote-body-overlap');
+  assert.equal(overlaps.length,2,JSON.stringify(overlaps));
+  assert.equal(overlaps[0].pageIndex,0);
+  assert.equal(overlaps[0].evidence.column,'right');
+  assert.ok(overlaps[0].evidence.deltaBp>0);
+  assert.equal(overlaps[1].pageIndex,1);
+  assert.equal(overlaps[1].evidence.column,'full');
+  assert.ok(overlaps[1].evidence.deltaBp>0);
+});

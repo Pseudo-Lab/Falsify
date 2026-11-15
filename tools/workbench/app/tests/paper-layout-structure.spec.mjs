@@ -5,7 +5,7 @@ import {createLatexProject} from '../src/latex-project.mjs';
 import {readLayoutStructure,applyLayoutStructure,renderStructureRegion} from '../src/paper-layout-structure.mjs';
 const hash='a'.repeat(64),enc=new TextEncoder(),dec=new TextDecoder();
 const ev=bbox=>({sourceSha256:hash,pageIndex:0,frame:'mupdf-display',bbox});
-const item=(id,kind,bbox,text)=>({id,kind,status:'observed',evidence:[ev(bbox)],text,extensions:{columns:2,span:'column'}});
+const item=(id,kind,bbox,text,pageIndex=0)=>({id,kind,status:'observed',evidence:[{sourceSha256:hash,pageIndex,frame:'mupdf-display',bbox}],text,extensions:{columns:2,span:'column'}});
 const model={schema:'falsify.pdf-latex-reconstruction.v1',sourceSha256:hash,pages:[{pageIndex:0,width:600,height:800,frame:'mupdf-display',extensions:{layoutHints:{columns:2,gutterBp:[290,310],status:'proposed',provenance:'paper-flow'}}}],items:[item('title','heading',[40,80,520,100],'Title'),item('author','paragraph',[40,120,480,135],'A. Author'),item('abstract','paragraph',[40,150,520,220],'Abstract text'),item('left','paragraph',[40,260,280,350],'Left 123'),item('right','paragraph',[320,260,560,350],'Right 456')],assets:[],relations:[],diagnostics:[]};
 const make=async(testModel=model)=> (await createReconstructionProject({sourceSha256:hash,model:testModel},[],{layout:'semantic-flow',profile:{schema:'falsify.paper-typography.v1',page:{widthBp:600,heightBp:800,columns:2,gutterBp:20,margins:{left:40,right:40,top:36,bottom:36}},body:{indentEm:1,paragraphGapEm:0},roles:Object.fromEntries(['body','heading','caption','footnote'].map(x=>[x,{sizeBp:10,leadingBp:12}])),fonts:{serif:'Latin Modern Roman'},packages:{}}})).project;
 const source=p=>dec.decode(p.files.find(f=>f.path==='main.tex').bytes);
@@ -52,4 +52,28 @@ test('moving a first-column footnote into footer reserves local body space witho
  assert.deepEqual(contents(source(out.project)),contents(source(p)));
  const again=await applyLayoutStructure({project:out.project,plan});assert.equal(again.project.id,out.project.id);
  const restored=await applyLayoutStructure({project:out.project,plan:s.plan});assert.deepEqual(readLayoutStructure(restored.project).bodyReservations,[]);assert.doesNotMatch(source(restored.project),/\\enlargethispage/);
+});
+
+test('two-column reservations support right-column, full-width and arbitrary pageIndex',async()=>{
+ const units=[
+  item('body0','paragraph',[40,70,280,680],'Page 1 left',0),
+  item('body0r','paragraph',[320,70,560,680],'Page 1 right',0),
+  item('foot0r','paragraph',[320,740,560,754],'Page 1 right footnote',0),
+  item('body1','paragraph',[40,70,280,680],'Page 2 left',1),
+  item('body1r','paragraph',[320,70,560,680],'Page 2 right',1),
+  item('foot1full','paragraph',[40,735,560,752],'Page 2 full-width footer',1),
+ ];
+ const m={schema:'falsify.pdf-latex-reconstruction.v1',sourceSha256:hash,pages:[0,1].map(pageIndex=>({pageIndex,width:600,height:800,frame:'mupdf-display',extensions:{layoutHints:{columns:2,gutterBp:[290,310]}}})),items:units,assets:[],relations:[],diagnostics:[]};
+ const p=await make(m),s=readLayoutStructure(p);
+ const plan={...s.plan,furniture:[{id:'foot0r',placement:'footer'},{id:'foot1full',placement:'footer'}]};
+ const out=await applyLayoutStructure({project:p,plan}),st=readLayoutStructure(out.project);
+ assert.deepEqual(st.bodyReservations,[
+  {pageIndex:0,column:'right',deltaBp:42},
+  {pageIndex:1,column:'full',deltaBp:47},
+ ]);
+ const tex=source(out.project);
+ assert.match(tex,/\\FalsifyBodyReservations/);
+ assert.match(tex,/\\@outputdblcol/);
+ assert.match(tex,/\\ifnum\\value\{page\}=1\\relax\\if@firstcolumn\\else\\enlargethispage\{-42bp\}\\fi\\fi/);
+ assert.match(tex,/\\ifnum\\value\{page\}=2\\relax\\enlargethispage\{-47bp\}\\fi/);
 });

@@ -1,3 +1,125 @@
+import {extractMacroDefinitions, readBalanced} from './latex-project.mjs';
+
+const CITATION_CMDS = new Set(['cite','citep','citet','citealp','citealt','citeauthor','citeyear','citeyearpar','autocite','parencite','textcite','footcite','fullcite','nocite','supercite','smartcite']);
+const skipWs = (s, i) => { while (i < s.length && /\s/.test(s[i])) i++; return i; };
+
+function matchCitationAt(source, start) {
+  if (source[start] !== '\\') return -1;
+  let i = start;
+  const pre = /^\\AtNextCite\b/.exec(source.slice(i));
+  if (pre) {
+    const grp = readBalanced(source, skipWs(source, i + pre[0].length));
+    if (!grp) return -1;
+    i = skipWs(source, grp.end);
+    const next = matchCitationAt(source, i);
+    return next >= 0 ? next : grp.end;
+  }
+  const cmd = /^\\([A-Za-z@]+)\*?/.exec(source.slice(i));
+  if (!cmd || !CITATION_CMDS.has(cmd[1])) return -1;
+  i = skipWs(source, i + cmd[0].length);
+  for (let k = 0; k < 2 && source[i] === '['; k++) {
+    const opt = readBalanced(source, i, '[', ']');
+    if (!opt) return -1;
+    i = skipWs(source, opt.end);
+  }
+  const grp = readBalanced(source, i);
+  return grp ? grp.end : -1;
+}
+
+function collectProjectMacros(project) {
+  const macros = new Map();
+  if (!Array.isArray(project?.files)) return macros;
+  const dec = new TextDecoder('utf-8', {fatal: false, ignoreBOM: true});
+  for (const f of project.files) {
+    if (!/\.(?:tex|sty|cls)$/i.test(f?.path || '') || !(f.bytes instanceof Uint8Array)) continue;
+    for (const m of extractMacroDefinitions(dec.decode(f.bytes), f.path)) {
+      if (m.arity <= 1) macros.set(m.name, m);
+    }
+  }
+  return macros;
+}
+
+function expandSimpleTex(raw) {
+  let out = raw.replace(/\\(?:lVert|rVert|\|)/g, '‖').replace(/\\(?:lvert|rvert)/g, '|').replace(/~/g, ' ');
+  let prev;
+  do {
+    prev = out;
+    out = out.replace(/\\(?:textbf|textit|emph|texttt|textrm|textsf|textsc|mbox)\s*\{([^{}]*)\}/g, '$1');
+  } while (out !== prev);
+  return out.replace(/[{}]/g, '');
+}
+
+function matchMacroAt(source, start, macros) {
+  if (!macros?.size || source[start] !== '\\') return null;
+  const cmd = /^\\([A-Za-z@]+)/.exec(source.slice(start));
+  if (!cmd) return null;
+  const macro = macros.get('\\' + cmd[1]);
+  if (!macro) return null;
+  let i = start + cmd[0].length;
+  if (macro.arity === 0) {
+    if (source.slice(i, i + 2) === '{}') i += 2;
+    return {end: i, display: expandSimpleTex(macro.body)};
+  }
+  i = skipWs(source, i);
+  if (source[i] === '*') i = skipWs(source, i + 1);
+  const arg = readBalanced(source, i);
+  if (!arg) return null;
+  const display = expandSimpleTex(macro.body.replace(/#1/g, expandSimpleTex(arg.content)));
+  return {end: arg.end, display};
+}
+
+function citationSpans(source) {
+  const spans = [];
+  for (let i = 0; i < source.length; i++) {
+    if (source[i] !== '\\') continue;
+    const end = matchCitationAt(source, i);
+    if (end > i) { spans.push([i, end]); i = end - 1; }
+  }
+  return spans;
+}
+
+function sanitizeDocumentCitations(doc, source) {
+  const spans = citationSpans(source);
+  if (!spans.length || typeof doc.displayText !== 'string' || !Array.isArray(doc.displayMap)) return doc;
+  let displayText = '';
+  const displayMap = [];
+  for (let i = 0; i < doc.displayText.length; i++) {
+    const entry = doc.displayMap[i];
+    if (entry && spans.some(([s, e]) => entry.start >= s && entry.end <= e)) continue;
+    displayText += doc.displayText[i];
+    displayMap.push(entry);
+  }
+  return {...doc, displayText, displayMap};
+}
+
+function expandGapMacros(source, from, to, macros, outText, outMap) {
+  let text = outText;
+  for (let i = from; i < to; i++) {
+    if (source[i] !== '\\') continue;
+    const hit = matchMacroAt(source, i, macros);
+    if (!hit || hit.end > to) continue;
+    for (const ch of hit.display) { text += ch; outMap.push({nodeId: null, start: i, end: hit.end, macro: true}); }
+    i = hit.end - 1;
+  }
+  return text;
+}
+
+function expandDocumentMacros(doc, source, macros) {
+  if (!macros.size || typeof doc.displayText !== 'string' || !Array.isArray(doc.displayMap)) return doc;
+  let displayText = '', cursor = 0;
+  const displayMap = [];
+  for (let i = 0; i < doc.displayText.length; i++) {
+    const entry = doc.displayMap[i];
+    if (entry && entry.start > cursor) {
+      displayText = expandGapMacros(source, cursor, entry.start, macros, displayText, displayMap);
+    }
+    displayText += doc.displayText[i];
+    displayMap.push(entry);
+    if (entry) cursor = Math.max(cursor, entry.end);
+  }
+  return {...doc, displayText, displayMap};
+}
+
 // Align normalized display text, then accept only independently proven source spans.
 function findDisplayMatches(model,item,before) {
   const matches=[];
@@ -16,14 +138,31 @@ function findDisplayMatches(model,item,before) {
   return matches;
 }
 
-function selectedIsContinuous(selected,source) {
+function gapIsContinuous(gap, macros) {
+  let i = 0;
+  while (i < gap.length) {
+    if (/[\s{}]/.test(gap[i])) { i++; continue; }
+    if (gap[i] === '%') { while (i < gap.length && gap[i] !== '\n') i++; continue; }
+    if (gap[i] === '\\') {
+      const citeEnd = matchCitationAt(gap, i);
+      if (citeEnd > i) { i = citeEnd; continue; }
+      const cmd = /^\\(?:textsuperscript|textsubscript|cite|citep|citet)\b/.exec(gap.slice(i));
+      if (cmd) { i += cmd[0].length; continue; }
+      const mac = matchMacroAt(gap, i, macros);
+      if (mac) { i = mac.end; continue; }
+    }
+    return false;
+  }
+  return true;
+}
+
+function selectedIsContinuous(selected,source,macros) {
   for (let i=1;i<selected.length;i++) {
     const a=selected[i-1].at(-1), b=selected[i][0];
-    if (!a || !b || a.end>b.start) return false;
-    if (a.nodeId!==b.nodeId) {
-      const gap=source.slice(a.end,b.start).replace(/%[^\r\n]*/g,'').replace(/\\(?:textsuperscript|textsubscript|cite|citep|citet)\b/g,'').replace(/[{}\s]/g,'');
-      if (gap) return false;
-    }
+    if (!a || !b) return false;
+    if (a.macro && b.macro && a.start===b.start && a.end===b.end) continue;
+    if (a.end>b.start) return false;
+    if (a.nodeId!==b.nodeId && !gapIsContinuous(source.slice(a.end,b.start),macros)) return false;
   }
   return true;
 }
@@ -58,11 +197,25 @@ function computeChangedSpans(before,after) {
   return {a,spans};
 }
 
+function buildMacroAwareModel(project, model, macros) {
+  const dec = new TextDecoder('utf-8', {fatal: true, ignoreBOM: true});
+  const documents = (model.documents || []).map(doc => {
+    const file = project.files?.find(f => f.path === doc.path);
+    if (!file) return doc;
+    let src; try { src = dec.decode(file.bytes); } catch { return doc; }
+    const clean = sanitizeDocumentCitations(doc, src);
+    return macros.size ? expandDocumentMacros(clean, src, macros) : clean;
+  });
+  return {...model, documents};
+}
+
 function narrowMixed(project, model, item, base) {
   const normalize = value => value.replace(/\s+/g,' ');
   const before=normalize(item.before), after=normalize(item.after);
   if (!before || before===after) return null;
-  const matches=findDisplayMatches(model,item,before);
+  const macros=collectProjectMacros(project);
+  const aware=buildMacroAwareModel(project,model,macros);
+  const matches=findDisplayMatches(aware,item,before);
   if (!matches.length) return null;
   const unresolved=status=>({...base,enabled:false,status});
   if (matches.length!==1) return unresolved('ambiguous');
@@ -71,7 +224,7 @@ function narrowMixed(project, model, item, base) {
   let source; try {source=new TextDecoder('utf-8',{fatal:true,ignoreBOM:true}).decode(file.bytes);} catch {return unresolved('unresolved');}
   const selected=map.slice(at,at+before.length).map(m=>doc.displayMap.slice(m.start,m.end));
   // Do not infer the display of hidden macros, math or footnotes between mapped nodes.
-  if (!selectedIsContinuous(selected,source)) return unresolved('unresolved');
+  if (!selectedIsContinuous(selected,source,macros)) return unresolved('unresolved');
   // Code points avoid splitting UTF-16 surrogate pairs, while offsets remain UTF-16.
   const differences=computeChangedSpans(before,after);
   if(!differences) return unresolved('unresolved');
@@ -81,7 +234,7 @@ function narrowMixed(project, model, item, base) {
   function appendChange(span) {
     const startIndex=a[span.from].start, endIndex=a[span.to-1].end;
     const entries=selected.slice(startIndex,endIndex).flat();
-    if(!entries.length || entries.some(x=>!x || x.nodeId!==entries[0].nodeId)) return false;
+    if(!entries.length || !entries[0]?.nodeId || entries.some(x=>!x || x.nodeId!==entries[0].nodeId)) return false;
     for(let k=1;k<entries.length;k++) if(entries[k-1].end!==entries[k].start) return false;
     const node=(model.nodes || []).find(x=>x.id===entries[0].nodeId && x.path===doc.path);
     const start=entries[0].start,end=entries.at(-1).end;

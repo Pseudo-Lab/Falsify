@@ -10,8 +10,8 @@ Public API:
 image is HxWx3 uint8, row 0 at the top. points are pixel indexes in that array,
 which are also crop pixels when the chart image is placed 1:1. trace_series asks
 the existing PlotTracer findLines core for each saturated color. It does not
-invent a second tracer. Gaps come back as separate series with an explicit
-branch id, and the samples stay dense enough for an interior bump.
+invent a second tracer. Editing retains the upstream skeleton graph's short
+joins and junctions; numerical measurement keeps its separate findLines route.
 
 edit_raster clears only the color pixels in a corridor around the changed span
 of the selected polyline, then paints that span. Other curves of the same color
@@ -45,12 +45,25 @@ def _rgb(image):
 
 
 def color_mask(image, color, tolerance=_TOLERANCE):
-    """True where every channel is within tolerance of color. The input is not modified."""
+    """Source ink and its antialiased mixes with white; exclude achromatic grids."""
     cv2, np = _deps()
     array = _rgb(image)
+    import paper_chart_dark_curve as dark
+    if dark.is_neutral_dark_color(color):
+        return dark.dark_neutral_ink_mask(array, color, tolerance, np)
     target = np.array([int(color[0]), int(color[1]), int(color[2])], dtype=np.int16)
     delta = np.max(np.abs(array.astype(np.int16) - target), axis=2)
-    return delta <= int(tolerance)
+    ink = 255.0 - target.astype(np.float32)
+    pixels = array.astype(np.float32)
+    coverage = np.sum((255.0 - pixels) * ink, axis=2) / max(float(np.dot(ink, ink)), 1.0)
+    residual = np.max(np.abs(pixels - (255.0 - coverage[:, :, None] * ink)), axis=2)
+    chroma = pixels.max(axis=2) - pixels.min(axis=2)
+    mixed = (coverage >= .08) & (coverage <= 1.5) & (residual <= int(tolerance)) & (chroma >= 10)
+    hsv = cv2.cvtColor(array, cv2.COLOR_RGB2HSV)
+    hue = int(cv2.cvtColor(np.uint8([[color]]), cv2.COLOR_RGB2HSV)[0, 0, 0])
+    difference = np.abs(hsv[:, :, 0].astype(np.int16) - hue)
+    shades = (np.minimum(difference, 180 - difference) <= 5) & (hsv[:, :, 1] >= 30) & (chroma >= 10)
+    return (delta <= int(tolerance)) | mixed | shades
 
 
 def _seek(image, mask, y, x, dy, dx):
@@ -128,7 +141,7 @@ def paint_polyline(image, points, color, width):
     return out
 
 
-def _changed_spans(points, new_points, eps=0.2):
+def _changed_spans(points, new_points, eps=1e-4):
     """Inclusive index spans of points that moved, expanded by one sample so joins stay covered."""
     if not points:
         return []
@@ -169,6 +182,23 @@ def _corridor(shape, polylines, radius):
     return layer.astype(bool)
 
 
+def _ink_and_structural_guard(array, color, tolerance, cv2, np):
+    import paper_chart_dark_curve as dark
+    ink = color_mask(array, color, tolerance)
+    if not dark.is_neutral_dark_color(color):
+        return ink, None
+    struct = dark.structural_neutral_mask(array, cv2, np)
+    return ink & (~struct), struct
+
+
+def _apply_structural_guard(out, array, guard, soft=None, alpha=None):
+    if guard is not None and bool(guard.any()):
+        out[guard] = array[guard]
+        if soft is not None and alpha is not None:
+            soft[guard] = alpha[guard][:, None]
+    return out
+
+
 def edit_raster(image, points, new_points, color, width, tolerance=_TOLERANCE):
     """Restore the changed span of this curve, then paint its new samples.
 
@@ -183,18 +213,18 @@ def edit_raster(image, points, new_points, color, width, tolerance=_TOLERANCE):
     spans = _changed_spans(points, new_points)
     if not spans:
         return array.copy()
-    ink = color_mask(array, color, tolerance)
+    ink, guard = _ink_and_structural_guard(array, color, tolerance, cv2, np)
     pieces = [points[begin:end + 1] for begin, end in spans if end >= begin]
     mask = _corridor(array.shape[:2], pieces, max(1.0, float(width) * 0.5 + 2.0)) & ink
     base = restore_under_mask(array, mask)
     if new_points is None:
-        return base
+        return _apply_structural_guard(base, array, guard)
     if len(points) != len(new_points):
-        return paint_polyline(base, new_points, color, width)
+        return _apply_structural_guard(paint_polyline(base, new_points, color, width), array, guard)
     out = base
     for begin, end in spans:
         out = paint_polyline(out, new_points[begin:end + 1], color, width)
-    return out
+    return _apply_structural_guard(out, array, guard)
 
 
 def _same_points(points, new_points, eps=1e-4):
@@ -204,6 +234,70 @@ def _same_points(points, new_points, eps=1e-4):
         if abs(float(left[0]) - float(right[0])) > eps or abs(float(left[1]) - float(right[1])) > eps:
             return False
     return True
+
+
+def edit_batch(image, edits, alpha=None):
+    """Clear all changed source corridors before drawing any destination stroke."""
+    cv2, np = _deps()
+    array = _rgb(image)
+    masks, paints = {}, []
+    for points, current, color, width in edits:
+        if _same_points(points, current):
+            continue
+        spans = _changed_spans(points, current)
+        radius = max(1.0, float(width) * .5 + 2)
+        corridor = _batch_corridor(array.shape[:2], points, spans, radius, current is not None)
+        key = tuple(color)
+        masks[key] = masks.get(key, np.zeros(array.shape[:2], dtype=bool)) | corridor
+        if current is not None:
+            ranges = spans if len(points) == len(current) else [(0, len(current) - 1)]
+            paints.extend((current[a:b + 1], color, width) for a, b in ranges)
+    cleared = np.zeros(array.shape[:2], dtype=bool)
+    combined_guard = np.zeros(array.shape[:2], dtype=bool)
+    opacity = {}
+    for color, corridor in masks.items():
+        ink, guard = _ink_and_structural_guard(array, color, _TOLERANCE, cv2, np)
+        cleared |= corridor & ink
+        if guard is not None:
+            combined_guard |= guard
+        if alpha is not None:
+            samples = alpha[ink & (alpha > 0)]
+            opacity[color] = int(np.median(samples)) if samples.size else 255
+    out = restore_under_mask(array, cleared)
+    soft = None if alpha is None else restore_under_mask(np.repeat(alpha[:, :, None], 3, axis=2), cleared)
+    for points, color, width in paints:
+        out = paint_polyline(out, points, color, width)
+        if soft is not None:
+            soft = paint_polyline(soft, points, (opacity[tuple(color)],) * 3, width)
+    _apply_structural_guard(out, array, combined_guard, soft=soft, alpha=alpha)
+    return out if soft is None else (out, soft[:, :, 0].copy())
+
+
+def _trim_cap(mask, point, inside, radius):
+    """An erasure's extra clearance must not eat the unchanged line past a join."""
+    _, np = _deps()
+    x, y = point
+    x0, y0 = max(0, int(x - radius - 1)), max(0, int(y - radius - 1))
+    x1, y1 = min(mask.shape[1], int(x + radius + 2)), min(mask.shape[0], int(y + radius + 2))
+    if x1 <= x0 or y1 <= y0:
+        return
+    yy, xx = np.ogrid[y0:y1, x0:x1]
+    behind = (xx - x) * (inside[0] - x) + (yy - y) * (inside[1] - y) < 0
+    mask[y0:y1, x0:x1][behind] = False
+
+
+def _batch_corridor(shape, points, spans, radius, trim):
+    _, np = _deps()
+    mask = np.zeros(shape, dtype=bool)
+    for a, b in spans:
+        piece = _corridor(shape, [points[a:b + 1]], radius)
+        if trim and b > a:
+            if a > 0:
+                _trim_cap(piece, points[a], points[a + 1], radius)
+            if b < len(points) - 1:
+                _trim_cap(piece, points[b], points[b - 1], radius)
+        mask |= piece
+    return mask
 
 
 def _colors(image):
@@ -263,33 +357,6 @@ def _dedupe(points):
     return kept
 
 
-def _near(point, other, tol=1.5):
-    return abs(float(point[0]) - float(other[0])) <= tol and abs(float(point[1]) - float(other[1])) <= tol
-
-
-def _split_gaps(points, gaps):
-    """Split one traced line at the gaps PlotTracer already recorded."""
-    if len(points) < 2:
-        return []
-    cuts = []
-    for gap in gaps or []:
-        if not isinstance(gap, (list, tuple)) or len(gap) < 2:
-            continue
-        left, right = gap[0], gap[1]
-        for index in range(len(points) - 1):
-            if _near(points[index], left) and _near(points[index + 1], right):
-                cuts.append(index + 1)
-    runs = []
-    start = 0
-    for cut in sorted(set(cuts)):
-        if cut - start >= 2:
-            runs.append(points[start:cut])
-        start = cut
-    if len(points) - start >= 2:
-        runs.append(points[start:])
-    return runs
-
-
 def _stroke_width(mask, points):
     """Median diameter of this color mask at the traced centreline. Not a second tracer."""
     cv2, np = _deps()
@@ -308,13 +375,15 @@ def _stroke_width(mask, points):
     if not samples:
         return 1.0
     samples.sort()
-    return max(1.0, samples[len(samples) // 2])
+    # LINE_8 paints 2*r+1 pixel support for a non-hairline stroke. Convert the
+    # measured support back to its even thickness rather than adding it twice.
+    return float(max(1, 2 * int(samples[len(samples) // 2] / 2)))
 
 
-def _trace_color(array, color, window, tolerance):
+def _trace_color(array, color, window, tolerance, *, custom_ink=None):
     cv2, np = _deps()
     height, width = array.shape[:2]
-    ink = color_mask(array, color, tolerance) & window
+    ink = (custom_ink if custom_ink is not None else color_mask(array, color, tolerance)) & window
     if int(ink.sum()) < _MIN_PIXELS:
         return []
     # Trace only the selected image window, at a bounded working resolution.
@@ -324,30 +393,54 @@ def _trace_color(array, color, window, tolerance):
         return []
     x0, x1 = max(0, int(xs.min())-2), min(width, int(xs.max())+3)
     y0, y1 = max(0, int(ys.min())-2), min(height, int(ys.max())+3)
-    local = ink[y0:y1, x0:x1]
-    local_h, local_w = local.shape
+    local = np.full_like(array[y0:y1, x0:x1], 255)
+    # Exclude achromatic grids/text, retaining the source ink's pale edge mixes.
+    # Passing a strict RGB-only binary mask here used to shatter thin lines.
+    local[ink[y0:y1, x0:x1]] = color
+    local_h, local_w = local.shape[:2]
     scale = min(1.0, 1200.0/max(local_w, local_h))
     tw, th = max(1, round(local_w*scale)), max(1, round(local_h*scale))
     if scale < 1:
-        local = cv2.resize(local.astype(np.float32), (tw, th), interpolation=cv2.INTER_AREA) > .2
-    isolated = np.full((th, tw, 3), 255, dtype=np.uint8)
-    isolated[local] = color
-    rgba = np.concatenate([isolated, np.full((th, tw, 1), 255, np.uint8)], axis=2)
-    region = {'x': -8, 'y': -8, 'width': tw + 16, 'height': th + 16}
+        local = cv2.resize(local, (tw, th), interpolation=cv2.INTER_AREA)
+    rgba = np.concatenate([local, np.full((th, tw, 1), 255, np.uint8)], axis=2)
+    region = {'x': -8, 'y': -8, 'width': tw + 16, 'height': th + 16, 'route': 'edit-network'}
     traced = _tracer().trace(rgba.tobytes(), tw, th, [{'id': 'series', 'rgb': list(color)}], region, True)
     series = (traced.get('series') or [{}])[0]
     found = []
     for line in series.get('lines') or []:
         points = _dedupe(line.get('points') or [])
-        for run in _split_gaps(points, line.get('gaps')):
+        if points:
+            points[-1] = tuple(line['points'][-1])
+        # A gap already bridged confidently by findLines is one editing curve.
+        for run in [points]:
             if len(run) >= 2:
-                found.append([((x+.5)*local_w/tw-.5+x0, (y+.5)*local_h/th-.5+y0) for x,y in run])
+                found.append({'points': [((x+.5)*local_w/tw-.5+x0, (y+.5)*local_h/th-.5+y0) for x,y in run],
+                              'nodes': line.get('nodes', [None, None]), 'endKinds': line.get('endKinds', [None, None])})
     return found
 
 
+def _append_traced_color(series, array, color, window, tolerance, bounds, ink, custom_ink=None):
+    x0, y0, x1, y1 = bounds
+    for edge in _trace_color(array, color, window, tolerance, custom_ink=custom_ink):
+        points = edge['points']
+        kept = [point for point in points if x0 - 1 <= point[0] <= x1 + 1 and y0 - 1 <= point[1] <= y1 + 1]
+        if len(kept) < 2:
+            continue
+        series.append({
+            'color': color,
+            'width': _stroke_width(ink, kept),
+            'points': kept,
+            'branch': 'b%d' % len(series),
+            'pixels': int(ink.sum()),
+            'nodes': edge['nodes'],
+            'endKinds': edge['endKinds'],
+        })
+
+
 def trace_series(image, plot_bbox=None, tolerance=_TOLERANCE):
-    """One dense polyline per PlotTracer line. Same-color branches stay separate."""
+    """Source-bound graph edges; junction identities keep their editing connected."""
     cv2, np = _deps()
+    import paper_chart_dark_curve as dark
     array = _rgb(image)
     height, width = array.shape[:2]
     x0, y0, x1, y1 = (0, 0, width, height) if not plot_bbox else [int(v) for v in plot_bbox]
@@ -355,18 +448,14 @@ def trace_series(image, plot_bbox=None, tolerance=_TOLERANCE):
     x1, y1 = min(width, x1), min(height, y1)
     window = np.zeros((height, width), dtype=bool)
     window[y0:y1, x0:x1] = True
+    bounds = (x0, y0, x1, y1)
     series = []
-    for color in _colors(array[y0:y1, x0:x1]):
-        ink = color_mask(array, color, tolerance)
-        for points in _trace_color(array, color, window, tolerance):
-            kept = [point for point in points if x0 - 1 <= point[0] <= x1 + 1 and y0 - 1 <= point[1] <= y1 + 1]
-            if len(kept) < 2:
-                continue
-            series.append({
-                'color': color,
-                'width': _stroke_width(ink, kept),
-                'points': kept,
-                'branch': 'b%d' % len(series),
-                'pixels': int(ink.sum()),
-            })
+    chromatic = _colors(array[y0:y1, x0:x1])
+    for color in chromatic:
+        ink = np.max(np.abs(array.astype(np.int16) - np.array(color, np.int16)), axis=2) <= tolerance
+        _append_traced_color(series, array, color, window, tolerance, bounds, ink)
+    found_dark = dark.extract_dark_neutral_curve(array, window, chromatic, _MIN_PIXELS, cv2, np)
+    if found_dark is not None:
+        dark_color, dark_mask = found_dark
+        _append_traced_color(series, array, dark_color, window, tolerance, bounds, dark_mask, custom_ink=dark_mask)
     return series

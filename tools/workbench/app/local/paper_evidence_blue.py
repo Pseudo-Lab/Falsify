@@ -9,10 +9,20 @@ import json
 import re
 
 SCHEMA = "falsify.paper-evidence.v1"
+MAX_CONTEXT_CHARS = 24_000
 _HEX = re.compile(r"[0-9a-f]{64}\Z")
 _CODE = re.compile(r"[a-z0-9_]{1,80}\Z")
 _DELIVERY = "delivery: text for an existing text-only review; not a model tool call; no image bytes in this text"
+MCP_TOOL_GUIDANCE = (
+    "mcpTools (when MCP is active): status, list_items, read_item, render_region, "
+    "read_page_text, search_text, list_references"
+)
 _CURVE_KEYS = ('id', 'name', 'color', 'requestedColor', 'effectiveColor', 'axisBinding', 'traceAmbiguous', 'pointKind')
+
+
+def mcp_guidance():
+    """Return read-only MCP tool guidance for BLUE prompts when MCP is active."""
+    return MCP_TOOL_GUIDANCE
 
 
 def _curve_source(series):
@@ -41,11 +51,25 @@ def _curve_source(series):
 
 
 class _Block:
-    def __init__(self, item_id, kind, text, complete):
+    def __init__(self, item_id, kind, text, complete, *, page_index=0, caption=None, classification="scientific", index=0):
         self.item_id = item_id
         self.kind = kind
         self.text = text
         self.complete = complete
+        self.page_index = page_index
+        self.caption = caption
+        self.classification = classification
+        self.index = index
+
+    def rank_key(self):
+        if self.kind == "table":
+            tier = 0 if self.caption else 1
+        elif self.kind == "figure":
+            tier = 4 if self.classification == "decorative" else (2 if self.caption else 3)
+        else:
+            tier = 3
+        page = self.page_index if type(self.page_index) is int and self.page_index >= 0 else 10**9
+        return (tier, page, self.index)
 
 
 def _validate_summary_counts(summary):
@@ -129,7 +153,16 @@ def _collect(store, paper_id, file_hash):
     return items, max(0, total - len(items)), capped
 
 
+def _format_table_logical(item, lines):
+    for key in ("logicalTableId", "partIndex", "partCount", "continuedFromId", "continuedIds", "footnotes", "units"):
+        if key in item and item[key] not in (None, []):
+            lines.append(f"{key}: " + json.dumps(item[key], ensure_ascii=False))
+    if isinstance(item.get("logicalTable"), dict) and item["logicalTable"].get("caption") and not item.get("caption"):
+        lines.append("logicalCaption: " + json.dumps(item["logicalTable"]["caption"], ensure_ascii=False))
+
+
 def _format_table(item, lines, complete):
+    _format_table_logical(item, lines)
     table = item.get("table")
     cells = table.get("cells") if isinstance(table, dict) else None
     if isinstance(table, dict) and "rows" in table:
@@ -150,10 +183,11 @@ def _format_table(item, lines, complete):
     return complete
 
 
-def _format_block(paper_id, item, kind):
+def _format_block(paper_id, item, kind, index=0):
     item_id = item["id"]
     page, bbox = item.get("pageIndex"), item.get("bbox")
     caption, provenance = item.get("caption"), item.get("provenance")
+    classification = item.get("classification") if kind == "figure" and item.get("classification") in ("decorative", "scientific") else "scientific"
     complete = (type(page) is int and page >= 0 and (caption is None or type(caption) is str)
                 and (provenance is None or isinstance(provenance, (str, dict))))
     try:
@@ -164,6 +198,8 @@ def _format_block(paper_id, item, kind):
             "caption: " + json.dumps(caption, ensure_ascii=False),
             "provenance: " + json.dumps(provenance, ensure_ascii=False),
         ]
+        if kind == "figure" and "classification" in item:
+            lines.append("classification: " + json.dumps(classification, ensure_ascii=False))
         if kind == "table":
             complete = _format_table(item, lines, complete)
         elif kind != "figure":
@@ -172,30 +208,35 @@ def _format_block(paper_id, item, kind):
         text = "\n".join(lines)
     except (TypeError, ValueError):
         return _Block(item_id, kind if kind in ("table", "figure") else "other",
-                      f"ITEM id={json.dumps(item_id, ensure_ascii=False)} unavailable", False)
-    return _Block(item_id, kind if kind in ("table", "figure") else "other", text, complete)
+                      f"ITEM id={json.dumps(item_id, ensure_ascii=False)} unavailable", False,
+                      page_index=page, caption=caption, classification=classification, index=index)
+    return _Block(item_id, kind if kind in ("table", "figure") else "other", text, complete,
+                  page_index=page, caption=caption, classification=classification, index=index)
 
 
-def _load_block(store, paper_id, file_hash, meta):
+def _load_block(store, paper_id, file_hash, meta, index=0):
     item_id, kind = meta["id"], meta["type"] if meta["type"] in ("table", "figure") else "other"
+    classification = meta.get("classification") if kind == "figure" and meta.get("classification") in ("decorative", "scientific") else "scientific"
     try:
         item = store.read_item(paper_id, item_id)
     except KeyError:
-        return _Block(item_id, kind, f"ITEM id={json.dumps(item_id, ensure_ascii=False)} unavailable", False)
+        return _Block(item_id, kind, f"ITEM id={json.dumps(item_id, ensure_ascii=False)} unavailable", False,
+                      page_index=meta.get("pageIndex"), caption=meta.get("caption"), classification=classification, index=index)
     except ValueError as exc:
         _fixed(exc)
     if not isinstance(item, dict) or item.get("id") != item_id:
         raise ValueError("paper_evidence_summary_invalid")
     if "fileHash" in item and item.get("fileHash") != file_hash:
         raise ValueError("paper_evidence_hash_mismatch")
-    return _format_block(paper_id, item, kind)
+    return _format_block(paper_id, item, kind, index=index)
 
 
-def _header(summary, facts, omitted_ids, limitations_in_text):
+def _header(summary, facts, omitted_ids, limitations_in_text, decorative_note=None):
     count = len(omitted_ids) + facts["list_gap"]
     lines = [
         "prepared-evidence falsify.paper-evidence.v1",
         _DELIVERY,
+        MCP_TOOL_GUIDANCE,
         f"paperId: {summary['paperId']}",
         f"fileHash: {summary['fileHash']}",
         f"status: {summary['status']}",
@@ -210,6 +251,8 @@ def _header(summary, facts, omitted_ids, limitations_in_text):
     if limitations_in_text:
         lines.append("limitations:")
         lines.extend(f"- {item}" for item in summary["limitations"])
+    if decorative_note:
+        lines.append(decorative_note)
     lines.extend([
         f"truncationCount: {count}",
         "omittedIds: " + json.dumps(omitted_ids, ensure_ascii=False),
@@ -250,30 +293,78 @@ def _result(summary, text, facts, included, omitted, max_chars, limitations_in_t
     return {"text": text, "coverage": coverage}
 
 
-def _try_pack(summary, blocks, facts, max_chars, limitations_in_text):
-    """Grow the omitted-id list until the header and the kept items agree.
+def _decorative_note(decorative_blocks):
+    if not decorative_blocks:
+        return None
+    ids = [b.item_id for b in decorative_blocks]
+    shown = ids[:10]
+    suffix = f", ... (+{len(ids) - 10} more)" if len(ids) > 10 else ""
+    return f"Decorative repeated assets omitted: {len(ids)} (ids: {', '.join(shown)}{suffix})"
 
-    A longer header can only drop more items, so the omitted set grows until
-    it matches the header that announced it.
-    """
-    omitted_ids = []
-    for _ in range(len(blocks) + 2):
-        header = _header(summary, facts, omitted_ids, limitations_in_text)
+
+def _omitted_scientific_footer(omitted_blocks, budget):
+    sci = [b for b in omitted_blocks if b.classification != "decorative"]
+    if not sci or budget <= 48:
+        return ""
+    header = "Omitted scientific items (fetch via read_item / render_region):"
+    if len(header) > budget:
+        return ""
+    lines, used = [header], len(header)
+    for b in sci:
+        cap = b.caption if isinstance(b.caption, str) else None
+        if cap and len(cap) > 80:
+            cap = cap[:77] + "..."
+        line = (
+            f"- id={json.dumps(b.item_id, ensure_ascii=False)} type={json.dumps(b.kind)} "
+            f"pageIndex={json.dumps(b.page_index)} caption={json.dumps(cap, ensure_ascii=False)}"
+        )
+        if used + 1 + len(line) > budget:
+            break
+        lines.append(line)
+        used += 1 + len(line)
+    return "\n".join(lines) if len(lines) > 1 else ""
+
+
+def _partition_blocks(blocks):
+    ranked = sorted(blocks, key=lambda b: b.rank_key())
+    scientific = [b for b in ranked if b.classification != "decorative"]
+    decorative = [b for b in ranked if b.classification == "decorative"]
+    if scientific and decorative:
+        return scientific, decorative, _decorative_note(decorative)
+    return ranked, [], None
+
+
+def _try_pack(summary, blocks, facts, max_chars, limitations_in_text):
+    """Grow the omitted-id list until the header and the kept items agree."""
+    pack_blocks, always_omitted, dec_note = _partition_blocks(blocks)
+    omitted_pack = []
+    seen = set()
+    for _ in range(len(pack_blocks) + 2):
+        omitted_ids = [b.item_id for b in omitted_pack] + [b.item_id for b in always_omitted]
+        header = _header(summary, facts, omitted_ids, limitations_in_text, decorative_note=dec_note)
         if len(header) > max_chars:
             return None
-        room, used, chosen, new_ids = max_chars - len(header), 0, [], []
-        for block in blocks:
+        footer = _omitted_scientific_footer(omitted_pack, max_chars - len(header) - 1)
+        footer_cost = len(footer) + 1 if footer else 0
+        room, used, chosen, new_omitted = max_chars - len(header) - footer_cost, 0, [], []
+        for block in pack_blocks:
             piece = len(block.text) + 1
             if used + piece <= room:
                 chosen.append(block)
                 used += piece
             else:
-                new_ids.append(block.item_id)
-        if new_ids == omitted_ids:
-            text = header if not chosen else header + "\n" + "\n".join(block.text for block in chosen)
-            omitted = [block for block in blocks if block not in chosen]
-            return _result(summary, text, facts, chosen, omitted, max_chars, limitations_in_text)
-        omitted_ids = new_ids
+                new_omitted.append(block)
+        state = tuple(b.item_id for b in new_omitted)
+        if state == tuple(b.item_id for b in omitted_pack):
+            body = [header, *(b.text for b in chosen)]
+            if footer:
+                body.append(footer)
+            text = "\n".join(body)
+            return _result(summary, text, facts, chosen, new_omitted + always_omitted, max_chars, limitations_in_text)
+        if state in seen:
+            return None
+        seen.add(state)
+        omitted_pack = new_omitted
     return None
 
 
@@ -339,7 +430,7 @@ def _append_analyses(store, paper_id, file_hash, blocks):
             header = _analysis_header(kind, native, method)
             context_entry = _analysis_context_entry(entry, kind, native, method)
             text = header + '\n' + json.dumps(context_entry, ensure_ascii=False, separators=(',', ':'))
-            blocks.append(_Block(analysis_id, 'other', text, True))
+            blocks.append(_Block(analysis_id, 'other', text, True, page_index=entry.get('pageIndex', 0), index=len(blocks)))
             analyses.append({'analysisId':analysis_id, 'kind':kind, 'pageIndex':entry['pageIndex'],
                              'imageSha256':entry['inputImage']['sha256'], 'provenance':entry['data'].get('provenance')})
             if context_entry is not entry:
@@ -370,7 +461,7 @@ def _validate_context_request(paper_id, file_hash, max_chars):
         raise ValueError("paper_evidence_budget_invalid")
 
 
-def context_for_review(paper_id, file_hash, store=None, max_chars=24000):
+def context_for_review(paper_id, file_hash, store=None, max_chars=MAX_CONTEXT_CHARS):
     """Return bounded raw table cells and figure captions for one prepared PDF.
 
     Hash mismatch and an unknown paper id are rejected. truncationCount counts
@@ -387,7 +478,7 @@ def context_for_review(paper_id, file_hash, store=None, max_chars=24000):
         _fixed(exc)
     require_summary(summary, paper_id=paper_id, file_hash=file_hash)
     metas, unlisted, capped = _collect(store, paper_id, file_hash)
-    blocks = [_load_block(store, paper_id, file_hash, meta) for meta in metas]
+    blocks = [_load_block(store, paper_id, file_hash, meta, index=i) for i, meta in enumerate(metas)]
     analyses = _append_analyses(store, paper_id, file_hash, blocks)
     facts = _coverage_facts(summary, metas, blocks, unlisted, capped)
     packed = _try_pack(summary, blocks, facts, max_chars, True)

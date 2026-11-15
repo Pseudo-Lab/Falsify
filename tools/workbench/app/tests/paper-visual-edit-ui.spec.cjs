@@ -302,82 +302,17 @@ serial('a source change drops an in-flight export',async()=>{
   assert.equal(h.ui.snapshot().outputFileHash,first);
 });
 
-serial('graph edits replot explicit points and hash the region',async()=>{
+serial('saved graph preparation failure offers retry without coordinate redraw',async()=>{
   const h=world();
   h.source={file:fileOf(PDF,'t.pdf'),fileHash:HASH,revision:'r1'};
   await h.ui.refresh();
   const radio=h.radios().find(el=>el.value==='analysis:achart');
   radio.checked=true;radio.dispatchEvent(new Event('change'));
-  await until(()=>h.labeled('점 1 세로'),'points');
+  await until(()=>h.button('다시 시도'),'fallback');
+  assert.ok(h.button('영역 다시 선택'));
+  assert.equal(h.labeled('점 1 세로'),undefined);
   assert.equal(h.renders.length,0);
-  assert.equal(h.labeled('점 1 낮은값').value,'');
-  h.labeled('점 1 세로').value='9';
-  h.labeled('점 1 세로').dispatchEvent(new Event('input'));
-  h.button('점 추가').click();
-  const added=all(h.host).filter(el=>el.getAttribute?.('aria-label')?.endsWith('가로')).at(-1);
-  const row=added.parentElement||added;
-  h.labeled('점 3 가로').value='5';
-  h.labeled('점 3 세로').value='6';
-  h.labeled('점 3 낮은값').value='1.5';
-  h.labeled('점 3 높은값').value='7';
-  for(const name of ['점 3 가로','점 3 세로','점 3 낮은값','점 3 높은값'])h.labeled(name).dispatchEvent(new Event('input'));
-  await until(()=>h.renders.length>=1,'replot');
-  const drawn=h.renders.at(-1).chart;
-  assert.equal(drawn.points?drawn.series[0].points.length:drawn.series[0].points.length,3);
-  assert.equal(drawn.series[0].points[0].y,9);
-  assert.equal(Object.hasOwn(drawn.series[0].points[0],'yLow'),false);
-  assert.equal(drawn.series[0].points[2].yLow,1.5);
-  assert.equal(drawn.series[0].points[2].yHigh,7);
-  assert.equal(h.renders.at(-1).width,640);
-  assert.equal(h.renders.at(-1).height,427);
-  await until(()=>!h.button('PDF에 적용').disabled,'graph preview ready');
-  h.button('PDF에 적용').click();
-  await until(()=>h.outputs.length===1,'graph out');
-  const op=h.calls.filter(call=>call.path==='/api/paper/visual/export').at(-1).body.operations[0];
-  assert.equal(op.kind,'region');
-  assert.equal(op.assetKind,'graph');
-  assert.equal(op.beforeImageSha256,WHITE_SHA);
-  assert.deepEqual(op.bbox,[0,0,120,80]);
-  assert.deepEqual(Buffer.from(op.png,'base64'),WHITE);
-  assert.equal(op.dataChanges.after.series[0].points[2].yHigh,7);
-  assert.equal(h.calls.filter(call=>call.body&&call.body.operation==='render').every(call=>call.body.dpi===150),true);
-  void row;
-});
-
-serial('480 graph points stay in a bounded scroller',async()=>{
-  const points=Array.from({length:480},(_,i)=>({x:i+1,y:i+2}));
-  const h=world({chart:chart(points)});
-  h.source={file:fileOf(PDF,'t.pdf'),fileHash:HASH,revision:'r1'};
-  await h.ui.refresh();
-  const radio=h.radios().find(el=>el.value==='analysis:achart');
-  radio.checked=true;radio.dispatchEvent(new Event('change'));
-  await until(()=>all(h.host).some(el=>String(el.className).includes('visual-edit-points')&&el.children.length===480),'480');
-  const box=all(h.host).find(el=>String(el.className).includes('visual-edit-points'));
-  assert.equal(box.children.length,480);
   assert.equal(h.button('PDF에 적용').disabled,true);
-});
-
-serial('log scale does not draw a non-positive value',async()=>{
-  const h=world();
-  h.source={file:fileOf(PDF,'t.pdf'),fileHash:HASH,revision:'r1'};
-  await h.ui.refresh();
-  const radio=h.radios().find(el=>el.value==='analysis:achart');
-  radio.checked=true;radio.dispatchEvent(new Event('change'));
-  await until(()=>h.labeled('점 1 세로'),'points');
-  const scale=all(h.host).filter(el=>el.tagName==='SELECT'&&[...el.children].some(option=>option.value==='log'))[1];
-  scale.value='log';
-  scale.dispatchEvent(new Event('change'));
-  h.labeled('점 1 세로').value='0';
-  h.labeled('점 1 세로').dispatchEvent(new Event('input'));
-  await settle();
-  const before=h.renders.length;
-  h.button('다시 그리기').click();
-  await settle();
-  assert.equal(h.renders.length,before);
-  h.button('PDF에 적용').click();
-  await settle();
-  assert.equal(h.outputs.length,0);
-  assert.match(h.status(),/로그/);
 });
 
 serial('figure replacement keeps PNG bytes and converts JPEG',async()=>{
@@ -655,6 +590,108 @@ serial('graph region selection opens shape editor with the drawn page and bounds
     await until(()=>mounts.length===1,'shape editor');
     const request=h.calls.find(c=>c.path==='/api/paper/chart/prepare');
     assert.equal(request.body.pageIndex,1);assert.deepEqual(request.body.bbox,[20,40,220,240]);
+    assert.equal(mounts[0].embedded,true);
+    assert.equal(h.button('PDF에 적용').disabled,true);
+    const original=mounts[0].scene;
+    mounts[0].onChange({revision:1,operations:[{type:'move'}],scene:{...original,series:[{id:'a',points:[{x:2,y:3}]}]}});
+    assert.equal(h.ui.snapshot().pending,1);
+    assert.equal(h.button('PDF에 적용').disabled,false);
+    mounts[0].onChange({revision:2,operations:[],scene:original});
+    assert.equal(h.ui.snapshot().pending,0);
+    assert.equal(h.button('PDF에 적용').disabled,true);
+    mounts[0].onChange({revision:3,operations:[{type:'move'}],scene:original});
+    mounts[0].onGestureChange(true);
+    assert.equal(h.button('PDF에 적용').disabled,true);
+    h.button('PDF에 적용').dispatchEvent(new Event('click'));
+    await settle();assert.equal(h.calls.filter(c=>c.path==='/api/paper/visual/export').length,0);
+    mounts[0].onGestureChange(false);
+    assert.equal(h.button('PDF에 적용').disabled,false);
+    h.button('PDF에 적용').click();
+    await until(()=>h.outputs.length===1,'embedded apply');
+    const op=h.calls.find(c=>c.path==='/api/paper/visual/export').body.operations[0];
+    assert.equal(op.kind,'chart-shape');assert.deepEqual(op.plan.operations,[{type:'move'}]);
+    assert.equal(h.calls.filter(c=>c.path==='/api/paper/visual/export').length,1);
+    h.button('영역 다시 선택').click();
+    await until(()=>all(h.host).some(el=>el.className.includes('visual-edit-stage')),'back to picker');
+    assert.equal(h.ui.snapshot().pending,1);
+    h.button('영역 선택 취소').click();
+    assert.ok(h.button('영역 다시 선택'));assert.equal(h.ui.snapshot().pending,1);
+    assert.ok(all(h.host).some(el=>el.tagName==='BUTTON'&&el.textContent.startsWith('이어 편집 ·')));
+  }finally{delete globalThis.FalsifyChartShape;delete globalThis.FalsifyChartShapeEditor;}
+});
+
+serial('failed graph preparation preserves selected bounds for retry',async()=>{
+  let tries=0;const mounts=[];
+  globalThis.FalsifyChartShape={};globalThis.FalsifyChartShapeEditor={create:args=>{mounts.push(args);return {destroy(){}};}};
+  try{
+    const h=world({shapeScene:{sceneId:'s',series:[{id:'a',points:[{x:1,y:2}]}]},request:(path,body,next)=>{
+      if(path==='/api/paper/chart/prepare'&&++tries===1)throw Error('failed');return next();
+    }});
+    h.source={file:fileOf(PDF,'vectors.pdf'),fileHash:HASH,revision:'r1'};
+    await h.ui.refresh();h.button('그래프 영역 선택').click();
+    await until(()=>all(h.host).some(el=>el.className.includes('visual-edit-stage'))&&h.previews.length===2,'picker');
+    const stage=all(h.host).find(el=>el.className.includes('visual-edit-stage'));
+    stage.dispatchEvent(pointer('pointerdown',10,20));stage.dispatchEvent(pointer('pointerup',110,120));
+    await until(()=>h.status().includes('준비하지 못했습니다'),'failure');
+    h.button('다시 시도').click();await until(()=>mounts.length===1,'retry');
+    const requests=h.calls.filter(c=>c.path==='/api/paper/chart/prepare');
+    assert.deepEqual(requests[0].body.bbox,[20,40,220,240]);assert.deepEqual(requests[1].body.bbox,requests[0].body.bbox);
+  }finally{delete globalThis.FalsifyChartShape;delete globalThis.FalsifyChartShapeEditor;}
+});
+
+serial('cancel during graph preparation rejects the stale scene',async()=>{
+  let resolvePrepare;const mounts=[];
+  globalThis.FalsifyChartShape={};globalThis.FalsifyChartShapeEditor={create:args=>{mounts.push(args);return {destroy(){}};}};
+  try{
+    const h=world({request:(path,body,next)=>path==='/api/paper/chart/prepare'?new Promise(resolve=>{resolvePrepare=()=>resolve({sceneId:'old',pageIndex:body.pageIndex,bbox:body.bbox,series:[{id:'a',points:[{x:1,y:2}]}]});}):next()});
+    h.source={file:fileOf(PDF,'vectors.pdf'),fileHash:HASH,revision:'r1'};
+    await h.ui.refresh();h.button('그래프 영역 선택').click();
+    await until(()=>all(h.host).some(el=>el.className.includes('visual-edit-stage'))&&h.previews.length===2,'picker');
+    const stage=all(h.host).find(el=>el.className.includes('visual-edit-stage'));
+    stage.dispatchEvent(pointer('pointerdown',10,20));stage.dispatchEvent(pointer('pointerup',110,120));
+    await until(()=>resolvePrepare,'prepare');h.button('영역 다시 선택').click();
+    await until(()=>all(h.host).some(el=>el.className.includes('visual-edit-stage')),'new picker');
+    h.button('영역 선택 취소').click();resolvePrepare();await settle();
+    assert.equal(mounts.length,0);assert.equal(h.ui.snapshot().pending,0);
+  }finally{delete globalThis.FalsifyChartShape;delete globalThis.FalsifyChartShapeEditor;}
+});
+
+serial('overlapping graph selection preserves drafts and permits explicit reopen or removal',async()=>{
+  const mounts=[];globalThis.FalsifyChartShape={};
+  globalThis.FalsifyChartShapeEditor={create:args=>{mounts.push(args);return {destroy(){}};}};
+  try{
+    const h=world({shapeScene:{sceneId:'s',series:[{id:'a',points:[{x:1,y:2}]}]}});
+    h.source={file:fileOf(PDF,'vectors.pdf'),fileHash:HASH,revision:'r1'};await h.ui.refresh();
+    async function choose(x1,y1,x2,y2){
+      h.button('그래프 영역 선택').click();
+      await until(()=>all(h.host).some(el=>el.className.includes('visual-edit-stage')),'picker');
+      const stage=all(h.host).find(el=>el.className.includes('visual-edit-stage'));
+      stage.dispatchEvent(pointer('pointerdown',x1,y1));stage.dispatchEvent(pointer('pointerup',x2,y2));
+    }
+    await choose(10,20,100,100);await until(()=>mounts.length===1,'first');
+    mounts[0].onChange({operations:[{type:'first'}],scene:mounts[0].scene});
+    h.button('영역 다시 선택').click();await until(()=>all(h.host).some(el=>el.className.includes('visual-edit-stage')),'single overlap picker');
+    let stage=all(h.host).find(el=>el.className.includes('visual-edit-stage'));
+    stage.dispatchEvent(pointer('pointerdown',20,30));stage.dispatchEvent(pointer('pointerup',110,110));
+    await until(()=>h.status().includes('겹치는 기존'),'existing region');
+    assert.equal(mounts.length,1);assert.equal(h.ui.snapshot().pending,1);
+    h.button('영역 다시 선택').click();await until(()=>all(h.host).some(el=>el.className.includes('visual-edit-stage')),'second picker');
+    stage=all(h.host).find(el=>el.className.includes('visual-edit-stage'));
+    stage.dispatchEvent(pointer('pointerdown',160,20));stage.dispatchEvent(pointer('pointerup',250,100));
+    await until(()=>mounts.length===2,'second');mounts[1].onChange({operations:[{type:'second'}],scene:mounts[1].scene});
+    assert.equal(h.ui.snapshot().pending,2);
+    assert.ok(h.button('이어 편집 · 1쪽 그래프1'));assert.ok(h.button('이어 편집 · 1쪽 그래프2'));
+    assert.equal(h.button('이어 편집 · 1쪽 그래프1').getAttribute('title'),'영역: 20, 40, 200, 200');
+    h.button('영역 다시 선택').click();await until(()=>all(h.host).some(el=>el.className.includes('visual-edit-stage')),'overlap picker');
+    stage=all(h.host).find(el=>el.className.includes('visual-edit-stage'));
+    stage.dispatchEvent(pointer('pointerdown',5,15));stage.dispatchEvent(pointer('pointerup',280,120));
+    await until(()=>all(h.host).some(el=>el.textContent==='겹치는 그래프 편집을 선택하세요.'),'overlap choice');
+    assert.equal(mounts.length,2);assert.equal(h.ui.snapshot().pending,2);
+    const remove=all(h.host).find(el=>el.tagName==='BUTTON'&&el.textContent.startsWith('편집 제거 ·'));
+    remove.click();assert.equal(h.ui.snapshot().pending,1);
+    assert.ok(h.button('이어 편집 · 1쪽 그래프2'));assert.equal(h.button('이어 편집 · 1쪽 그래프1'),undefined);
+    const reopen=all(h.host).find(el=>el.tagName==='BUTTON'&&el.textContent.startsWith('이어 편집 ·'));
+    reopen.click();assert.ok(h.button('영역 다시 선택'));assert.equal(h.ui.snapshot().pending,1);
   }finally{delete globalThis.FalsifyChartShape;delete globalThis.FalsifyChartShapeEditor;}
 });
 

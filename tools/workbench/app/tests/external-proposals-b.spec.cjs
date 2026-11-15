@@ -14,3 +14,17 @@ test('atomic selection keeps provenance and rejects invalid changes without muta
   c.setSelection([{id:'p1',enabled:false},{id:'p2',enabled:true}]);assert.deepEqual(c.edits().map(x=>x.after),['value 30']);
   assert.deepEqual(c.snapshot().items[0].sourceRefs,before.items[0].sourceRefs);assert.equal(c.snapshot().batches[0].raw,'original a');
 });
+
+test('structured table-cell and chart-point proposals track conflicts and getters separately from edits()',()=>{
+  const c=create({fileHash:hash,segments});
+  c.append(batch('s',[
+    item('p', 'value 20'),
+    {id:'t1',kind:'table-cell',before:'81%',after:'91%',pageIndex:0,anchor:null,matchStatus:'matched',tableTarget:{tableId:'t',pageIndex:0,row:1,column:1,bbox:null,before:'81%',after:'91%'}},
+    {id:'t2',kind:'table-cell',before:'81%',after:'92%',pageIndex:0,anchor:null,matchStatus:'matched',tableTarget:{tableId:'t',pageIndex:0,row:1,column:1,bbox:null,before:'81%',after:'92%'}},
+    {id:'v1',kind:'chart-point',before:'0.5',after:'0.2',pageIndex:0,anchor:null,matchStatus:'matched',visualTarget:{figureId:'f',pageIndex:0,bbox:null,series:'loss',pointIndex:0,markIndex:null,beforeValue:0.5,afterValue:0.2}}
+  ]));
+  c.setEnabled('p1',true);c.setEnabled('p2',true);c.setEnabled('p4',true);
+  assert.equal(c.edits().length,1);assert.equal(c.tableEdits().length,1);assert.equal(c.visualEdits().length,1);
+  c.setEnabled('p3',true);
+  assert.equal(c.snapshot().items[1].enabled,false);assert.equal(c.tableEdits()[0].after,'92%');
+});

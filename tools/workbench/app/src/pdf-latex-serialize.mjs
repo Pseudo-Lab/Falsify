@@ -1,6 +1,8 @@
 import {planReconstructionLayout} from './pdf-latex-layout.mjs';
 import {hex} from './paragraph-pdf-crypto.mjs';
 import {unicodeActualTextPreamble} from './pdf-latex-unicode.mjs';
+import {validateTableGrid, serializeTabular, estimateTableDimensions, splitTableGrid, multirowPreambleLine} from './pdf-latex-tables.mjs';
+import {isBibliographyHeading, isNonBibliographyHeading, detectBibliographySplits} from './pdf-latex-bibliography.mjs';
 
 const enc = new TextEncoder();
 const hashPattern = /^[0-9a-f]{64}$/;
@@ -80,6 +82,32 @@ function invalidModel(model,decisions) { return !model || model.schema !== 'fals
 
 // Decisions are explicit baseline transcriptions: {itemId, sourceSha256, tex, evidence}.
 // The caller binds the resulting project ID after createLatexProject().
+function prevalidateReconstructionTables(modelItems, choices, hash, pages) {
+  const tableGrids = new Map();
+  let needsMultirow = false;
+  for (const item of modelItems) {
+    if (item.kind !== 'table' || !item.table || choices.has(item.id)) continue;
+    const pageIdx = item.evidence[0].pageIndex;
+    const grid = validateTableGrid(item.table.rows, c => validRefs(c.evidence, hash, pages) && c.evidence.every(r => r.pageIndex === pageIdx));
+    tableGrids.set(item.id, grid);
+    if (grid.valid && grid.hasRowSpan) needsMultirow = true;
+  }
+  return {tableGrids, needsMultirow};
+}
+
+function renderValidatedTable(item, gridInfo, p, availableWidth) {
+  let anyUnsupported = false, anyMapped = false;
+  const formatCell = txt => { const c = plain(txt); if (c.unsupported) anyUnsupported = true; if (c.mapped) anyMapped = true; return c.output; };
+  const dims = estimateTableDimensions(gridInfo.grid, gridInfo.cols, {sizeBp: item.extensions?.typography?.fontSizeBp || 10, leadingBp: item.extensions?.typography?.leadingBp || 12});
+  const narrow = item.extensions?.columns === 2 || availableWidth < p.width * 0.6;
+  const resizeWidth = narrow && dims.widthBp > availableWidth ? '\\linewidth' : null;
+  const availHeight = Math.max(120, p.height - 96);
+  const maxRows = narrow && dims.heightBp > availHeight ? Math.max(4, Math.floor(availHeight / dims.rowHeightBp)) : gridInfo.grid.length;
+  const rendered = splitTableGrid(gridInfo.grid, maxRows).map(chunk => serializeTabular(chunk, gridInfo.cols, formatCell, {resizeWidth})).join('\n\\par\\medskip\n');
+  const original = anyUnsupported ? item.table.rows.flat().map(c => '% Original UTF-8 cell: ' + c.text.replace(/[\r\n]/g, ' ')).join('\n') + '\n' : '';
+  return {anyUnsupported, anyMapped, body: original + rendered};
+}
+
 export function serializeReconstruction({model, decisions=[], engine='pdflatex'}={}) {
   if (engine !== 'pdflatex') fail('UNSUPPORTED_ENGINE');
   if (invalidModel(model,decisions)) fail('INVALID_MODEL');
@@ -91,7 +119,8 @@ export function serializeReconstruction({model, decisions=[], engine='pdflatex'}
   let status = diagnostics.some(d=>d.severity==='error') ? 'unsupported' : diagnostics.some(d=>d.severity==='warning') ? 'needs-review' : 'ready';
   const issue=(code,item,severity='warning')=>{diagnostics.push({code,severity,...(item?{itemId:item.id,pageIndex:item.evidence[0].pageIndex}:{})}); if(severity==='error') status='unsupported'; else if(status==='ready') status='needs-review';};
   issue('LAYOUT_OVERFLOW_UNVERIFIED');
-  let source='\\documentclass{article}\n\\usepackage{graphicx}\n'+unicodePreamble+'\\pagestyle{empty}\n\\setlength{\\parindent}{0pt}\n\\setlength{\\parskip}{0pt}\n\\begin{document}\n';
+  const {tableGrids, needsMultirow} = prevalidateReconstructionTables(model.items, choices, hash, pages);
+  let source='\\documentclass{article}\n\\usepackage{graphicx}\n'+(needsMultirow?multirowPreambleLine():'')+unicodePreamble+'\\pagestyle{empty}\n\\setlength{\\parindent}{0pt}\n\\setlength{\\parskip}{0pt}\n\\begin{document}\n';
   const append=(item, body, bindingStatus)=>{const start=source.length; source+=body; bindings.push({itemId:item.id,projectId:null,path:'main.tex',start,end:source.length,evidence:structuredClone(item.evidence),status:bindingStatus}); source+='\n\n';};
   if (!model.items.length) issue('MISSING_CONTENT',null,'error');
   for (const relation of model.relations) if (relation.status!=='confirmed') issue('RELATION_REVIEW');
@@ -100,22 +129,15 @@ export function serializeReconstruction({model, decisions=[], engine='pdflatex'}
   const layout=planReconstructionLayout(model);
   for(const d of layout.diagnostics) {diagnostics.push(d); if(d.severity==='error') status='unsupported'; else if(d.severity==='warning'&&status==='ready') status='needs-review';}
   let assetNumber=0;
-  function emitTable(item,index) {
-      if (item.kind==='table' && item.table) {
-        const rows=item.table.rows;
-        const width=Array.isArray(rows)&&rows[0]?.length;
-        const valid=width>0 && rows.every(row=>Array.isArray(row)&&row.length===width&&row.every(c=>c&&typeof c.text==='string'&&(c.colSpan===undefined||c.colSpan===1)&&(c.rowSpan===undefined||c.rowSpan===1)&&validRefs(c.evidence,hash,pages)&&c.evidence.every(r=>r.pageIndex===index)));
-        if(valid) {
-          const cells=rows.map(row=>row.map(c=>plain(c.text)));
-          if(cells.flat().some(c=>c.unsupported)) issue('UNICODE_REVIEW',item);
-          if(cells.flat().some(c=>c.mapped)) issue('UNICODE_RENDER_REVIEW',item);
-          const original=cells.flat().some(c=>c.unsupported) ? rows.flat().map(c=>'% Original UTF-8 cell: '+c.text.replace(/[\r\n]/g,' ')).join('\n')+'\n' : '';
-          append(item,original+'\\begin{tabular}{'+('l'.repeat(width))+'}\n'+cells.map(row=>row.map(c=>c.output).join(' & ')+' \\\\').join('\n')+'\n\\end{tabular}',cells.flat().some(c=>c.mapped||c.unsupported)?'review-required':'reviewed');
-          return true;
-        }
-        issue('TABLE_STRUCTURE_REVIEW',item);
-      }
-    return false;
+  function emitTable(item,index,p,availableWidth) {
+      if (item.kind!=='table' || !item.table) return false;
+      const gridInfo=tableGrids.get(item.id)||{valid:false};
+      if(!gridInfo.valid) {issue('TABLE_STRUCTURE_REVIEW',item); return false;}
+      const out = renderValidatedTable(item, gridInfo, p, availableWidth);
+      if(out.anyUnsupported) issue('UNICODE_REVIEW',item);
+      if(out.anyMapped) issue('UNICODE_RENDER_REVIEW',item);
+      append(item, out.body, out.anyMapped||out.anyUnsupported?'review-required':'reviewed');
+      return true;
   }
   function emitAsset(item,index,p,availableWidth) {
       if (item.assetId) {
@@ -162,10 +184,24 @@ export function serializeReconstruction({model, decisions=[], engine='pdflatex'}
     return content;
   }
   function needsTranscriptionReview(item) { return ['math','footnote','citation'].includes(item.kind) || item.reason==='inline-script-candidate' || !!item.extensions?.candidates?.length; }
-  function emitText(item,index) {
+  function formatParagraphText(item,inBibliography) {
+      const splits=item.kind==='paragraph'?detectBibliographySplits(item.text,{inBibliography}):[];
+      if(!splits.length) return plain(item.text);
+      const cuts=[0,...splits,item.text.length];
+      let unsupported=false, mapped=false;
+      const parts=[];
+      for(let i=1;i<cuts.length;i++){
+        const piece=plain(item.text.slice(cuts[i-1],cuts[i]).trimStart());
+        if(piece.unsupported)unsupported=true;
+        if(piece.mapped)mapped=true;
+        if(piece.output)parts.push(piece.output);
+      }
+      return {output:parts.join('\\par\\noindent '),unsupported,mapped};
+  }
+  function emitText(item,index,inBibliography=false) {
       const semantic = needsTranscriptionReview(item);
       if (typeof item.text==='string' && item.text.length) {
-        const text=plain(item.text);
+        const text=formatParagraphText(item,inBibliography);
         if (text.unsupported) issue('UNICODE_REVIEW',item);
         if (text.mapped) issue('UNICODE_RENDER_REVIEW',item);
         if (/\s{2}|[\r\n\t]/.test(item.text)) issue('TEXT_SPACING_REVIEW',item);
@@ -182,14 +218,20 @@ export function serializeReconstruction({model, decisions=[], engine='pdflatex'}
         source+=`% Content missing for item ${index + 1}; review source evidence.\n`;
       }
   }
-  function emitItem(item,p,availableWidth) {
+  let inBibliography=false;
+  function updateBibState(item) {
+    if(isBibliographyHeading(item)) inBibliography=true;
+    else if(isNonBibliographyHeading(item)) inBibliography=false;
+  }
+  function emitItem(item,p,availableWidth,{isFurniture=false}={}) {
     const index=p.pageIndex;
+    if(!isFurniture) updateBibState(item);
       const decision=choices.get(item.id);
       if (decision) {append(item,decision.tex,'reviewed'); return;}
       if (item.extensions?.columns > 1) issue('MULTICOLUMN_REVIEW',item);
-      if (emitTable(item,index)) return;
+      if (emitTable(item,index,p,availableWidth)) return;
       if (emitAsset(item,index,p,availableWidth)) return;
-      emitText(item,index);
+      emitText(item,index,!isFurniture&&inBibliography);
   }
   function emitPages() {
   for (const page of layout.pages) {
@@ -205,7 +247,7 @@ export function serializeReconstruction({model, decisions=[], engine='pdflatex'}
     if(!page.bands.length && !page.furniture.length) {issue('EMPTY_PAGE_REVIEW');source+='\\null\n';}
     if(page.furniture.length) {
       source+='\\AddToHookNext{shipout/foreground}{%\n';
-      for(const entry of page.furniture){const b=entry.bbox, width=Math.max(1,b[2]-b[0]);source+=`\\put(${dimension(b[0])}bp,${dimension(-b[3])}bp){\\makebox[0pt][l]{\\parbox[t]{${dimension(width)}bp}{%\n`;emitItem(items.get(entry.itemId),p,width);source+='}}}\n';}
+      for(const entry of page.furniture){const b=entry.bbox, width=Math.max(1,b[2]-b[0]);source+=`\\put(${dimension(b[0])}bp,${dimension(-b[3])}bp){\\makebox[0pt][l]{\\parbox[t]{${dimension(width)}bp}{%\n`;emitItem(items.get(entry.itemId),p,width,{isFurniture:true});source+='}}}\n';}
       source+='}\n';
       if(!page.bands.length) source+='\\null\n';
     }

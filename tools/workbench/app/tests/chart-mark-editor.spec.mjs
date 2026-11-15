@@ -77,6 +77,7 @@ function layoutRect(el) {
 }
 
 function createDom() {
+  let active = null;
   function element(tag) {
     const el = new EventTarget();
     const attrs = {};
@@ -155,6 +156,8 @@ function createDom() {
       el._capture = null;
     };
     el.getBoundingClientRect = () => layoutRect(el);
+    el.focus = () => { active = el; };
+    el.contains = node => { for (let current = node; current; current = current.parentElement) if (current === el) return true; return false; };
     return el;
   }
   function invoke(node, event) {
@@ -189,7 +192,7 @@ function createDom() {
     }
     return event;
   }
-  return {document: {createElement: element, createElementNS: (_ns, tag) => element(tag)}, emit, element};
+  return {document: {createElement: element, createElementNS: (_ns, tag) => element(tag), get activeElement() { return active; }}, emit, element};
 }
 
 function scene() {
@@ -265,7 +268,7 @@ function button(host, label) {
   return found;
 }
 
-function mount(source = scene(), parentWidth = 400) {
+function mount(source = scene(), parentWidth = 400, embedded = false, hooks = {}) {
   const dom = createDom();
   const host = dom.element('div');
   host.style.width = `${parentWidth}px`;
@@ -274,11 +277,13 @@ function mount(source = scene(), parentWidth = 400) {
   const exports = [];
   const editor = create({
     host,
+    embedded,
     scene: source,
     document: dom.document,
     core: loadCore(),
-    onChange(state) { changes.push(structuredClone(state)); },
-    onCommit(state) { commits.push(structuredClone(state)); },
+    onChange(state) { changes.push(structuredClone(state)); hooks.onChange?.(state); },
+    onCommit(state) { commits.push(structuredClone(state)); hooks.onCommit?.(state); },
+    onGestureChange: hooks.onGestureChange,
     onRequestExport(state) { exports.push(structuredClone(state)); },
   });
   return {dom, host, editor, changes, commits, exports};
@@ -331,7 +336,8 @@ test('stage keeps the scene aspect ratio and precision starts collapsed', () => 
   const details = walk(session.host).find(el => el.tagName === 'DETAILS');
   assert.equal(details.open, false);
   const summary = walk(session.host).find(el => el.tagName === 'SUMMARY');
-  assert.equal(summary.textContent, '좌표 (px)');
+  assert.equal(summary.textContent, '선택한 항목의 정밀 좌표 (px)');
+  assert.equal(details.hidden, true);
   const headers = walk(session.host).filter(el => el.tagName === 'TH').map(el => el.textContent);
   assert.deepEqual(headers, ['계열', '번호', 'x (px)', 'y (px)']);
   const background = byClass(session.host, 'falsify-mark-background')[0];
@@ -341,7 +347,10 @@ test('stage keeps the scene aspect ratio and precision starts collapsed', () => 
 test('dragging a bar handle changes only its value axis through set-values', () => {
   const session = mount();
   const stage = byClass(session.host, 'falsify-mark-stage')[0];
-  const handle = handles(session.host).find(el => el.getAttribute('data-index') === '0');
+  const body = byClass(session.host, 'falsify-mark-bar')[0];
+  pointer(session.dom, body, 'pointerdown', 78, 170);
+  pointer(session.dom, stage, 'pointerup', 78, 170);
+  const handle = handles(session.host)[0];
   pointer(session.dom, handle, 'pointerdown', 78, 170);
   pointer(session.dom, stage, 'pointermove', 90, 130);
   pointer(session.dom, stage, 'pointerup', 90, 130);
@@ -363,24 +372,19 @@ test('dragging a bar handle changes only its value axis through set-values', () 
   assert.equal(session.editor.getState().scene.series[0].points[0].y, 130);
 });
 
-test('a negative bar can cross its baseline and the body click does not drag', () => {
+test('dragging a bar body moves its value without jumping and can cross the baseline', () => {
   const session = mount();
   const stage = byClass(session.host, 'falsify-mark-stage')[0];
-  const body = byClass(session.host, 'falsify-mark-bar').find(el => el.getAttribute('data-index') === '1');
+  const body = byClass(session.host, 'falsify-mark-bar')[1];
   pointer(session.dom, body, 'pointerdown', 198, 280);
   pointer(session.dom, stage, 'pointermove', 198, 240);
   pointer(session.dom, stage, 'pointerup', 198, 240);
-  assert.equal(session.editor.getState().scene.series[0].points[1].y, 290);
-  assert.equal(session.editor.getState().operations.length, 0);
-  const handle = handles(session.host).find(el => el.getAttribute('data-index') === '1');
-  pointer(session.dom, handle, 'pointerdown', 198, 290);
-  pointer(session.dom, stage, 'pointermove', 210, 240);
-  pointer(session.dom, stage, 'pointerup', 210, 240);
   const point = session.editor.getState().scene.series[0].points[1];
-  assert.equal(point.x, 198);
-  assert.equal(point.y, 240);
+  assert.equal(point.y, 250);
   assert.equal(point.baseline, 260);
-  assert.equal(point.width, 36);
+  assert.equal(session.editor.getState().operations.length, 1);
+  session.editor.undo();
+  assert.equal(session.editor.getState().scene.series[0].points[1].y, 290);
 });
 
 test('a horizontal bar handle moves only x', () => {
@@ -388,9 +392,11 @@ test('a horizontal bar handle moves only x', () => {
   source.series[0].orientation = 'horizontal';
   source.series[0].points = [{x: 180, y: 80, baseline: 60, width: 28, axis: 'x', role: 'bar-top'}];
   const session = mount(source);
+  const stage = byClass(session.host, 'falsify-mark-stage')[0];
+  pointer(session.dom, byClass(session.host, 'falsify-mark-bar')[0], 'pointerdown', 180, 80);
+  pointer(session.dom, stage, 'pointerup', 180, 80);
   const handle = handles(session.host)[0];
   assert.equal(handle.className.includes('is-horizontal'), true);
-  const stage = byClass(session.host, 'falsify-mark-stage')[0];
   pointer(session.dom, handle, 'pointerdown', 180, 80);
   pointer(session.dom, stage, 'pointermove', 210, 96);
   pointer(session.dom, stage, 'pointerup', 210, 96);
@@ -435,9 +441,14 @@ test('compare shows the original crop and export reports the envelope', () => {
 
 test('precision edits the open axis and destroy rejects later calls', () => {
   const session = mount();
-  const input = walk(session.host).find(el => el.tagName === 'INPUT' && el.getAttribute('data-series-id') === 'points' && el.getAttribute('data-axis') === 'x' && el.getAttribute('data-index') === '0');
-  const locked = walk(session.host).find(el => el.tagName === 'INPUT' && el.getAttribute('data-series-id') === 'bars' && el.getAttribute('data-axis') === 'x' && el.getAttribute('data-index') === '0');
+  const stage = byClass(session.host, 'falsify-mark-stage')[0];
+  pointer(session.dom, byClass(session.host, 'falsify-mark-bar')[0], 'pointerdown', 78, 170);
+  pointer(session.dom, stage, 'pointerup', 78, 170);
+  const locked = walk(session.host).find(el => el.tagName === 'INPUT' && el.getAttribute('data-series-id') === 'bars' && el.getAttribute('data-axis') === 'x');
   assert.equal(locked.readOnly, true);
+  pointer(session.dom, points(session.host)[0], 'pointerdown', 300, 200);
+  pointer(session.dom, stage, 'pointerup', 300, 200);
+  const input = walk(session.host).find(el => el.tagName === 'INPUT' && el.getAttribute('data-series-id') === 'points' && el.getAttribute('data-axis') === 'x' && el.getAttribute('data-index') === '0');
   input.value = '312';
   session.dom.emit(input, 'change', {target: input});
   assert.equal(session.editor.getState().scene.series[1].points[0].x, 312);
@@ -487,4 +498,99 @@ test('2000 marks coalesce drag previews and preserve precision rows until commit
     assert.doesNotThrow(() => destroyedFrame());
     assert.equal(session.host.children.length, 0);
   } finally { globalThis.requestAnimationFrame = oldRaf; globalThis.cancelAnimationFrame = oldCancel; }
+});
+
+test('embedded precision and keyboard operate on the selected mark', () => {
+  const session = mount(scene(), 400, true);
+  assert.equal(button(session.host, '내보내기').hidden, true);
+  const details = walk(session.host).find(el => el.tagName === 'DETAILS');
+  assert.equal(details.hidden, true);
+  const stage = byClass(session.host, 'falsify-mark-stage')[0];
+  pointer(session.dom, points(session.host)[0], 'pointerdown', 300, 200);
+  pointer(session.dom, stage, 'pointerup', 300, 200);
+  assert.equal(details.hidden, false);
+  assert.equal(walk(session.host).filter(el => el.tagName === 'INPUT').length, 2);
+  session.dom.emit(byClass(session.host, 'falsify-mark-editor')[0], 'keydown', {key: 'ArrowUp'});
+  assert.equal(session.editor.getState().scene.series[1].points[0].y, 199);
+  session.editor.undo();
+  assert.equal(session.editor.getState().scene.series[1].points[0].y, 200);
+});
+
+test('mark selection is a no-op and precision keeps focus on change', () => {
+  const session = mount();
+  const stage = byClass(session.host, 'falsify-mark-stage')[0];
+  pointer(session.dom, points(session.host)[0], 'pointerdown', 300, 200);
+  pointer(session.dom, stage, 'pointerup', 300, 200);
+  assert.equal(session.editor.getState().operations.length, 0);
+  assert.equal(session.commits.length, 0);
+  const input = walk(session.host).find(el => el.tagName === 'INPUT' && el.getAttribute('data-axis') === 'x');
+  input.focus();
+  input.value = '312';
+  session.dom.emit(input, 'change');
+  assert.equal(session.dom.document.activeElement, input);
+  assert.equal(walk(session.host).find(el => el.tagName === 'INPUT' && el.getAttribute('data-axis') === 'x'), input);
+  assert.equal(session.editor.getState().scene.series[1].points[0].x, 312);
+});
+
+test('gesture lifecycle settles return-to-origin preview before unlock', () => {
+  const oldRaf = globalThis.requestAnimationFrame, oldCancel = globalThis.cancelAnimationFrame;
+  const frames = new Map(); let seq = 0;
+  globalThis.requestAnimationFrame = fn => { frames.set(++seq, fn); return seq; };
+  globalThis.cancelAnimationFrame = id => frames.delete(id);
+  try {
+    const events = [];
+    const session = mount(scene(), 400, false, {onGestureChange: value => events.push(['gesture', value]), onChange: value => events.push(['change', value]), onCommit: () => events.push(['commit'])});
+    const stage = byClass(session.host, 'falsify-mark-stage')[0];
+    pointer(session.dom, points(session.host)[0], 'pointerdown', 300, 200);
+    pointer(session.dom, stage, 'pointerup', 310, 200);
+    const previous = session.editor.getState();
+    events.length = 0;
+    pointer(session.dom, points(session.host)[0], 'pointerdown', 310, 200);
+    pointer(session.dom, stage, 'pointermove', 320, 200);
+    const callback = [...frames.values()][0]; frames.clear(); callback();
+    pointer(session.dom, stage, 'pointermove', 310, 200);
+    pointer(session.dom, stage, 'pointerup', 310, 200);
+    assert.deepEqual(events.at(-1), ['gesture', false]);
+    const last = events.filter(e => e[0] === 'change').at(-1)[1];
+    const state = session.editor.getState();
+    assert.deepEqual(last.operations, state.operations);
+    assert.deepEqual(last.scene, state.scene);
+    assert.equal(state.operations.length, previous.operations.length);
+    assert.equal(events.some(e => e[0] === 'commit'), false);
+    pointer(session.dom, points(session.host)[0], 'pointerdown', 310, 200);
+    session.editor.destroy();
+    assert.deepEqual(events.at(-1), ['gesture', false]);
+  } finally { globalThis.requestAnimationFrame = oldRaf; globalThis.cancelAnimationFrame = oldCancel; }
+});
+
+test('scatter hit area stays screen sized and selects nearest overlapping point', () => {
+  const source = scene();
+  source.series = [{id: 'near', kind: 'scatter', points: [{x: 200, y: 150, radius: 1}, {x: 210, y: 150, radius: 1}]}];
+  const session = mount(source, 100);
+  const hits = byClass(session.host, 'falsify-mark-hit');
+  assert.equal(hits.length, 2);
+  assert.equal(hits[0].getAttribute('stroke-width'), '24');
+  assert.equal(hits[0].getAttribute('vector-effect'), 'non-scaling-stroke');
+  assert.equal(points(session.host)[0].getAttribute('r'), '1');
+  const stage = byClass(session.host, 'falsify-mark-stage')[0];
+  pointer(session.dom, hits[1], 'pointerdown', 50.25, 37.5);
+  pointer(session.dom, stage, 'pointerup', 50.25, 37.5);
+  assert.equal(session.editor.getState().selection.index, 0);
+  session.dom.emit(byClass(session.host, 'falsify-mark-editor')[0], 'keydown', {key: 'ArrowRight'});
+  assert.equal(session.editor.getState().scene.series[0].points[0].x, 201);
+  assert.equal(session.editor.getState().scene.series[0].points[1].x, 210);
+});
+
+test('mark gesture callback pairs on cancellation, compare and scene replacement', () => {
+  const states = [];
+  const session = mount(scene(), 400, false, {onGestureChange: value => states.push(value)});
+  const stage = byClass(session.host, 'falsify-mark-stage')[0];
+  pointer(session.dom, points(session.host)[0], 'pointerdown', 300, 200);
+  pointer(session.dom, stage, 'pointercancel', 300, 200);
+  pointer(session.dom, points(session.host)[0], 'pointerdown', 300, 200);
+  session.dom.emit(button(session.host, '원본 비교'), 'click');
+  session.dom.emit(button(session.host, '원본 비교'), 'click');
+  pointer(session.dom, points(session.host)[0], 'pointerdown', 300, 200);
+  session.editor.setScene(scene());
+  assert.deepEqual(states, [true, false, true, false, true, false]);
 });

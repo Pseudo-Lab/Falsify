@@ -444,3 +444,27 @@ serial('large source crops lower render DPI without cutting the region',async()=
  const radio=all(h.host).find(e=>e.tag==='input'&&e.type==='radio');radio.checked=true;radio.dispatchEvent(new Event('change'));
  await until(()=>renders(h).length===1,'render');const request=renders(h)[0].body;assert.deepEqual(request.bbox,bounds);assert.ok(request.dpi<120);assert.ok((842*request.dpi/72)*(1191*request.dpi/72)<2000000);
 });
+
+serial('displays optional decorativeCount, decorative tag, and logical table part index',async()=>{
+  const h=harness(),bytes=pdf('meta-display'),hash=sha(bytes);
+  h.source={file:fileOf(bytes),fileHash:hash};
+  h.toggle(true);
+  await until(()=>prepares(h).length===1,'prepare');
+  prepares(h)[0].resolve(summary(hash,{counts:{tables:2,figures:2,decorativeCount:1}}));
+  await until(()=>/표 2 · 그림 2 · 장식 1 · 3쪽 · 준비됨/.test(text(h.status())),'status shows decorativeCount');
+  await until(()=>lists(h).length===1,'list');
+  lists(h)[0].resolve({
+    paperId:'pid-'+hash.slice(0,12),
+    fileHash:hash,
+    total:2,
+    nextOffset:null,
+    items:[
+      item({id:'t1',type:'table',partIndex:0,partCount:2,caption:'Table 1'}),
+      item({id:'f1',type:'figure',classification:'decorative',caption:null}),
+    ],
+  });
+  await flush();
+  const rowsText=text(all(h.host).find(e=>e.classList.contains('image-rows')));
+  assert.match(rowsText,/표 \(1\/2\) · 1쪽/);
+  assert.match(rowsText,/그림 · 1쪽 \[장식\]/);
+});

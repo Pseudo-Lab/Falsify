@@ -1,11 +1,83 @@
 import {hex} from './paragraph-pdf-crypto.mjs';
 import {inferTypographyProfile} from './paper-typography-profile.mjs';
 import {renderStructureRegion} from './paper-layout-structure.mjs';
+import {orderFloatUnits} from './pdf-latex-layout.mjs';
+import {estimateTableDimensions, multirowPreambleLine, serializeTabular, splitTableGrid, validateTableGrid} from './pdf-latex-tables.mjs';
+import {detectBibliographySplits, isBibliographyHeading, isNonBibliographyHeading} from './pdf-latex-bibliography.mjs';
+import {calibrateFontLineFit, resolveFlowFontFamily} from './pdf-latex-fonts.mjs';
 const enc=new TextEncoder(), fail=code=>{throw Object.assign(new Error(code),{code});};
 const escapeMap={'\\':'\\textbackslash{}','{':'\\{','}':'\\}','$':'\\$','&':'\\&','#':'\\#','%':'\\%','_':'\\_','~':'\\textasciitilde{}','^':'\\textasciicircum{}'};
 const escape=text=>Array.from(text, c=>escapeMap[c]??(c==='\r'||c==='\n'||c==='\t'?' ':c)).join('');
 const num=n=>Number(n.toFixed(4)).toString();
 const good=(x,min,max)=>Number.isFinite(x)&&x>=min&&x<=max;
+
+function buildFlowFontSpec(resolved, fontPaths, lineFit, num) {
+  const fitOpts = [];
+  if (lineFit.applied && lineFit.wordSpaceScale !== 1) fitOpts.push(`WordSpace={${num(lineFit.wordSpaceScale)},1.0,1.0}`);
+  if (lineFit.applied && lineFit.horizontalScale !== 1) fitOpts.push(`FakeStretch=${num(lineFit.horizontalScale)}`);
+  if (resolved.customFiles) {
+    const faceOpts = [...fontPaths].filter(([k]) => k !== 'regular').map(([k, v]) => `${{bold: 'BoldFont', italic: 'ItalicFont', bolditalic: 'BoldItalicFont'}[k]}={${v.slice(6)}}`);
+    const allOpts = ['NFSSFamily=FalsifyBody', 'Path=fonts/', `UprightFont={${fontPaths.get('regular').slice(6)}}`, ...faceOpts, ...fitOpts];
+    return `\\setmainfont[${allOpts.join(',')}]{FalsifyPublication}`;
+  }
+  return fitOpts.length ? `\\setmainfont[${fitOpts.join(',')}]{${resolved.family}}` : `\\setmainfont{${resolved.family}}`;
+}
+
+function emitPlainSplits(text, splits, escapeFn) {
+  if (!splits.length) return escapeFn(text);
+  const cuts = [0, ...splits, text.length];
+  let out = '';
+  for (let n = 1; n < cuts.length; n++) {
+    const a = cuts[n - 1], b = cuts[n];
+    const slice = n > 1 && splits.includes(a) ? text.slice(a, b).replace(/^ +/, '') : text.slice(a, b);
+    out += escapeFn(slice);
+    if (b < text.length && splits.includes(b)) out += '\\par\\noindent ';
+  }
+  return out;
+}
+
+function emitStyledSplits(text, cuts, runs, breaks, label, escapeFn, styleFn) {
+  let out = '';
+  for (let n = 1; n < cuts.length; n++) {
+    const a = cuts[n - 1], b = cuts[n], run = runs.find(r => r.start <= a && r.end >= b);
+    const raw = n > 1 && breaks.includes(a) ? text.slice(a, b).replace(/^ +/, '') : text.slice(a, b);
+    out += styleFn(escapeFn(raw), run);
+    if (b < text.length && (breaks.includes(b) || label?.end === b)) out += '\\par\\noindent ';
+  }
+  return out;
+}
+
+function collectParsedTables(items, choices, refs) {
+  const parsedTables = new Map();
+  let needsMultirow = false;
+  for (const i of items) {
+    if (choices.has(i.id) || i.kind !== 'table' || !i.table?.rows?.length) continue;
+    const grid = validateTableGrid(i.table.rows, c => typeof c?.text === 'string' && refs(c.evidence));
+    if (!grid.valid) fail('INVALID_TABLE');
+    if (grid.hasRowSpan) needsMultirow = true;
+    parsedTables.set(i.id, grid);
+  }
+  return {parsedTables, needsMultirow};
+}
+
+function buildTableLayouts(orderedItems, parsedTables, spans, p, bodyRole, headerClearance, footerClearance) {
+  const availHeight = Math.max(120, p.heightBp - headerClearance - footerClearance - 48);
+  const textWidthBp = p.widthBp - p.margins.left - p.margins.right;
+  const colWidthBp = p.columns === 2 ? Math.max(72, (textWidthBp - p.gutterBp) / 2) : textWidthBp;
+  const layouts = new Map();
+  for (const i of orderedItems) {
+    const grid = parsedTables.get(i.id);
+    if (!grid) continue;
+    const isSpan = spans(i), availW = isSpan ? textWidthBp : colWidthBp;
+    const dims = estimateTableDimensions(grid.grid, grid.cols, bodyRole);
+    const resizeWidth = p.columns === 2 && dims.widthBp > availW ? (isSpan ? '\\textwidth' : '\\columnwidth') : null;
+    const maxRows = p.columns === 2 && dims.heightBp > availHeight ? Math.max(2, Math.floor((availHeight - 12) / dims.rowHeightBp)) : 0;
+    const chunks = maxRows > 0 ? splitTableGrid(grid.grid, maxRows) : [grid.grid];
+    layouts.set(i.id, {cols: grid.cols, chunks, multiChunk: chunks.length > 1, resizeWidth, isSpan});
+  }
+  return layouts;
+}
+
 export function serializeFlowReconstruction({model,decisions=[],profile,fontFiles=[]}={}) {
   function validateModel() {
     if(model?.schema!=='falsify.pdf-latex-reconstruction.v1'||!/^[a-f0-9]{64}$/.test(model.sourceSha256||'')||!Array.isArray(model.pages)||!model.pages.length||!Array.isArray(model.items)||!Array.isArray(model.assets)||!Array.isArray(model.relations)||!Array.isArray(model.diagnostics)||!Array.isArray(decisions)||!Array.isArray(fontFiles)) fail('INVALID_MODEL');
@@ -49,8 +121,11 @@ export function serializeFlowReconstruction({model,decisions=[],profile,fontFile
     for(const rel of model.relations)if(rel.status!=='confirmed')issue('RELATION_REVIEW');
   }
   reportRelationDiagnostics();
-  const font=fontPaths.has('regular')?`\\setmainfont[NFSSFamily=FalsifyBody,Path=fonts/,UprightFont={${fontPaths.get('regular').slice(6)}},${[...fontPaths].filter(([k])=>k!=='regular').map(([k,v])=>`${{bold:'BoldFont',italic:'ItalicFont',bolditalic:'BoldItalicFont'}[k]}={${v.slice(6)}}`).join(',')}]{FalsifyPublication}`:'\\setmainfont{Latin Modern Roman}';
-  if(!fontPaths.size&&t.fonts?.serif!=='Latin Modern Roman')fail('INVALID_FONT');
+  const resolvedFont=resolveFlowFontFamily(t,fontPaths);
+  if(!resolvedFont)fail('INVALID_FONT');
+  const lineFit=calibrateFontLineFit(model,t,{fontFamily:resolvedFont.family});
+  const font=buildFlowFontSpec(resolvedFont,fontPaths,lineFit,num);
+  const {parsedTables, needsMultirow} = collectParsedTables(model.items, choices, refs);
   const headerClearance=Math.max(p.margins.top,...model.items.filter(i=>i.kind==='furniture'||i.evidence[0].bbox[3]<pages.get(i.evidence[0].pageIndex).height*.1).filter(i=>i.evidence[0].bbox[1]<pages.get(i.evidence[0].pageIndex).height*.1).map(i=>i.evidence[0].bbox[3]+10));
   const footerClearance=Math.max(p.margins.bottom,...model.items.filter(i=>i.evidence.some(e=>e.bbox[1]>pages.get(e.pageIndex).height*.93)).map(i=>{const e=i.evidence[0];return pages.get(e.pageIndex).height-e.bbox[1]+10;}));
   let source=`% !TeX program = lualatex\n\\documentclass{article}\n\\usepackage{fontspec}\n\\usepackage{microtype}\n\\usepackage{graphicx}\n\\usepackage[paperwidth=${num(p.widthBp)}bp,paperheight=${num(p.heightBp)}bp,left=${num(p.margins.left)}bp,right=${num(p.margins.right)}bp,top=${num(headerClearance)}bp,bottom=${num(footerClearance)}bp]{geometry}\n${font}\n`;
@@ -59,7 +134,9 @@ export function serializeFlowReconstruction({model,decisions=[],profile,fontFile
   function emitPreamble() {
     source+=t.packages?.needspace?'\\IfFileExists{needspace.sty}{\\usepackage{needspace}}{\\newcommand{\\Needspace}[1]{}}\n':'\\newcommand{\\Needspace}[1]{}\n';
     if(t.packages?.luaWidowControl)source+='\\IfFileExists{lua-widow-control.sty}{\\usepackage{lua-widow-control}}{}\n';
+    if(needsMultirow)source+=multirowPreambleLine();
     source+='\\widowpenalty=10000\n\\clubpenalty=10000\n\\displaywidowpenalty=10000\n';
+    if(lineFit.applied)source+=`\\setlength{\\emergencystretch}{${num(lineFit.emergencystretchBp)}bp}\n\\newcommand{\\FalsifyLineFit}{\\fontdimen2\\font=${num(lineFit.wordSpaceScale)}\\fontdimen2\\font}\n`;
     // Use the source display box when known; otherwise cap the image's natural size.
     source+='\\newsavebox{\\FalsifyImageBox}\n\\newcommand{\\FalsifyImage}[3]{%\n\\sbox{\\FalsifyImageBox}{\\includegraphics{#3}}%\n\\def\\FalsifyWidth{#1}\\def\\FalsifyHeight{#2}%\n\\ifdim\\FalsifyWidth>\\linewidth\\def\\FalsifyWidth{\\linewidth}\\fi%\n\\ifdim\\FalsifyHeight>.7\\textheight\\def\\FalsifyHeight{.7\\textheight}\\fi%\n\\includegraphics[width=\\FalsifyWidth,height=\\FalsifyHeight,keepaspectratio]{#3}}\n';
     source+=`\\setlength{\\columnsep}{${num(p.gutterBp)}bp}\n\\setlength{\\parindent}{${num(body.indentEm)}em}\n\\setlength{\\parskip}{${num(body.paragraphGapEm)}em}\n\\pagestyle{empty}\n\\begin{document}\n`;
@@ -72,17 +149,15 @@ export function serializeFlowReconstruction({model,decisions=[],profile,fontFile
     if(run?.script==='super')value=`\\textsuperscript{${value}}`;else if(run?.script==='sub')value=`\\textsubscript{${value}}`;
     return value;
   }
-  const emitText=(i,text)=>{
+  const emitText=(i,text,inBib=false)=>{
     if(/[^\x00-\x7f]/u.test(text))issue('UNICODE_GLYPH_COVERAGE_UNVERIFIED',i);if(i.extensions?.candidates?.length||i.reason==='inline-script-candidate')issue('SEMANTIC_TRANSCRIPTION_REVIEW',i);if(i.extensions?.separators?.length)issue('SOURCE_SPACING_PROPOSED',i);
-    const runs=i.extensions?.inlineRuns;if(text!==i.text||!runs?.length)return escaped(text);
+    const runs=i.extensions?.inlineRuns;
+    const bibBreaks=i.kind==='paragraph'&&text===i.text?detectBibliographySplits(text,{inBibliography:inBib,lineBreaks:i.extensions?.lineBreaks||[]}):[];
+    if(text!==i.text||!runs?.length)return emitPlainSplits(text,bibBreaks,escaped);
     if(!runs.every((r,n)=>Number.isSafeInteger(r.start)&&Number.isSafeInteger(r.end)&&r.start>=0&&r.end<=text.length&&r.start<r.end&&(!n||runs[n-1].end<=r.start)))fail('INVALID_INLINE_RUN');
-    const publication=i.extensions.publicationRole,label=i.extensions.roleLabel,breaks=['metadata','affiliation'].includes(publication)?i.extensions.lineBreaks||[]:[];
+    const publication=i.extensions.publicationRole,label=i.extensions.roleLabel,breaks=[...new Set([...(['metadata','affiliation'].includes(publication)?i.extensions.lineBreaks||[]:[]),...bibBreaks])];
     const cuts=[...new Set([0,text.length,...runs.flatMap(r=>[r.start,r.end]),...breaks,...(label?[label.end]:[])])].filter(n=>Number.isSafeInteger(n)&&n>=0&&n<=text.length).sort((a,b)=>a-b);
-    let out='';for(let n=1;n<cuts.length;n++){
-      const a=cuts[n-1],b=cuts[n],run=runs.find(r=>r.start<=a&&r.end>=b);let value=escaped(text.slice(a,b));
-      value=styleInlineRun(value,run);
-      out+=value;if(b<text.length&&(breaks.includes(b)||label?.end===b))out+='\\par\\noindent ';
-    }return out;
+    return emitStyledSplits(text,cuts,runs,breaks,label,escaped,styleInlineRun);
   };
   // A caption relation owns its pair independently of flat reader order.
   const boxOf=refs=>{const bs=refs.map(e=>e.bbox);return [Math.min(...bs.map(b=>b[0])),Math.min(...bs.map(b=>b[1])),Math.max(...bs.map(b=>b[2])),Math.max(...bs.map(b=>b[3]))];};
@@ -110,10 +185,16 @@ export function serializeFlowReconstruction({model,decisions=[],profile,fontFile
     for(const i of model.items){if(groupedCaptions.has(i.id))continue;const caption=items.get(groups.get(i.id));if(caption&&boxOf(caption.evidence)[3]<=boxOf(i.evidence)[1])orderedItems.push(caption,i);else{orderedItems.push(i);if(caption)orderedItems.push(caption);}}
   }
   orderItems();
+  const reordered=orderFloatUnits(orderedItems,groups);
+  orderedItems.splice(0,orderedItems.length,...reordered.ordered);
+  const tableLayouts=buildTableLayouts(orderedItems,parsedTables,spans,p,t.roles.body,headerClearance,footerClearance);
   const floatStart=new Map(), floatEnd=new Set();
   function planFloats() {
     for(const [fid,cid] of groups){const fi=orderedItems.findIndex(i=>i.id===fid),ci=orderedItems.findIndex(i=>i.id===cid);const figure=items.get(fid),env=(figure.kind==='table'?'table':'figure')+(spans(figure)?'*':'');floatStart.set(Math.min(fi,ci),env);floatEnd.add(JSON.stringify([Math.max(fi,ci),env]));}
-    for(const [index,i] of orderedItems.entries())if(i.kind==='table'&&i.assetId&&!groups.has(i.id)){const env='table'+(spans(i)?'*':'');floatStart.set(index,env);floatEnd.add(JSON.stringify([index,env]));}
+    for(const [index,i] of orderedItems.entries())if(i.kind==='table'&&!groups.has(i.id)){
+      if(tableLayouts.has(i.id)){if(p.columns===2&&spans(i)&&!tableLayouts.get(i.id)?.multiChunk){floatStart.set(index,'table*');floatEnd.add(JSON.stringify([index,'table*']));}}
+      else if(i.assetId){const env='table'+(spans(i)?'*':'');floatStart.set(index,env);floatEnd.add(JSON.stringify([index,env]));}
+    }
   }
   planFloats();
   const endings=new Map([...floatEnd].map(x=>JSON.parse(x)));
@@ -121,15 +202,23 @@ export function serializeFlowReconstruction({model,decisions=[],profile,fontFile
   function emitAsset(i) {
     const a=assets.get(i.assetId);if(!a||a.evidence.some(e=>e.pageIndex!==i.evidence[0].pageIndex))fail('INVALID_ASSET_REFERENCE');const path=`assets/${a.sha256}.png`;if(!files.some(f=>f.path===path))files.push({path,bytes:a.bytes.slice()});const b=assetBox(a,i),w=b?`${num(b[2]-b[0])}bp`:'\\wd\\FalsifyImageBox',h=b?`${num(b[3]-b[1])}bp`:'\\ht\\FalsifyImageBox';append(i,`\\FalsifyImage{${w}}{${h}}{${path}}`,'noneditable');issue('NONEDITABLE_REGION',i);if(i.text){if(a.representation==='region-raster')issue('RASTER_TEXT_NONEDITABLE',i);else source+=' '+emitText(i,i.text);}
   }
-  function emitUnitContent(i, decision) {
+  function emitTableUnit(i) {
+    const layout=tableLayouts.get(i.id);
+    const fmt=cellText=>emitText(i,cellText);
+    const parts=layout.chunks.map(chunk=>serializeTabular(chunk,layout.cols,fmt,{resizeWidth:layout.resizeWidth}));
+    const wrapSpan=layout.multiChunk&&layout.isSpan&&!groups.has(i.id);
+    const content=wrapSpan?parts.map(part=>`\\begin{table*}[htbp]\n\\centering\n${part}\n\\end{table*}`).join('\n\n'):parts.join('\n\\par\\medskip\n');
+    append(i,content,'review-required');issue('TABLE_LAYOUT_REVIEW',i);
+  }
+  function emitUnitContent(i, decision, inBib) {
     if(decision)append(i,decision.tex,'reviewed');
+    else if(i.kind==='table'&&i.table?.rows?.length)emitTableUnit(i);
     else if(i.assetId)emitAsset(i);
-    else if(i.kind==='table'&&i.table?.rows?.length){const rows=i.table.rows;if(!rows.every(row=>Array.isArray(row)&&row.length===rows[0].length&&row.every(c=>typeof c?.text==='string'&&refs(c.evidence)&&(c.colSpan??1)===1&&(c.rowSpan??1)===1)))fail('INVALID_TABLE');const content='\\begin{tabular}{'+'l'.repeat(rows[0].length)+'}\n'+rows.map(row=>row.map(c=>emitText(i,c.text)).join(' & ')+' \\\\').join('\n')+'\n\\end{tabular}';append(i,content,'review-required');issue('TABLE_LAYOUT_REVIEW',i);}
-    else if(typeof i.text==='string'&&i.text.length)append(i,emitText(i,i.text),/[^\x00-\x7f]/u.test(i.text)||i.extensions?.candidates?.length||i.extensions?.separators?.length||i.reason==='inline-script-candidate'?'review-required':'exact-text');
+    else if(typeof i.text==='string'&&i.text.length)append(i,emitText(i,i.text,inBib),/[^\x00-\x7f]/u.test(i.text)||i.extensions?.candidates?.length||i.extensions?.separators?.length||i.reason==='inline-script-candidate'?'review-required':'exact-text');
     else {issue('MISSING_CONTENT',i,'error');source+='% Missing source content';}
   }
-  function openUnit(i, r, style, publication) {
-    if(r==='heading')source+='\\Needspace{4\\baselineskip}\n';if(i.assetId||r==='caption')source+='\\Needspace{5\\baselineskip}\n';if(r==='footnote')source+='\\begingroup\\renewcommand{\\thefootnote}{}\\footnotetext{';source+=`{\\fontsize{${num(style.sizeBp)}bp}{${num(style.leadingBp)}bp}\\selectfont `;if(['heading','title'].includes(r))source+='\\bfseries ';if(publication&&publication!=='body')source+='\\noindent ';
+  function openUnit(i, r, style, publication, inBib) {
+    if(r==='heading')source+='\\Needspace{4\\baselineskip}\n';if(i.assetId||r==='caption')source+='\\Needspace{5\\baselineskip}\n';if(r==='footnote')source+='\\begingroup\\renewcommand{\\thefootnote}{}\\footnotetext{';source+=`{\\fontsize{${num(style.sizeBp)}bp}{${num(style.leadingBp)}bp}\\selectfont `;if(lineFit.applied&&r==='body'&&i.kind==='paragraph')source+='\\FalsifyLineFit ';if(['heading','title'].includes(r))source+='\\bfseries ';if((publication&&publication!=='body')||(inBib&&i.kind==='paragraph'))source+='\\noindent ';
   }
   function closeUnit(index, r, style, publication) {
     source+='\\par}\n\n';
@@ -139,8 +228,11 @@ export function serializeFlowReconstruction({model,decisions=[],profile,fontFile
     if(endings.has(index))source+=`\\end{${endings.get(index)}}\n`;
   }
   function renderUnits() {
-    function renderUnit(index, i) {const unitStart=source.length, bindingStart=bindings.length; if(floatStart.has(index))source+=`\\begin{${floatStart.get(index)}}[htbp]\n\\centering\n`; const r=role(i),baseStyle=t.roles[r]||t.roles.body,page=pages.get(i.evidence[0].pageIndex),edgeBox=boxOf(i.evidence),observedSize=i.extensions?.typography?.fontSizeBp,isEdge=i.kind==='furniture'||edgeBox[3]<page.height*.1||edgeBox[1]>page.height*.93,publication=i.extensions?.publicationRole,override=t.diagnostics?.some(d=>d.source==='override'&&(d.field==='roles'||d.field==='body'&&r==='body')),observedLeading=i.extensions?.typography?.leadingBp,style=(i.kind==='furniture'||!override&&(isEdge||publication))&&good(observedSize,4,36)?{sizeBp:observedSize,leadingBp:good(observedLeading,observedSize*.9,observedSize*2)?observedLeading:observedSize*1.2}:baseStyle,decision=choices.get(i.id);openUnit(i, r, style, publication);
-      emitUnitContent(i, decision);
+    let inBib=false;
+    function renderUnit(index, i) {
+      if(i.kind!=='furniture'){if(isBibliographyHeading(i))inBib=true;else if(isNonBibliographyHeading(i))inBib=false;}
+      const unitStart=source.length, bindingStart=bindings.length; if(floatStart.has(index))source+=`\\begin{${floatStart.get(index)}}[htbp]\n\\centering\n`; const r=role(i),baseStyle=t.roles[r]||t.roles.body,page=pages.get(i.evidence[0].pageIndex),edgeBox=boxOf(i.evidence),observedSize=i.extensions?.typography?.fontSizeBp,isEdge=i.kind==='furniture'||edgeBox[3]<page.height*.1||edgeBox[1]>page.height*.93,publication=i.extensions?.publicationRole,override=t.diagnostics?.some(d=>d.source==='override'&&(d.field==='roles'||d.field==='body'&&r==='body')),observedLeading=i.extensions?.typography?.leadingBp,style=(i.kind==='furniture'||!override&&(isEdge||publication))&&good(observedSize,4,36)?{sizeBp:observedSize,leadingBp:good(observedLeading,observedSize*.9,observedSize*2)?observedLeading:observedSize*1.2}:baseStyle,decision=choices.get(i.id);openUnit(i, r, style, publication, inBib);
+      emitUnitContent(i, decision, inBib);
       closeUnit(index, r, style, publication);
       unitFragments.set(i.id,source.slice(unitStart)); for(const b of bindings.slice(bindingStart))unitBindings.set(i.id,{binding:b,start:b.start-unitStart,end:b.end-unitStart}); source=source.slice(0,unitStart);
     }

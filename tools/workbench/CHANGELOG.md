@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.0-alpha.59
+
+- Expand BLUE evidence context to 24,000 characters ranked by scientific relevance, classify repeated header/footer logos and icons as decorative, and bind multi-grid/multi-page continued tables with units, footnotes and superscripts.
+- Add read-only BLUE MCP tools (`read_page_text`, `search_text`, `list_references`), chart printed-value reconciliation, isolated CI error-bar endpoint bounds, and uncalibrated zero-series guards.
+- Support nested Form XObject bar/scatter mark isolation, dark-neutral raster curve separation from axes/ticks/text, and structured `table-cell` and `chart-point` external RED edits while keeping blind PDF handoff intact.
+- Improve PDF-to-LaTeX numeric figure ordering, bibliography entry separation, verified `\multicolumn`/`\multirow` and two-column long/wide tables, and opt-in line-fit font width guards (`T-0157`).
+- Add original LaTeX `.bbl`/multi-bib/`natbib`/`biblatex`/custom-macro analysis and two-column right, full-width and multi-page footnote collision checks (`T-0158`), plus paragraph-vendor `8f3bef6` sync and provenance verification (`sourceBuildVerified: false`).
+
 ## 0.2.0-alpha.49
 
 - Edit curve peaks, wells, width and position while retaining source axes, labels and page layout.

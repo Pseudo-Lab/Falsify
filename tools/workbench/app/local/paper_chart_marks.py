@@ -24,19 +24,21 @@ import hashlib
 import io
 import math
 
+import paper_chart_form_xobject as form_xo
 import paper_chart_paint as paint
 
 SCHEMA = 'falsify.chart-scene.v1'
 REPORT_SCHEMA = 'falsify.chart-marks-report.v1'
 _LIMITS = (
-    'top-level-filled-rect-and-circle',
+    'filled-rect-and-circle',
     'axis-aligned-display-rect',
     'vertical-or-horizontal-baseline',
     'similar-marker-radius',
     'no-white-erase',
     'seqno-not-operator-index',
     'source-hash-and-token-occurrence',
-    'form-xobject-not-claimed',
+    'nested-form-xobject-depth-4',
+    'form-xobject-occurrence-isolated',
     'curve-and-image-routes-unchanged',
     'near-white-fill-skipped',
     'bar-width-and-baseline-fixed',
@@ -178,10 +180,35 @@ def _mark_graphics(word, operands, state, note_ctm):
         state['known'] = False
 
 
-def _parse_stream(pk, tokens, display_tm, content_index):
-    state, stack = _gstate(), []
+def _stamp_form_path(marks, start_index, form_path):
+    if not form_path:
+        return
+    serialized = [{'name': s[0], 'nameTokIndex': s[1], 'objgen': list(s[2])} for s in form_path]
+    stream_og = list(form_path[-1][2])
+    for mark in marks[start_index:]:
+        mark['formPath'] = serialized
+        mark['streamObjgen'] = stream_og
+
+
+def _parse_stream(
+    pk,
+    tokens,
+    display_tm,
+    content_index,
+    *,
+    res_chain=(),
+    init_state=None,
+    form_path=(),
+    visited=frozenset(),
+    depth=0,
+    forms_tokens=None,
+):
+    state = _copy_state(init_state) if init_state is not None else _gstate()
+    stack = []
     current, subs = None, []
     marks, strokes = [], []
+    if forms_tokens is None:
+        forms_tokens = {}
 
     def close_sub():
         nonlocal current
@@ -251,10 +278,19 @@ def _parse_stream(pk, tokens, display_tm, content_index):
             _mark_graphics(word, operands, state, note_ctm)
         elif word in ('m', 'l', 'c', 're', 'h', 'v', 'y'):
             path_command(word, operands, op_index)
+        elif word == 'Do':
+            close_sub()
+            subs = []
+            form_xo.maybe_parse_form_do(
+                pk, operands, state, res_chain, display_tm, content_index,
+                form_path, visited, depth, forms_tokens, _parse_stream, marks, strokes,
+            )
         elif word in _END:
             close_sub()
             if word in _PAINT:
+                before = len(marks)
                 _consider(subs, state, display_tm, content_index, op_index, marks)
+                _stamp_form_path(marks, before, form_path)
             elif word in _STROKE:
                 _consider_stroke(subs, display_tm, strokes)
             subs = []
@@ -616,13 +652,18 @@ def _load(raw, page_index, bbox):
     pdf = pk.open(io.BytesIO(raw))
     try:
         page = pdf.pages[page_index]
-        streams = []
+        page_res = form_xo.effective_resources(pk, page.obj)
+        res_chain = (page_res,) if page_res is not None else ()
+        streams = {'contents': [], 'forms': {}}
         marks, strokes = [], []
         for content_index, stream in enumerate(paint._contents(pk, page)):
             data = stream.read_bytes()
             tokens = paint._tokens(pk, data)
-            streams.append(tokens)
-            found, lines = _parse_stream(pk, tokens, display_tm, content_index)
+            streams['contents'].append(tokens)
+            found, lines = _parse_stream(
+                pk, tokens, display_tm, content_index,
+                res_chain=res_chain, forms_tokens=streams['forms'],
+            )
             marks.extend(found)
             strokes.extend(lines)
     finally:
@@ -712,6 +753,9 @@ def _mark_binding(mark):
             'radiusUser': mark['radius_user'],
             'operands': mark['operands'],
         })
+    if mark.get('formPath'):
+        binding['formPath'] = mark['formPath']
+        binding['streamObjgen'] = mark['streamObjgen']
     return binding
 
 
@@ -823,8 +867,9 @@ def _ambiguous(marks):
     seen = {}
     blocked = set()
     for mark in marks:
+        fpath = form_xo.path_key(mark)
         for index in mark['drops']:
-            key = (mark['content'], index)
+            key = (mark['content'], fpath, index)
             if key in seen:
                 blocked.add(id(seen[key]))
                 blocked.add(id(mark))
@@ -836,8 +881,8 @@ def _ambiguous(marks):
 def prepare_marks(source, page_index, bbox, options=None):
     """Return a marks scene, or [] when no bar or scatter mark is bound.
 
-    Curve-only crops, form XObjects and images return []. The returned scene
-    has mode "marks" so a dispatcher can mount FalsifyChartMarkEditor.
+    Curve-only crops and image-only crops return []. Claimed vector bar/scatter
+    marks (including inside nested Form XObjects up to depth 4) return mode "marks".
     """
     if type(page_index) is not int or isinstance(page_index, bool) or page_index < 0:
         raise ValueError('bad-page')
@@ -888,7 +933,8 @@ def _strip(raw, page_index, series):
     edits = {}
     for item in series:
         for mark in item['sourceBinding']['marks']:
-            bucket = edits.setdefault(mark['content'], {'replacements': {}, 'drops': set()})
+            key = (mark['content'], form_xo.path_key(mark))
+            bucket = edits.setdefault(key, {'replacements': {}, 'drops': set()})
             bucket['drops'].update(mark['drops'])
     if not edits:
         return raw
@@ -900,24 +946,16 @@ def _streams_of(raw, page_index):
     pdf = pk.open(io.BytesIO(raw))
     try:
         page = pdf.pages[page_index]
-        return [paint._tokens(pk, stream.read_bytes()) for stream in paint._contents(pk, page)]
+        return {
+            'contents': [paint._tokens(pk, stream.read_bytes()) for stream in paint._contents(pk, page)],
+            'forms': form_xo.collect_form_tokens(pk, page),
+        }
     finally:
         pdf.close()
 
 
 def _apply_streams(raw, page_index, streams, edits):
-    pk, _mu = paint._deps()
-    pdf = pk.open(io.BytesIO(raw))
-    try:
-        page = pdf.pages[page_index]
-        for content_index, edit in edits.items():
-            if not edit['replacements'] and not edit['drops']:
-                continue
-            data = paint._join(streams[content_index], edit['replacements'], edit['drops'])
-            paint._write_content(pk, pdf, page, content_index, data)
-        return paint._save(pk, pdf)
-    finally:
-        pdf.close()
+    return form_xo.apply_tree_edits(raw, page_index, streams, edits)
 
 
 def _check(source, scene):
@@ -1050,6 +1088,18 @@ def _scene_box(scene):
     return [float(value) for value in box], float(dpi)
 
 
+def _mark_tokens(streams, mark):
+    objgen = mark.get('streamObjgen')
+    if objgen is not None:
+        key = tuple(int(v) for v in objgen)
+        if key not in streams['forms']:
+            raise ValueError('mark-not-found')
+        return streams['forms'][key]
+    if mark['content'] >= len(streams['contents']):
+        raise ValueError('mark-not-found')
+    return streams['contents'][mark['content']]
+
+
 def _edit_mark_series(series, edited_by_id, streams, bbox, dpi, edits, changed):
     current = edited_by_id.get(series.get('id'))
     if current is None:
@@ -1059,10 +1109,8 @@ def _edit_mark_series(series, edited_by_id, streams, bbox, dpi, edits, changed):
     for mark, before, after in zip(bindings, series['points'], current['points']):
         if abs(float(before['x']) - float(after['x'])) <= 1e-3 and abs(float(before['y']) - float(after['y'])) <= 1e-3:
             continue
-        if mark['content'] >= len(streams):
-            raise ValueError('mark-not-found')
-        tokens = streams[mark['content']]
-        bucket = edits.setdefault(mark['content'], {'replacements': {}, 'drops': set()})
+        tokens = _mark_tokens(streams, mark)
+        bucket = edits.setdefault((mark['content'], form_xo.path_key(mark)), {'replacements': {}, 'drops': set()})
         if series['kind'] == 'bar':
             wrote = _rewrite_bar(mark, after, bbox, dpi, bucket['replacements'], tokens)
         else:

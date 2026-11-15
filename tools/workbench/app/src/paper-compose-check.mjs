@@ -119,10 +119,38 @@ function validFurnitureRecord(item,style,frameSupported,t) {
           !Number.isFinite(item.width) || item.width < 0 || !Number.isFinite(item.height) || item.height <= 0 || t[0] <= 0 || t[3] <= 0 || Math.abs(t[1]) > 1e-6 || Math.abs(t[2]) > 1e-6 || item.dir !== 'ltr') && validFurnitureStyle(style);
 }
 
+function spanBoxFromRecords(records, indexes) {
+  const rs = indexes.map(i => records[i]).filter(Boolean);
+  return [Math.min(...rs.map(r=>r.x)), Math.min(...rs.map(r=>r.top)), Math.max(...rs.map(r=>r.x+r.item.width)), Math.max(...rs.map(r=>r.bottom))];
+}
+
+function classifyFooterBandColumn(bbox, midpoint, twoColumn) {
+  if (!twoColumn) return 'left';
+  if (bbox[0] < midpoint - 12 && bbox[2] > midpoint + 12) return 'full';
+  return bbox[0] >= midpoint - 12 ? 'right' : 'left';
+}
+
+function detectFooterBodyOverlap({records, excluded, footerBoxes, bodyFrame, pageIndex, findings}) {
+  if (!footerBoxes.length) return;
+  const round2 = x => Math.round(x * 100) / 100;
+  const mid = (bodyFrame.left + bodyFrame.right) / 2;
+  const body = records.filter(r => r && !excluded.has(r.index));
+  const twoColumn = body.some(r => r.x + r.item.width < mid - 6) && body.some(r => r.x > mid + 6);
+  const colsMatch = (a, b) => a === 'full' || b === 'full' || a === b;
+  for (const fb of footerBoxes) {
+    fb.column = classifyFooterBandColumn(fb.bbox, mid, twoColumn);
+    const hits = body.filter(r => r.bottom > fb.bbox[1] + 1 && r.top < fb.bbox[3] - 1 && colsMatch(classifyFooterBandColumn([r.x, r.top, r.x + r.item.width, r.bottom], mid, twoColumn), fb.column));
+    if (!hits.length) continue;
+    const bodyBbox = [Math.min(...hits.map(r=>r.x)), Math.min(...hits.map(r=>r.top)), Math.max(...hits.map(r=>r.x+r.item.width)), Math.max(...hits.map(r=>r.bottom))];
+    const deltaBp = Math.round((bodyBbox[3] - fb.bbox[1] + 6) * 100) / 100;
+    findings.push({code:'footnote-body-overlap', pageIndex, column:fb.column, deltaBp, footnoteBbox:fb.bbox.map(round2), bodyBbox:bodyBbox.map(round2)});
+  }
+}
+
 function inspectPageFurniture({content, viewport, frameSupported, furnitureValid, expectedFurniture, outputFurniture, bodyFrame, selectedSources, n, numPages, findings}) {
   // Match only complete, upright text runs in a reserved vertical band. The
   // map identifies an occurrence, but bytes and geometry establish its text.
-  const excluded = new Set();
+  const excluded = new Set(), footerBoxes = [];
   let furnitureAssets = false;
   if (furnitureValid) {
     function furnitureRecord(item,index) {
@@ -135,6 +163,9 @@ function inspectPageFurniture({content, viewport, frameSupported, furnitureValid
     const claimed = new Set(), mergedMarkers = new Set();
     const pageMarkers = outputFurniture.filter(m=>m?.page === n);
     claimMergedFurniture({records, pageMarkers, expectedFurniture, n, numPages, bodyFrame, viewport, excluded, claimed, mergedMarkers});
+    for (const run of records.filter(Boolean)) if (excluded.has(run.index) && pageMarkers.some(m=>mergedMarkers.has(m) && m.kind==='footer')) {
+      footerBoxes.push({pageIndex:n-1, bbox:[run.x, run.top, run.x+run.item.width, run.bottom], text:run.item.str});
+    }
     function inspectMarker(marker) {
       if (mergedMarkers.has(marker)) return;
       const matches = expectedFurniture.filter(t => t?.sourcePage === marker.sourcePage && t.kind === marker.kind &&
@@ -151,6 +182,7 @@ function inspectPageFurniture({content, viewport, frameSupported, furnitureValid
         findings.push({code:candidates.length ? 'ambiguous-furniture' : 'missing-furniture',pageIndex:n-1,id:marker.id}); return;
       }
       for (const i of candidates[0]) { excluded.add(i); claimed.add(i); }
+      if (marker.kind === 'footer') footerBoxes.push({pageIndex:n-1, bbox:spanBoxFromRecords(records, candidates[0]), text:target});
     }
     for (const marker of outputFurniture.filter(m => m?.page === n)) inspectMarker(marker);
     inspectSelectedSources();
@@ -171,8 +203,9 @@ function inspectPageFurniture({content, viewport, frameSupported, furnitureValid
     for (const r of records) if (r && !excluded.has(r.index) && (r.bottom <= bodyFrame.top || r.top >= bodyFrame.bottom)) {
       findings.push({code:'unexpected-margin-text',pageIndex:n-1,text:r.item.str});
     }
+    detectFooterBodyOverlap({records, excluded, footerBoxes, bodyFrame, pageIndex:n-1, findings});
   }
-  return {excluded, furnitureAssets};
+  return {excluded, furnitureAssets, footerBoxes};
 }
 
 function resolveGlyphBoundaries({boundaries, glyphPages, n, itemScalars, parts, spacingEvidence, findings}) {
@@ -313,7 +346,7 @@ function observePageText({content, viewport, furnitureValid, expectedFurniture, 
   }
   for (const [itemIndex, item] of content.items.entries()) observeItem(itemIndex,item);
   resolveGlyphBoundaries({boundaries, glyphPages, n, itemScalars, parts, spacingEvidence, findings});
-  return {text:normalize(parts.join('')), inspectedItems, furnitureAssets:furniture.furnitureAssets};
+  return {text:normalize(parts.join('')), inspectedItems, furnitureAssets:furniture.furnitureAssets, footerBoxes:furniture.footerBoxes};
 }
 
 function associateFurnitureSources({furnitureValid, blockSpans, numPages, expectedFurniture}) {
@@ -337,47 +370,89 @@ function associateFurnitureSources({furnitureValid, blockSpans, numPages, expect
   return {sourceAssociation, selectedSources};
 }
 
-function assembleRecompositionReport({pages, expectedBlocks, edits, bytes, mupdf, layoutProfile, sourceBytes, sourcePageIndexes, flowExpectations, findings, spacingEvidence, locations, exporter, furnitureEnabled, furnitureValid, selectedSources, sourceAssociation, furnitureAssets, inspectedItems}) {
+function mergeFooterProfile(layoutProfile, observedFooters) {
+  if (!observedFooters?.length) return layoutProfile;
+  return {...(layoutProfile || {}), footers:[...(layoutProfile?.footers || []), ...observedFooters]};
+}
+
+function appendFootnoteOverlapFindings(layoutQuality, findings) {
+  for (const issue of layoutQuality.issues || []) {
+    if (issue.type !== 'footnote-body-overlap') continue;
+    const col = issue.evidence?.column || 'left';
+    const exists = findings.some(f => f.code === 'footnote-body-overlap' && f.pageIndex === issue.pageIndex && (f.column === col || f.column === 'full' || col === 'full'));
+    if (!exists) findings.push({code:'footnote-body-overlap', pageIndex:issue.pageIndex, column:col, deltaBp:issue.evidence?.deltaBp, footnoteBbox:issue.evidence?.footnoteBbox, bodyBbox:issue.evidence?.bodyBbox});
+  }
+}
+
+function alignRecompositionLocations({alignmentAvailable, pages, expectedBlocks, edits, locations}) {
+  if (!alignmentAvailable) return;
+  // Both sequences are normalized as a whole, with one separator between
+  // nonempty entries. Offsets therefore follow the validated sequence itself.
+  const pageRanges = []; let offset = 0;
+  for (const page of pages) {
+    if (!page) { pageRanges.push(null); continue; }
+    if (offset) offset++;
+    pageRanges.push({start:offset, end:offset + page.length});
+    offset += page.length;
+  }
+  offset = 0;
+  for (const block of expectedBlocks) {
+    const value = normalize(Object.hasOwn(edits,block.id) ? edits[block.id] : block.text);
+    if (!value) { locations.push({id:block.id, pageIndexes:[]}); continue; }
+    if (offset) offset++;
+    const start = offset, end = start + value.length;
+    const pageIndexes = pageRanges.flatMap((range, i) => range && range.start < end && range.end > start ? [i] : []);
+    locations.push({id:block.id, pageIndexes});
+    offset = end;
+  }
+}
+
+function describeIndependentExporter(exporter) {
+  if (typeof exporter === 'string' && exporter.trim() && !/pdf\.?js/i.test(exporter)) {
+    return {status:'declared', reader:'PDF.js text extraction', exporter, limitation:'Distinct named engines only; exporter identity is caller supplied.'};
+  }
+  return {status:'unavailable', reader:'PDF.js text extraction', reason:'Exporter path not supplied or uses PDF.js.'};
+}
+
+function computeContentStatus({findings, observed, expected, flowMatches, flowDifferences, representation}) {
+  if (findings.some(f=>f.code==='ambiguous-text-geometry' || f.code==='unsupported-text-geometry')) return 'unavailable';
+  if (observed===expected || (flowMatches && !flowDifferences.length)) return 'pass';
+  return representation.matches || flowMatches ? 'normalized' : 'finding';
+}
+
+function describeFurnitureCheck({furnitureEnabled, findings, furnitureValid, selectedSources, sourceAssociation, furnitureAssets}) {
+  if (!furnitureEnabled) return undefined;
+  const hasFinding = findings.some(f=>f.code==='missing-furniture' || f.code==='unexpected-margin-text' || f.code==='wrong-furniture-source');
+  const unavailable = !furnitureValid || !selectedSources || findings.some(f=>f.code==='furniture-unavailable' || f.code==='ambiguous-furniture');
+  const status = hasFinding ? 'finding' : unavailable ? 'unavailable' : 'checked';
+  const assets = furnitureAssets ? {status:'unavailable',reason:'Furniture assets require independent visual inspection.'} : {status:'not-applicable'};
+  return {status, sourceAssociation, assets};
+}
+
+function computeBoundsStatus(findings, inspectedItems) {
+  if (findings.some(f=>f.code==='text-outside-page')) return 'finding';
+  if (!inspectedItems || findings.some(f=>f.code==='unsupported-text-geometry')) return 'unavailable';
+  return 'checked';
+}
+
+function assembleRecompositionReport({pages, expectedBlocks, edits, bytes, mupdf, layoutProfile, observedFooters, sourceBytes, sourcePageIndexes, flowExpectations, findings, spacingEvidence, locations, exporter, furnitureEnabled, furnitureValid, selectedSources, sourceAssociation, furnitureAssets, inspectedItems}) {
   const observed = normalize(pages.join(' '));
   const expected = normalize(expectedBlocks.map(b => Object.hasOwn(edits,b.id) ? edits[b.id] : b.text).join(' '));
-  const layoutQuality=inspectLayoutQuality({bytes,mupdf,profile:layoutProfile,sourceBytes,sourcePageIndexes});
+  const mergedProfile = mergeFooterProfile(layoutProfile, observedFooters);
+  const layoutQuality = inspectLayoutQuality({bytes,mupdf,profile:mergedProfile,sourceBytes,sourcePageIndexes});
+  appendFootnoteOverlapFindings(layoutQuality, findings);
   const {flow, flowMatches, flowDifferences} = compareFloatingCaptions({flowExpectations, layoutProfile, layoutQuality, expected, observed, expectedBlocks, edits});
-  const representation=representationComparison(expected,observed);
-  const reportedDifferences=representation.matches ? representation.differences : flowMatches ? flowDifferences : [];
+  const representation = representationComparison(expected,observed);
+  const reportedDifferences = representation.matches ? representation.differences : flowMatches ? flowDifferences : [];
   if (!representation.matches && !flowMatches) findings.push({code:'content-mismatch', expected, observed});
   const alignmentAvailable = observed === expected && !findings.some(f => f.code === 'ambiguous-text-geometry' || f.code === 'unsupported-text-geometry');
-  alignLocations();
-  function alignLocations() {
-    if (alignmentAvailable) {
-      // Both sequences are normalized as a whole, with one separator between
-      // nonempty entries. Offsets therefore follow the validated sequence itself.
-      const pageRanges = []; let offset = 0;
-      for (const page of pages) {
-        if (!page) { pageRanges.push(null); continue; }
-        if (offset) offset++;
-        pageRanges.push({start:offset, end:offset + page.length});
-        offset += page.length;
-      }
-      offset = 0;
-      for (const block of expectedBlocks) {
-        const value = normalize(Object.hasOwn(edits,block.id) ? edits[block.id] : block.text);
-        if (!value) { locations.push({id:block.id, pageIndexes:[]}); continue; }
-        if (offset) offset++;
-        const start = offset, end = start + value.length;
-        const pageIndexes = pageRanges.flatMap((range, i) => range && range.start < end && range.end > start ? [i] : []);
-        locations.push({id:block.id, pageIndexes});
-        offset = end;
-      }
-    }
-  }
-  const independent = typeof exporter === 'string' && exporter.trim() && !/pdf\.?js/i.test(exporter) ? {status:'declared', reader:'PDF.js text extraction', exporter, limitation:'Distinct named engines only; exporter identity is caller supplied.'} : {status:'unavailable', reader:'PDF.js text extraction', reason:'Exporter path not supplied or uses PDF.js.'};
-  function contentStatus() {
-    return findings.some(f=>f.code==='ambiguous-text-geometry' || f.code==='unsupported-text-geometry') ? 'unavailable' : observed===expected || (flowMatches && !flowDifferences.length) ? 'pass' : representation.matches || flowMatches ? 'normalized' : 'finding';
-  }
-  function describeFurniture() {
-    return furnitureEnabled ? {status:findings.some(f=>f.code==='missing-furniture' || f.code==='unexpected-margin-text' || f.code==='wrong-furniture-source') ? 'finding' : !furnitureValid || !selectedSources || findings.some(f=>f.code==='furniture-unavailable' || f.code==='ambiguous-furniture') ? 'unavailable' : 'checked', sourceAssociation, assets:furnitureAssets ? {status:'unavailable',reason:'Furniture assets require independent visual inspection.'} : {status:'not-applicable'}} : undefined;
-  }
-  return {schema:'falsify.recomposition-check.v1', readable:true, layoutQuality, checks:{flow, furniture:describeFurniture(),content:{status:contentStatus(), comparison:'ordered text with whitespace runs collapsed; ambiguous item geometry is unavailable',representationDifferences:reportedDifferences,spacingEvidence,offsetUnit:'UTF-16 offsets in whitespace-normalized source expectation and PDF.js output; scoped flow differences use caption-local or body-after-caption-removal offsets',limitation:reportedDifferences.length ? 'The listed representation differences are not byte-exact preservation.' : undefined}, bounds:{status:findings.some(f=>f.code==='text-outside-page')?'finding':!inspectedItems || findings.some(f=>f.code==='unsupported-text-geometry')?'unavailable':'checked', limitation:'Extracted upright text items only, estimated from font ascent and descent; PDF.js may omit off-page text. Not clipping or ink bounds.'}, movement:alignmentAvailable ? {status:'observed', locations} : {status:'unavailable', locations:null, reason:'Complete ordered text alignment or supported geometry is unavailable.'}, independent, visual:{status:'unavailable', reason:'No raster or visibility inspection.'}, overlap:{status:'unavailable', reason:'Text and asset ownership not established.'}, captionOwnership:{status:'unavailable', reason:'Relations not established from PDF bytes.'}}, findings};
+  alignRecompositionLocations({alignmentAvailable, pages, expectedBlocks, edits, locations});
+  const independent = describeIndependentExporter(exporter);
+  const contentStatus = computeContentStatus({findings, observed, expected, flowMatches, flowDifferences, representation});
+  const furniture = describeFurnitureCheck({furnitureEnabled, findings, furnitureValid, selectedSources, sourceAssociation, furnitureAssets});
+  const boundsStatus = computeBoundsStatus(findings, inspectedItems);
+  const movement = alignmentAvailable ? {status:'observed', locations} : {status:'unavailable', locations:null, reason:'Complete ordered text alignment or supported geometry is unavailable.'};
+  return {schema:'falsify.recomposition-check.v1', readable:true, layoutQuality, checks:{flow, furniture, content:{status:contentStatus, comparison:'ordered text with whitespace runs collapsed; ambiguous item geometry is unavailable',representationDifferences:reportedDifferences,spacingEvidence,offsetUnit:'UTF-16 offsets in whitespace-normalized source expectation and PDF.js output; scoped flow differences use caption-local or body-after-caption-removal offsets',limitation:reportedDifferences.length ? 'The listed representation differences are not byte-exact preservation.' : undefined}, bounds:{status:boundsStatus, limitation:'Extracted upright text items only, estimated from font ascent and descent; PDF.js may omit off-page text. Not clipping or ink bounds.'}, movement, independent, visual:{status:'unavailable', reason:'No raster or visibility inspection.'}, overlap:{status:'unavailable', reason:'Text and asset ownership not established.'}, captionOwnership:{status:'unavailable', reason:'Relations not established from PDF bytes.'}}, findings};
 }
 
 function validateRecompositionInput(bytes,expectedBlocks,edits,pdfjs) {
@@ -402,6 +477,7 @@ export async function checkRecomposition({bytes, expectedBlocks, edits = {}, pdf
   let furnitureAssets = false;
   let inspectedItems = 0;
   let glyphPages = null;
+  const observedFooters = [];
   if (mupdf) {
     try { glyphPages = readOutputGlyphs({bytes:bytes.slice(), mupdf}); } catch { glyphPages = null; }
   }
@@ -415,6 +491,7 @@ export async function checkRecomposition({bytes, expectedBlocks, edits = {}, pdf
       const content = await page.getTextContent();
       const observation = observePageText({content, viewport, furnitureValid, expectedFurniture, outputFurniture, bodyFrame, selectedSources, n, numPages:doc.numPages, findings, glyphPages, spacingEvidence});
       furnitureAssets ||= observation.furnitureAssets;
+      if (observation.footerBoxes?.length) observedFooters.push(...observation.footerBoxes);
       inspectedItems += observation.inspectedItems;
       pages.push(observation.text);
       page.cleanup();
@@ -427,5 +504,5 @@ export async function checkRecomposition({bytes, expectedBlocks, edits = {}, pdf
       if (expectedFurniture.some(t=>t.entryKind === 'asset')) furnitureAssets = true;
     }
   }
-  return assembleRecompositionReport({pages, expectedBlocks, edits, bytes, mupdf, layoutProfile, sourceBytes, sourcePageIndexes, flowExpectations, findings, spacingEvidence, locations, exporter, furnitureEnabled, furnitureValid, selectedSources, sourceAssociation, furnitureAssets, inspectedItems});
+  return assembleRecompositionReport({pages, expectedBlocks, edits, bytes, mupdf, layoutProfile, observedFooters, sourceBytes, sourcePageIndexes, flowExpectations, findings, spacingEvidence, locations, exporter, furnitureEnabled, furnitureValid, selectedSources, sourceAssociation, furnitureAssets, inspectedItems});
 }

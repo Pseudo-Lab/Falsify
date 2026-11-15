@@ -73,9 +73,8 @@
 .falsify-mark-stage.is-comparing .falsify-mark-svg {
   visibility: hidden;
 }
-.falsify-mark-bar {
-  cursor: pointer;
-}
+.falsify-mark-bar { cursor: ns-resize; }
+.falsify-mark-bar:hover, .falsify-mark-point:hover { stroke: #1d1a16; stroke-width: 3px; }
 .falsify-mark-handle {
   fill: #fffdf8;
   stroke: #1d1a16;
@@ -86,10 +85,12 @@
 .falsify-mark-handle.is-horizontal {
   cursor: ew-resize;
 }
+.falsify-mark-hit { cursor: move; }
 .falsify-mark-point {
   cursor: move;
   vector-effect: non-scaling-stroke;
 }
+.falsify-mark-precision[hidden], .falsify-mark-button[hidden] { display: none; }
 .falsify-mark-precision {
   background: #fffdf8;
   border: 1px solid #d9d2c5;

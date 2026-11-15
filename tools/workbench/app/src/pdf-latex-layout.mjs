@@ -4,6 +4,90 @@ const validBox=b=>Array.isArray(b)&&b.length===4&&b.every(Number.isFinite)&&b[0]
 const union=bs=>[Math.min(...bs.map(b=>b[0])),Math.min(...bs.map(b=>b[1])),Math.max(...bs.map(b=>b[2])),Math.max(...bs.map(b=>b[3]))];
 const overlapY=(a,b)=>a[1]<b[3]&&b[1]<a[3];
 const overlap=(a,b)=>a[0]<b[2]&&b[0]<a[2]&&overlapY(a,b);
+const FLOAT_PROSE=/^\s*(?:supplementary\s+|extended\s+data\s+)?(?:fig(?:ure)?\.?|table)\s*(?:s)?(?:\d+|[ivx]+)[a-z]?\s+(?:shows?|is|are|was|were|illustrates?|presents?|reports?|demonstrates?|depicts?|lists?|contains?|summarizes?|summarises?|provides?|compares?|displays?|indicates?|reveals?|highlights?)\b/iu;
+const FLOAT_LABEL=/^\s*(supplementary|extended\s+data)?\s*(fig(?:ure)?\.?|table)\s*(?:(s)\s*)?(\d+)(?:[a-z])?(?=\s*(?:[.:|—–\-()]|\s|$))/iu;
+const ROMAN_TABLE=/^\s*(?:([Ss]upplementary|SUPPLEMENTARY|[Ee]xtended\s+[Dd]ata|EXTENDED\s+DATA)\s+)?([Tt]able|TABLE)\s+([IVX]+)(?=\s*(?:[.:|—–\-]|\s))/u;
+const ROMAN_MAP={I:1,V:5,X:10,L:50};
+
+function parseRoman(str){
+  if(!/^[IVXL]+$/.test(str)||str.length>7)return null;
+  let total=0,prev=0;
+  for(let i=str.length-1;i>=0;i--){const v=ROMAN_MAP[str[i]];if(!v)return null;total+=v<prev?-v:v;prev=v;}
+  return total>0&&total<=50?total:null;
+}
+
+function parseRomanFloatLabel(text){
+  const rm=ROMAN_TABLE.exec(text);
+  const num=rm?parseRoman(rm[3]):null;
+  if(!num)return null;
+  const prefix=rm[1]?rm[1].toLowerCase().replace(/\s+/g,'-'):'';
+  const track=prefix==='extended-data'?'extended':prefix==='supplementary'?'S':'roman';
+  return {family:'table',track,series:`table:${track}`,number:num};
+}
+
+/** Parse explicit numeric figure/table labels while separating main and supplement sequences. */
+export function parseFloatLabel(text){
+  if(typeof text!=='string'||!text.trim()||FLOAT_PROSE.test(text))return null;
+  const m=FLOAT_LABEL.exec(text);
+  if(!m)return parseRomanFloatLabel(text);
+  const prefix=m[1]?m[1].toLowerCase().replace(/\s+/g,'-'):'';
+  const family=/^fig/i.test(m[2])?'figure':'table';
+  const track=prefix==='extended-data'?'extended':(prefix==='supplementary'||m[3])?'S':'main';
+  return {family,track,series:`${family}:${track}`,number:Number.parseInt(m[4],10)};
+}
+
+function itemFloatLabel(item,partner=null){
+  if(!item)return null;
+  const isFloat=['figure','table','caption'].includes(item.kind)||item.reason==='caption-proposal';
+  if(!isFloat&&!partner)return null;
+  const sources=[partner?.text,item.text,item.extensions?.publicationTable?.caption,partner?.extensions?.publicationTable?.caption];
+  for(const text of sources){const parsed=parseFloatLabel(text);if(parsed)return parsed;}
+  return null;
+}
+
+function buildFloatUnits(orderedItems,groups){
+  const units=[],used=new Set();
+  for(let i=0;i<orderedItems.length;i++){
+    const item=orderedItems[i];
+    if(used.has(item.id))continue;
+    const next=orderedItems[i+1];
+    const paired=(next&&!used.has(next.id)&&(groups.get(item.id)===next.id||groups.get(next.id)===item.id));
+    if(paired){
+      used.add(item.id);used.add(next.id);
+      const fig=groups.has(item.id)?item:next,cap=fig===item?next:item;
+      units.push({items:[item,next],label:itemFloatLabel(fig,cap),isAppendix:false});
+      continue;
+    }
+    used.add(item.id);
+    const isAppendix=(item.kind==='heading'||item.extensions?.publicationRole==='section-heading')&&/^\s*appendix\b/iu.test(item.text||'');
+    units.push({items:[item],label:itemFloatLabel(item),isAppendix});
+  }
+  return units;
+}
+
+function sortSegmentFloats(segment){
+  let reordered=0;
+  const bySeries=new Map();
+  segment.forEach((u,idx)=>{if(u.label){const list=bySeries.get(u.label.series)||[];list.push({idx,u});bySeries.set(u.label.series,list);}});
+  for(const entries of bySeries.values()){
+    if(entries.length<2)continue;
+    const inverted=entries.some((e,k)=>k>0&&entries[k-1].u.label.number>e.u.label.number);
+    if(!inverted)continue;
+    const sorted=[...entries].sort((a,b)=>a.u.label.number-b.u.label.number||a.idx-b.idx);
+    entries.forEach((slot,k)=>{if(segment[slot.idx]!==sorted[k].u)reordered++;segment[slot.idx]=sorted[k].u;});
+  }
+  return reordered;
+}
+
+/** Restore numeric order for inverted float sequences without breaking caption groups or prose. */
+export function orderFloatUnits(orderedItems,groups=new Map()){
+  const units=buildFloatUnits(orderedItems,groups);
+  const segments=[[]];
+  for(const u of units){if(u.isAppendix&&segments.at(-1).length)segments.push([u]);else segments.at(-1).push(u);}
+  let reordered=0;
+  for(const seg of segments)reordered+=sortSegmentFloats(seg);
+  return {ordered:segments.flat().flatMap(u=>u.items),reordered};
+}
 
 function validGutterHint(hint,gutter,width){
  return hint?.status==='proposed'&&hint?.provenance==='paper-flow'&&hint?.columns===2&&Array.isArray(gutter)&&gutter.length===2&&gutter.every(Number.isFinite)&&gutter[0]>=0&&gutter[0]<gutter[1]&&gutter[1]<=width;
@@ -92,5 +176,18 @@ export function planReconstructionLayout(model){
   }
  }
  for(const page of pages)planPage(page);
+ checkFloatOrderInversions(model.items,say);
  return {pages,diagnostics};
+}
+
+function checkFloatOrderInversions(items,say){
+ const lastBySeries=new Map();
+ for(const item of items){
+  if((item.kind==='heading'||item.extensions?.publicationRole==='section-heading')&&/^\s*appendix\b/iu.test(item.text||'')){lastBySeries.clear();continue;}
+  const label=itemFloatLabel(item);
+  if(!label)continue;
+  const prev=lastBySeries.get(label.series);
+  if(prev&&label.number<prev.number)say(item.evidence[0].pageIndex,'FLOAT_ORDER_INVERSION',[prev.id,item.id]);
+  lastBySeries.set(label.series,{id:item.id,number:label.number});
+ }
 }

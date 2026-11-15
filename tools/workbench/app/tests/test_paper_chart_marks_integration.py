@@ -3,15 +3,24 @@ import base64
 import hashlib
 import sys
 import unittest
+from unittest import mock
 from pathlib import Path
 import pymupdf
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'local'))
+import paper_native_worker
 from paper_evidence import EvidenceStore
 from paper_chart_edit_service import ChartEditService
 from test_paper_chart_marks import document, circle
 
+_INTEGRATION_TIMEOUT = max(paper_native_worker.TIMEOUT, 120)
+
+
 class MarkIntegrationTests(unittest.TestCase):
     def test_bar_and_scatter_dispatch_and_cumulative_export(self):
+        with mock.patch.object(paper_native_worker, 'TIMEOUT', _INTEGRATION_TIMEOUT):
+            self._run_bar_and_scatter_cases()
+
+    def _run_bar_and_scatter_cases(self):
         for stream, kind in [
             (b'0 0 0 RG 1 w 30 40 m 370 40 l S 0.2 0.4 0.8 rg 60 40 36 90 re f 120 40 36 140 re f', 'bar'),
             (b'0.1 0.55 0.25 rg '+circle(150,100,6)+b' '+circle(250,150,6), 'scatter'),

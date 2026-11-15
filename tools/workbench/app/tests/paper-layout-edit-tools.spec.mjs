@@ -23,3 +23,22 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {spawnSync} from 'node:child_process';
 test('native footer insertion reserves second-page right column and grouped spans compile',async t=>{if(spawnSync('lualatex',['--version']).error||spawnSync('pdftotext',['-v']).error){t.skip('LuaLaTeX and pdftotext are required');return;}const pages=[0,1,2].map(pageIndex=>({pageIndex,width:600,height:800,frame:'mupdf-display',extensions:{layoutHints:{columns:2,gutterBp:[290,310],status:'proposed',provenance:'paper-flow'}}}));const items=Array.from({length:10},(_,n)=>({id:'u'+n,kind:'paragraph',status:'observed',evidence:[{sourceSha256:hash,pageIndex:Math.floor(n/4),frame:'mupdf-display',bbox:[n%2?320:40,100+n%4*100,n%2?560:280,180+n%4*100]}],text:n===7?'Boundary selected RED footnote 123':`Block ${n}. `+'Evidence remains intact. '.repeat(65)}));let p=(await createReconstructionProject({sourceSha256:hash,model:{...model,pages,items}},[],{layout:'semantic-flow'})).project;p=(await updateBlockLayout({project:p,args:{blockId:'u7',placement:'footer'}})).project;const footer=readLayoutUnitPayloads(p).u7;assert.match(footer,/\\insert\\footins/);assert.match(footer,/Boundary selected RED footnote 123/);for(const env of ['figure','table']){let q=(await replaceLayoutUnitPayloads({project:p,replacements:{u8:`\\begin{${env}}[htbp]\n\\centering\n A 123\\par\n`,u9:`Caption RED 789\\par\n\\end{${env}}\n`}})).project;const st=readLayoutStructure(q);st.groups=[['u8','u9']];q=await createLatexProject({...q,files:q.files.map(f=>({path:f.path,bytes:f.path==='falsify-layout-structure.json'?enc.encode(JSON.stringify(st)):f.bytes}))});q=(await updateBlockLayout({project:q,args:{blockId:'u8',columnSpan:2}})).project;const dir=mkdtempSync(join(tmpdir(),'falsify-flow-test-'));writeFileSync(join(dir,'main.tex'),q.files.find(f=>f.path==='main.tex').bytes);const run=spawnSync('lualatex',['--disable-installer','--no-shell-escape','-interaction=nonstopmode','-halt-on-error','main.tex'],{cwd:dir,encoding:'utf8',timeout:30000});assert.equal(run.status,0,run.stdout?.slice(-2000));const extract=spawnSync('pdftotext',['-bbox','main.pdf','out.html'],{cwd:dir,encoding:'utf8'});assert.equal(extract.status,0);const ps=readBytes(join(dir,'out.html'),'utf8').match(/<page\b[\s\S]*?<\/page>/g);const page=ps.findIndex(x=>x.includes('Boundary'));assert.equal(page,1);const word=/<word xMin="([\d.]+)"[^>]*>Boundary<\/word>/.exec(ps[page]);assert.ok(Number(word[1])>300,'footer is in right column');const footerY=Number(/<word xMin="[\d.]+" yMin="([\d.]+)"[^>]*>Boundary<\/word>/.exec(ps[page])[1]);const bodyWords=[...ps[page].matchAll(/<word xMin="([\d.]+)" yMin="([\d.]+)" xMax="[\d.]+" yMax="([\d.]+)"[^>]*>(?:Evidence|remains|intact)[^<]*<\/word>/g)].filter(m=>Number(m[1])>300&&Number(m[2])<footerY);assert.ok(bodyWords.length>0);assert.ok(bodyWords.every(m=>Number(m[3])<=footerY),'body stays above inserted footer');assert.ok(ps.some(x=>x.includes('Caption')));}});
+
+test('unifyDocumentFont is opt-in and leaves secondary and inline font declarations intact by default',async()=>{
+ let p=await createLatexProject({mainFile:'main.tex',engine:'lualatex',files:[
+  {path:'main.tex',bytes:enc.encode('\\documentclass{article}\n\\usepackage{fontspec}\n\\usepackage{times}\n\\setmainfont{OldSerif}\n\\setsansfont{OldSans}\n\\setmonofont{OldMono}\n\\begin{document}\n{\\fontfamily{phv}\\selectfont Local text} and body.\n\\end{document}\n')}
+ ]});
+ const kept=(await setProjectTypography({project:p,args:{family:'Latin Modern Roman'}})).project;
+ assert.equal(src(kept).includes('\\setsansfont{OldSans}'),true);
+ assert.equal(src(kept).includes('\\setmonofont{OldMono}'),true);
+ assert.equal(src(kept).includes('\\fontfamily{phv}\\selectfont'),true);
+ assert.equal(src(kept).includes('\\usepackage{times}'),true);
+
+ const unified=await setProjectTypography({project:p,args:{family:'Latin Modern Roman',unifyDocumentFont:true}});
+ assert.equal(unified.summary.unifyDocumentFont,true);
+ assert.match(src(unified.project),/\\setmainfont\{Latin Modern Roman\}/);
+ assert.match(src(unified.project),/\\setsansfont\{Latin Modern Roman\}/);
+ assert.match(src(unified.project),/\\setmonofont\{Latin Modern Roman\}/);
+ assert.doesNotMatch(src(unified.project),/\\usepackage\{times\}/);
+ assert.doesNotMatch(src(unified.project),/\\fontfamily\{phv\}/);
+});

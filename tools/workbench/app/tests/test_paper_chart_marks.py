@@ -270,7 +270,7 @@ class MarkExportTests(unittest.TestCase):
 
 
 class MarkLimitTests(unittest.TestCase):
-    def test_form_xobject_is_not_claimed(self):
+    def test_form_xobject_is_claimed(self):
         pdf = pikepdf.new()
         page = pdf.add_blank_page(page_size=(400, 300))
         form = pdf.make_stream(b'0 0 1 rg 10 10 40 80 re f')
@@ -282,7 +282,10 @@ class MarkLimitTests(unittest.TestCase):
         buf = io.BytesIO()
         pdf.save(buf)
         raw = buf.getvalue()
-        self.assertEqual(marks.prepare_marks(raw, 0, [0, 0, 400, 300]), [])
+        scene = marks.prepare_marks(raw, 0, [0, 0, 400, 300])
+        self.assertEqual(len(scene['series']), 1)
+        self.assertEqual(scene['series'][0]['kind'], 'bar')
+        self.assertEqual(len(scene['series'][0]['points']), 1)
 
     def test_top_level_bar_is_kept_when_a_form_is_also_present(self):
         pdf = pikepdf.new()
@@ -299,9 +302,8 @@ class MarkLimitTests(unittest.TestCase):
         buf = io.BytesIO()
         pdf.save(buf)
         scene = marks.prepare_marks(buf.getvalue(), 0, [0, 0, 400, 300])
-        self.assertEqual(len(scene['series']), 1)
-        self.assertEqual(scene['series'][0]['kind'], 'bar')
-        self.assertEqual(len(scene['series'][0]['points']), 1)
+        self.assertEqual(len(scene['series']), 2)
+        self.assertTrue(all(s['kind'] == 'bar' and len(s['points']) == 1 for s in scene['series']))
 
     def test_rotation_moves_the_value_edge_along_the_page_transform(self):
         doc = pymupdf.open()

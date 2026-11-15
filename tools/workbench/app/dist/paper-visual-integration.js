@@ -22,12 +22,79 @@
   function manualEdits(changes){
     const edits=[];
     for(const [index,change] of changes.entries()){
-      const base={id:('visual-'+String(change.id||index)).slice(0,65),enabled:true,pageIndex:change.pageIndex,origin:'human',anchor:Array.isArray(change.bbox)?{bbox:[...change.bbox]}:null};
+      const origin=change.origin==='external-ai-import'?'external-ai-import':'human';
+      const base={id:('visual-'+String(change.id||index)).slice(0,65),enabled:true,pageIndex:change.pageIndex,origin,anchor:Array.isArray(change.bbox)?{bbox:[...change.bbox]}:null};
       if(Array.isArray(change.before?.series)&&Array.isArray(change.after?.series)){
         appendChartEdits(edits,base,change);
       }else edits.push({...base,before:describe(change.before),after:describe(change.after)});
     }
     return edits;
+  }
+  function cloneValue(value){return value===undefined?undefined:JSON.parse(JSON.stringify(value));}
+  const nonEmptyString=v=>typeof v==='string'&&v.length>0;
+  function verifyProposalSource(snapshotOrItems,options={}){
+    const expected=nonEmptyString(options?.fileHash)?options.fileHash:null;
+    if(Array.isArray(snapshotOrItems)){
+      if(!expected)throw Error('원본 파일 해시(fileHash)를 확인할 수 없습니다.');
+      return {fileHash:expected,items:snapshotOrItems};
+    }
+    if(!snapshotOrItems||typeof snapshotOrItems!=='object'||!Array.isArray(snapshotOrItems.items))throw Error('외부 제안 목록 형식이 올바르지 않습니다.');
+    const actual=nonEmptyString(snapshotOrItems.fileHash)?snapshotOrItems.fileHash:null;
+    if(!actual)throw Error('제안 스냅샷에 fileHash가 없습니다.');
+    if(expected&&actual!==expected)throw Error('원본 파일 해시(fileHash)가 일치하지 않습니다.');
+    return {fileHash:expected||actual,items:snapshotOrItems.items};
+  }
+  const cloneRefs=item=>Array.isArray(item.sourceRefs)?cloneValue(item.sourceRefs):[];
+  const itemOrigin=item=>item.origin||'external-ai-import';
+  const matchedOfKind=(item,kind,targetKey)=>!!(item&&item.enabled&&item.kind===kind&&item.matchStatus==='matched'&&item[targetKey]);
+  function toTableCellPatch(item){
+    if(!matchedOfKind(item,'table-cell','tableTarget'))return null;
+    const t=item.tableTarget;
+    if(!Number.isInteger(t.pageIndex)||t.pageIndex<0)return null;
+    const beforeText=typeof t.before==='string'?t.before:item.before;
+    const afterText=typeof item.after==='string'?item.after:t.after;
+    if(!nonEmptyString(beforeText)||typeof afterText!=='string'||beforeText===afterText)return null;
+    const bbox=Array.isArray(t.bbox)?t.bbox.slice():null;
+    return {id:item.id,pageIndex:t.pageIndex,tableId:t.tableId??null,row:t.row??null,column:t.column??null,bbox,beforeText,afterText,origin:itemOrigin(item),sourceRefs:cloneRefs(item)};
+  }
+  function tableCellPatchesFromProposals(snapshotOrItems,options={}){
+    const {items}=verifyProposalSource(snapshotOrItems,options);
+    return items.map(toTableCellPatch).filter(Boolean);
+  }
+  function chartSeriesSide(v,value){
+    if(v.pointIndex!=null&&Number.isSafeInteger(v.pointIndex)&&v.pointIndex>=0&&v.pointIndex<=4096){
+      const points=new Array(v.pointIndex+1).fill(null);
+      points[v.pointIndex]=cloneValue(value);
+      const seriesId=v.series||'series-0';
+      return {kind:'chart',title:v.figureId||'',xAxis:{},yAxis:{},series:[{id:seriesId,name:seriesId,points}]};
+    }
+    return {figureId:v.figureId??null,series:v.series??null,markIndex:v.markIndex??null,value:cloneValue(value)};
+  }
+  function toVisualChartEdit(item){
+    if(!matchedOfKind(item,'chart-point','visualTarget'))return null;
+    const v=item.visualTarget;
+    if(!Number.isInteger(v.pageIndex)||v.pageIndex<0||v.beforeValue===undefined||v.afterValue===undefined)return null;
+    if(JSON.stringify(v.beforeValue)===JSON.stringify(v.afterValue))return null;
+    return {
+      id:item.id,kind:'chart-point',itemId:v.figureId??null,pageIndex:v.pageIndex,
+      bbox:Array.isArray(v.bbox)?v.bbox.slice():null,
+      series:v.series??null,pointIndex:v.pointIndex??null,markIndex:v.markIndex??null,
+      beforeValue:cloneValue(v.beforeValue),afterValue:cloneValue(v.afterValue),
+      before:chartSeriesSide(v,v.beforeValue),after:chartSeriesSide(v,v.afterValue),
+      origin:itemOrigin(item),sourceRefs:cloneRefs(item)
+    };
+  }
+  function visualChartEditsFromProposals(snapshotOrItems,options={}){
+    const {items}=verifyProposalSource(snapshotOrItems,options);
+    return items.map(toVisualChartEdit).filter(Boolean);
+  }
+  function stageExternalProposals(snapshotOrItems,options={}){
+    const {fileHash,items}=verifyProposalSource(snapshotOrItems,options);
+    return {
+      fileHash,
+      tableCells:items.map(toTableCellPatch).filter(Boolean),
+      chartEdits:items.map(toVisualChartEdit).filter(Boolean)
+    };
   }
   function describe(value){
     if(typeof value==='string'&&value.length<=8000)return value;
@@ -139,9 +206,20 @@
     doc.addEventListener('falsify:document-clear',refresh);
     doc.addEventListener('falsify:local-bridge',()=>{prepared=null;sync();if(source()&&!editor.snapshot?.()?.paperId)void editor.refresh?.();});
     doc.addEventListener('falsify:document-state',event=>{const value=!!event.detail?.busy;if(redBusy!==value){redBusy=value;sync();}});
-    refresh();return {refresh,source,editor,enrichment};
+    function stageFromProposals(snapshotOrItems,options={}){
+      const src=source();
+      const expectedHash=options?.fileHash||src?.fileHash||null;
+      if(!expectedHash)throw Error('원본 파일 해시(fileHash)를 확인할 수 없습니다.');
+      const staged=stageExternalProposals(snapshotOrItems,{fileHash:expectedHash});
+      const chartIds=new Set(staged.chartEdits.map(c=>c.id));
+      stagedChanges=stagedChanges.filter(x=>!chartIds.has(x.id)).concat(staged.chartEdits);
+      return staged;
+    }
+    refresh();return {refresh,source,editor,enrichment,stageFromProposals};
   }
-  const api={mount,manualEdits};root.FalsifyVisualEditIntegration=api;
+  const api={mount,manualEdits,tableCellPatchesFromProposals,visualChartEditsFromProposals,stageExternalProposals};
+  root.FalsifyVisualEditIntegration=api;
+  root.FalsifyPaperVisualIntegration=api;
   if(typeof module==='object'&&module.exports)module.exports=api;
   if(root.document){const start=()=>{api.instance=mount();};if(root.document.readyState==='loading')root.document.addEventListener('DOMContentLoaded',start,{once:true});else start();}
 })(typeof globalThis==='object'?globalThis:this);

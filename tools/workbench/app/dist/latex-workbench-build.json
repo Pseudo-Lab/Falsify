@@ -31,7 +31,7 @@
     },
     {
       "path": "src/latex-project.mjs",
-      "sha256": "0e2bd8bfaac53622aeb91e08af8991ac97de98ba6ecec004b185e329f46c9205"
+      "sha256": "d3e0326fb12d138aebf0acd7d1c0e94ae20b1bd394a6e5606a044a2c195a4e14"
     },
     {
       "path": "src/latex-reference-policy.mjs",
@@ -43,7 +43,7 @@
     },
     {
       "path": "src/latex-semantic-edits.mjs",
-      "sha256": "d82f3fdaa5d97aa70a4f604db2e9ebaa635c9eec238f22abf216d2bdfa58dcbf"
+      "sha256": "5815fb1390f2675c48f2299d317159a6d2235beb598a92be61b767dfdd4db805"
     },
     {
       "path": "src/latex-session-archive.mjs",
@@ -103,7 +103,7 @@
     },
     {
       "path": "src/paper-layout-edit-tools.mjs",
-      "sha256": "ed1948fb2162b4a84780bb4b12734f1938e8c0fbebe962a50d8e882f38575912"
+      "sha256": "7fbb634ec0c0e17eacc099b345c625ec6cd63ba5e69085fdd2f31d0cb70607ff"
     },
     {
       "path": "src/paper-layout-outcome.mjs",
@@ -115,7 +115,7 @@
     },
     {
       "path": "src/paper-layout-quality.mjs",
-      "sha256": "8b50ee064d15eb005b2e0245bb29e746b82ea80a04c1d9300ebbc66aca9b6c07"
+      "sha256": "01e5dd69c0ba35900ba60c697e6e32c6716268a187e179253962e9811483cdbd"
     },
     {
       "path": "src/paper-layout-reference.mjs",
@@ -127,7 +127,7 @@
     },
     {
       "path": "src/paper-layout-structure.mjs",
-      "sha256": "78a3e543d6c9e69c0993c5dc05f16cda76d22a122c37e85b0207ed16acc4d059"
+      "sha256": "6439fc74bd5b3b9aaa311d51ad54949561a4532327d36c90d593f544e56e3679"
     },
     {
       "path": "src/paper-layout-targets.mjs",
@@ -174,20 +174,24 @@
       "sha256": "072ed8aa2a4be68395acd8b1f7fb70896f8b070bc05dd8ae2a3d5d5e4d268b24"
     },
     {
+      "path": "src/pdf-latex-bibliography.mjs",
+      "sha256": "1d7f26e62d896cb184ca0e884137e1a29e06d5ccd10d1469d2ef03df6a9a711b"
+    },
+    {
       "path": "src/pdf-latex-evidence.mjs",
       "sha256": "0df5d2bdb9a000a08f0a76b772b71a0c44e37d6f0f1df8ceecdada336aba0b95"
     },
     {
       "path": "src/pdf-latex-flow-serialize.mjs",
-      "sha256": "3a6b9cab789206a93e31a5d3855116b0ef7b782298390790b517c990efbc1a3c"
+      "sha256": "eb72af7297ba95d17df38f58794633fa49b6835e914aeaec67b61d6868949e48"
     },
     {
       "path": "src/pdf-latex-fonts.mjs",
-      "sha256": "f9b41d53bd182771ef44182ed25834b26083f291de558f908249824e42dc8366"
+      "sha256": "9a17d7c2a7cabd4212fa1a51557ad2be8c7d665e117fb7245ac582b3c5e446d9"
     },
     {
       "path": "src/pdf-latex-layout.mjs",
-      "sha256": "1b851586934f3bc681e80f1bbc1ebf5fbd50c87657b6305ae9fc9814ca2afa58"
+      "sha256": "ff2ab500d56f3363e1a557af1f084b621bdecdd326fb24e00fb482d9204a0738"
     },
     {
       "path": "src/pdf-latex-reader-worker.mjs",
@@ -199,15 +203,19 @@
     },
     {
       "path": "src/pdf-latex-regions.mjs",
-      "sha256": "c9f73ff12a04da6b1a62a66e52a981c22415a62e6242b52611a3cf525106b4d8"
+      "sha256": "2424c7204403a5be19ce2b56ddc365b5534fc0997d8261dabeab2d08dbaadd45"
     },
     {
       "path": "src/pdf-latex-serialize.mjs",
-      "sha256": "3b90d7f0e0c271c7bc5ab8b721e0f41e937605ed5dd332993e4d7a91d8bbf4ea"
+      "sha256": "cf5bb058a77ca46f63eebaad2aacf4463c2457d5930cd40be08d5769a638a9ae"
     },
     {
       "path": "src/pdf-latex-structure-audit.mjs",
       "sha256": "22da5a482de525ee635950b0c8bb067880ed00d39a30be71aaf12cfbc7e2ba20"
+    },
+    {
+      "path": "src/pdf-latex-tables.mjs",
+      "sha256": "881fd21de2e5a3979c233a1167261cc32eace011c9fdcd0a516c7dcff779605e"
     },
     {
       "path": "src/pdf-latex-unicode.mjs",
@@ -236,10 +244,10 @@
   ],
   "output": {
     "path": "latex-workbench.mjs",
-    "sha256": "6b48dc45518c35ed498f87452d44981c67973766f85a27a8fdc368705f41f5f6"
+    "sha256": "25778f52a9abdc356b5129f9ab190a8c99feae2ec35182fea817ef2bc57d8de6"
   },
   "worker": {
     "path": "pdf-latex-reader-worker.mjs",
-    "sha256": "264d6a4869920cff06f687154997d080323c6733cb007ac5c39bf90dc6465f24"
+    "sha256": "a2162519028fdd7f3446f6cd396e5f8ae3e3d2ed837c83d1dacc088d52b509a1"
   }
 }

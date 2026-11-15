@@ -194,3 +194,32 @@ test('macro-based graphics path and unbraced dynamic inputs remain unresolved',a
   assert.ok(a.diagnostics.some(x=>x.code==='UNRESOLVED_REFERENCE'&&x.reference==='image'));assert.equal(a.missingFiles.length,0);
  }
 });
+
+test('comma-separated bibliography, bbl fallback, local sty/cls, citation package and macros are analyzed',async()=>{
+ const p1=await createLatexProject({files:[
+  {path:'main.tex',bytes:enc.encode('\\documentclass{customcls}\n\\usepackage{amsmath,natbib,localpkg}\n\\newcommand{\\sys}{Alpha}\n\\DeclarePairedDelimiter{\\norm}{\\lVert}{\\rVert}\n\\def\\helper#1{[#1]}\n\\begin{document}\nText \\citep{a}\n\\bibliography{refs,appendix_refs}\n\\end{document}')},
+  {path:'customcls.cls',bytes:enc.encode('\\ProvidesClass{customcls}\\LoadClass{article}')},
+  {path:'localpkg.sty',bytes:enc.encode('\\ProvidesPackage{localpkg}\\RequirePackage{graphicx}')},
+  {path:'refs.bib',bytes:enc.encode('@article{a,title={A}}')},
+  {path:'appendix_refs.bib',bytes:enc.encode('@article{b,title={B}}')},
+ ]});
+ const a1=analyzeProjectFiles(p1);
+ assert.deepEqual(a1.missingFiles,[]);
+ assert.equal(a1.projectAnalysis.citationPackage,'natbib');
+ assert.equal(a1.projectAnalysis.bblFallback,false);
+ assert.deepEqual(a1.projectAnalysis.localClasses,['customcls.cls']);
+ assert.deepEqual(a1.projectAnalysis.localPackages,['localpkg.sty']);
+ assert.ok(a1.projectAnalysis.customMacros.some(m=>m.name==='\\sys'&&m.arity===0));
+ assert.ok(a1.projectAnalysis.customMacros.some(m=>m.name==='\\norm'&&m.arity===1));
+ assert.ok(a1.projectAnalysis.customMacros.some(m=>m.name==='\\helper'&&m.arity===1));
+
+ const p2=await createLatexProject({files:[
+  {path:'paper/main.tex',bytes:enc.encode('\\documentclass{article}\n\\usepackage[backend=biber]{biblatex}\n\\begin{document}\nHi \\autocite{k}\n\\bibliography{refs,extra}\n\\end{document}')},
+  {path:'paper/main.bbl',bytes:enc.encode('\\begin{thebibliography}{1}\\bibitem{k}Item\\end{thebibliography}')},
+ ]});
+ const a2=analyzeProjectFiles(p2);
+ assert.deepEqual(a2.missingFiles,[]);
+ assert.equal(a2.projectAnalysis.bblFallback,true);
+ assert.deepEqual(a2.projectAnalysis.bblFiles,['paper/main.bbl']);
+ assert.equal(a2.projectAnalysis.citationPackage,'biblatex');
+});

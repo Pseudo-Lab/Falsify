@@ -1,4 +1,4 @@
-// Tiny straight link decorations only. No table/rule/figure classification is
+// Straight source-owned link decorations only. No table/rule/figure classification is
 // inferred from shape alone: every source path needs one exact Link owner.
 import { readLinkPageCharacters } from './document-flow-links.mjs';
 const fail=code=>{throw Object.assign(new Error(code),{code});};
@@ -42,15 +42,29 @@ export function sourceUnderline(engine,h,pageIndex,annotationModel){
  if(links.length!==1)fail('document_flow_underline_ownership_ambiguous');
  const link=links[0],chars=readLinkPageCharacters(engine,pageIndex),owned=chars.filter(c=>c.box&&Math.min(c.box.r,link.rect[2])-Math.max(c.box.l,link.rect[0])>1e-4&&Math.min(c.box.t,link.rect[3])-Math.max(c.box.b,link.rect[1])>1e-4);
  if(!owned.length)fail('document_flow_underline_ownership_ambiguous');
- // A citation underline is at most two source ems. Wider links can still
- // transport annotations, but their arbitrary path art remains unsupported.
+ // The original short-citation gate remains unchanged. Long decorations need
+ // additional evidence from the immutable source glyph span.
  engine.loadPage(pageIndex);const M=engine.M,tp=M._FPDFText_LoadPage(engine.page),matrix=M._malloc(24);let size=0;
  try{for(const c of owned){
    if(!M._FPDFText_GetMatrix(tp,c.index,matrix))fail('document_flow_underline_style_unsupported');
    const [a,b,cx,d]=Array.from(M.HEAPF32.slice(matrix>>2,(matrix>>2)+4));
    size=Math.max(size,M._FPDFText_GetFontSize(tp,c.index)*Math.max(Math.hypot(a,b),Math.hypot(cx,d)));
  }}finally{M._free(matrix);M._FPDFText_ClosePage(tp);}
- if(!(size>0)||right-left>2*size+.02)fail('document_flow_underline_too_long');
+ if(!(size>0))fail('document_flow_underline_too_long');
+ if(right-left>2*size+.02){
+  const sorted=[...owned].sort((a,b)=>a.index-b.index),first=sorted[0],last=sorted.at(-1),tol=.25*size+.02;
+  const overlaps=(box,rect)=>Math.min(box.r,rect[2])-Math.max(box.l,rect[0])>1e-4&&Math.min(box.t,rect[3])-Math.max(box.b,rect[1])>1e-4;
+  // Unique, contiguous, left-to-right glyphs on one line, tightly covering
+  // both endpoints. Gaps admit ordinary spaces but not an unrelated rule.
+  if(sorted.some(c=>c.generated||!c.object||c.box.l<left-tol||c.box.r>right+tol||c.box.b<baseline-tol||c.box.t>baseline+2*size+tol)||
+     Math.abs(first.box.l-left)>tol||Math.abs(last.box.r-right)>tol||
+     sorted.some((c,i)=>i&&(c.index<=sorted[i-1].index||c.box.l<sorted[i-1].box.l-.02||c.box.l-sorted[i-1].box.r>size))||
+     chars.some(c=>c.box&&!owned.includes(c)&&c.index>first.index&&c.index<last.index)||
+     chars.some(c=>c.box&&!owned.includes(c)&&sorted.some(o=>o.object===c.object))||
+     annotationModel.annotations.some(a=>a!==link&&a.sourcePageIndex===pageIndex&&Array.isArray(a.rect)&&owned.some(c=>overlaps(c.box,a.rect))))fail('document_flow_underline_too_long');
+  const quads=new Set(sorted.map(c=>[c.box.l,c.box.r,c.box.b,c.box.t].join(',')));
+  if(quads.size!==sorted.length)fail('document_flow_underline_ownership_ambiguous');
+ }
  const objects=list(M,engine.page),order=objects.indexOf(h>>>0),text=M._FPDFText_LoadPage(engine.page);let owners;
  try{owners=owned.map(c=>objects.indexOf(M._FPDFText_GetTextObject(text,c.index)>>>0));}finally{M._FPDFText_ClosePage(text);}
  if(owners.some(i=>i<0)||!(order<Math.min(...owners)||order>Math.max(...owners)))fail('document_flow_underline_paint_order_unsupported');

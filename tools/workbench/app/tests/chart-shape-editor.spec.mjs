@@ -328,7 +328,7 @@ function curves(host) {
 }
 
 function handles(host) {
-  return walk(host).filter(el => el.getAttribute('data-handle'));
+  return walk(host).filter(el => el.getAttribute('data-handle') && !el.className.includes('falsify-shape-handle-hit'));
 }
 
 function handle(host, name) {
@@ -354,11 +354,13 @@ function mount(source = scene(), hooks = {}) {
   const exports = [];
   const editor = create({
     host,
+    embedded: hooks.embedded,
     scene: source,
     document: dom.document,
     core: hooks.core === undefined ? loadShapeCore() : hooks.core,
-    onChange(state) { changes.push(structuredClone(state)); },
-    onCommit(state) { commits.push(structuredClone(state)); },
+    onChange(state) { changes.push(structuredClone(state)); hooks.onChange?.(state); },
+    onCommit(state) { commits.push(structuredClone(state)); hooks.onCommit?.(state); },
+    onGestureChange: hooks.onGestureChange,
     onRequestExport(state) { exports.push(structuredClone(state)); },
   });
   return {dom, host, editor, changes, commits, exports};
@@ -381,6 +383,67 @@ function selectMiddle(session) {
   pointer(session.dom, stage, 'pointerup', 100, 50);
   return stage;
 }
+
+function linearScene() {
+  const value = scene();
+  const knots = [{id: 'k0', x: 20, y: 50}, {id: 'k1', x: 100, y: 50}, {id: 'k2', x: 180, y: 50}];
+  value.linearBasePng = 'AAAA';
+  value.linearTracks = [{id: 'line-1', color: '#c45c26', width: 2, knots,
+    sourceKnots: structuredClone(knots), inkPng: 'AAAA',
+    decorations: [{knotId: 'k1', bbox: [96, 40, 104, 60], png: 'AAAA'}]}];
+  return value;
+}
+
+test('linear point moves with decorations and one undo preserves the preceding drag', () => {
+  const lifecycle = [];
+  const s = mount(linearScene(), {embedded: true, onGestureChange: value => lifecycle.push(value)});
+  const stage = one(s.host, 'falsify-shape-stage');
+  const drag = (x, from, to) => {
+    pointer(s.dom, stage, 'pointerdown', x, from);
+    pointer(s.dom, stage, 'pointermove', x, (from + to) / 2);
+    pointer(s.dom, stage, 'pointermove', x, to);
+    pointer(s.dom, stage, 'pointerup', x, to);
+  };
+  drag(100, 50, 30);
+  assert.equal(s.editor.getState().operations.length, 1);
+  const first = s.editor.getState().scene;
+  assert.equal(first.linearTracks[0].knots[1].y, 30);
+  const images = walk(s.host).filter(n => n.tagName === 'IMAGE');
+  assert.equal(images[0].getAttribute('y'), '20');
+  drag(100, 30, 70);
+  assert.equal(s.editor.getState().operations.length, 2);
+  s.editor.undo();
+  assert.deepEqual(s.editor.getState().scene, first);
+  s.editor.undo();
+  assert.deepEqual(s.editor.getState().scene, linearScene());
+  s.editor.redo(); assert.deepEqual(s.editor.getState().scene, first);
+  drag(100, 30, 40);
+  assert.equal(s.editor.getState().canRedo, false);
+  assert.deepEqual(lifecycle, [true, false, true, false, true, false]);
+});
+
+test('linear middle drag inserts one vertex with straight joins; cancellation and click add no steps', () => {
+  const s = mount(linearScene()); const stage = one(s.host, 'falsify-shape-stage');
+  pointer(s.dom, stage, 'pointerdown', 60, 50);
+  pointer(s.dom, stage, 'pointerup', 60, 25);
+  const state = s.editor.getState();
+  assert.equal(state.operations.length, 1);
+  assert.deepEqual(state.scene.linearTracks[0].knots.map(k => [k.x, k.y]), [[20,50],[60,25],[100,50],[180,50]]);
+  const path = walk(s.host).find(n => n.tagName === 'POLYLINE');
+  assert.equal(path.getAttribute('points'), '20,50 60,25 100,50 180,50');
+  pointer(s.dom, stage, 'pointerdown', 60, 25);
+  pointer(s.dom, stage, 'pointermove', 60, 70);
+  pointer(s.dom, stage, 'pointercancel', 60, 70);
+  assert.deepEqual(s.editor.getState().scene, state.scene);
+  pointer(s.dom, stage, 'pointerdown', 60, 25);
+  pointer(s.dom, stage, 'pointerup', 60, 25);
+  assert.equal(s.editor.getState().operations.length, 1);
+  pointer(s.dom, stage, 'pointerdown', 60, 25);
+  pointer(s.dom, stage, 'pointermove', 60, 40);
+  pointer(s.dom, stage, 'pointermove', 60, 25);
+  pointer(s.dom, stage, 'pointerup', 60, 25);
+  assert.equal(s.editor.getState().operations.length, 1);
+});
 
 test('bundle is a local FalsifyChartShapeEditor global and the stylesheet has visible handles', () => {
   assert.equal(cssText, EDITOR_CSS);
@@ -492,7 +555,7 @@ test('editor draws the source style on the background and keeps precision collap
   assert.equal(other.getAttribute('stroke-dasharray'), null);
   const precision = walk(session.host).find(el => el.tagName === 'DETAILS');
   assert.equal(precision.open, false);
-  assert.equal(walk(precision).find(el => el.tagName === 'SUMMARY').textContent, '정밀 좌표');
+  assert.equal(walk(precision).find(el => el.tagName === 'SUMMARY').textContent, '선택한 점의 정밀 좌표 (px)');
   assert.equal(walk(precision).find(el => el.tagName === 'CAPTION').textContent, '원본 이미지 좌표 · px');
   assert.equal(one(session.host, 'falsify-shape-algorithm').textContent, '곡선을 끌어 모양을 바꾸고, 양옆 손잡이는 폭, 가운데 손잡이는 위치와 높이입니다.');
   assert.equal(walk(session.host).some(el => el.tagName === 'TEXTAREA'), false);
@@ -609,16 +672,12 @@ test('width handles and the center handle edit only the selected span', () => {
   pointer(session.dom, one(session.host, 'falsify-shape-stage'), 'pointermove', 110, 35);
   pointer(session.dom, one(session.host, 'falsify-shape-stage'), 'pointerup', 110, 35);
   points = pointsOf(session.editor);
-  assert.equal(points[0].x, 20);
-  assert.equal(points[0].y, 50);
-  assert.equal(points[4].x, 180);
-  assert.equal(points[4].y, 50);
-  assert.equal(points[1].x, 70);
-  assert.equal(points[1].y, 35);
   assert.equal(points[2].x, 125);
   assert.equal(points[2].y, 35);
-  assert.equal(points[3].x, 180);
-  assert.equal(points[3].y, 35);
+  assert.ok(points[1].y > 35 && points[1].y < 50);
+  assert.ok(points[3].y > 35 && points[3].y < 50);
+  assert.equal(session.commits.at(-1).operations.at(-1).kind, 'deform');
+  assert.equal(session.commits.at(-1).operations.at(-1).radius, 110);
   assert.deepEqual(pointsOf(session.editor, 'b').map(point => point.y), [80, 80, 80]);
   const core = loadShapeCore();
   const replay = core.applyPlan(scene(), session.editor.getState().operations).scene;
@@ -650,7 +709,7 @@ test('undo, redo, and a new edit reevaluate the immutable baseline', () => {
   pointer(session.dom, stage, 'pointerup', 110, 50);
   assert.equal(button(session.host, '다시 실행').disabled, true);
   assert.equal(session.editor.getState().operations.length, 1);
-  assert.equal(session.editor.getState().operations[0].kind, 'move');
+  assert.equal(session.editor.getState().operations[0].kind, 'deform');
   assert.equal(pointsOf(session.editor)[2].y, 50);
   assert.equal(pointsOf(session.editor)[2].x, 110);
   session.editor.destroy();
@@ -694,14 +753,14 @@ test('keyboard nudges, widens, and undoes the selected span', () => {
   const up = session.dom.emit(root, 'keydown', {key: 'ArrowUp'});
   assert.equal(up.defaultPrevented, true);
   let points = pointsOf(session.editor);
-  assert.deepEqual(points.map(point => point.y), [50, 49, 49, 49, 50]);
+  assert.deepEqual(points.map(point => point.y), [50, 49.5, 49, 49.5, 50]);
   assert.deepEqual(points.map(point => point.x), [20, 60, 100, 140, 180]);
-  assert.equal(session.commits.at(-1).operations.at(-1).kind, 'move');
+  assert.equal(session.commits.at(-1).operations.at(-1).kind, 'deform');
   session.dom.emit(root, 'keydown', {key: 'z', ctrlKey: true});
   assert.deepEqual(pointsOf(session.editor).map(point => point.y), [50, 50, 50, 50, 50]);
   assert.equal(session.commits.length, 1);
   session.dom.emit(root, 'keydown', {key: 'ArrowUp', shiftKey: true});
-  assert.deepEqual(pointsOf(session.editor).map(point => point.y), [50, 40, 40, 40, 50]);
+  assert.deepEqual(pointsOf(session.editor).map(point => point.y), [50, 45, 40, 45, 50]);
   session.editor.undo();
   session.dom.emit(root, 'keydown', {key: 'ArrowRight', altKey: true});
   points = pointsOf(session.editor);
@@ -711,7 +770,7 @@ test('keyboard nudges, widens, and undoes the selected span', () => {
   assert.ok(Math.abs(points[2].x - 100) < 1e-9);
   assert.ok(Math.abs(points[3].x - 144) < 1e-9);
   assert.equal(session.commits.at(-1).operations.at(-1).kind, 'resize');
-  const input = walk(session.host).find(el => el.getAttribute('aria-label') === 'A 0 y');
+  const input = walk(session.host).find(el => el.getAttribute('aria-label') === 'A 2 y');
   const beforeKey = pointsOf(session.editor).map(point => ({x: point.x, y: point.y}));
   input.focus();
   session.dom.emit(input, 'keydown', {key: 'ArrowUp'});
@@ -741,6 +800,7 @@ test('escape cancels a drag, a secondary button does not select, and an empty pr
 
 test('collapsed precision can commit one coordinate without fitting the curve', () => {
   const session = mount();
+  selectMiddle(session);
   const input = walk(session.host).find(el => el.getAttribute('aria-label') === 'A 2 y');
   input.value = 'foo';
   session.dom.emit(input, 'change');
@@ -1179,7 +1239,7 @@ test('browser pointer drag, handles, compare, and export do not request a server
       y: window.editor.getState().scene.series[0].points.map(item => item.y),
       revision: window.editor.getState().revision,
       commits: window.commits.slice(),
-      handles: [...document.querySelectorAll('[data-handle]')].map(el => el.getAttribute('data-handle')),
+      handles: [...document.querySelectorAll('.falsify-shape-handle')].map(el => el.getAttribute('data-handle')),
       fill: getComputedStyle(document.querySelector('.falsify-shape-handle-center')).fill,
       open: document.querySelector('details').open,
     }));
@@ -1302,4 +1362,161 @@ test('closed source stroke keeps its implicit closing edge in the overlay', () =
   assert.equal(points.at(-1), points[0]);
   assert.equal(points.length, source.series[0].points.length + 1);
   session.editor.destroy();
+});
+
+test('embedded editor shows precision only for the selected point', () => {
+  const session = mount(scene(), {embedded: true});
+  assert.equal(button(session.host, '내보내기').hidden, true);
+  const details = walk(session.host).find(el => el.tagName === 'DETAILS');
+  assert.equal(details.hidden, true);
+  selectMiddle(session);
+  assert.equal(details.hidden, false);
+  assert.equal(walk(session.host).filter(el => el.tagName === 'INPUT').length, 2);
+});
+
+test('selection click is a no-op and precision focus survives a change', () => {
+  const session = mount();
+  selectMiddle(session);
+  assert.equal(session.editor.getState().operations.length, 0);
+  assert.equal(session.commits.length, 0);
+  const input = walk(session.host).find(el => el.getAttribute('aria-label') === 'A 2 y');
+  input.focus();
+  input.value = '42';
+  session.dom.emit(input, 'change');
+  assert.equal(session.dom.document.activeElement, input);
+  assert.equal(walk(session.host).find(el => el.getAttribute('aria-label') === 'A 2 y'), input);
+  assert.equal(pointsOf(session.editor)[2].y, 42);
+});
+
+test('halo and radius do not intercept pointer selection', () => {
+  assert.match(cssText, /\.falsify-shape-halo,\s*\.falsify-shape-radius\s*\{\s*pointer-events:\s*none;/);
+  assert.equal((cssText.match(/\.falsify-shape-halo\.is-selected/g) || []).length, 1);
+  assert.equal((cssText.match(/\.falsify-shape-hit:hover/g) || []).length, 1);
+});
+
+test('gesture lifecycle settles preview before unlock, including return to origin', () => {
+  const events = [];
+  const session = mount(scene(), {onGestureChange: value => events.push(['gesture', value]), onChange: value => events.push(['change', value]), onCommit: () => events.push(['commit'])});
+  const stage = one(session.host, 'falsify-shape-stage');
+  pointer(session.dom, stage, 'pointerdown', 100, 50);
+  pointer(session.dom, stage, 'pointermove', 100, 40);
+  pointer(session.dom, stage, 'pointerup', 100, 40);
+  assert.deepEqual(events.filter(e => e[0] === 'gesture').map(e => e[1]), [true, false]);
+  const previous = session.editor.getState();
+  const y = previous.scene.series[0].points[2].y;
+  events.length = 0;
+  pointer(session.dom, stage, 'pointerdown', 100, y);
+  pointer(session.dom, stage, 'pointermove', 100, y - 10);
+  session.dom.emit(stage, 'pointermove', {clientX: 100, clientY: y, pointerId: 1, button: 0});
+  session.dom.emit(stage, 'pointerup', {clientX: 100, clientY: y, pointerId: 1, button: 0});
+  flushFrames();
+  assert.deepEqual(events.at(-1), ['gesture', false]);
+  const last = events.filter(e => e[0] === 'change').at(-1)[1];
+  const state = session.editor.getState();
+  assert.deepEqual(last.operations, state.operations);
+  assert.deepEqual(last.scene, state.scene);
+  assert.equal(state.operations.length, previous.operations.length);
+  assert.equal(events.some(e => e[0] === 'commit'), false);
+  pointer(session.dom, stage, 'pointerdown', 100, y);
+  session.editor.destroy();
+  assert.deepEqual(events.at(-1), ['gesture', false]);
+});
+
+test('gesture callback pairs on cancellation, compare and scene replacement', () => {
+  const states = [];
+  const session = mount(scene(), {onGestureChange: value => states.push(value)});
+  const stage = one(session.host, 'falsify-shape-stage');
+  pointer(session.dom, stage, 'pointerdown', 100, 50);
+  pointer(session.dom, stage, 'pointercancel', 100, 50);
+  pointer(session.dom, stage, 'pointerdown', 100, 50);
+  session.dom.emit(button(session.host, '원본 비교'), 'click');
+  session.dom.emit(button(session.host, '원본 비교'), 'click');
+  pointer(session.dom, stage, 'pointerdown', 100, 50);
+  session.editor.setScene(scene());
+  assert.deepEqual(states, [true, false, true, false, true, false]);
+});
+
+test('center handle and keyboard produce tapered influence with replay and undo', () => {
+  const source = scene();
+  source.series = [source.series[0]];
+  source.series[0].points = Array.from({length: 41}, (_, i) => ({x: i * 5, y: 50}));
+  const session = mount(source);
+  const stage = one(session.host, 'falsify-shape-stage');
+  pointer(session.dom, stage, 'pointerdown', 100, 50);
+  pointer(session.dom, stage, 'pointerup', 100, 50);
+  const center = handle(session.host, 'move');
+  pointer(session.dom, center, 'pointerdown', 100, 50);
+  pointer(session.dom, stage, 'pointermove', 100, 30);
+  pointer(session.dom, stage, 'pointerup', 100, 30);
+  const ys = pointsOf(session.editor).map(point => point.y);
+  assert.equal(ys[20], 30);
+  assert.ok(ys[20] < ys[19] && ys[19] < ys[18] && ys[18] < ys[17]);
+  assert.equal(ys[16], 50);
+  assert.equal(ys[24], 50);
+  assert.equal(session.editor.getState().operations.length, 1);
+  assert.deepEqual(plain(loadShapeCore().applyPlan(source, session.editor.getState().operations).scene.series), plain(session.editor.getState().scene.series));
+  session.editor.undo();
+  assert.ok(pointsOf(session.editor).every(point => point.y === 50));
+  session.dom.emit(one(session.host, 'falsify-shape-editor'), 'keydown', {key: 'ArrowUp', shiftKey: true});
+  const keyed = pointsOf(session.editor).map(point => point.y);
+  assert.ok(keyed[20] < keyed[19] && keyed[19] < keyed[18] && keyed[18] < keyed[17]);
+  assert.equal(keyed[16], 50);
+});
+
+test('dense handles separate in screen space and offset resize uses actual delta', () => {
+  const source = scene();
+  source.series = [source.series[0]];
+  source.series[0].points = Array.from({length: 41}, (_, i) => ({x: i * 5, y: 50}));
+  const session = mount(source, {parentWidth: 100});
+  const stage = one(session.host, 'falsify-shape-stage');
+  pointer(session.dom, stage, 'pointerdown', 50, 25);
+  pointer(session.dom, stage, 'pointerup', 50, 25);
+  const hits = byClass(session.host, 'falsify-shape-handle-hit');
+  const start = hits.find(el => el.getAttribute('data-handle') === 'width-start');
+  const end = hits.find(el => el.getAttribute('data-handle') === 'width-end');
+  const center = hits.find(el => el.getAttribute('data-handle') === 'move');
+  const scale = stage.getBoundingClientRect().width / source.width;
+  assert.ok((Number(center.getAttribute('cx')) - Number(start.getAttribute('cx'))) * scale >= 24);
+  assert.ok((Number(end.getAttribute('cx')) - Number(center.getAttribute('cx'))) * scale >= 24);
+  assert.ok(Number(end.getAttribute('r')) * scale * 2 >= 24);
+  assert.equal(byClass(session.host, 'falsify-shape-handle-guide').length, 2);
+  assert.equal(session.editor.getState().operations.length, 0);
+  assert.deepEqual(pointsOf(session.editor), source.series[0].points);
+  const x = Number(end.getAttribute('cx')) * scale;
+  const y = Number(end.getAttribute('cy')) * scale;
+  pointer(session.dom, end, 'pointerdown', x, y);
+  pointer(session.dom, stage, 'pointerup', x + 2, y);
+  const state = session.editor.getState();
+  assert.equal(state.operations.length, 1);
+  assert.equal(state.operations[0].kind, 'resize');
+  assert.ok(Math.abs(state.operations[0].scaleX - 1.2) < 1e-9);
+  session.editor.undo();
+  assert.deepEqual(pointsOf(session.editor), source.series[0].points);
+});
+
+test('handle targets stay inside all edges and corners at a compact viewport', () => {
+  for (const [x, y] of [[2,50], [198,50], [100,2], [100,98], [2,2], [198,2], [2,98], [198,98]]) {
+    const source = scene();
+    source.series = [source.series[0]];
+    source.series[0].points = [x - 5, x, x + 5].map(px => ({x: Math.max(0, Math.min(200, px)), y}));
+    const session = mount(source, {parentWidth: 240});
+    const stage = one(session.host, 'falsify-shape-stage');
+    const scale = stage.getBoundingClientRect().width / source.width;
+    pointer(session.dom, stage, 'pointerdown', x * scale, y * scale);
+    pointer(session.dom, stage, 'pointerup', x * scale, y * scale);
+    const hits = byClass(session.host, 'falsify-shape-handle-hit');
+    assert.equal(hits.length, 3, `${x},${y}`);
+    const centers = hits.map(el => ({x: Number(el.getAttribute('cx')) * scale, y: Number(el.getAttribute('cy')) * scale, r: Number(el.getAttribute('r')) * scale}));
+    const rect = stage.getBoundingClientRect();
+    for (const point of centers) {
+      assert.ok(point.x - point.r >= -0.01 && point.x + point.r <= rect.width + 0.01, `${x},${y} horizontal`);
+      assert.ok(point.y - point.r >= -0.01 && point.y + point.r <= rect.height + 0.01, `${x},${y} vertical`);
+    }
+    assert.ok(centers[2].x - centers[0].x >= 23.99);
+    assert.ok(centers[1].x - centers[2].x >= 23.99);
+    assert.ok(byClass(session.host, 'falsify-shape-handle-guide').length > 0);
+    assert.equal(session.editor.getState().operations.length, 0);
+    assert.deepEqual(pointsOf(session.editor), source.series[0].points);
+    session.editor.destroy();
+  }
 });

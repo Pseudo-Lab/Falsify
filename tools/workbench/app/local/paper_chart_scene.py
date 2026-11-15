@@ -67,17 +67,19 @@ def prepare_scene(source, page_index, bbox, options=None):
     width, height = paint.crop_size(box, dpi)
     plot = _plot(options, width, height)
     series = paint.series_for_crop(raw, page_index, box, dpi, plot)
+    from paper_chart_curve_links import curve_links
+    links = curve_links(series, dpi)
     original = paint.render_png(raw, page_index, box, dpi)
     if _png_size(original) != (width, height):
         width, height = _png_size(original)
     if series:
-        stripped = paint.strip_series(raw, page_index, box, dpi, series)
+        stripped = paint.strip_series(raw, page_index, box, dpi, series, curve_links=links)
         background = paint.render_png(stripped, page_index, box, dpi)
     else:
         background = original
     digest = hashlib.sha256(raw).hexdigest()
     scene_id = hashlib.sha256(('%s\n%s\n%s\n%s' % (digest, page_index, ','.join('%.4f' % v for v in box), dpi)).encode('ascii')).hexdigest()
-    return {
+    scene = {
         'schema': SCHEMA,
         'sceneId': scene_id,
         'sourceFileHash': digest,
@@ -91,4 +93,7 @@ def prepare_scene(source, page_index, bbox, options=None):
         'backgroundPng': base64.b64encode(background).decode('ascii'),
         'originalPng': base64.b64encode(original).decode('ascii'),
         'series': series,
+        'curveLinks': links,
     }
+    from paper_chart_linear import augment
+    return augment(raw, scene)

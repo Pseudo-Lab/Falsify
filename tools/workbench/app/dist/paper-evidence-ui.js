@@ -197,7 +197,8 @@
     }
     function paintReady(parsed){
       const kind=parsed.status==='partial'?'일부만 준비됨':'준비됨';
-      say(status,'표 '+parsed.counts.tables+' · 그림 '+parsed.counts.figures+' · '+parsed.pageCount+'쪽 · '+kind);
+      const dec=parsed.counts.decorativeCount>0?' · 장식 '+parsed.counts.decorativeCount:'';
+      say(status,'표 '+parsed.counts.tables+' · 그림 '+parsed.counts.figures+dec+' · '+parsed.pageCount+'쪽 · '+kind);
       engineText.textContent='엔진 '+parsed.engine;
       limitList.replaceChildren();
       for(const line of (parsed.limitations.length?parsed.limitations:['보고된 한계 없음']))limitList.append(el('li',null,line));
@@ -215,7 +216,8 @@
       const expiresAt=typeof data.expiresAt==='string'?Date.parse(data.expiresAt):NaN;
       if(!Number.isFinite(expiresAt))fail('failed');
       if(expiresAt<=Date.now())fail('expired');
-      return {paperId:data.paperId,fileHash,status:data.status,pageCount:data.pageCount,counts:{tables:data.counts.tables,figures:data.counts.figures},engine:data.engine.trim(),limitations:data.limitations.slice(0,16).map(x=>clip(x,200)).concat(data.limitations.length>16?['추가 항목 '+(data.limitations.length-16)+'개']:[]),expiresAt};
+      const decorativeCount=countOk(data.counts.decorativeCount)?data.counts.decorativeCount:0;
+      return {paperId:data.paperId,fileHash,status:data.status,pageCount:data.pageCount,counts:{tables:data.counts.tables,figures:data.counts.figures,decorativeCount},engine:data.engine.trim(),limitations:data.limitations.slice(0,16).map(x=>clip(x,200)).concat(data.limitations.length>16?['추가 항목 '+(data.limitations.length-16)+'개']:[]),expiresAt};
     }
     function validateSummaryMetadata(data){
       if(!countOk(data.pageCount)||data.pageCount>20000||!data.counts||typeof data.counts!=='object'||!countOk(data.counts.tables)||!countOk(data.counts.figures))fail('failed');
@@ -241,13 +243,19 @@
       return {items:out,total:data.total,nextOffset:next,skipped};
     }
     function listHeaderValid(data,parsed){return !!data&&typeof data==='object'&&data.paperId===parsed.paperId&&data.fileHash===parsed.fileHash&&Array.isArray(data.items)&&countOk(data.total);}
+    function itemBadgeMeta(raw){
+      const classification=raw.classification==='decorative'||raw.classification==='scientific'?raw.classification:null;
+      const partCount=Number.isSafeInteger(raw.partCount)&&raw.partCount>1?raw.partCount:null;
+      const partIndex=partCount&&Number.isSafeInteger(raw.partIndex)&&raw.partIndex>=0?raw.partIndex:null;
+      return {classification,partIndex,partCount};
+    }
     function readEvidenceItem(raw,seen){
         const id=raw&&raw.id;
         const caption=raw&&raw.caption!=null?raw.caption:null;
         const provenance=raw&&raw.provenance!=null?raw.provenance:null;
         if(invalidEvidenceIdentity(raw,id,seen)||invalidEvidenceGeometry(raw)||invalidEvidenceMetadata(caption,provenance))return null;
         seen.add(id);
-        return {id,type:raw.type,pageIndex:raw.pageIndex,bbox:[raw.bbox[0],raw.bbox[1],raw.bbox[2],raw.bbox[3]],caption,provenance:typeof provenance==='object'&&provenance!==null?[provenance.engine,provenance.method].filter(v=>typeof v==='string').join(' · '):provenance};
+        return {id,type:raw.type,pageIndex:raw.pageIndex,bbox:[raw.bbox[0],raw.bbox[1],raw.bbox[2],raw.bbox[3]],caption,provenance:typeof provenance==='object'&&provenance!==null?[provenance.engine,provenance.method].filter(v=>typeof v==='string').join(' · '):provenance,...itemBadgeMeta(raw)};
     }
     function invalidEvidenceIdentity(raw,id,seen){return !raw||typeof raw!=='object'||typeof id!=='string'||id.length<1||id.length>160||seen.has(id)||/[\u0000-\u001f]/.test(id);}
     function invalidEvidenceGeometry(raw){return (raw.type!=='table'&&raw.type!=='figure')||!Number.isSafeInteger(raw.pageIndex)||raw.pageIndex<0||raw.pageIndex>20000||!bboxOk(raw.bbox);}
@@ -267,6 +275,12 @@
       if(!bytes||bytes.length<8||bytes[0]!==137||bytes[1]!==80||bytes[2]!==78||bytes[3]!==71||bytes[4]!==13||bytes[5]!==10||bytes[6]!==26||bytes[7]!==10)return null;
       return bytes;
     }
+    function itemRowLabel(item){
+      const base=item.type==='table'?'표':'그림';
+      const part=item.partCount>1&&item.partIndex!=null?' ('+(item.partIndex+1)+'/'+item.partCount+')':'';
+      const tag=item.classification==='decorative'?' [장식]':'';
+      return base+part+' · '+(item.pageIndex+1)+'쪽'+tag;
+    }
     function paintRows(pageItems){
       for(const item of pageItems){
         const row=el('label','image-row');
@@ -276,7 +290,7 @@
         input.value=item.id;
         input.checked=item.id===selectedId;
         const text=el('span','image-row-text');
-        const title=el('span','image-row-title',(item.type==='table'?'표':'그림')+' · '+(item.pageIndex+1)+'쪽');
+        const title=el('span','image-row-title',itemRowLabel(item));
         text.append(title);
         if(item.caption){const note=el('span','image-row-note',clip(item.caption,400));text.append(note);}
         input.addEventListener('change',()=>{if(!input.checked||parentBusy||!included)return;selectedId=item.id;void showCrop(item);});

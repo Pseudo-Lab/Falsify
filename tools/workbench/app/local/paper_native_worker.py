@@ -6,7 +6,7 @@ sys.path.insert(0, str(HERE))
 from paper_enrichment import _stop
 MAX_REQUEST = 80 * 1024 * 1024
 MAX_RESPONSE = 100 * 1024 * 1024
-TIMEOUT = 60
+TIMEOUT = 90
 _IN_WORKER = False
 
 def check(deadline, cancelled=None):
@@ -40,7 +40,7 @@ def _worker_response(chunks):
         raise ValueError('native_output_invalid')
     if not response['ok']:
         error = response.get('error')
-        raise ValueError(error if isinstance(error, str) and re.fullmatch(r'[a-z][a-z0-9_]{0,80}', error) else 'native_worker_failed')
+        raise ValueError(error if isinstance(error, str) and re.fullmatch(r'[a-z][a-z0-9_-]{0,80}', error) else 'native_worker_failed')
     try: data = _unpack(response['data'])
     except (KeyError, TypeError, ValueError): raise ValueError('native_output_invalid') from None
     return data
@@ -68,9 +68,11 @@ def _cleanup_worker(process, writer, reader):
         for pipe in (process.stdin, process.stdout):
             if pipe is not None and not pipe.closed: pipe.close()
 
-def run(operation, args, *, cancelled=None, timeout=TIMEOUT, deadline=None):
+def run(operation, args, *, cancelled=None, timeout=None, deadline=None):
     if _IN_WORKER:
         return _dispatch(operation, args)
+    if timeout is None:
+        timeout = TIMEOUT
     started = time.monotonic()
     deadline = min(deadline, started + timeout) if deadline is not None else started + timeout
     check(deadline, cancelled)
@@ -138,6 +140,8 @@ def _rebind_chart(source_override, scene, edited, options):
         matches = original.get(key(current), [])
         if not matches: raise ValueError('chart_region_changed')
         fresh_edited['series'][i]['points'] = copy.deepcopy(edited['series'][matches.pop(0)]['points'])
+    from paper_chart_linear import rebind_linear
+    rebind_linear(scene, edited, fresh, fresh_edited)
     return source_override, fresh, fresh_edited
 
 
@@ -222,7 +226,7 @@ def _worker():
         response = {'ok': True, 'data': _pack(data)}
     except ValueError as exc:
         code = str(exc)
-        response = {'ok': False, 'error': code if re.fullmatch(r'[a-z][a-z0-9_]{0,80}', code) else 'native_worker_failed'}
+        response = {'ok': False, 'error': code if re.fullmatch(r'[a-z][a-z0-9_-]{0,80}', code) else 'native_worker_failed'}
     except Exception: response = {'ok': False, 'error': 'native_worker_failed'}
     sys.stdout.buffer.write(json.dumps(response, allow_nan=False).encode('utf-8'))
 

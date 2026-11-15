@@ -629,9 +629,10 @@
     blueBtn.hidden=true;
     const outputNote=el('p','form-feedback','');
     actions.append(applyBtn,download,blueBtn);
-    host.append(heading,lead,status,retry,layout,actions,outputNote);
+    const graphDrafts=el('div','visual-edit-graph-drafts');
+    host.append(heading,lead,status,retry,layout,graphDrafts,actions,outputNote);
 
-    let generation=0,selectSerial=0,chartSerial=0,listSerial=0,parentBusy=false,applying=false,errorCode=null;
+    let generation=0,selectSerial=0,chartSerial=0,listSerial=0,parentBusy=false,applying=false,errorCode=null,preparingShape=null;
     let paperId=null,boundHash=null,boundRevision=null,pageCount=0,flight=null,applyOwner=null;
     let listItems=[],listTotal=0,listPage=0,savedItems=[],savedPage=0,selectedKey=null;
     const controllers=[];
@@ -641,11 +642,11 @@
     const analysisCache=new Map();
     const shapeViews=new Map();
     let chartState=null,figureState=null,chartBlocked=false,output=null,downloadUrl=null,previewUrls=[],imageTask=Promise.resolve(),figureSerial=0;
-    let dynamic=[];
+    let dynamic=[],currentShapeKey=null,pickerPrevious=null,graphOrdinal=0;
 
     function track(){const controller=new root.AbortController();controllers.push(controller);return controller.signal;}
     function abortAll(){for(const controller of controllers)controller.abort();controllers.length=0;}
-    function bump(){generation++;selectSerial++;chartSerial++;abortAll();return generation;}
+    function bump(){preparingShape=null;generation++;selectSerial++;chartSerial++;abortAll();return generation;}
     function live(token,src){const current=currentSource();return token===generation&&!!src&&!!current&&src.fileHash===boundHash&&src.revision===boundRevision&&current.fileHash===src.fileHash&&current.revision===src.revision&&current.file===src.file;}
     function currentSource(){
       let value;
@@ -673,7 +674,10 @@
       img.src=url;
       img.hidden=false;
     }
+    function focusGraph(active){sourceColumn.hidden=active;layout.classList.toggle('visual-edit-focused',active);}
     function resetDrafts(){
+      focusGraph(false);
+      currentShapeKey=null;pickerPrevious=null;graphOrdinal=0;graphDrafts.replaceChildren();
       imageTask=Promise.resolve();
       for(const view of shapeViews.values())view.widget?.destroy?.();
       shapeViews.clear();
@@ -687,27 +691,32 @@
     function pendingCount(){return cellOps.size+regionOps.size;}
     function records(){return [...cellOps.values(),...regionOps.values()].map(entry=>entry.record);}
     function wires(){return [...cellOps.values(),...regionOps.values()].map(entry=>entry.wire);}
-    function emit(){if(typeof onChange==='function'){try{onChange({changes:records()});}catch{}}if(output)say(outputNote,outputReady()?'현재 편집을 반영한 PDF입니다.':'마지막 생성 PDF입니다. 지금 편집은 PDF에 적용을 눌러 반영하세요.');}
+    function emit(){paintGraphDrafts();if(typeof onChange==='function'){try{onChange({changes:records()});}catch{}}if(output)say(outputNote,outputReady()?'현재 편집을 반영한 PDF입니다.':'마지막 생성 PDF입니다. 지금 편집은 PDF에 적용을 눌러 반영하세요.');}
     function outputReady(){
       const src=currentSource();
       return !!(output&&src&&src.fileHash===output.source&&src.revision===output.revision&&output.draftKey===JSON.stringify(records()));
     }
+    function shapePreparationActive(){return !!(preparingShape&&selectionCurrent(preparingShape.token,preparingShape.mine));}
+    function graphGestureActive(){return [...shapeViews.values()].some(view=>view.gestureActive);}
+    function applyDisabled(lock){return lock||graphGestureActive()||shapePreparationActive()||pendingCount()===0||!paperId;}
+    function syncPagers(lock){
+      listPrev.disabled=lock||listPage<=0;listNext.disabled=lock||(listPage+1)*LIST_PAGE>=listTotal;
+      savedPrev.disabled=lock||savedPage<=0;savedNext.disabled=lock||(savedPage+1)*LIST_PAGE>=savedItems.length;
+      listPos.textContent=listTotal?((listPage+1)+' / '+Math.max(1,Math.ceil(listTotal/LIST_PAGE))):'';
+      savedPos.textContent=savedItems.length?((savedPage+1)+' / '+Math.max(1,Math.ceil(savedItems.length/LIST_PAGE))):'';
+    }
     function syncDisabled(){
       const lock=parentBusy||applying;
       for(const view of shapeViews.values())view.panel.inert=lock;
-      applyBtn.disabled=lock||pendingCount()===0||!paperId;
+      applyBtn.disabled=applyDisabled(lock);
       blueBtn.disabled=lock||!outputReady();
       blueBtn.hidden=!outputReady();
       retry.disabled=lock;
       pickPage.disabled=lock||!paperId;
       pickGraph.disabled=pickPage.disabled;
       connect.hidden=!!paperId;
-      listPrev.disabled=lock||listPage<=0;
-      listNext.disabled=lock||(listPage+1)*LIST_PAGE>=listTotal;
-      savedPrev.disabled=lock||savedPage<=0;
-      savedNext.disabled=lock||(savedPage+1)*LIST_PAGE>=savedItems.length;
-      listPos.textContent=listTotal?((listPage+1)+' / '+Math.max(1,Math.ceil(listTotal/LIST_PAGE))):'';
-      savedPos.textContent=savedItems.length?((savedPage+1)+' / '+Math.max(1,Math.ceil(savedItems.length/LIST_PAGE))):'';
+      syncPagers(lock);
+      for(const button of graphDrafts.querySelectorAll?.('button')||[])button.disabled=lock||graphGestureActive();
       for(const node of dynamic)node.disabled=lock||node._softLock===true;
     }
     function paintOutput(){
@@ -814,6 +823,8 @@
       const token=generation;
       const mine=++selectSerial;
       selectedKey=value;
+      currentShapeKey=null;pickerPrevious=null;
+      focusGraph(false);
       const parsed=value.split(':');
       const kind=parsed.shift();
       const id=parsed.join(':');
@@ -933,25 +944,68 @@
       paintChanged();
       setImages(null,null);
     }
+    function graphLabel(view){return (view.scene.pageIndex+1)+'쪽 그래프'+view.ordinal;}
+    function openGraph(key){
+      const view=shapeViews.get(key);if(!view||parentBusy||applying||graphGestureActive())return;
+      selectSerial++;currentShapeKey=key;pickerPrevious=null;figureState=null;chartState=null;
+      focusGraph(true);workBody.replaceChildren(view.panel);setImages(null,null);
+      say(status,'선택한 영역의 그래프 편집을 이어갑니다.');syncDisabled();
+    }
+    function removeGraph(key){
+      const view=shapeViews.get(key);if(!view||parentBusy||applying||graphGestureActive())return;
+      view.widget?.destroy?.();shapeViews.delete(key);regionOps.delete(key);
+      if(currentShapeKey===key){currentShapeKey=null;workBody.replaceChildren();focusGraph(false);}
+      if(pickerPrevious===key)pickerPrevious=null;
+      emit();syncDisabled();say(status,'선택한 그래프 편집을 제거했습니다.');
+    }
+    function graphDraftButton(label,key,action){
+      const view=shapeViews.get(key);
+      const button=el('button','button secondary',label+' · '+graphLabel(view));button.type='button';
+      button.setAttribute('title','영역: '+view.scene.bbox.join(', '));
+      button.disabled=parentBusy||applying||graphGestureActive();button.addEventListener('click',()=>action(key));return button;
+    }
+    function paintGraphDrafts(){
+      const keys=[...shapeViews.keys()].filter(key=>regionOps.has(key));graphDrafts.replaceChildren();
+      if(!keys.length)return;
+      graphDrafts.append(el('p','muted','적용 전 그래프 편집'));
+      for(const key of keys)graphDrafts.append(graphDraftButton('이어 편집',key,openGraph),graphDraftButton('편집 제거',key,removeGraph));
+    }
+    function boxesOverlap(a,b){return a[0]<b[2]&&b[0]<a[2]&&a[1]<b[3]&&b[1]<a[3];}
+    function overlappingGraphs(analysis){
+      return [...shapeViews.entries()].filter(([key,view])=>regionOps.has(key)&&view.scene.pageIndex===analysis.pageIndex&&boxesOverlap(view.scene.bbox,analysis.bbox)).map(([key])=>key);
+    }
+    function handleGraphOverlap(analysis){
+      const keys=overlappingGraphs(analysis);if(!keys.length)return false;
+      if(keys.length===1){openGraph(keys[0]);say(status,'겹치는 기존 그래프 영역을 열었습니다.');return true;}
+      const panel=el('div','visual-edit-column');panel.append(el('p',null,'겹치는 그래프 편집을 선택하세요.'));
+      workBody.replaceChildren(panel);say(status,'기존 편집을 선택하거나 제거한 뒤 다시 선택하세요.');return true;
+    }
     async function paintShape(analysis,token,mine){
       if(!root.FalsifyChartShapeEditor?.create||!root.FalsifyChartShape||!bboxOk(analysis.bbox))return false;
       const key='shape:'+analysis.analysisId;
       let view=shapeViews.get(key);
-      if(view){chartState=null;figureState=null;workBody.replaceChildren(view.panel);setImages(null,null);return true;}
+      if(view){openGraph(key);return true;}
+      if(handleGraphOverlap(analysis))return true;
       const src=currentSource();
+      focusGraph(true);
       const panel=el('div','visual-edit-column');
       panel.append(el('h3',null,'그래프 · '+(analysis.pageIndex+1)+'쪽'));
+      const back=el('button','button secondary','영역 다시 선택');back.type='button';
+      back.addEventListener('click',()=>{void selectPage(true);});panel.append(back);
       const shapeHost=el('div');panel.append(shapeHost);
       workBody.replaceChildren(panel);setImages(null,null);
       say(status,'곡선을 준비하고 있습니다.');
-      const scene=await session().request('/api/paper/chart/prepare',{paperId,fileHash:src.fileHash,pageIndex:analysis.pageIndex,bbox:analysis.bbox.slice()},{signal:track()});
+      const prepareOwner={token,mine};preparingShape=prepareOwner;syncDisabled();
+      let scene;
+      try{scene=await session().request('/api/paper/chart/prepare',{paperId,fileHash:src.fileHash,pageIndex:analysis.pageIndex,bbox:analysis.bbox.slice()},{signal:track()});}
+      finally{if(preparingShape===prepareOwner){preparingShape=null;syncDisabled();}}
       if(!live(token,src)||mine!==selectSerial)return true;
       if(!scene||!Array.isArray(scene.series)||!scene.series.length)throw err('chart-bad');
       const tool=scene.mode==='marks'?root.FalsifyChartMarkEditor:root.FalsifyChartShapeEditor;
       if(!tool?.create)throw err('chart-missing');
-      view={panel,scene,widget:null};shapeViews.set(key,view);
-      const recordScene=value=>({series:value.series});
-      view.widget=tool.create({host:shapeHost,scene,core:root.FalsifyChartShape,
+      view={panel,scene,widget:null,gestureActive:false};
+      const recordScene=value=>({series:value.linearTracks?.length?value.linearTracks.map(t=>({id:t.id,color:t.color,points:t.knots})):value.series});
+      view.widget=tool.create({host:shapeHost,scene,core:root.FalsifyChartShape,embedded:true,
         onChange:value=>{
           if(!live(token,src)||parentBusy||applying)return;
           const operations=value.operations||[];
@@ -960,6 +1014,7 @@
             record:{id:'chart-'+scene.sceneId,kind:'chart-shape',assetKind:'graph',pageIndex:scene.pageIndex,bbox:scene.bbox.slice(),before:recordScene(scene),after:recordScene(value.scene),author:'human'}});
           emit();syncDisabled();
         },
+        onGestureChange:active=>{view.gestureActive=!!active;syncDisabled();},
         onCommit:()=>{},
         onRequestExport:async()=>{
           if(parentBusy||applying)return;
@@ -972,19 +1027,24 @@
           await apply();if(outputReady())download.click();
         }
       });
+      view.ordinal=++graphOrdinal;shapeViews.set(key,view);currentShapeKey=key;pickerPrevious=null;
       chartState=null;figureState=null;chartBlocked=false;
       say(status,scene.mode==='marks'?'점이나 막대의 끝을 끌어 바꾸세요.':'곡선을 끌어 모양을 바꾸세요.');syncDisabled();return true;
     }
     function canPaintShape(analysis,legacy){return !legacy&&root.FalsifyChartShapeEditor&&bboxOk(analysis.bbox);}
     async function paintChart(analysis,token,mine,legacy=false){
       figureState=null;
-      if(canPaintShape(analysis,legacy)){
+      if(!legacy&&canPaintShape(analysis,legacy)){
         try{if(await paintShape(analysis,token,mine))return;}
         catch(error){
           if(!selectionCurrent(token,mine))return;
           paintChartFallback(analysis,token,mine);return;
         }
       }
+      if(!legacy){paintChartFallback(analysis,token,mine);return;}
+      return paintLegacyChart(analysis,token,mine);
+    }
+    async function paintLegacyChart(analysis,token,mine){
       const api=root.FalsifyChartRedraw;
       if(!chartApiReady(api))return;
       const raw=readChartAnalysis(api,analysis);
@@ -1116,8 +1176,10 @@
     function paintChartFallback(analysis,token,mine){
           const panel=el('div','visual-edit-column');
           panel.append(el('p','form-feedback','곡선 편집을 준비하지 못했습니다.'));
-          const advanced=el('button','button secondary','고급 · 새 서식으로 그리기');advanced.type='button';
-          advanced.addEventListener('click',()=>{void paintChart(analysis,token,mine,true);});panel.append(advanced);workBody.replaceChildren(panel);
+          const retryShape=el('button','button secondary','다시 시도');retryShape.type='button';
+          retryShape.addEventListener('click',()=>{void paintChart(analysis,token,++selectSerial);});
+          const reselect=el('button','button secondary','영역 다시 선택');reselect.type='button';
+          reselect.addEventListener('click',()=>{void selectPage(true);});panel.append(retryShape,reselect);workBody.replaceChildren(panel);focusGraph(true);
     }
     let chartQueued=false;
     function queueChart(){
@@ -1193,13 +1255,15 @@
       if(parentBusy||applying||!paperId)return;
       const token=generation,mine=++selectSerial,src=currentSource(),pageIndex=currentPage(src);
       if(pageIndex===null){say(status,'현재 쪽과 편집 대상 PDF의 대응을 확인할 수 없습니다.',true);return;}
+      pickerPrevious=graphIntent?currentShapeKey:null;currentShapeKey=null;
+      focusGraph(graphIntent);
       try{
         const view=await root.FalsifyBlueVisual.previewBluePage({file:src.file,fileHash:src.fileHash,page:pageIndex+1});
         if(!live(token,src)||mine!==selectSerial||currentPage(src)!==pageIndex)return;
         selectedKey='figure:page-region';paintLists();
         await paintFigure({id:'page-region',pageIndex,bbox:[0,0,view.width,view.height],graphIntent},token,mine,()=>currentPage(src)===pageIndex);
         if(live(token,src)&&mine===selectSerial&&currentPage(src)===pageIndex)say(status,'편집 대상 PDF에서 고칠 영역을 드래그하세요.');
-      }catch{if(token===generation)say(status,TEXT.previewFailed,true);}
+      }catch{if(selectionCurrent(token,mine)){focusGraph(false);say(status,TEXT.previewFailed,true);}}
     }
     pickPage.addEventListener('click',()=>{void selectPage();});
     pickGraph.addEventListener('click',()=>{void selectPage(true);});
@@ -1216,7 +1280,7 @@
       const rendered=await renderRegion(item.pageIndex,item.bbox);
       if(!selectionCurrent(token,mine)||!stillCurrent())return;
       if(!rendered){say(status,TEXT.previewFailed,true);errorCode='preview';return;}
-      figureState={key:'figure:'+item.id,opId:'figure-'+item.id,itemId:item.id,pageIndex:item.pageIndex,bbox:item.bbox.slice(),beforeSha:rendered.sha256,beforePng:rendered.bytes,uploaded:null,crop:null,label:null,afterPng:null,page:item.pageIndex+1,graphIntent:!!item.graphIntent};
+      figureState={key:'figure:'+item.id,opId:'figure-'+item.id,itemId:item.id,pageIndex:item.pageIndex,bbox:item.bbox.slice(),beforeSha:rendered.sha256,beforePng:rendered.bytes,uploaded:null,crop:null,label:null,afterPng:null,page:item.pageIndex+1,graphIntent:!!item.graphIntent,graphSelected:false};
       const fig=figureState;
       paintFigureControls();
       setImages(rendered.bytes,null);
@@ -1237,8 +1301,10 @@
       const cancel=el('button','button secondary','영역 선택 취소');
       cancel.type='button';
       cancel.addEventListener('click',()=>{
-        selectSerial++;figureState=null;selectedKey=null;workBody.replaceChildren();
-        paintLists();say(status,'영역 선택을 취소했습니다.');
+        const previous=pickerPrevious;
+        selectSerial++;figureState=null;selectedKey=null;workBody.replaceChildren();focusGraph(false);
+        paintLists();if(previous&&shapeViews.has(previous)){openGraph(previous);return;}
+        pickerPrevious=null;say(status,'영역 선택을 취소했습니다.');
       });
       const fileLabel=el('label','button secondary','바꿀 이미지');
       const file=el('input');
@@ -1279,18 +1345,20 @@
       useCrop.addEventListener('click',()=>{imageTask=applyCrop(nums);});
       box.append(useRegion,useCrop);
       advanced.append(box);
-      const shapeButton=el('button','button secondary','그래프 고치기');shapeButton.type='button';
-      shapeButton.hidden=!root.FalsifyChartShapeEditor;
+      const shapeButton=el('button','button secondary',fig.graphIntent?'다시 시도':'그래프 고치기');shapeButton.type='button';
+      shapeButton.hidden=!root.FalsifyChartShapeEditor||(fig.graphIntent&&!fig.graphSelected);
       shapeButton.addEventListener('click',async()=>{
         if(parentBusy||applying)return;
         const chosen=figureState;if(!chosen)return;
         const pageIndex=chosen.page-1;
         const bbox=pageIndex===chosen.pageIndex?chosen.bbox.slice():[0,0,chosen.view.width,chosen.view.height];
-        try{await paintShape({analysisId:'region-'+chosen.key+'-p'+pageIndex+'-'+bbox.join(','),pageIndex,bbox},generation,selectSerial);}
-        catch{if(figureState===chosen){paintFigureControls();say(status,'곡선을 읽지 못했습니다. 그래프 전체가 들어오도록 영역을 선택하세요.',true);}}
+        const attempt=++selectSerial;
+        try{await paintShape({analysisId:'region-'+chosen.key+'-p'+pageIndex+'-'+bbox.join(','),pageIndex,bbox},generation,attempt);}
+        catch{if(selectionCurrent(generation,attempt)&&figureState===chosen){paintFigureControls();await loadPreview(generation,attempt);if(selectionCurrent(generation,attempt)&&figureState===chosen)say(status,'그래프를 준비하지 못했습니다. 같은 영역을 다시 시도하거나 다시 선택하세요.',true);}}
       });dynamic.push(shapeButton);
       fig.shapeButton=shapeButton;
-      panel.append(title,shapeButton,nav,stage,cancel,fileLabel,labelInput,labelBtn,advanced);
+      if(fig.graphIntent)panel.append(title,shapeButton,nav,stage,cancel);
+      else panel.append(title,shapeButton,nav,stage,cancel,fileLabel,labelInput,labelBtn,advanced);
       workBody.replaceChildren(panel);
       dynamic.push(prev,next,file,labelBtn,useRegion,useCrop,cancel);
       prev.addEventListener('click',()=>{if(fig.page>1)void setPage(fig.page-1);});
@@ -1400,7 +1468,7 @@
       fig.label=null;
       paintOverlay(bbox);
       await composeFigure();
-      if(fig.graphIntent&&figureState===fig&&!fig.shapeButton.hidden){fig.graphIntent=false;fig.shapeButton.click();}
+      if(fig.graphIntent&&figureState===fig){fig.graphSelected=true;fig.shapeButton.hidden=!root.FalsifyChartShapeEditor;if(!fig.shapeButton.hidden)fig.shapeButton.click();else say(status,'그래프 편집을 준비할 수 없습니다.',true);}
     }
     async function onFile(file){
       if(!file||!figureState||parentBusy||applying)return;
@@ -1616,7 +1684,7 @@
     const APPLY_STALE=Symbol('apply-stale');
     function requireApplyLive(token,src){if(!live(token,src))throw APPLY_STALE;}
     function requireDraftCurrent(token,src,draftKey){if(!draftCurrent(token,src,draftKey))throw APPLY_STALE;}
-    function applyBusy(){return parentBusy||applying;}
+    function applyBusy(){return parentBusy||applying||graphGestureActive();}
     function chartNeedsFlush(){return chartState&&editorDirty(chartState);}
     function canReleaseApply(owner){return owner.locked&&typeof hold==='function';}
     function requireUnchangedDraft(draftKey){if(draftKey!==JSON.stringify(records()))throw APPLY_STALE;}

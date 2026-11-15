@@ -1,14 +1,17 @@
 # Falsify paragraph PDF engine browser adapter
 
-The five base editor modules were copied from
-Shinick-Han/falsify-pdf-editor commit cd4ba2cdd68ae7e51198f615bd4ac6130206b162:
+The nine editor modules are derived from
+Shinick-Han/falsify-pdf-editor commit 8f3bef68aa50364aec79fb19d07887dfed7addee:
 editor.mjs, quality.mjs, pagination.mjs, inline-preservation.mjs,
-continuation-template.mjs. Their original notices, AGPL-3.0-only LICENSE,
-third-party notices, patches and dependency licenses accompany this copy.
+continuation-template.mjs, document-flow.mjs, document-flow-band.mjs,
+document-flow-links.mjs and document-flow-underlines.mjs (including 51ae98a
+and 8f3bef6). Their original notices, AGPL-3.0-only LICENSE, third-party
+notices, patches and dependency licenses accompany this copy.
 
-The paragraph-flow overlay now modifies editor.mjs, quality.mjs, pagination.mjs
-and continuation-template.mjs. overlay.json identifies the exact base, commit,
-source branch and complete corresponding patch including tests and documentation.
+Workbench-local additions on top of 8f3bef68aa50364aec79fb19d07887dfed7addee
+are recorded in overlay.json and patches/paragraph-flow-overlay.patch
+(document-flow-band.mjs and document-flow-underlines.mjs match the upstream
+base commit byte-for-byte).
 The generated dist bundle is built from these modules under app/src/paragraph-vendor;
 its manifest records current module hashes. See build-source/PAGINATION.md for
 bounded layout support and the edited-page ICC colour conversion limitation.

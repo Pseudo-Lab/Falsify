@@ -32,14 +32,25 @@ def _b64(raw):
 def _public(scene):
     """Expose geometry and rendering data, keep source token bindings in the server."""
     keys = ('schema', 'sceneId', 'sourceFileHash', 'pageIndex', 'bbox', 'width', 'height',
-            'plotBbox', 'axes', 'calibration', 'revision', 'backgroundPng', 'originalPng', 'issues', 'mode')
+            'plotBbox', 'axes', 'calibration', 'revision', 'backgroundPng', 'originalPng', 'issues', 'mode', 'curveLinks',
+            'linearBasePng', 'linearScale')
     result = {k: copy.deepcopy(scene[k]) for k in keys if k in scene}
     result['series'] = [{k: copy.deepcopy(s[k]) for k in ('id', 'name', 'kind', 'color', 'style', 'points', 'baseline', 'radius', 'orientation')
                          if k in s} for s in scene.get('series', [])]
+    if scene.get('linearTracks'):
+        result['linearTracks'] = [{k: copy.deepcopy(v) for k, v in track.items() if k != 'sourceMaskPng'}
+                                  for track in scene['linearTracks']]
     for k in ('backgroundPng', 'originalPng'):
         if isinstance(result.get(k), bytes):
             result[k] = _b64(result[k])
     return result
+
+
+def _record_geometry(scene, linear):
+    if not linear:
+        return {'series': _public(scene)['series']}
+    return {'series': [{'id': t['id'], 'color': t['color'], 'points': copy.deepcopy(t['knots'])}
+                       for t in scene['linearTracks']]}
 
 
 def _prepare_backend(raw, index, bbox, options=None, preferred=None):
@@ -271,10 +282,12 @@ class ChartEditService:
                 options = copy.deepcopy(entry['options'])
         from paper_native_worker import run
         output, report, pages, issues = run('chart_export', [raw, scene, edited, source_override, options], cancelled=cancelled, deadline=deadline)
-        changes = [] if scene['series'] == edited['series'] else [{
+        from paper_chart_linear_paint import changed
+        linear = changed(scene, edited)
+        changes = [] if scene['series'] == edited['series'] and not linear else [{
             'id': 'chart-' + scene['sceneId'], 'kind': 'chart-shape', 'assetKind': 'graph',
             'pageIndex': scene['pageIndex'], 'bbox': scene['bbox'], 'author': author,
-            'before': {'series': _public(scene)['series']}, 'after': {'series': _public(edited)['series']},
+            'before': _record_geometry(scene, linear), 'after': _record_geometry(edited, linear),
             'operations': copy.deepcopy(data['operations'])}]
         response = {'schema': 'falsify.visual-edit-export.v1', 'sourceSha256': data['fileHash'],
                 'outputSha256': _sha(output), 'file': _b64(output), 'pageCount': pages,

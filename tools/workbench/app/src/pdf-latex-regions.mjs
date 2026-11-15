@@ -44,39 +44,56 @@ function pageProof(bytes,model,mupdf){
   } finally {doc.destroy();}
 }
 function ref(hash,pageIndex,bbox,extra={}){return {sourceSha256:hash,pageIndex,frame:'mupdf-display',bbox:[...bbox],...extra};}
-function hasCellRules(table,pg){
-  for(const c of table.cells){const [x0,y0,x1,y1]=c.bbox,eps=1.5;
-    const horizontal=y=>pg.rules.some(r=>Math.abs((r.bbox[1]+r.bbox[3])/2-y)<=eps&&r.bbox[0]<=x0+eps&&r.bbox[2]>=x1-eps);
-    const vertical=x=>pg.rules.some(r=>Math.abs((r.bbox[0]+r.bbox[2])/2-x)<=eps&&r.bbox[1]<=y0+eps&&r.bbox[3]>=y1-eps);
-    if(!horizontal(y0)||!horizontal(y1)||!vertical(x0)||!vertical(x1))return false;
-  }
+function cellRulesIntact(c,pg){
+  const [x0,y0,x1,y1]=c.bbox,eps=1.5;
+  const horizontal=y=>pg.rules.some(r=>Math.abs((r.bbox[1]+r.bbox[3])/2-y)<=eps&&r.bbox[0]<=x0+eps&&r.bbox[2]>=x1-eps);
+  const vertical=x=>pg.rules.some(r=>Math.abs((r.bbox[0]+r.bbox[2])/2-x)<=eps&&r.bbox[1]<=y0+eps&&r.bbox[3]>=y1-eps);
+  if(!horizontal(y0)||!horizontal(y1)||!vertical(x0)||!vertical(x1))return false;
+  if(c.colSpan>1&&pg.rules.some(r=>{const mx=(r.bbox[0]+r.bbox[2])/2;return mx>x0+2&&mx<x1-2&&r.bbox[1]<=y0+eps&&r.bbox[3]>=y1-eps&&r.bbox[3]-r.bbox[1]>r.bbox[2]-r.bbox[0];}))return false;
+  if(c.rowSpan>1&&pg.rules.some(r=>{const my=(r.bbox[1]+r.bbox[3])/2;return my>y0+2&&my<y1-2&&r.bbox[0]<=x0+eps&&r.bbox[2]>=x1-eps&&r.bbox[2]-r.bbox[0]>r.bbox[3]-r.bbox[1];}))return false;
   return true;
 }
-function invalidTableShape(table){return !table?.ruled||!table.rows||!table.cols||table.rows*table.cols!==table.cells.length||table.rows*table.cols>400;}
+function hasCellRules(table,pg){
+  return !!pg&&table.cells.every(c=>cellRulesIntact(c,pg));
+}
+function invalidTableShape(table){return !table?.ruled||!table.rows||!table.cols||!Array.isArray(table.cells)||!table.cells.length||table.cells.length>table.rows*table.cols||table.rows*table.cols>400;}
 function duplicateIdentities(model){return model.items.some(i=>!i?.id)||new Set(model.items.map(i=>i.id)).size!==model.items.length||model.assets.some(a=>!a?.id)||new Set(model.assets.map(a=>a.id)).size!==model.assets.length;}
 function publicationCropRejected(cropBox,box,candidate,output,pi){return cropBox[0]<box[0]-12||cropBox[2]>box[2]+12||cropBox[3]>box[3]+4||cropBox[1]<candidate.caption.bbox[1]-2||output.items.some(i=>i.assetId&&i.evidence.some(e=>e.pageIndex===pi&&overlap(e.bbox,cropBox)));}
 function invalidModelCollections(model){return !Array.isArray(model.pages)||!Array.isArray(model.items)||!Array.isArray(model.assets)||!Array.isArray(model.diagnostics);}
 function invalidRegion(region,ids,f){return !region||!valid(region.bbox)||ids.has(region.id)||region.pageIndex!==f.source.pageIndex||!same(region.bbox,f.source.bbox,1);}
 function regionOutsideBudget(page,region,planned){return !page||!within(region.bbox,[0,0,page.width,page.height],0)||9*(region.bbox[2]-region.bbox[0])*(region.bbox[3]-region.bbox[1])>MAX_PIXELS||planned.length>=MAX_REGIONS;}
+function markGridCell(grid,cell,totalRows,totalCols){
+  if(!Number.isInteger(cell.row)||!Number.isInteger(cell.col)||!Number.isInteger(cell.rowSpan)||!Number.isInteger(cell.colSpan))return false;
+  if(cell.row<0||cell.col<0||cell.rowSpan<1||cell.colSpan<1||cell.row+cell.rowSpan>totalRows||cell.col+cell.colSpan>totalCols)return false;
+  for(let r=cell.row;r<cell.row+cell.rowSpan;r++)for(let c=cell.col;c<cell.col+cell.colSpan;c++){
+    if(grid[r][c])return false;
+    grid[r][c]=true;
+  }
+  return true;
+}
 function safeTable(table, inventory, document, region, hash, revision, rulePages){
   if(invalidTableShape(table)) return null;
   const pg=rulePages[table.pageIndex];
-  const rows=Array.from({length:table.rows},()=>Array(table.cols));
+  const grid=Array.from({length:table.rows},()=>Array(table.cols).fill(false));
+  const rowEntries=Array.from({length:table.rows},()=>[]);
   for(const cell of table.cells){
-    if(cell.rowSpan!==1||cell.colSpan!==1||rows[cell.row]?.[cell.col])return null;
+    if(!markGridCell(grid,cell,table.rows,table.cols))return null;
     const s=selectTableCell(inventory,{tableId:table.id,cellId:cell.id,sourceSha256:hash,revision});
     if(s.status!=='ready')return null;
     const candidates=document.blocks.filter(b=>b.source?.pageIndex===table.pageIndex&&b.text===s.before&&same(b.source.bbox,s.anchor.bbox,.3)&&region.blockIds.includes(b.id));
     if(candidates.length!==1)return null;
-    const b=candidates[0];rows[cell.row][cell.col]={text:s.before,evidence:[ref(hash,table.pageIndex,b.source.bbox,{blockId:b.parentBlockId||b.id,range:{...b.source.range}})]};
+    const b=candidates[0];
+    rowEntries[cell.row].push({col:cell.col,cell:{text:s.before,evidence:[ref(hash,table.pageIndex,b.source.bbox,{blockId:b.parentBlockId||b.id,range:{...b.source.range}})],...(cell.colSpan>1?{colSpan:cell.colSpan}:{}),...(cell.rowSpan>1?{rowSpan:cell.rowSpan}:{})}});
   }
-  if(rows.some(row=>row.some(x=>!x)))return null;
+  if(grid.some(row=>row.some(x=>!x)))return null;
+  const rows=rowEntries.map(row=>row.sort((a,b)=>a.col-b.col).map(x=>x.cell));
   const used=rows.flat().map(c=>{const e=c.evidence[0];return document.blocks.find(b=>b.source.pageIndex===e.pageIndex&&b.source.range.start===e.range.start&&b.source.range.end===e.range.end)?.id;});
   if(new Set(used).size!==used.length||region.blockIds.some(id=>!used.includes(id)))return null;
   // Detector's ruled classification alone is not proof: require all four sides
-  // of every cell to be covered by an observed straight rule.
+  // of every cell (and no internal dividing rule across merged cells).
   if(!hasCellRules(table,pg))return null;
-  return {rows};
+  const hasMerge=table.cells.some(c=>c.rowSpan>1||c.colSpan>1);
+  return hasMerge?{rows,cols:table.cols}:{rows};
 }
 
 /** Re-read and bind bounded figure/table crops to the immutable original PDF. */

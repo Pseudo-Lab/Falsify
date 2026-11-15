@@ -50,14 +50,144 @@ function graphicsPaths(text, dir) {
  }
  return {dirs,unknown:false,declared:true};
 }
-export function analyzeProjectFiles(project) {
- const paths=new Set(project.files.map(f=>f.path)), mainCandidates=[],missingFiles=[],diagnostics=[],texts=new Map();
- function inspectSource(f) {
-  let text;try{text=dec.decode(f.bytes)}catch{diagnostics.push({code:'INVALID_UTF8',message:'Source is not UTF-8',path:f.path});return}
-  text=text.replace(/(^|[^\\])%.*/gm,'$1');texts.set(f.path,text);
-  if(/\\documentclass(?:\s*\[[^\]]*\])?\s*\{/.test(text)&&/\\begin\s*\{document\}/.test(text))mainCandidates.push(f.path);
+export function readBalanced(text, start, open='{', close='}') {
+ if(text[start]!==open) return null;
+ let depth=0;
+ for(let i=start;i<text.length;i++) {
+  if(text[i]==='\\') { i++; continue; }
+  if(text[i]===open) depth++;
+  else if(text[i]===close && --depth===0) return {content:text.slice(start+1,i),end:i+1};
  }
- for(const f of project.files.filter(f=>/\.tex$/i.test(f.path))) inspectSource(f);
+ return null;
+}
+function skipSpaces(text, i) { while(i<text.length && /\s/.test(text[i])) i++; return i; }
+function readMacroName(text, i) {
+ i=skipSpaces(text,i);
+ if(text[i]==='{') { const g=readBalanced(text,i); return g?{name:g.content.trim(),end:g.end}:null; }
+ const m=/^(\\[A-Za-z@]+)/.exec(text.slice(i));
+ return m?{name:m[1],end:i+m[0].length}:null;
+}
+function readNewCommandMacro(text, cmdStart, kind, path) {
+ let i=skipSpaces(text,cmdStart);
+ if(text[i]==='*') i=skipSpaces(text,i+1);
+ const target=readMacroName(text,i);
+ if(!target || !/^\\[A-Za-z@]+$/.test(target.name)) return null;
+ i=skipSpaces(text,target.end);
+ let arity=0, hasOptionalDefault=false;
+ if(text[i]==='[') { const opt=readBalanced(text,i,'[',']'); if(!opt) return null; const n=Number(opt.content.trim()); if(Number.isInteger(n)&&n>=0&&n<=9) arity=n; i=skipSpaces(text,opt.end); }
+ if(text[i]==='[') { const def=readBalanced(text,i,'[',']'); if(!def) return null; hasOptionalDefault=true; i=skipSpaces(text,def.end); }
+ const body=readBalanced(text,i);
+ return body?{macro:{name:target.name,arity,hasOptionalDefault,body:body.content,kind,path},end:body.end}:null;
+}
+function readDefMacro(text, cmdStart, path) {
+ const m=/^\\([A-Za-z@]+)/.exec(text.slice(skipSpaces(text,cmdStart)));
+ if(!m) return null;
+ const name='\\'+m[1], paramStart=skipSpaces(text,cmdStart)+m[0].length, brace=text.indexOf('{',paramStart);
+ if(brace<0 || /[\r\n]/.test(text.slice(paramStart,brace))) return null;
+ const params=text.slice(paramStart,brace), body=readBalanced(text,brace);
+ if(!body) return null;
+ const nums=[...params.matchAll(/#([1-9])/g)].map(x=>Number(x[1]));
+ return {macro:{name,arity:nums.length?Math.max(...nums):0,hasOptionalDefault:false,body:body.content,kind:'def',path},end:body.end};
+}
+function readPairedDelimiterMacro(text, cmdStart, path) {
+ let i=skipSpaces(text,cmdStart);
+ if(text[i]==='*') i=skipSpaces(text,i+1);
+ const target=readMacroName(text,i);
+ if(!target || !/^\\[A-Za-z@]+$/.test(target.name)) return null;
+ const left=readBalanced(text,skipSpaces(text,target.end)); if(!left) return null;
+ const right=readBalanced(text,skipSpaces(text,left.end)); if(!right) return null;
+ return {macro:{name:target.name,arity:1,hasOptionalDefault:false,body:`${left.content}#1${right.content}`,kind:'DeclarePairedDelimiter',path},end:right.end};
+}
+export function extractMacroDefinitions(text, path='') {
+ const macros=[], clean=text.replace(/(^|[^\\])%.*/gm,'$1');
+ const re=/\\(newcommand|renewcommand|providecommand|DeclarePairedDelimiter|def)\b/g;
+ for(const m of clean.matchAll(re)) {
+  const after=m.index+m[0].length;
+  const parsed=m[1]==='def'?readDefMacro(clean,after,path):m[1]==='DeclarePairedDelimiter'?readPairedDelimiterMacro(clean,after,path):readNewCommandMacro(clean,after,m[1],path);
+  if(parsed) macros.push(parsed.macro);
+ }
+ return macros;
+}
+function detectCitationPackage(texts) {
+ const pkgs=new Set();
+ for(const text of texts) {
+  for(const m of text.matchAll(/\\(?:usepackage|RequirePackage)(?:\s*\[[^\]]*\])?\s*\{([^{}]+)\}/g)) {
+   for(const p of m[1].split(',')) if(p.trim()) pkgs.add(p.trim());
+  }
+ }
+ if(pkgs.has('biblatex')) return 'biblatex';
+ if(pkgs.has('natbib')) return 'natbib';
+ if(pkgs.has('cite')) return 'cite';
+ const joined=texts.join('\n');
+ if(/\\(?:addbibresource|autocite|parencite|textcite|footcite)\b/.test(joined)) return 'biblatex';
+ if(/\\(?:citep|citet|citealp|citealt|citeauthor|citeyear)\b/.test(joined)) return 'natbib';
+ return 'standard';
+}
+function decodeProjectSources(files, diagnostics) {
+ const texts=new Map(), styleTexts=new Map(), mainCandidates=[];
+ for(const f of files) {
+  if(/\.tex$/i.test(f.path)) {
+   let text;try{text=dec.decode(f.bytes)}catch{diagnostics.push({code:'INVALID_UTF8',message:'Source is not UTF-8',path:f.path});continue;}
+   text=text.replace(/(^|[^\\])%.*/gm,'$1');texts.set(f.path,text);
+   if(/\\documentclass(?:\s*\[[^\]]*\])?\s*\{/.test(text)&&/\\begin\s*\{document\}/.test(text))mainCandidates.push(f.path);
+  } else if(/\.(?:sty|cls)$/i.test(f.path)) {
+   try { styleTexts.set(f.path,dec.decode(f.bytes).replace(/(^|[^\\])%.*/gm,'$1')); } catch {}
+  }
+ }
+ return {texts, styleTexts, mainCandidates};
+}
+function refExtensions(command) {
+ if(command==='includegraphics') return ['','.pdf','.png','.jpg','.jpeg'];
+ return command==='bibliography'||command==='addbibresource'?['','.bib']:['','.tex'];
+}
+function resolvePathWithExts(paths, root, ref, exts) {
+ const p=resolveReference(root,ref);
+ return p===null?null:(exts.map(ext=>p+ext).find(path=>paths.has(path)) ?? null);
+}
+function resolveBblFallbackPath(paths, main, path, root, r) {
+ const fromRef=resolvePathWithExts(paths,root,r.replace(/\.bib$/i,''),['.bbl']);
+ if(fromRef) return fromRef;
+ const owner=(main||path).replace(/\.tex$/i,'.bbl');
+ return owner!==(main||path)&&paths.has(owner)?owner:null;
+}
+function collectLocalStyleDeps(paths, root, text, localClasses, localPackages) {
+ for(const m of text.matchAll(/\\(documentclass|LoadClass|usepackage|RequirePackage)(?:\s*\[[^\]]*\])?\s*\{([^{}]+)\}/g)) {
+  const isCls=m[1]==='documentclass'||m[1]==='LoadClass', ext=isCls?'.cls':'.sty';
+  for(const part of m[2].split(',')) {
+   const r=part.trim();if(!r||r.includes('\\')||/#[1-9]/.test(r))continue;
+   const hit=resolvePathWithExts(paths,root,r,[ext]);
+   if(hit)(isCls?localClasses:localPackages).add(hit);
+  }
+ }
+}
+function summarizeObservations(observations, mainFile, diagnostics, missingFiles) {
+ for(const {path,reference,command,results} of observations.values()) {
+  const selected=mainFile && results.some(x=>x.main===mainFile) ? results.filter(x=>x.main===mainFile) : results;
+  const states=new Set(selected.map(x=>x.status));
+  if(states.size===1 && states.has('found'))continue;
+  const detail={path,reference,command};
+  if(states.has('unknown')||states.has('found')) diagnostics.push({code:'UNRESOLVED_REFERENCE',message:'Referenced file could not be determined',...detail});
+  else missingFiles.push(detail);
+ }
+}
+function finalizeMainAndMissingDiagnostics(mainFile, mainCandidates, missingFiles, diagnostics) {
+ if(!mainFile&&mainCandidates.length!==1) {
+  const hasMain=mainCandidates.length>0;
+  diagnostics.push({code:hasMain?'AMBIGUOUS_MAIN':'MISSING_MAIN',message:hasMain?'Multiple main files found':'No main file found'});
+ }
+ for(const m of missingFiles) diagnostics.push({code:'MISSING_FILE',message:'Referenced file is missing',...m});
+}
+function buildProjectAnalysisSummary(texts, styleTexts, localClasses, localPackages, bblFiles) {
+ const styleEntries=[...localClasses,...localPackages].map(p=>[p,styleTexts.get(p)]).filter(([,t])=>t!==undefined);
+ const activeSources=[...texts.entries(),...styleEntries];
+ const citationPackage=detectCitationPackage(activeSources.map(([,t])=>t));
+ const customMacros=activeSources.flatMap(([p,t])=>extractMacroDefinitions(t,p));
+ return {bblFallback:bblFiles.size>0,bblFiles:[...bblFiles].sort(),citationPackage,localPackages:[...localPackages].sort(),localClasses:[...localClasses].sort(),customMacros};
+}
+export function analyzeProjectFiles(project) {
+ const paths=new Set(project.files.map(f=>f.path)), missingFiles=[], diagnostics=[];
+ const bblFiles=new Set(), localPackages=new Set(), localClasses=new Set();
+ const {texts, styleTexts, mainCandidates}=decodeProjectSources(project.files, diagnostics);
  const roots=project.mainFile ? [project.mainFile,...mainCandidates.filter(x=>x!==project.mainFile)] : mainCandidates;
  const observations=new Map(), visited=new Set();let budget=0;
  const note=(main,path,index,ref,command,status)=>{
@@ -65,57 +195,47 @@ export function analyzeProjectFiles(project) {
   if(!observations.has(key))observations.set(key,{path,reference:ref,command,results:[]});
   observations.get(key).results.push({main,status});
  };
- const extensions=command=>command==='includegraphics'?['','.pdf','.png','.jpg','.jpeg']:command==='bibliography'||command==='addbibresource'?['','.bib']:['','.tex'];
- const resolve=(root,ref,exts)=>{
-  const p=resolveReference(root,ref);
-  if(p===null)return null;
-  return exts.map(ext=>p+ext).find(path=>paths.has(path)) ?? null;
- };
  const walk=(main,root,path,state,stack)=>{
   if(++budget>10000 || stack.has(path))return {dirs:[],unknown:true};
   const text=texts.get(path);if(text===undefined)return state;
   visited.add(path);const next=new Set(stack);next.add(path);
+  collectLocalStyleDeps(paths,root,text,localClasses,localPackages);
   const declaration=graphicsPaths(text,root);
   if(declaration.declared)state=declaration;
   const conditional=/\\(?:if\w*|else|fi)\b/.test(text);
   if(conditional || /\\(?:input|include)\b(?!\s*\{)/.test(text))state={dirs:[],unknown:true};
   const re=/\\(input|include|bibliography|addbibresource|includegraphics)(?:\s*\[[^\]]*\])?\s*\{([^{}]+)\}/g;
-  function referenceStatus(valid,direct,m,r) {
+  function referenceStatus(valid,direct,cmd,r) {
    let status=direct?'found':'missing';
-   if(valid&&!direct&&m[1]==='includegraphics') {
+   if(valid&&!direct&&cmd==='includegraphics') {
     if(state.unknown)status='unknown';
-    else if(state.dirs.some(dir=>resolve(dir,r,extensions(m[1]))))status='found';
+    else if(state.dirs.some(dir=>resolvePathWithExts(paths,dir,r,refExtensions(cmd))))status='found';
+   } else if(valid&&!direct&&(cmd==='bibliography'||cmd==='addbibresource')) {
+    const bbl=resolveBblFallbackPath(paths,main,path,root,r);
+    if(bbl){status='found';bblFiles.add(bbl);}
    }
-   if(conditional && valid)status='unknown';
-   return status;
+   return conditional && valid ? 'unknown' : status;
   }
   function inspectReference(m,part) {
    const r=part.trim();if(!r)return;
-   if(r.includes('\\')||/#[1-9]/.test(r)) {note(main,path,m.index,r,m[1],'unknown');if(m[1]==='input'||m[1]==='include')state={dirs:[],unknown:true};return;}
-   const valid=resolveReference(root,r)!==null, direct=valid?resolve(root,r,extensions(m[1])):null;
-   const status=referenceStatus(valid,direct,m,r);
-   note(main,path,m.index,r,m[1],status);
-   if(direct && !conditional && (m[1]==='input'||m[1]==='include') && texts.has(direct)) state=walk(main,root,direct,state,next);
-   else if((m[1]==='input'||m[1]==='include') && status==='unknown') state={dirs:[],unknown:true};
+   const cmd=m[1], isTexInclude=cmd==='input'||cmd==='include';
+   if(r.includes('\\')||/#[1-9]/.test(r)) {note(main,path,m.index,r,cmd,'unknown');if(isTexInclude)state={dirs:[],unknown:true};return;}
+   const valid=resolveReference(root,r)!==null, direct=valid?resolvePathWithExts(paths,root,r,refExtensions(cmd)):null;
+   const status=referenceStatus(valid,direct,cmd,r);
+   note(main,path,m.index,r,cmd,status);
+   if(direct && !conditional && isTexInclude && texts.has(direct)) state=walk(main,root,direct,state,next);
+   else if(isTexInclude && status==='unknown') state={dirs:[],unknown:true};
   }
   for(const m of text.matchAll(re)) for(const part of (m[1]==='bibliography'?m[2].split(','):[m[2]])) inspectReference(m,part);
   return state;
  };
- for(const main of roots) if(texts.has(main))walk(main,parentDir(main),main,{dirs:[],unknown:false},new Set());
- // Detached source files have no proven execution root; inspect against their
- // own directory, retaining the existing diagnostics for standalone sources.
+ for(const main of roots) walk(main,parentDir(main),main,{dirs:[],unknown:false},new Set());
  for(const path of texts.keys()) if(!visited.has(path))walk(null,parentDir(path),path,{dirs:[],unknown:false},new Set());
- function inspectObservation({path,reference,command,results}) {
-  const selected=project.mainFile && results.some(x=>x.main===project.mainFile) ? results.filter(x=>x.main===project.mainFile) : results;
-  const states=new Set(selected.map(x=>x.status));
-  if(states.size===1 && states.has('found'))return;
-  const detail={path,reference,command};
-  if(states.has('unknown')||states.has('found')) diagnostics.push({code:'UNRESOLVED_REFERENCE',message:'Referenced file could not be determined',...detail});
-  else missingFiles.push(detail);
- }
- for(const observation of observations.values()) inspectObservation(observation);
- if(!project.mainFile&&mainCandidates.length!==1)diagnostics.push({code:mainCandidates.length?'AMBIGUOUS_MAIN':'MISSING_MAIN',message:mainCandidates.length?'Multiple main files found':'No main file found'});
- for(const m of missingFiles)diagnostics.push({code:'MISSING_FILE',message:'Referenced file is missing',...m}); return {mainCandidates,missingFiles,diagnostics};
+ for(const stylePath of [...localClasses,...localPackages]) collectLocalStyleDeps(paths,parentDir(stylePath),styleTexts.get(stylePath)||'',localClasses,localPackages);
+ summarizeObservations(observations, project.mainFile, diagnostics, missingFiles);
+ finalizeMainAndMissingDiagnostics(project.mainFile, mainCandidates, missingFiles, diagnostics);
+ const projectAnalysis=buildProjectAnalysisSummary(texts, styleTexts, localClasses, localPackages, bblFiles);
+ return {mainCandidates,missingFiles,diagnostics,...projectAnalysis,projectAnalysis};
 }
 export async function importLatexProject(file,{mainFile,engine,signal}={}) { if(signal?.aborted) fail('ABORTED','Import cancelled'); const bytes=new Uint8Array(await file.arrayBuffer()); if(signal?.aborted) fail('ABORTED','Import cancelled'); let files; if(/\.tex$/i.test(file.name)) {const name=pathOf(file.name);files=[{path:name,bytes}];mainFile??=name;} else if(/\.zip$/i.test(file.name)) {let entries;try{let count=0,total=0;const names=new Set();unzipSync(bytes,{filter:f=>{if(++count>20000||names.has(f.name))fail('INVALID_ZIP','Duplicate or excessive ZIP entries');names.add(f.name);total+=f.originalSize;if(total>128*1024*1024||f.originalSize>Math.max(f.size*200,1000000))fail('INVALID_ZIP','ZIP size limit exceeded');return false;}});entries=unzipSync(bytes);}catch(e){if(e.code)throw e;fail('INVALID_ZIP','Invalid ZIP archive')} files=Object.entries(entries).filter(([p])=>!p.endsWith('/')).map(([path,bytes])=>({path,bytes}));} else fail('INVALID_FORMAT','Expected a .tex or .zip file');
  let p=await createLatexProject({files,mainFile:mainFile??null,engine}); if(!p.mainFile){const a=analyzeProjectFiles(p);if(a.mainCandidates.length===1)p=await createLatexProject({files,mainFile:a.mainCandidates[0],engine});}

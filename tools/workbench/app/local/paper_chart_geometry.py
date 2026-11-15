@@ -192,7 +192,7 @@ def _geometry_color_mask(hue,roi,mask,frame,ocr_lines,np):
     return cm
 
 
-def _geometry_candidates(image,frame,ocr_lines,cv,np,trace_mask,result):
+def _geometry_candidates(image,frame,ocr_lines,cv,np,trace_mask,result,whisker_excl=None):
     left,top,right,bottom=frame
     hsv=cv.cvtColor(image,cv.COLOR_BGR2HSV);roi=hsv[top+2:bottom-1,left+2:right-1]
     mask=(roi[:,:,1]>90)&(roi[:,:,2]>70);counts=np.bincount(roi[:,:,0][mask],minlength=180)
@@ -206,6 +206,7 @@ def _geometry_candidates(image,frame,ocr_lines,cv,np,trace_mask,result):
     candidates=[]
     for hue in [*selected,None]:
         cm=_geometry_color_mask(hue,roi,mask,frame,ocr_lines,np)
+        if whisker_excl is not None:cm=cm&(~whisker_excl)
         traced=trace_mask(cm, max_gap=max(6, int((right-left)*.025)), min_columns=12)
         accepted=[]
         for trace in traced['traces']:
@@ -291,9 +292,12 @@ def extract_geometry(png_bytes,ocr_lines=None):
         if not ocr_ok:return result
         ticks=_ticks(ocr_lines,frame,width,height,image,cv,np);left,top,right,bottom=frame
         _fit_geometry_axes(ticks,frame,image,cv,np,result)
+        from paper_chart_error_bars import detect_error_bars,build_whisker_exclusion_mask,attach_error_bars
         axes=result['axes']
         if 'x' not in axes or not any(side in axes for side in ('left','right')):result['issues'].append('axis-calibration-insufficient');return result
-        candidates=_geometry_candidates(image,frame,ocr_lines,cv,np,trace_mask,result)
+        error_bars=detect_error_bars(image,frame,ocr_lines,np)
+        whisker_excl=build_whisker_exclusion_mask(image,frame,error_bars,np) if error_bars else None
+        candidates=_geometry_candidates(image,frame,ocr_lines,cv,np,trace_mask,result,whisker_excl=whisker_excl)
         if len(candidates)>64:
             candidates=candidates[:64];result['issues'].append('curve-count-limit')
         budget=max(3,480//max(1,len(candidates)))
@@ -301,6 +305,7 @@ def extract_geometry(png_bytes,ocr_lines=None):
         tick_columns=[t['pixel']-origin_x for t in axes['x']['usedTicks']]
         for hue,trace in candidates:
             _append_geometry_series(hue,trace,axes,budget,origin_x,origin_y,tick_columns,cv,np,sample_trace,result)
+        attach_error_bars(result,axes,axis_value,error_bars)
         if not result['series']:result['issues'].append('colored-continuous-curves-not-found');return result
         result['status']='partial' if result['issues'] else 'ready'
         return result

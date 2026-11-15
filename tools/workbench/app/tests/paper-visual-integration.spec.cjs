@@ -78,3 +78,17 @@ test('graph provenance stores the changed source values without copying all unch
  await t.seen.editor.onOutput({outputFileHash:'c'.repeat(64),changes:[{id:'graph1',pageIndex:0,bbox:[10,20,30,40],before:{imageSha256:'a'.repeat(64)},after:{imageSha256:'b'.repeat(64)}}],verification:{status:'passed'}});
  const rows=t.seen.records[0].snapshot.edits;assert.equal(rows.length,1);assert.match(rows[0].before,/"y":4/);assert.match(rows[0].after,/"y":9/);assert.doesNotMatch(rows[0].after,/"y":2/);
 });
+
+test('external proposals stage table-cell and chart-point patches with fileHash enforcement',()=>{
+ const t=boot(),api=t.context.FalsifyPaperVisualIntegration;
+ assert.equal(t.context.FalsifyVisualEditIntegration,api);
+ const snap={fileHash:t.source.fileHash,items:[
+  {id:'p1',kind:'table-cell',enabled:true,matchStatus:'matched',origin:'external-ai-import',tableTarget:{tableId:'t1',pageIndex:0,row:0,column:1,bbox:[1,2,3,4],before:'10',after:'20'},sourceRefs:[{batchId:'b1',itemId:'1'}]},
+  {id:'p2',kind:'chart-point',enabled:true,matchStatus:'matched',origin:'external-ai-import',visualTarget:{figureId:'f1',pageIndex:0,bbox:[5,6,50,60],series:'s',pointIndex:0,markIndex:null,beforeValue:1,afterValue:4},sourceRefs:[{batchId:'b1',itemId:'2'}]}
+ ]};
+ const staged=api.stageExternalProposals(snap,{fileHash:t.source.fileHash});
+ assert.equal(staged.tableCells[0].afterText,'20');
+ assert.equal(staged.chartEdits[0].afterValue,4);
+ assert.equal(api.manualEdits(staged.chartEdits)[0].origin,'external-ai-import');
+ assert.throws(()=>api.stageExternalProposals(snap,{fileHash:'mismatch'}));
+});

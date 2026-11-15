@@ -48,17 +48,65 @@ export function renderStructureRegion(s,p,fragments){
   text+=`\\AddToHook{shipout/foreground}{${condition}\\relax\\put(${f.b[0]}bp,-${f.y}bp){\\parbox[t]{${Math.max(1,f.b[2]-f.b[0])}bp}{\\csname ${f.name}\\endcsname}}\\fi}\n`;
  }
  addBody();
- function addBody(){
- addColumnStart();
- function addColumnStart(){
- if(p.columns===2)text+=front.size?'\\twocolumn[{\n':'\\twocolumn\n';
- if(p.columns===2&&front.size&&Number.isFinite(s.frontTopPaddingBp)&&s.frontTopPaddingBp>0)text+=`\\vspace*{${s.frontTopPaddingBp}bp}\n`;
+ function emitBodyReservations(s,p){
+  const list=normalizeReservations(s.bodyReservations||[],p.columns);
+  if(!list.length)return '';
+  if(list.length===1&&list[0].pageIndex===0&&list[0].column==='left'){
+   return `\\enlargethispage{-${Number(list[0].deltaBp.toFixed(4))}bp}\n`;
+  }
+  const perPage=expandPageColumnReservations(list,p.columns),clauses=[];
+  for(const [pageIndex,cols] of [...perPage.entries()].sort((a,b)=>a[0]-b[0])){
+   const l=cols.left>0?`\\enlargethispage{-${Number(cols.left.toFixed(4))}bp}`:'';
+   const r=cols.right>0?`\\enlargethispage{-${Number(cols.right.toFixed(4))}bp}`:'';
+   if(p.columns===1){clauses.push(`\\ifnum\\value{page}=${pageIndex+1}\\relax${l}\\fi`);continue;}
+   if(l&&r&&Math.abs(cols.left-cols.right)<1e-4)clauses.push(`\\ifnum\\value{page}=${pageIndex+1}\\relax${l}\\fi`);
+   else clauses.push(`\\ifnum\\value{page}=${pageIndex+1}\\relax\\if@firstcolumn${l}\\else${r}\\fi\\fi`);
+  }
+  const hook=p.columns===2?'\\@outputdblcol':'\\@outputpage';
+  return `\\makeatletter\\def\\FalsifyBodyReservations{${clauses.join('')}}\\g@addto@macro${hook}{\\FalsifyBodyReservations}\\FalsifyBodyReservations\\makeatother\n`;
  }
- for(const id of p.frontMatter)add(id);if(p.columns===2&&front.size)text+='}]\n';
- for(const r of s.bodyReservations||[])if(r.pageIndex===0&&r.column==='left'&&Number.isFinite(r.deltaBp)&&r.deltaBp>0)text+=`\\enlargethispage{-${Number(r.deltaBp.toFixed(4))}bp}\n`;
- for(const id of p.order)if(!front.has(id)&&!furn.has(id))add(id);
+ function addBody(){
+  addColumnStart();
+  function addColumnStart(){
+  if(p.columns===2)text+=front.size?'\\twocolumn[{\n':'\\twocolumn\n';
+  if(p.columns===2&&front.size&&Number.isFinite(s.frontTopPaddingBp)&&s.frontTopPaddingBp>0)text+=`\\vspace*{${s.frontTopPaddingBp}bp}\n`;
+  }
+  for(const id of p.frontMatter)add(id);if(p.columns===2&&front.size)text+='}]\n';
+  text+=emitBodyReservations(s,p);
+  for(const id of p.order)if(!front.has(id)&&!furn.has(id))add(id);
  }
  return {text:text+END,offsets};
+}
+
+const COL_ORDER={left:0,right:1,full:2};
+function normalizeReservations(list,columns){
+ const merged=new Map();
+ for(const r of list||[]){
+  if(!r||!Number.isInteger(r.pageIndex)||r.pageIndex<0||!['left','right','full'].includes(r.column)||!Number.isFinite(r.deltaBp)||r.deltaBp<=0)continue;
+  const col=columns===1&&r.column==='full'?'left':r.column, k=`${r.pageIndex}:${col}`;
+  const prev=merged.get(k);
+  merged.set(k,{pageIndex:r.pageIndex,column:col,deltaBp:prev?Math.max(prev.deltaBp,r.deltaBp):r.deltaBp});
+ }
+ return [...merged.values()].sort((a,b)=>a.pageIndex-b.pageIndex||COL_ORDER[a.column]-COL_ORDER[b.column]);
+}
+function expandPageColumnReservations(list,columns){
+ const pages=new Map();
+ for(const r of list){
+  let entry=pages.get(r.pageIndex);if(!entry){entry={left:0,right:0};pages.set(r.pageIndex,entry);}
+  if(r.column==='left'||(r.column==='full'&&columns===1))entry.left=Math.max(entry.left,r.deltaBp);
+  else if(r.column==='right')entry.right=Math.max(entry.right,r.deltaBp);
+  else if(r.column==='full'){entry.left=Math.max(entry.left,r.deltaBp);entry.right=Math.max(entry.right,r.deltaBp);}
+ }
+ return pages;
+}
+function classifyFooterColumn(b,s,plan,u){
+ if(plan.columns===1)return 'left';
+ const bodyUnits=s.units.filter(v=>v.pageIndex===u.pageIndex&&!plan.furniture.some(x=>x.id===v.id));
+ const minX=bodyUnits.length?Math.min(...bodyUnits.map(v=>v.bbox[0])):0;
+ const maxX=bodyUnits.length?Math.max(...bodyUnits.map(v=>v.bbox[2])):(u.pageWidth||b[0]+b[2]);
+ const midpoint=(minX+maxX)/2;
+ if(b[0]<midpoint-12&&b[2]>midpoint+12)return 'full';
+ return b[0]>=midpoint-12?'right':'left';
 }
 function validateStructureProject(project){
  if(project?.schema!=='falsify.latex-project.v1'||project.origin!=='reconstructed-pdf'||!Array.isArray(project.files)||!project.mainFile||!/^[a-f0-9]{64}$/.test(project.sourcePdfHash||''))fail('INVALID_PROJECT');
@@ -84,24 +132,25 @@ function applyReplacements(project,replacements,extraFiles,fragments){
  for(const [id,payload] of Object.entries(replacements)){if(!fragments.has(id)||typeof payload!=='string')fail('INVALID_UNIT');fragments.set(id,payload);}
  const existing=new Set(project.files.map(f=>f.path));for(const f of extraFiles){if(!f || typeof f.path!=='string'||existing.has(f.path)||!(f.bytes instanceof Uint8Array))fail('INVALID_EXTRA_FILE');existing.add(f.path);}
 }
-async function updateStructure({project,plan,signal,replacements={},extraFiles=[]}={}){
+async function updateStructure({project,plan,signal,replacements={},extraFiles=[],bodyReservations}={}){
  if(signal?.aborted)throw new DOMException('Cancelled','AbortError');const {s,source,start,stop,fragments}=inspect(project);plan ??= s.plan;validate(s,plan);
  applyReplacements(project,replacements,extraFiles,fragments);
- // Reserve current-column space for a first-page footer entering the body box.
- // Keep the rest of the document's margins and pagination unchanged.
+ // Reserve page/column space for footers or footnotes entering the body box
+ // while keeping the rest of the document's margins and pagination unchanged.
  const dimensions=[...source.slice(0,start).matchAll(/bottom\s*=\s*([\d.]+)\s*(bp|pt|mm|cm|in)/g)],last=dimensions.at(-1),factor={bp:1,pt:72/72.27,mm:72/25.4,cm:72/2.54,in:72};
- const bottom=last?Number(last[1])*factor[last[2]]:null;let reserve=0;
+ const bottom=last?Number(last[1])*factor[last[2]]:null,computed=[];
  function reserveFooter(f){const u=s.units.find(x=>x.id===f.id);if(f.placement!=='footer'||!Number.isFinite(bottom))return;
   if(u.role==='footnote'&&fragments.get(f.id)?.includes('\\footnotetext{'))return;
-  const b=u.bbox,bodyUnits=s.units.filter(v=>v.pageIndex===u.pageIndex&&!plan.furniture.some(x=>x.id===v.id)),minX=Math.min(...bodyUnits.map(v=>v.bbox[0])),maxX=Math.max(...bodyUnits.map(v=>v.bbox[2])),leftColumn=plan.columns===1||b[2]<=(minX+maxX)/2;
+  const b=u.bbox,column=classifyFooterColumn(b,s,plan,u);
   const y=b[1]>=u.pageHeight/2?b[1]:u.pageHeight-36,bodyBottom=u.pageHeight-bottom;
   if(y>=bodyBottom)return;
-  if(u.pageIndex!==0||!leftColumn)return;
   const font=/\\fontsize\s*\{\s*([\d.]+)(bp|pt)?\s*\}/.exec(fragments.get(f.id)||''),size=font?Number(font[1])*(font[2]==='pt'?factor.pt:1):10;
-  reserve=Math.max(reserve,bodyBottom-y+size*1.2+6);
+  computed.push({pageIndex:u.pageIndex,column,deltaBp:bodyBottom-y+size*1.2+6});
  }
  for(const f of plan.furniture)reserveFooter(f);
- s.bodyReservations=reserve>0?[{pageIndex:0,column:'left',deltaBp:reserve}]:[];
+ const extraReservations=Array.isArray(bodyReservations)?bodyReservations:(s.bodyReservations||[]).filter(r=>r.manual);
+ s.bodyReservations=normalizeReservations([...computed,...extraReservations],plan.columns);
+ if(Array.isArray(bodyReservations))for(const r of s.bodyReservations)if(bodyReservations.some(x=>x&&x.pageIndex===r.pageIndex&&x.column===r.column&&r.deltaBp>=x.deltaBp))r.manual=true;
  const rendered=renderStructureRegion(s,plan,fragments),region=rendered.text;s.plan=structuredClone(plan);
  const files=project.files.map(f=>{if(f.path===project.mainFile)return {path:f.path,bytes:enc.encode(source.slice(0,start)+region+source.slice(stop))};if(f.path==='falsify-layout-structure.json')return {path:f.path,bytes:enc.encode(JSON.stringify(s))};
   if(f.path==='falsify-reconstruction.json'){const m=JSON.parse(dec.decode(f.bytes));m.baselineBindings??=structuredClone(m.bindings||[]);m.bindings=(m.bindings||[]).map(b=>{const offset=rendered.offsets.get(b.itemId),payload=fragments.get(b.itemId);if(offset===undefined||typeof payload!=='string')fail('INVALID_BINDING');return {...b,start:start+offset,end:start+offset+payload.length,status:'review-required',scope:'layout-unit',bindingScope:'containing-project'};});m.layoutDerived=true;return {path:f.path,bytes:enc.encode(JSON.stringify(m))};}
@@ -110,5 +159,5 @@ async function updateStructure({project,plan,signal,replacements={},extraFiles=[
  if(signal?.aborted)throw new DOMException('Cancelled','AbortError');const next=await createLatexProject({files,mainFile:project.mainFile,engine:project.engine,origin:project.origin,sourcePdfHash:project.sourcePdfHash});return {project:next,summary:{units:s.units.length,frontMatter:plan.frontMatter.length,furniture:plan.furniture.length,columns:plan.columns}};
 }
 
-export async function applyLayoutStructure({project,plan,signal}={}){return updateStructure({project,plan,signal});}
-export async function replaceLayoutUnitPayloads({project,replacements,extraFiles=[],signal}={}){return updateStructure({project,replacements,extraFiles,signal});}
+export async function applyLayoutStructure({project,plan,signal,bodyReservations}={}){return updateStructure({project,plan,signal,bodyReservations});}
+export async function replaceLayoutUnitPayloads({project,replacements,extraFiles=[],signal,bodyReservations}={}){return updateStructure({project,replacements,extraFiles,signal,bodyReservations});}
