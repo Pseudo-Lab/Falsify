@@ -49,7 +49,7 @@
     host=host||doc.getElementById('document-blue');
     if(!host||doc.getElementById('blue-defect-sensor'))return null;
     const node=(tag,text,cls)=>{const n=doc.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n;};
-    const section=node('section',undefined,'role-step blue-sensor-panel');
+    const section=node('section',undefined,'blue-sensor-panel');
     section.id='blue-defect-sensor';
     const head=node('div',undefined,'blue-sensor-head');
     const titleWrap=node('div',undefined,'blue-sensor-title-wrap');

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.0-alpha.63
+
+- Fix `#blue-defect-sensor` panel class in `blue-defect-sensor-ui.js` so `visual-workflow.js` `:scope > .role-step` keeps `[intake, execute, result]` indices intact, keeping `#blue-defect-sensor` visible directly below BLUE intake and keeping `#doc-blue-request` visible after `BLUE로 보내기` in `latex-source.browser.cjs` CI & GitHub Pages deployment.
+
 ## 0.2.0-alpha.62
 
 - Implement Confluence-grounded Cops-and-Robbers (`BLUE` blind defect verifier vs `RED` defect-injection stress tester) v2 co-evolution architecture across RED, BLUE, Human Audit (`H1`), and Co-Evolution Arena (`A1`).

@@ -65,6 +65,12 @@
   margin: 12px 0 6px;
 }
 
+.blue-sensor-actions .button {
+  max-width: 100%;
+  white-space: normal;
+  text-align: left;
+}
+
 .blue-sensor-details {
   margin-top: 10px;
 }
