@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.0-alpha.66
+
+- Convert `app/tests/test_paper_supplement_audit.py` from `pytest` to standard-library `unittest.TestCase` so GitHub Actions Ubuntu `python -m unittest discover -s app/tests -p 'test_*.py'` runs cleanly without external test runners and deploys GitHub Pages.
+
 ## 0.2.0-alpha.65
 
 - Fix companion HTTP `supplement_audit` page-text extraction in `paper_evidence_http.py` (`_require_bound_pdf` + `_open_pdf` instead of unsupported `kind='page'` on `EvidenceStore.list_items`) and add end-to-end HTTP adapter regression test in `test_paper_supplement_audit.py`.
