@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.0-alpha.60
+
+- Fix cross-platform Linux CI provenance verification test execution (`[process.execPath, fakeEmcc]`) for the `0.2.0-alpha.59` Wave 1 + Wave 2 release so `Publish workbench` completes and deploys GitHub Pages cleanly.
+
 ## 0.2.0-alpha.59
 
 - Expand BLUE evidence context to 24,000 characters ranked by scientific relevance, classify repeated header/footer logos and icons as decorative, and bind multi-grid/multi-page continued tables with units, footnotes and superscripts.

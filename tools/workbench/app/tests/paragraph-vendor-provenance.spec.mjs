@@ -184,13 +184,7 @@ test('wasm build verification stays false unless clean-room build reproduces exa
 
     const fakeEmcc = join(tmp, 'fake-emcc.mjs');
     writeFileSync(fakeEmcc, "console.log('emcc 3.1.70');\n");
-    const emccWrapper = process.platform === 'win32' ? join(tmp, 'emcc.cmd') : join(tmp, 'emcc.sh');
-    writeFileSync(
-      emccWrapper,
-      process.platform === 'win32'
-        ? `@echo off\r\n"${process.execPath}" "${fakeEmcc}" %*\r\n`
-        : `#!/bin/sh\n"${process.execPath}" "${fakeEmcc}" "$@"\n`
-    );
+    const emccWrapper = [process.execPath, fakeEmcc];
 
     const noTreeResult = verifyWasmSourceBuild({
       sourceDir: srcVendor,
