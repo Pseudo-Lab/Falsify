@@ -24,6 +24,8 @@ pip install -r requirements.txt
 | 논문 원문 받기 (Red, Blue 공통) | `python tools/fetch_paper.py PMC12215570` |
 | 패치를 원문에 적용해 변조본 만들기 (Red 자가 확인, Blue 판정 준비) | `python tools/apply_patch.py corpus/raw/PMC12215570.md submissions/w3/team-a/PMC12215570.diff -o work/PMC12215570.tampered.md` |
 | Blue 판정을 집계하고 논문별 다음 수 정하기 (집계 당번) | `python tools/score.py results/w4/ --keys ../Falsify-keys/w3 --papers corpus/papers.csv` |
+| Workbench RED/BLUE JSON 변환 및 왕복 검사 | `python tools/workbench_bridge.py roundtrip-check --self-test` |
+| D1/D2/D3 게이트 및 배치 평가 실행 | `python -m eval.run_eval --input eval_cases/ --output-csv results/w4/blue-gates.csv` |
 | 마무리 한마디 모으기 (빌더) | `python tools/til_collect.py --week 3 --members 9` |
 
 식별자는 PMCID(`PMC12215570`), arXiv 번호(`2402.06196`), DOI(`10.1001/...`, 제안 도구만) 를 받습니다.
@@ -98,6 +100,20 @@ paper_id, team, judge_type, model, iteration, location, defect_type, label, evid
 
 홀드아웃 논문(`papers.csv` 의 `role=holdout`)에 찍힌 맞음은 정의상 전부 오탐이라 재현율 분모에는
 안 들어가고 거짓양성률과 정밀도 분모에만 들어갑니다.
+
+## workbench_bridge.py
+
+`Shinick-Han/falsify-workbench`에서 내보낸 RED/BLUE JSON을 시즌 13 공개 저장소 형식(`submissions/`, `tools/score.py`, `eval/run_eval.py`)으로 변환합니다. 표준 라이브러리만 쓰며 자세한 안내서는 [docs/workbench-integration.md](../docs/workbench-integration.md)에 있습니다.
+
+- `red-to-submission`: `falsify.external-batch.v1`, `falsify.external-proposals.v1`, 리뷰 번들, `falsify-visual-edits.json`을 받아 `submissions/*.json`(검증 통과), 블라인드용 변조본(`blind/`, Red 메타데이터 0건), 운영자 정답지(`organizer/answer_key.csv`, `organizer/keys/*.json`)를 만듭니다. `--defect-type` 으로 `D1`/`D2`/`D3`를 강제 지정할 수 있습니다.
+- `blue-to-predictions`: `role=="blue"` 배치나 BLUE 하네스 출력을 `tools/score.py` 호환 `predictions.csv` (`case_id`, `verdict`, `defect_type`, `confidence`, `evidence_quote` 포함)로 바꿉니다.
+- `roundtrip-check`: `submissions/validate_submission.py` 와 `tools/score.py` 호환성을 한 번에 점검합니다.
+
+## gates/ 및 eval/ 워크플로우
+
+- 단일 논문 게이트 실행: `python -m gates.cli --fact-card corpus/examples/sample_fact_card.json --document work/PMC9000001.tampered.md --output results/w4/blue-gates.csv`
+- 배치 평가와 혼동행렬·`score.py` 집계: `python -m eval.run_eval --input manifest.json --output-csv results/w4/blue-gates.csv --answer-key organizer/answer_key.csv --keys-dir organizer/keys`
+- 제출물 검증: `python -m submissions.validate_submission submissions/examples`
 
 ## til_collect.py
 
