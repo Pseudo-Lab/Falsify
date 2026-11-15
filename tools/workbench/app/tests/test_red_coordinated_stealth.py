@@ -228,7 +228,19 @@ class CoordinatedRedMcpTests(unittest.TestCase):
                                 'scan_source_baseline', 'list_pdf_links',
                                 'prepare_chart_scene', 'preview_coordinated_edits',
                                 'export_coordinated_edits', 'audit_candidate_pdf',
+                                'simulate_red_detectability', 'trace_claim_propagation',
                             })
+                            schemas = {t.name: t for t in (await session.list_tools()).tools}
+                            self.assertEqual(
+                                set(schemas['simulate_red_detectability'].inputSchema['properties']),
+                                {'paperId', 'operations'},
+                            )
+                            self.assertEqual(
+                                set(schemas['trace_claim_propagation'].inputSchema['properties']),
+                                {'paperId', 'query'},
+                            )
+                            for name in ('simulate_red_detectability', 'trace_claim_propagation'):
+                                self.assertTrue(schemas[name].annotations.readOnlyHint)
 
                             targets_res = await session.call_tool('list_red_targets', {'paperId': pid})
                             self.assertFalse(targets_res.isError, targets_res)

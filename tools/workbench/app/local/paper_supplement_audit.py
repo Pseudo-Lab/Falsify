@@ -1,5 +1,8 @@
 """Pure-Python deterministic cross-document audit for main paper vs supplementary/code/log files."""
+import math
 import re
+
+from paper_stat_math import check_count_percentage
 
 SCHEMA = "falsify.paper-supplement-audit.v1"
 
@@ -85,6 +88,16 @@ _N_LOG_LINE_RE = re.compile(
     r"\b(?:Loaded|Analyzed|Processed|Total\s+(?:rows|samples|subjects|patients)|Dataset\s+shape)\s*[:=(]?\s*(\d{2,7})(?:\s*(?:rows|samples|subjects|patients|records)|\s*,\s*\d+\s*\))",
     re.IGNORECASE,
 )
+# Supplementary-table arithmetic cues. _TABLE_TOTAL_ROW_RE extends the summary-row
+# filter used by _extract_csv_sample_claims ("total|summary|mean|overall").
+_TABLE_TOTAL_ROW_RE = re.compile(r"^\s*(?:total|sum|overall|all)\b", re.IGNORECASE)
+_TABLE_TOTAL_COL_RE = re.compile(r"^\s*(?:total|sum|overall|all)\b", re.IGNORECASE)
+_TABLE_COUNT_HDR_RE = re.compile(
+    r"^(?:n|count|no\.?|number|events?|patients?|participants?|subjects?|samples?|cases?|mice|animals?)(?![A-Za-z])",
+    re.IGNORECASE,
+)
+_TABLE_N_RE = re.compile(r"\bN\s*=\s*(\d{2,7})\b")
+_TABLE_NUM_RE = re.compile(r"^\s*([-−]?(?:\d{1,3}(?:,\d{3})+|\d*\.?\d+(?:[eE][-−+]?\d+)?))\s*(%)?\s*$")
 
 
 def _assert_no_red_keys(value):
@@ -449,6 +462,239 @@ def _extract_csv_metric_claims(supp, default_anchor):
     return out
 
 
+def _parse_table_cell(raw):
+    """Return {'value','decimals','isPercent'} for an unambiguous numeric cell, else None."""
+    m = _TABLE_NUM_RE.match(str(raw or ""))
+    if not m:
+        return None
+    value = _safe_float(m.group(1))
+    if value is None:
+        return None
+    return {"value": value, "decimals": _count_decimals(m.group(1)), "isPercent": bool(m.group(2))}
+
+
+def _table_row_cells(row):
+    return [_parse_table_cell(cell) for cell in row]
+
+
+def _table_has_header(rows):
+    first = rows[0] if rows else []
+    letters = any(re.search(r"[A-Za-z가-힣]", str(cell or "")) for cell in first)
+    numeric = sum(1 for cell in first if _parse_table_cell(cell) is not None)
+    return bool(letters) and numeric < len(first)
+
+
+def _table_sum_matches(cell, total):
+    tolerance = 0.5 * (10.0 ** (-cell["decimals"])) + 1e-9
+    return abs(cell["value"] - total) <= tolerance
+
+
+def _column_values_above(cells_rows, start_row, end_row, column):
+    values = []
+    for row_index in range(start_row, end_row):
+        row = cells_rows[row_index]
+        cell = row[column] if column < len(row) else None
+        if not cell or cell["isPercent"]:
+            return None
+        values.append(cell["value"])
+    return values if len(values) >= 2 else None
+
+
+def _row_values(cells_row, exclude_column):
+    values = []
+    for column, cell in enumerate(cells_row):
+        if column == 0 or column == exclude_column:
+            continue
+        if not cell or cell["isPercent"]:
+            return None
+        values.append(cell["value"])
+    return values if len(values) >= 2 else None
+
+
+def _table_sum_signal(block, label, header, cell, total, cell_count, excerpt, meta):
+    return {
+        "family": "D1", "category": "D1", "kind": "supplement_table_sum_mismatch",
+        "segmentId": meta["segmentId"], "pageIndex": meta["pageIndex"], "supplementFile": meta["fileName"],
+        "excerpt": excerpt,
+        "reported": {
+            "table": block, "label": label, "column": header,
+            "printed": cell["value"], "decimals": cell["decimals"],
+        },
+        "computed": {
+            "sum": round(total, 6), "cellCount": cell_count,
+            "supplementFile": meta["fileName"], "segmentId": meta["segmentId"],
+        },
+        "detail": (
+            f"{block} row '{label}' prints {cell['value']} in column '{header}', "
+            f"but the {cell_count} cells above sum to {round(total, 6)}."
+        ),
+    }
+
+
+def _column_header(rows, column):
+    header = rows[0][column] if column < len(rows[0]) else ""
+    return str(header or f"col{column + 1}")
+
+
+def _row_sum_signals(rows, meta):
+    has_header = _table_has_header(rows)
+    cells_rows = [_table_row_cells(row) for row in rows]
+    start = 1 if has_header else 0
+    signals = []
+    for row_index in range(start, len(rows)):
+        if not _TABLE_TOTAL_ROW_RE.match(str(rows[row_index][0] or "")):
+            continue
+        for column in range(1, len(rows[row_index])):
+            cell = cells_rows[row_index][column]
+            if not cell or cell["isPercent"]:
+                continue
+            values = _column_values_above(cells_rows, start, row_index, column)
+            if values is None:
+                continue
+            total = math.fsum(values)
+            if _table_sum_matches(cell, total):
+                continue
+            signals.append(_table_sum_signal(
+                "row-sum", rows[row_index][0], _column_header(rows, column),
+                cell, total, len(values), ", ".join(rows[row_index])[:140], meta,
+            ))
+    return signals
+
+
+def _column_sum_row_signal(rows, cells_rows, row_index, column, meta):
+    cell = cells_rows[row_index][column] if column < len(cells_rows[row_index]) else None
+    if not cell or cell["isPercent"]:
+        return None
+    values = _row_values(cells_rows[row_index], column)
+    if values is None:
+        return None
+    total = math.fsum(values)
+    if _table_sum_matches(cell, total):
+        return None
+    return _table_sum_signal(
+        "column-sum", rows[row_index][0], _column_header(rows, column),
+        cell, total, len(values), ", ".join(rows[row_index])[:140], meta,
+    )
+
+
+def _column_sum_signals(rows, meta):
+    if not _table_has_header(rows):
+        return []
+    cells_rows = [_table_row_cells(row) for row in rows]
+    total_columns = [col for col, head in enumerate(rows[0]) if col > 0 and _TABLE_TOTAL_COL_RE.match(str(head or ""))]
+    signals = []
+    for column in total_columns:
+        for row_index in range(1, len(rows)):
+            if _TABLE_TOTAL_ROW_RE.match(str(rows[row_index][0] or "")):
+                continue
+            signal = _column_sum_row_signal(rows, cells_rows, row_index, column, meta)
+            if signal is not None:
+                signals.append(signal)
+    return signals
+
+
+def _table_total_for_column(rows, cells_rows, column):
+    for row_index, row in enumerate(rows):
+        if not _TABLE_TOTAL_ROW_RE.match(str(row[0] or "")):
+            continue
+        cell = cells_rows[row_index][column] if column < len(cells_rows[row_index]) else None
+        if not cell or cell["isPercent"] or cell["value"] <= 0 or cell["value"] != int(cell["value"]):
+            continue
+        return int(cell["value"])
+    return None
+
+
+def _table_percentage_signal(label, header, cell, count, total, check, excerpt, meta):
+    return {
+        "family": "D1", "category": "D1", "kind": "supplement_table_percentage_mismatch",
+        "segmentId": meta["segmentId"], "pageIndex": meta["pageIndex"], "supplementFile": meta["fileName"],
+        "excerpt": excerpt,
+        "reported": {
+            "table": "percentage", "label": label, "column": header,
+            "printedPct": cell["value"], "decimals": cell["decimals"], "count": count, "total": total,
+        },
+        "computed": {
+            "computedPct": round(check["computedPct"], 6), "diffPctPoints": round(check["diffPctPoints"], 6),
+            "status": check["status"], "supplementFile": meta["fileName"], "segmentId": meta["segmentId"],
+        },
+        "detail": (
+            f"Row '{label}' prints {cell['value']}% for column '{header}', "
+            f"but {count}/{total} computes to {round(check['computedPct'], 6)}%."
+        ),
+    }
+
+
+def _row_percentage_signals(rows, cells_rows, row_index, count_columns, header_n, meta):
+    row_label = str(rows[row_index][0] or "")
+    signals = []
+    for count_column in count_columns:
+        count_cell = cells_rows[row_index][count_column]
+        if not count_cell or count_cell["isPercent"] or count_cell["value"] <= 0:
+            continue
+        if count_cell["value"] != int(count_cell["value"]):
+            continue
+        count = int(count_cell["value"])
+        total = header_n or _table_total_for_column(rows, cells_rows, count_column)
+        if not total or total < count:
+            continue
+        for column, cell in enumerate(cells_rows[row_index]):
+            if not cell or not cell["isPercent"]:
+                continue
+            check = check_count_percentage(count, total, cell["value"], cell["decimals"])
+            if check["consistent"]:
+                continue
+            signals.append(_table_percentage_signal(
+                row_label, _column_header(rows, column), cell, count, total, check,
+                ", ".join(rows[row_index])[:140], meta,
+            ))
+    return signals
+
+
+def _percentage_signals(rows, meta):
+    if not _table_has_header(rows):
+        return []
+    count_columns = [
+        column for column, head in enumerate(rows[0])
+        if column > 0 and _TABLE_COUNT_HDR_RE.match(_norm_text(head).strip())
+    ]
+    if not count_columns:
+        return []
+    cells_rows = [_table_row_cells(row) for row in rows]
+    header_n = _TABLE_N_RE.search(" ".join(str(head or "") for head in rows[0]))
+    stated_n = int(header_n.group(1)) if header_n else None
+    signals = []
+    for row_index in range(1, len(rows)):
+        if _TABLE_TOTAL_ROW_RE.match(str(rows[row_index][0] or "")):
+            continue
+        signals.extend(_row_percentage_signals(rows, cells_rows, row_index, count_columns, stated_n, meta))
+    return signals
+
+
+def _table_text_blocks(supp):
+    if supp["kind"] == "table-data":
+        text = "\n".join(seg["text"] for seg in supp["segments"])
+        first = supp["segments"][0] if supp["segments"] else {"id": "s0", "pageIndex": 0}
+        return [(text, {"segmentId": first["id"], "pageIndex": first.get("pageIndex", 0), "fileName": supp["name"]})]
+    return [
+        (seg["text"], {"segmentId": seg["id"], "pageIndex": seg["pageIndex"], "fileName": supp["name"]})
+        for seg in supp["segments"]
+    ]
+
+
+def _detect_supplement_table_arithmetic(supplements):
+    """Deterministic arithmetic audit of supplementary tables (row/column sums, percentage vs N)."""
+    signals = []
+    for supp in supplements:
+        for text, meta in _table_text_blocks(supp):
+            rows = _parse_delimited_rows(text)
+            if not rows or len(rows) < 3 or not _table_has_header(rows):
+                continue
+            signals.extend(_row_sum_signals(rows, meta))
+            signals.extend(_column_sum_signals(rows, meta))
+            signals.extend(_percentage_signals(rows, meta))
+    return signals
+
+
 def _extract_supplement_metrics(supps):
     claims = []
     for supp in supps:
@@ -524,6 +770,8 @@ def _count_signals(signals):
         "missing_supplementary_item": 0,
         "cross_file_sample_size_mismatch": 0,
         "cross_file_metric_mismatch": 0,
+        "supplement_table_sum_mismatch": 0,
+        "supplement_table_percentage_mismatch": 0,
     }
     d1, d4_1 = 0, 0
     for sig in signals:
@@ -545,7 +793,8 @@ def audit_paper_with_supplements(main_text_or_pages, supplements):
     cited_items, present_items, miss_sigs = _detect_missing_supplements(main_segs, norm_supps)
     n_sigs = _detect_sample_size_mismatches(main_segs, norm_supps)
     metric_sigs = _detect_metric_mismatches(main_segs, norm_supps)
-    signals = [{**sig, "id": f"SUPP-{i + 1}"} for i, sig in enumerate(miss_sigs + n_sigs + metric_sigs)]
+    table_sigs = _detect_supplement_table_arithmetic(norm_supps)
+    signals = [{**sig, "id": f"SUPP-{i + 1}"} for i, sig in enumerate(miss_sigs + n_sigs + metric_sigs + table_sigs)]
     report = {
         "schema": SCHEMA,
         "supplementCount": len(norm_supps),

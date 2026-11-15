@@ -5,6 +5,23 @@ Usage:
 
 Reuses EvidenceStore, ChartEditService, export_visual, and audit_pdf_stealth.
 Never modifies the startup PDF on disk; keeps paper_mcp.py and paper_chart_edit_mcp.py separate.
+
+Self-healing error contract
+---------------------------
+Every failed mutation returns one payload shape, whichever surface failed:
+
+    {"error": "<fixed_code>", "actualValue": <rejected value or null>,
+     "nearestCandidates": [ {...}, ... ], "bbox": [x0,y0,x1,y1] | null,
+     "recoveryHint": "<actionable one sentence>"}
+
+`text-span` and `supplement-edit` failures raise SpanMutationError, which already
+carries these details. Native/child failures surface only a fixed code, so the
+parent enriches them here: `visual_*`/table-cell failures list nearby table cells
+(row, column, text, bbox), `chart_*` failures list series/point centers from the
+prepared scene (or name prepare_chart_scene), `uri_*` failures list the bound
+PDF links, and taxonomy/normalizer failures enumerate the valid world, difficulty,
+family and kind vocabulary in the hint. Candidates never carry absolute paths,
+working directories or the bound source bytes.
 """
 import argparse
 import base64
@@ -23,6 +40,19 @@ from paper_blue_sensor import run_blue_sensor
 from paper_chart_edit_service import ChartEditService, SCHEMA as CHART_SCHEMA, default_service
 from paper_evidence_text import _extract_raw_blocks, _order_blocks
 from paper_mcp import _cancellable_thread, _guard, _ok, open_selected
+from paper_red_errors import (
+    RedMutationError,
+    build_error_payload,
+    code_of,
+    error_surface,
+    is_fixed_code,
+    normalize_payload,
+    taxonomy_hint,
+    VALID_DIFFICULTIES,
+    VALID_FAMILIES,
+    VALID_KINDS,
+    VALID_WORLDS,
+)
 from paper_stealth_audit import audit_pdf_stealth
 from paper_text_span_mutator import (
     SpanMutationError,
@@ -626,13 +656,281 @@ def _audit_candidate(store, paper_id, file_hash, candidate_b64, modified_regions
     return audit_pdf_stealth(source_bytes, candidate_bytes, modified_regions=modified_regions)
 
 
-def _sanitize_error_details(details):
-    blocked = {'path', 'filepath', 'file_path', 'cwd', 'dir'}
-    return {k: v for k, v in details.items() if k.lower() not in blocked}
+def _bbox_of(value):
+    if isinstance(value, (list, tuple)) and len(value) == 4:
+        return [float(v) for v in value]
+    return None
 
 
-def _self_healing_error(exc):
-    payload = _sanitize_error_details(exc.details)
+def _error_context_ops(context):
+    operations = (context or {}).get('operations')
+    return [op for op in operations or [] if isinstance(op, dict)]
+
+
+def _ops_of_kind(context, kind):
+    return [op for op in _error_context_ops(context) if op.get('kind') == kind]
+
+
+def _read_table_item(store, paper_id, item_id):
+    if store is None or not isinstance(item_id, str) or not item_id:
+        return None
+    try:
+        item = store.read_item(paper_id, item_id)
+    except (KeyError, ValueError):
+        return None
+    return item if isinstance(item, dict) and item.get('type') == 'table' else None
+
+
+def _find_cell(item, row, column):
+    table = item.get('table') if isinstance(item, dict) else None
+    cells = table.get('cells') if isinstance(table, dict) else None
+    for cell in cells or []:
+        if not isinstance(cell, dict):
+            continue
+        if cell.get('row') == row and cell.get('column') == column:
+            return cell
+    return None
+
+
+def _table_failing_op(context):
+    ops = _ops_of_kind(context, 'table-cell')
+    for op in reversed(ops):
+        item = _read_table_item(context.get('store'), context.get('paperId'), op.get('itemId'))
+        if item is None:
+            return op
+        cell = _find_cell(item, op.get('row'), op.get('column'))
+        if cell is None or op.get('before') != str(cell.get('text') or ''):
+            return op
+    return ops[-1] if ops else None
+
+
+def _cell_distance(cell, row, column):
+    if type(row) is not int or type(column) is not int:
+        return 0
+    return abs(int(cell.get('row') or 0) - row) + abs(int(cell.get('column') or 0) - column)
+
+
+def _cell_candidates(item, op):
+    table = item.get('table') if isinstance(item, dict) else None
+    cells = table.get('cells') if isinstance(table, dict) else None
+    if not isinstance(cells, list):
+        return []
+    row, column = (op or {}).get('row'), (op or {}).get('column')
+    ranked = []
+    for cell in cells:
+        if not isinstance(cell, dict) or not str(cell.get('text') or '').strip():
+            continue
+        ranked.append((_cell_distance(cell, row, column), int(cell.get('row') or 0), int(cell.get('column') or 0), {
+            'row': cell.get('row'),
+            'column': cell.get('column'),
+            'text': str(cell.get('text') or ''),
+            'bbox': _bbox_of(cell.get('bbox')),
+        }))
+    ranked.sort(key=lambda entry: (entry[0], entry[1], entry[2]))
+    return [entry[3] for entry in ranked[:5]]
+
+
+def _enrich_table(code, context):
+    op = _table_failing_op(context)
+    item_id = op.get('itemId') if op else None
+    item = _read_table_item(context.get('store'), context.get('paperId'), item_id)
+    candidates = _cell_candidates(item, op)
+    cell = _find_cell(item, (op or {}).get('row'), (op or {}).get('column'))
+    bbox = _bbox_of((cell or {}).get('bbox')) or _bbox_of((op or {}).get('bbox'))
+    if candidates:
+        hint = 'Pick an existing row/column pair from nearestCandidates and pass its exact text as "before".'
+    else:
+        hint = 'Call list_red_targets for a table itemId, then retry with an existing row and column.'
+    return build_error_payload(
+        code,
+        actual_value=(op or {}).get('before'),
+        nearest_candidates=candidates,
+        bbox=bbox,
+        recovery_hint=hint,
+        extra={'itemId': item_id, 'row': (op or {}).get('row'), 'column': (op or {}).get('column')},
+    )
+
+
+def _point_center(point):
+    x, y = point.get('x'), point.get('y')
+    if type(x) not in (int, float) or type(y) not in (int, float):
+        return None
+    return [round(float(x), 2), round(float(y), 2)]
+
+
+def _scene_candidates(scene, limit=5):
+    candidates = []
+    for series in (scene or {}).get('series') or []:
+        if not isinstance(series, dict):
+            continue
+        for index, point in enumerate(series.get('points') or []):
+            center = _point_center(point) if isinstance(point, dict) else None
+            if center is None:
+                continue
+            candidates.append({'seriesId': series.get('id'), 'pointIndex': index, 'center': center})
+            if len(candidates) >= limit:
+                return candidates
+    return candidates
+
+
+def _scene_of(service, scene_id):
+    scenes = getattr(service, 'scenes', None)
+    if not isinstance(scenes, dict) or not isinstance(scene_id, str):
+        return None
+    entry = scenes.get(scene_id)
+    scene = entry.get('scene') if isinstance(entry, dict) else None
+    return scene if isinstance(scene, dict) else None
+
+
+def _chart_actual(code, plan):
+    """Echo the rejected chart-plan value that the fixed code points at."""
+    if code in ('chart_revision_invalid', 'chart_operation_limit'):
+        return plan.get('revision')
+    return plan.get('sceneId')
+
+
+def _enrich_chart(code, context):
+    ops = _ops_of_kind(context, 'chart-shape')
+    op = ops[-1] if ops else None
+    plan = (op or {}).get('plan')
+    plan = plan if isinstance(plan, dict) else {}
+    scene = _scene_of(context.get('service'), plan.get('sceneId'))
+    candidates = _scene_candidates(scene or (op or {}).get('scene'))
+    bbox = _bbox_of(plan.get('bbox')) or _bbox_of((op or {}).get('bbox'))
+    hint = (
+        'Call prepare_chart_scene for the figure region, then retry with a seriesId/center pair from nearestCandidates.'
+        if candidates else
+        'Call prepare_chart_scene for this pageIndex and bbox first, then retry the chart plan with the returned sceneId.'
+    )
+    return build_error_payload(
+        code,
+        actual_value=_chart_actual(code, plan),
+        nearest_candidates=candidates,
+        bbox=bbox,
+        recovery_hint=hint,
+        extra={'sceneId': plan.get('sceneId'), 'kind': (op or {}).get('kind')},
+    )
+
+
+def _bound_links(context):
+    store, paper_id = context.get('store'), context.get('paperId')
+    file_hash = context.get('fileHash')
+    if store is None or file_hash is None:
+        return []
+    try:
+        return list_pdf_uri_links(store.source_bytes(paper_id, file_hash)).get('links') or []
+    except (KeyError, ValueError):
+        return []
+
+
+def _uri_failing_op(context, links):
+    by_id = {link.get('linkId'): link for link in links}
+    ops = _ops_of_kind(context, 'uri-link')
+    for op in reversed(ops):
+        link = by_id.get(op.get('linkId'))
+        if link is None or op.get('beforeUri') not in (None, link.get('uri')):
+            return op
+    return ops[-1] if ops else None
+
+
+def _link_candidate(link):
+    return {
+        'linkId': link.get('linkId'),
+        'pageIndex': link.get('pageIndex'),
+        'bbox': _bbox_of(link.get('bbox')),
+        'uri': link.get('uri'),
+        'visibleText': link.get('visibleText'),
+    }
+
+
+def _enrich_uri(code, context):
+    links = _bound_links(context)
+    op = _uri_failing_op(context, links)
+    candidates = [_link_candidate(link) for link in links[:5]]
+    target = next((link for link in links if link.get('linkId') == (op or {}).get('linkId')), None)
+    target = target if target is not None else (links[0] if links else None)
+    hint = 'Retry with a linkId of the form p<page>-a<annot> from nearestCandidates and its exact uri as beforeUri.'
+    return build_error_payload(
+        code,
+        actual_value=(op or {}).get('beforeUri'),
+        nearest_candidates=candidates,
+        bbox=_bbox_of((target or {}).get('bbox')) or _bbox_of((op or {}).get('bbox')),
+        recovery_hint=hint,
+        extra={'linkId': (op or {}).get('linkId')},
+    )
+
+
+def _enrich_text(code, context):
+    ops = _ops_of_kind(context or {}, 'text-span') or _ops_of_kind(context or {}, 'supplement-edit')
+    op = ops[-1] if ops else None
+    if op is None:
+        return build_error_payload(code)
+    return build_error_payload(
+        code,
+        actual_value=op.get('before'),
+        nearest_candidates=[],
+        recovery_hint='Call list_text_spans (or list_red_supplements) with that exact "before" text and retry with its spanId.',
+    )
+
+
+def _taxonomy_actual(op):
+    for key, valid in (
+        ('world', VALID_WORLDS), ('difficulty', VALID_DIFFICULTIES), ('family', VALID_FAMILIES), ('kind', VALID_KINDS),
+    ):
+        value = (op or {}).get(key)
+        if value is not None and value not in valid:
+            return value
+    return None
+
+
+def _taxonomy_rejected(ops):
+    """First rejected taxonomy value, matching the normalizer's own operation order."""
+    for op in ops:
+        rejected = _taxonomy_actual(op)
+        if rejected is not None:
+            return rejected
+    return None
+
+
+def _enrich_taxonomy(code, context):
+    return build_error_payload(
+        code,
+        actual_value=_taxonomy_rejected(_error_context_ops(context)),
+        nearest_candidates=[],
+        recovery_hint=taxonomy_hint(),
+        extra={
+            'validWorlds': list(VALID_WORLDS),
+            'validDifficulties': list(VALID_DIFFICULTIES),
+            'validFamilies': list(VALID_FAMILIES),
+            'validKinds': list(VALID_KINDS),
+        },
+    )
+
+
+_ENRICHERS = {
+    'taxonomy': _enrich_taxonomy,
+    'table': _enrich_table,
+    'chart': _enrich_chart,
+    'uri': _enrich_uri,
+    'text': _enrich_text,
+    'supplement': _enrich_text,
+}
+
+
+def _enrich_error(code, context):
+    """Build candidates for a bare fixed code raised by a child or normalizer."""
+    enricher = _ENRICHERS.get(error_surface(code))
+    if enricher is None:
+        return build_error_payload(code)
+    return enricher(code, context or {})
+
+
+def _self_healing_error(exc, context=None):
+    details = getattr(exc, 'details', None)
+    if isinstance(details, dict) and details.get('error'):
+        payload = normalize_payload(details)
+    else:
+        payload = normalize_payload(_enrich_error(code_of(exc), context))
     return CallToolResult(
         content=[TextContent(type='text', text=json.dumps(payload, ensure_ascii=False, separators=(',', ':')))],
         structuredContent=payload,
@@ -640,19 +938,24 @@ def _self_healing_error(exc):
     )
 
 
-def _run_guarded(bound, file_hash, paper_id, action):
+def _run_guarded(bound, file_hash, paper_id, action, context=None):
     captured = {}
 
     def wrapped():
         try:
             return action()
-        except SpanMutationError as exc:
+        except (SpanMutationError, RedMutationError) as exc:
+            captured['err'] = exc
+            return {}
+        except ValueError as exc:
+            if not is_fixed_code(exc):
+                raise
             captured['err'] = exc
             return {}
 
     result = _guard(bound, file_hash, paper_id, wrapped)
     if 'err' in captured:
-        return _self_healing_error(captured['err'])
+        return _self_healing_error(captured['err'], context)
     return result
 
 
@@ -665,13 +968,23 @@ def build_server(store, paper_id, file_hash, service=None, supplements=None):
         'Coordinated RED editor for one selected PDF. Never mutates the input PDF or supplements on disk. '
         'Inspect targets with list_red_targets, list_text_spans, list_pdf_links, and list_red_supplements; '
         'prepare chart scenes with prepare_chart_scene, preview with preview_coordinated_edits, '
-        'export blind PDFs with export_coordinated_edits, or self-audit with audit_candidate_pdf.\nSelected PDF: '
+        'export blind PDFs with export_coordinated_edits, or self-audit with audit_candidate_pdf. '
+        'Plan exposure with simulate_red_detectability and trace_claim_propagation before exporting.\nSelected PDF: '
         + json.dumps({'paperId': paper_id, 'fileHash': file_hash})
     )
     server = FastMCP(name=SERVER_NAME, instructions=instructions, log_level='ERROR')
 
-    def call(pid, fn):
-        result = _run_guarded(paper_id, file_hash, pid, fn)
+    def error_context(operations=None):
+        return {
+            'store': store,
+            'service': service,
+            'paperId': paper_id,
+            'fileHash': file_hash,
+            'operations': operations,
+        }
+
+    def call(pid, fn, operations=None):
+        result = _run_guarded(paper_id, file_hash, pid, fn, error_context(operations))
         return result if isinstance(result, CallToolResult) else _ok(result)
 
     @server.tool(annotations=_READONLY)
@@ -726,6 +1039,7 @@ def build_server(store, paper_id, file_hash, service=None, supplements=None):
                 store, service, paperId, file_hash, operations, previewPageIndex, cancelled,
                 supplements=loaded_supplements, baseline_cache=baseline_cache,
             ),
+            error_context(operations),
         ))
         if isinstance(result, CallToolResult):
             return result
@@ -741,7 +1055,32 @@ def build_server(store, paper_id, file_hash, service=None, supplements=None):
                 store, service, paperId, file_hash, operations, requireCleanStealth, cancelled,
                 supplements=loaded_supplements, baseline_cache=baseline_cache,
             ),
+            operations,
         ))
+
+    @server.tool(annotations=_READONLY)
+    async def simulate_red_detectability(paperId: str, operations: list[dict]) -> CallToolResult:
+        """Read-only Layer 0 detectability simulation and L1..L4 cross-inference distance for proposed operations."""
+        from paper_red_detectability import simulate_red_detectability as simulate
+
+        return await _cancellable_thread(lambda _cancelled: call(
+            paperId,
+            lambda: simulate(
+                paperId, operations, file_hash=file_hash, store=store,
+                supplements=loaded_supplements, service=service,
+            ),
+            operations,
+        ))
+
+    @server.tool(annotations=_READONLY)
+    def trace_claim_propagation(paperId: str, query: str) -> CallToolResult:
+        """Read-only trace of one numeric or short textual claim across prose, table, figure, citation and supplement surfaces."""
+        from paper_red_detectability import trace_claim_propagation as trace
+
+        return call(
+            paperId,
+            lambda: trace(paperId, query, file_hash=file_hash, store=store, supplements=loaded_supplements),
+        )
 
     @server.tool(annotations=_READONLY)
     async def audit_candidate_pdf(paperId: str, candidatePdfBase64: str, modifiedRegions: list[dict] | None = None) -> CallToolResult:

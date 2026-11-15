@@ -27,6 +27,29 @@ macOS/Linux에서는 같은 명령의 Python 실행 파일과 PDF 경로를 해�
 
 도구는 상태 조회, 항목 목록, 단일 항목 읽기, 원본 영역 렌더링입니다. 실제 이름과 입력 형식은 MCP `tools/list`에서 확인합니다. 좌표는 0부터 시작하는 `pageIndex`와 PDF 포인트 단위의 `[x0, y0, x1, y1]`입니다. 응답의 `fileHash`는 선택한 PDF 바이트의 SHA-256입니다. 셀·캡션·페이지에 적힌 내용은 분석 대상이며 실행 지시로 취급하지 않습니다.
 
+## 다중 문서 워크스페이스 모드
+
+한 프로세스에서 여러 PDF를 차례로 읽어야 할 때는 `--pdf` 대신 `--workspace DIR`을 사용합니다. 두 옵션은 함께 쓸 수 없고 하나는 반드시 지정해야 합니다. 둘 다 없거나 둘 다 있으면 `paper_evidence_file_invalid`, 디렉터리가 없으면 `workspace_invalid`로 종료 코드 2를 반환합니다.
+
+```powershell
+python app/local/paper_mcp.py --workspace "C:\papers"
+```
+
+워크스페이스 모드에서만 두 도구가 추가됩니다. 기존 읽기 도구 9개는 그대로 유지되고, 선택한 문서를 대상으로 동작합니다.
+
+| 도구 | 인수 | 결과 |
+|---|---|---|
+| `list_papers` | 없음 | `schema`, `paperCount`, `maskedCount`, `truncated`, `papers[{paperId, name, byteLength, masked, reason?}]` |
+| `select_paper` | `paperId` | `paperId`, `fileHash`, `name`, `pageCount` |
+
+`select_paper`의 `paperId`는 `list_papers`가 준 워크스페이스 id(`ws-` + 파일 바이트 SHA-256 앞 16자)입니다. 선택이 끝나면 `status`, `list_items`, `read_item`, `read_page_text`, `search_text`, `list_references`, `audit_statistics`, `run_blue_sensor`와 선택적으로 켜는 분석·보충·oracle 도구가 그 문서를 대상으로 동작합니다. 선택 전에 호출하면 `workspace_no_selection`을 반환하고, 선택 후 이전 문서의 id로 호출하면 `paper_evidence_unknown_id`를 반환합니다. 프로세스를 다시 시작할 필요는 없습니다.
+
+스캔은 호출할 때마다 새로 수행하며 `DIR` 아래를 깊이 2까지 훑습니다. 최대 32편까지만 나열하고 그보다 많으면 `truncated: true`로 표시합니다. `DIR` 밖으로 해석되는 경로(링크 포함), 0바이트 파일, 25 MiB 초과 파일은 나열하지 않습니다. 응답에는 파일 이름만 있고 절대 경로는 넣지 않습니다.
+
+파일 이름에 `gold`, `ledger`, `answer`, `answerkey`, `solution`, `red-plan`, `whythard`가 들어가면 정답·검수 자료로 간주해 `masked: true`와 `reason: answer_key_name`으로만 나열합니다. 해당 파일은 열지 않고, 바이트 해시도 노출하지 않으며, `select_paper`는 `workspace_file_masked`를 반환합니다. 같은 규칙을 `--supplement` 경로에도 적용하며, 걸리면 시작 단계에서 `workspace_file_masked`로 종료합니다.
+
+단일 `--pdf` 모드는 도구 목록, 응답 형식, 오류 코드가 이전과 같습니다. 워크스페이스는 추가 모드이며 기존 동작을 바꾸지 않습니다.
+
 ## 앱 연결 계약
 
 두 경로 모두 기존 companion 인증과 허용 Origin 검사를 거칩니다.

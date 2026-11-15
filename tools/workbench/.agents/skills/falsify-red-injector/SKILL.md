@@ -19,6 +19,7 @@ python app/local/falsify_cli.py red targets --pdf SOURCE.pdf --include-baseline
 - Enumerates addressable paragraphs, tables (`itemId`, rows/columns/cells), scientific figures, and `/URI` hyperlinks (`list_pdf_uri_links` from `app/local/paper_uri_mutator.py`).
 - Runs offline Layer 0 `run_blue_sensor` (`Baseline Guard`) from `app/local/paper_blue_sensor.py`.
 - When operating via stdio MCP (`app/local/paper_red_mcp.py --pdf SOURCE.pdf`), call `scan_source_baseline`, `list_red_targets`, and `list_pdf_links`.
+- Print a client-ready stdio config with absolute paths and no file writes: `python app/local/falsify_cli.py mcp-config --pdf SOURCE.pdf [--workspace DIR] [--analysis] [--oracle] [--supplement SUPP ...]` (`falsify.mcp-config.v1`, `registers: [claude, codex, gemini]`).
 - Skip any sentence, table cell, reference index, or link already flagged in `baseline.signals`.
 
 ## 2. Design Coordinated W1–W5 (`D1–D7`, `L1–L4`) Defects

@@ -645,3 +645,14 @@ PDF는 원래 페이지 위에서 데이터 획만 지우고 직선 경로와 �
 - **헤드리스 상보적 진화 아레나 채점기 & 맹검 번들 검증기 (`w6-a1`)**: `tools/evaluation/arena_runner.py`에 PDF 메타데이터·주석·위젯·보충자료 맹검 누출 검증기(`verify_blind_bundle`, 원본 상속 토큰 면제)와 1:1 이분 매칭·`Baseline Guard` 면제(`preExistingExempted`)·`W1–W5`/`D1–D7`/`L1–L4` 층화 재현율·`stealthYield`·`Krippendorff's α`·선택적 예측 `AURC`·`feedbackDigest` 산출기(`evaluate_arena_match`)를 구현했다.
 
 통합 검증과 패키징 아카이브 검사를 마친 뒤 `0.2.0-alpha.67`로 상향해 GitHub `main`·릴리스 태그·Pages·로컬 `falsify-public` 설치본 및 `Pseudo-Lab/Falsify` 피처 브랜치(`feat/workbench-html-guide-20261012`)에 동기화한다(`sourceBuildVerified: false` 유지). 영수증과 WorkBite 대기 기록(`T-0152`)은 소스 밖 `coordination/hydrogen-wave-20261115`에 보관한다.
+
+## 2026-11-16 Agent-First 2차 4개 축 1순위 병렬 통합 (미배포)
+
+조율자(Antigravity, Gemini 4 Carbon High)는 5시간 쿼터 소진으로 alpha.67 배포 직후 제안만 남긴 채 턴을 종료했고, 사용자가 그 마지막 제안(4개 축 1순위) 전체를 OpenCode 좌석에서 이어서 진행하도록 지정했다. 5개 작업 트리(`w7-b1-blue-forensics`, `w7-r1-red-detectability`, `w7-c1-cli-validate`, `w7-c2-mcp-workspace`, `w7-a1-arena-round`)를 `fe55b4b`에서 분기해 독립 구현·검수 후 `main`(`2ef4688`)에 병합했다. **릴리스·배포·WorkBite 기록은 하지 않았다**(사용자 승인 대기).
+
+- **BLUE 보충 표 재계산 & 그림 포렌식 (`w7-b1`)**: `paper_supplement_audit.py`에 행·열 합계 및 인쇄 백분율 대 `N` 재계산(`supplement_table_sum_mismatch`, `supplement_table_percentage_mismatch`)을 추가하고, 신규 `paper_figure_forensics.py`(`falsify.figure-forensics.v1`)로 배치 이미지의 dHash/aHash 기반 복제·좌우반전·180°회전·중심 크롭 패널 쌍과 차트 인쇄값 대 본문 수치 불일치 후보를 bbox와 함께 산출한다. 센서 연결은 `include_figure_forensics=False` 기본값으로 꺼져 있다.
+- **RED 탐지 난이도 시뮬레이터 & 자가 교정 오류 통일 (`w7-r1`)**: 신규 `paper_red_detectability.py`가 원본 대비 편집본의 Layer 0 신호 차집합으로 사전 탐지 여부를 판정하고 L1–L4 교차 추론 거리와 노출 위험을 결정론적으로 분류하며(D3·S1은 Layer 0 감지기 부재를 명시해 L4), `trace_claim_propagation`이 본문·표·그림·인용·보충자료 전반의 값 전파 위치를 좌표와 함께 추적한다. 모든 변조 오퍼레이션 실패 응답을 `{error, actualValue, nearestCandidates, bbox, recoveryHint}`로 통일하고 경로·cwd 노출을 차단한다.
+- **BLUE 리포트 검증 게이트 & 다중 문서 MCP (`w7-c1`, `w7-c2`)**: `blue validate`가 인용구 실존(정규화/근접 후보 포함)을 검사하고 웹 앱의 Zero-Drop 복원 의미를 그대로 옮겨 누락 판정을 복원하며 아레나 12열 CSV로 정규화한다(환각 인용 종료 코드 3). `mcp-config`가 Claude/Codex/Gemini용 stdio 등록 구성을 출력한다. `paper_mcp.py --workspace DIR`은 32편 상한의 읽기전용 스캔, 정답·원장·해설 파일명 마스킹, `list_papers`/`select_paper` 선택 후 기존 읽기 도구 재사용을 제공하며 단일 `--pdf` 동작은 불변이다.
+- **무인 아레나 라운드 & 정답 비노출 규칙 증류 (`w7-a1`)**: `tools/evaluation/arena_round.py`가 맹검 누출 게이트를 먼저 통과시킨 뒤 임시 클린룸에 맹검 번들만 복사해 임의 stdio 에이전트 커맨드를 실행하고(`harness_adapter.run_stdio` 재사용), `evaluate_arena_match`로 다중 실행을 채점한다. `arena distill`은 미탐·순수 오탐·판정 플립·RED 조기 발각을 가족·표면·난이도 코드로 집계해 `falsify.harness-patch.v1` 규칙과 차기 RED 브리프로 증류하며, 인용·수치·식별자·파일명·`paperId`가 남으면 `distill_scrub_failed`로 실패한다. 두 명령은 `falsify_cli.py arena run-round|distill`로도 노출된다.
+
+통합 검증은 앱 Python 1,208개(스킵 7, 실패 1건은 Windows 로컬 소켓 플레이크로 격리 재실행 5/5 통과), 평가 54개, 포터블 BLUE v0.3.7 5개, Node 전 서브스위트 실패 0, 생산 코드 CCN 243개 파일 12,052개 함수 `max 15`(`>15: 0`)를 확인했다. 영수증은 `coordination/agent-first2-wave7-20261116`에 보관하며, 릴리스 승인 전까지 `sourceBuildVerified: false`와 설치본 `0.2.0-alpha.67`을 유지한다.

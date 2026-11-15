@@ -1,6 +1,6 @@
 ---
 name: falsify-blue-auditor
-description: Autonomous BLUE academic paper verification protocol using app/local/paper_mcp.py, app/local/falsify_cli.py blue scan --digest-only, anti-false-positive checks, strict quote-binding, and selective abstention (falsify.blue-report.v1).
+description: Autonomous BLUE academic paper verification protocol using app/local/paper_mcp.py, app/local/falsify_cli.py blue scan --digest-only, the blue validate report gate (verbatim quote check + Zero-Drop restoration + 12-column CSV), anti-false-positive checks, strict quote-binding, and selective abstention (falsify.blue-report.v1).
 license: AGPL-3.0-only
 ---
 
@@ -70,3 +70,19 @@ Emit `falsify.blue-report.v1` JSON:
   ]
 }
 ```
+
+## 5. Report Gate: `blue validate` (Hallucination Block + Zero-Drop)
+
+Before handing a `falsify.blue-report.v1` file to the arena, gate it against the blind PDF. Every quote is re-located in the PDF text and every stage-1 candidate must survive into stage 2:
+
+```bash
+python app/local/falsify_cli.py blue validate --pdf BLIND.pdf --report BLUE_REPORT.json \
+  [--ledger CANDIDATES.json] [--csv BLUE_12COL.csv] [--out VALIDATION.json]
+```
+
+- Implemented by `app/local/blue_report_validate.py` (`validate_blue_report`); the CLI only wraps it in the JSON envelope. The command is read-only: it never modifies `BLIND.pdf` or `BLUE_REPORT.json`, and `--out`/`--csv` refuse any path that resolves to `--pdf`, `--report`, or `--ledger` (`cannot_overwrite_input`).
+- **Quote gate**: each `quote`/`excerpt`/`resolutionQuote` is searched in `read_page_text`-equivalent line extraction of every page (whitespace collapsed, soft-hyphen line joins repaired). Result per quote: `exact` (case-sensitive verbatim), `normalized` (found only after an extra case-insensitive pass) or `missing`. A missing quote returns `nearestCandidates` (max 5 `_line_similarity`-ranked `{pageIndex, bbox, text}` lines) plus a `recoveryHint`. When a finding declares `pageIndex`/`page`, its quote is searched only inside that page.
+- **Zero-Drop restoration**: `--ledger` (or `report.candidateLedger`) entries are matched to findings by candidate id, then by a >= 12-character normalized quote overlap, then by same page + `locationLabel` containment. Unmatched candidates are restored as `{verdictLabel: "확인필요", zeroDropRecovered: true, severity: "불일치", confidence: "확인필요 (Zero-Drop 복원)"}`; a `맞음` verdict without `resolutionQuote` or a non-empty `rationale` is downgraded the same way. The semantics are a faithful port of `reconcileCandidateLedger`/`partitionStage2` in `app/dist/blue-defect-sensor-core.js` (never imported) and mirror `app/tests/blue-defect-sensor.spec.cjs`.
+- **`zeroDrop.summary`** always carries exactly `stage1Count`, `resolvedOkCount`, `reportedDefectCount`, `recoveredCount`.
+- **`--csv`** writes the score.py-compatible 12-column BLUE rows (`paper_id, team, judge_type, model, iteration, location, defect_type, label, evidence, time_sec, tokens, is_holdout`) that `tools/evaluation/agreement_selective.py` reads. `label` maps to `아님|맞음|확인필요`, `defect_type` is whitelisted to `D1..D7`, `D4-1`, `S1` (`D3` fallback is recorded in `warnings`), text cells starting with `= + - @` get a leading `'`, encoding is UTF-8 without BOM, quoting is RFC 4180.
+- **Exit codes**: `0` all quotes located after restoration; `3` any `missing` quote remains, or the report/ledger carries forbidden RED keys (`before`, `after`, `patch`, `gold`, `why_hard`, `candidateRationales`, `plan`); `2` malformed input (bad JSON, unknown `verdictLabel`, non-object finding, `> 5000` findings, unreadable PDF); `124` timeout. Every failure keeps the `{"schema":"falsify.agent-cli.v1","ok":false,"error","message","recoveryHint"}` envelope; success returns `ok` plus `paperId`, `fileHash`, `quoteCheck`, `zeroDrop`, `csv`, `warnings`.

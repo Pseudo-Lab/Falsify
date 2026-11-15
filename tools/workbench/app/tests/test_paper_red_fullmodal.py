@@ -407,7 +407,12 @@ class FullModalRedMcpTests(unittest.TestCase):
 
     def test_ccn_gate_on_new_and_modified_python_modules(self):
         parser_script = ROOT / 'tools' / 'quality' / 'python-functions.py'
-        for rel in ('app/local/paper_text_span_mutator.py', 'app/local/paper_red_mcp.py'):
+        for rel in (
+            'app/local/paper_text_span_mutator.py',
+            'app/local/paper_red_mcp.py',
+            'app/local/paper_red_errors.py',
+            'app/local/paper_red_detectability.py',
+        ):
             src = (ROOT / rel).read_bytes()
             proc = subprocess.run(
                 [sys.executable, str(parser_script)],

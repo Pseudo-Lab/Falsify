@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.0-alpha.68
+
+- Add BLUE supplement-table arithmetic audit (`supplement_table_sum_mismatch`, `supplement_table_percentage_mismatch`) and a figure/panel forensic sensor (`app/local/paper_figure_forensics.py`, `falsify.figure-forensics.v1`) that detects dHash/aHash duplicate, horizontally mirrored, 180-degree rotated and centred-crop panel pairs plus chart printed-value vs prose mismatch candidates with bboxes; `paper_blue_sensor.run_blue_sensor` exposes it behind the opt-in `include_figure_forensics` flag.
+- Add RED detectability simulation and claim propagation (`app/local/paper_red_detectability.py`): `simulate_red_detectability` diffs Layer 0 signals between the source and the in-memory edited copy and classifies L1-L4 cross-inference distance and exposure risk (D3/S1 remain L4 because Layer 0 has no detector for them), and `trace_claim_propagation` locates one claim across prose, tables, figures, citations and supplements. Every mutation failure now returns `{error, actualValue, nearestCandidates, bbox, recoveryHint}` without path leakage (`app/local/paper_red_errors.py`).
+- Add `falsify blue validate` (`app/local/blue_report_validate.py`): verbatim quote gate with normalized and nearest-candidate fallback, Zero-Drop restoration ported from the web app, 12-column arena CSV normalization, exit code `3` while a missing quote survives; add `falsify mcp-config` stdio client configuration output for Claude, Codex and Gemini.
+- Add read-only multi-document MCP mode (`app/local/paper_mcp_workspace.py`, `python app/local/paper_mcp.py --workspace DIR`): bounded 32-paper scan, answer-key filename masking, `list_papers`/`select_paper` selection, path-escape refusal and no absolute-path payloads; the single `--pdf` mode is unchanged.
+- Add an unattended arena round runner and answer-key-free distiller (`tools/evaluation/arena_round.py`, `falsify.arena-round.v1` / `falsify.harness-patch.v1`): leak-gated cleanroom containing only the blind bundle, arbitrary stdio agent commands through `harness_adapter`, multi-run scoring via `evaluate_arena_match`, and failure-to-rule distillation with a fail-closed scrubber; exposed as `falsify arena run-round` and `falsify arena distill`.
+
 ## 0.2.0-alpha.67
 
 - Upgrade Read-Only BLUE MCP (`app/local/paper_mcp.py`, `app/local/paper_mcp_bundle.py`) with offline `run_blue_sensor` (`digestOnly` token-budget mode), repeatable `--supplement PATH` bundle tools (`list_supplements`, paginated `read_supplement`, `audit_supplements`), and explicit opt-in `--oracle` `P2` tools (`verify_references`, `verify_registries`).

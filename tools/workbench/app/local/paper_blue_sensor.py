@@ -43,6 +43,7 @@ from paper_external_grounding import (
     plain,
     verify_bibliography,
 )
+from paper_figure_forensics import audit_figure_forensics
 from paper_registry_identifiers import (
     audit_identifiers_offline,
     verify_identifiers_online,
@@ -877,6 +878,24 @@ def _dedupe_and_number(signals, max_signals):
     return numbered, truncated
 
 
+def _figure_forensics(paper_id, actual_hash, max_signals, store):
+    result = audit_figure_forensics(paper_id, file_hash=actual_hash, max_signals=max_signals, store=store)
+    signals = [
+        _signal(
+            sig["family"], sig["kind"], sig.get("subtype") or sig["kind"], sig.get("pageIndex", 0),
+            sig.get("excerpt", ""), sig.get("detail", ""),
+            sig.get("reported"), sig.get("computed"), item_id=sig.get("itemId"),
+        )
+        for sig in result.get("signals", [])
+    ]
+    summary = {
+        "enabled": True,
+        "signalCount": result.get("signalCount", 0),
+        "figureCount": result.get("figureCount", 0),
+    }
+    return signals, summary
+
+
 def run_blue_sensor(
     paper_id,
     file_hash=None,
@@ -887,12 +906,15 @@ def run_blue_sensor(
     bib_transport=None,
     trial_transport=None,
     identifier_transport=None,
+    include_figure_forensics=False,
 ):
     """Run BLUE Layer 0 offline PDF forensic sensor (and opt-in P2 oracle pack)."""
     if isinstance(max_signals, bool) or type(max_signals) is not int or not 1 <= max_signals <= 100:
         raise ValueError("limit")
     if type(include_external_oracle) is not bool:
         raise ValueError("include_external_oracle")
+    if type(include_figure_forensics) is not bool:
+        raise ValueError("include_figure_forensics")
     store = _default_store() if store is None else store
     paper_id, actual_hash, summary, raw = _require_bound_pdf(paper_id, store)
     require_summary(summary, paper_id=paper_id, file_hash=file_hash)
@@ -920,9 +942,13 @@ def run_blue_sensor(
         )
         if include_external_oracle else ([], None)
     )
+    fig_sigs, fig_summary = (
+        _figure_forensics(paper_id, actual_hash, max_signals, store)
+        if include_figure_forensics else ([], None)
+    )
     all_signals = (
         link_sigs + shared_sigs + dup_sigs + cite_sigs + mal_sigs
-        + id_offline_sigs + acro_sigs + oracle_sigs + d1_sigs
+        + id_offline_sigs + acro_sigs + oracle_sigs + d1_sigs + fig_sigs
     )
     capped, truncated = _dedupe_and_number(all_signals, max_signals)
     result = {
@@ -944,5 +970,7 @@ def run_blue_sensor(
         },
         "oraclePack": oracle_pack,
     }
+    if fig_summary is not None:
+        result["figureForensics"] = fig_summary
     _assert_no_red_keys(result)
     return result
