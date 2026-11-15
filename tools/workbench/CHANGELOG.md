@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.0-alpha.67
+
+- Upgrade Read-Only BLUE MCP (`app/local/paper_mcp.py`, `app/local/paper_mcp_bundle.py`) with offline `run_blue_sensor` (`digestOnly` token-budget mode), repeatable `--supplement PATH` bundle tools (`list_supplements`, paginated `read_supplement`, `audit_supplements`), and explicit opt-in `--oracle` `P2` tools (`verify_references`, `verify_registries`).
+- Add autonomous `BLUE Evidence v0.3.7` runner (`app/examples/evidence_blue_v037`) prepending a zero-model-cost deterministic Layer 0 Triage Digest (`SPRITE`/`2×2`/`KM` stats, `supp-*` cross-file audit, offline registry checks) and extended `P2` retraction & `OSF`/`PROSPERO`/`GEO`/`PDB` grounding (`<= 18,000` chars) without modifying frozen `v031`–`v036` bundles.
+- Expand Coordinated RED MCP (`app/local/paper_text_span_mutator.py`, `app/local/paper_red_mcp.py`) to full-modal stealth authoring with native PDF prose `text-span` inspection/mutation (`list_text_spans`, glyph-only redaction, baseline-aligned font fitting, self-healing `SpanMutationError` `nearestCandidates` & `recoveryHint`), `supplement-edit` (`--supplement`, `list_red_supplements`), `baselineOverlaps` (`Baseline Guard`), and sealed `goldLedger` (`falsify.red-gold-ledger.v1`).
+- Add unified headless Agent JSON CLI (`app/local/falsify_cli.py`: `blue scan`, `red targets`, `red apply`, `blind verify`, `arena score` with `--digest-only` `< 12 KB` budget and deterministic exit codes `0`/`2`/`3`/`124`) and repo-native Agent Skills (`.agents/skills/falsify-blue-auditor/SKILL.md`, `.agents/skills/falsify-red-injector/SKILL.md`).
+- Add headless Co-Evolution Arena evaluator and blind-bundle verifier (`tools/evaluation/arena_runner.py`: `verify_blind_bundle` across DocInfo/XMP/annotations/AcroForm/supplements with source-inherited exemption, plus `evaluate_arena_match` 1-to-1 bipartite matching, `Baseline Guard` `preExistingExempted`, `W1–W5`/`D1–D7`/`L1–L4` stratified recall, `stealthYield`, `Krippendorff's α`, `AURC`, and `feedbackDigest`).
+
 ## 0.2.0-alpha.66
 
 - Convert `app/tests/test_paper_supplement_audit.py` from `pytest` to standard-library `unittest.TestCase` so GitHub Actions Ubuntu `python -m unittest discover -s app/tests -p 'test_*.py'` runs cleanly without external test runners and deploys GitHub Pages.

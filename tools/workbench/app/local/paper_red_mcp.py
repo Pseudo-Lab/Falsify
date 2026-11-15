@@ -12,22 +12,36 @@ import copy
 import hashlib
 import json
 import logging
+import re
 import sys
 
 import pymupdf
 from mcp.server.fastmcp import FastMCP
-from mcp.types import CallToolResult, ToolAnnotations
+from mcp.types import CallToolResult, TextContent, ToolAnnotations
 
 from paper_blue_sensor import run_blue_sensor
 from paper_chart_edit_service import ChartEditService, SCHEMA as CHART_SCHEMA, default_service
 from paper_evidence_text import _extract_raw_blocks, _order_blocks
 from paper_mcp import _cancellable_thread, _guard, _ok, open_selected
 from paper_stealth_audit import audit_pdf_stealth
+from paper_text_span_mutator import (
+    SpanMutationError,
+    assert_blind_supplements,
+    list_pdf_text_spans,
+    load_red_supplements,
+    mutate_pdf_text_spans,
+    mutate_supplements,
+    normalize_supplements,
+)
 from paper_uri_mutator import list_pdf_uri_links, mutate_pdf_uri_links
 from paper_visual_edit import SCHEMA as VISUAL_SCHEMA, export_visual
 
 SERVER_NAME = 'Falsify Coordinated RED Editor'
 MAX_CANDIDATE_PDF_BYTES = 50 * 1024 * 1024
+GOLD_LEDGER_SCHEMA = 'falsify.red-gold-ledger.v1'
+_VALID_WORLDS = frozenset({'W1', 'W2', 'W3', 'W4', 'W5'})
+_VALID_DIFFICULTIES = frozenset({'L1', 'L2', 'L3', 'L4'})
+_VALID_FAMILY_RE = re.compile(r'^(?:D[1-7](?:-\d+)?|S\d+)$')
 _READONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=False)
 _EDITING = ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWorldHint=False)
 
@@ -182,26 +196,75 @@ def _normalize_uri_op(op, op_id):
     return out
 
 
+def _normalize_text_span_op(op, op_id):
+    out = {
+        'id': op_id,
+        'kind': 'text-span',
+        'pageIndex': op.get('pageIndex'),
+        'before': op.get('before'),
+        'after': op.get('after'),
+        'occurrence': op.get('occurrence', 0),
+    }
+    for key in ('bbox', 'spanId'):
+        if op.get(key) is not None:
+            out[key] = op[key]
+    return out
+
+
+def _normalize_supplement_op(op, op_id):
+    out = {
+        'id': op_id,
+        'kind': 'supplement-edit',
+        'before': op.get('before'),
+        'after': op.get('after'),
+        'occurrence': op.get('occurrence', 0),
+    }
+    for key in ('supplementId', 'name'):
+        if op.get(key) is not None:
+            out[key] = op[key]
+    return out
+
+
+def _validate_op_taxonomy(op):
+    world = op.get('world')
+    if world is not None and world not in _VALID_WORLDS:
+        raise ValueError('red_taxonomy_invalid')
+    difficulty = op.get('difficulty')
+    if difficulty is not None and difficulty not in _VALID_DIFFICULTIES:
+        raise ValueError('red_taxonomy_invalid')
+    family = op.get('family')
+    if family is not None and (not isinstance(family, str) or not _VALID_FAMILY_RE.fullmatch(family)):
+        raise ValueError('red_taxonomy_invalid')
+    rationale = op.get('rationale')
+    if rationale is not None and not isinstance(rationale, str):
+        raise ValueError('red_taxonomy_invalid')
+
+
+def _normalize_single_op(op, idx, store, paper_id, file_hash, service):
+    if not isinstance(op, dict):
+        raise ValueError('visual_operation_invalid')
+    _validate_op_taxonomy(op)
+    op_id = op.get('id') if isinstance(op.get('id'), str) and op.get('id') else f'red-op-{idx}'
+    kind = op.get('kind')
+    if kind == 'table-cell':
+        return _normalize_table_op(op, op_id)
+    if kind == 'chart-shape':
+        return _normalize_shape_op(op, op_id, paper_id, file_hash, service)
+    if kind in ('chart-redraw', 'region-replace', 'region'):
+        return _normalize_region_op(op, op_id, kind, store, paper_id)
+    if kind == 'uri-link':
+        return _normalize_uri_op(op, op_id)
+    if kind == 'text-span':
+        return _normalize_text_span_op(op, op_id)
+    if kind == 'supplement-edit':
+        return _normalize_supplement_op(op, op_id)
+    raise ValueError('visual_operation_invalid')
+
+
 def _normalize_operations(operations, store, paper_id, file_hash, service):
     if not isinstance(operations, list):
         raise ValueError('visual_operation_invalid')
-    normalized = []
-    for idx, op in enumerate(operations):
-        if not isinstance(op, dict):
-            raise ValueError('visual_operation_invalid')
-        op_id = op.get('id') if isinstance(op.get('id'), str) and op.get('id') else f'red-op-{idx}'
-        kind = op.get('kind')
-        if kind == 'table-cell':
-            normalized.append(_normalize_table_op(op, op_id))
-        elif kind == 'chart-shape':
-            normalized.append(_normalize_shape_op(op, op_id, paper_id, file_hash, service))
-        elif kind in ('chart-redraw', 'region-replace', 'region'):
-            normalized.append(_normalize_region_op(op, op_id, kind, store, paper_id))
-        elif kind == 'uri-link':
-            normalized.append(_normalize_uri_op(op, op_id))
-        else:
-            raise ValueError('visual_operation_invalid')
-    return normalized
+    return [_normalize_single_op(op, idx, store, paper_id, file_hash, service) for idx, op in enumerate(operations)]
 
 
 def _empty_vis_result(source_bytes, file_hash):
@@ -215,6 +278,22 @@ def _empty_vis_result(source_bytes, file_hash):
     }
 
 
+def _append_check(vis_result, check_name):
+    checks = vis_result.setdefault('verification', {}).setdefault('checks', [])
+    if check_name not in checks:
+        checks.append(check_name)
+
+
+def _apply_text_span_ops(edited_bytes, vis_result, text_ops):
+    text_res = mutate_pdf_text_spans(edited_bytes, text_ops)
+    out_bytes = text_res['pdfBytes']
+    vis_result['outputSha256'] = text_res['outputSha256']
+    vis_result['file'] = base64.b64encode(out_bytes).decode('ascii')
+    vis_result['changes'].extend(text_res['changes'])
+    _append_check(vis_result, 'text-span')
+    return out_bytes, vis_result
+
+
 def _apply_uri_ops(edited_bytes, vis_result, uri_ops):
     uri_res = mutate_pdf_uri_links(edited_bytes, uri_ops, require_clean_stealth=True)
     out_bytes = uri_res['pdfBytes']
@@ -222,19 +301,18 @@ def _apply_uri_ops(edited_bytes, vis_result, uri_ops):
     vis_result['file'] = base64.b64encode(out_bytes).decode('ascii')
     for op, ch in zip(uri_ops, uri_res['changes']):
         vis_result['changes'].append({'id': op['id'], 'kind': 'uri-link', **ch})
-    checks = vis_result.setdefault('verification', {}).setdefault('checks', [])
-    if 'uri-link' not in checks:
-        checks.append('uri-link')
+    _append_check(vis_result, 'uri-link')
     return out_bytes, vis_result
 
 
-def _apply_operations(store, service, paper_id, file_hash, operations, cancelled=None):
+def _apply_operations(store, service, paper_id, file_hash, operations, supplements=None, cancelled=None):
     source_bytes = store.source_bytes(paper_id, file_hash)
     normalized = _normalize_operations(operations, store, paper_id, file_hash, service)
-    if not normalized:
-        return source_bytes, source_bytes, _empty_vis_result(source_bytes, file_hash)
-    visual_ops = [op for op in normalized if op['kind'] != 'uri-link']
+    visual_kinds = {'table-cell', 'chart-shape', 'region'}
+    visual_ops = [op for op in normalized if op['kind'] in visual_kinds]
+    text_ops = [op for op in normalized if op['kind'] == 'text-span']
     uri_ops = [op for op in normalized if op['kind'] == 'uri-link']
+    supp_ops = [op for op in normalized if op['kind'] == 'supplement-edit']
     if visual_ops:
         vis_req = {
             'schema': VISUAL_SCHEMA,
@@ -248,15 +326,24 @@ def _apply_operations(store, service, paper_id, file_hash, operations, cancelled
     else:
         edited_bytes = source_bytes
         vis_result = _empty_vis_result(source_bytes, file_hash)
+    if text_ops:
+        edited_bytes, vis_result = _apply_text_span_ops(edited_bytes, vis_result, text_ops)
     if uri_ops:
         edited_bytes, vis_result = _apply_uri_ops(edited_bytes, vis_result, uri_ops)
-    return source_bytes, edited_bytes, vis_result
+    blind_supplements = []
+    if supplements or supp_ops:
+        supp_res = mutate_supplements(supplements or [], supp_ops)
+        blind_supplements = supp_res['blindSupplements']
+        vis_result['changes'].extend(supp_res['changes'])
+        if supp_ops:
+            _append_check(vis_result, 'supplement-edit')
+    return source_bytes, edited_bytes, vis_result, blind_supplements
 
 
 def _modified_regions(vis_result):
     regions = []
     for change in vis_result.get('changes', []):
-        if change.get('kind') == 'uri-link':
+        if change.get('kind') in ('uri-link', 'supplement-edit'):
             continue
         if type(change.get('pageIndex')) is int and isinstance(change.get('bbox'), list) and len(change['bbox']) == 4:
             regions.append({'pageIndex': change['pageIndex'], 'bbox': change['bbox']})
@@ -285,11 +372,201 @@ def _decode_candidate_pdf(candidate_b64):
     return raw
 
 
-def _preview_edits(store, service, paper_id, file_hash, operations, preview_page_index, cancelled):
-    source_bytes, edited_bytes, vis_result = _apply_operations(
-        store, service, paper_id, file_hash, operations, cancelled=cancelled)
+def _text_overlaps(a, b):
+    na = ' '.join(str(a or '').split()).lower()
+    nb = ' '.join(str(b or '').split()).lower()
+    if len(na) < 4 or len(nb) < 4:
+        return False
+    if na in nb or nb in na:
+        return True
+    if min(len(na), len(nb)) < 12:
+        return False
+    short, long_s = (na, nb) if len(na) <= len(nb) else (nb, na)
+    return any(short[i:i + 12] in long_s for i in range(len(short) - 11))
+
+
+def _cue_overlaps(text, sig):
+    rep = sig.get('reported')
+    if not isinstance(rep, dict):
+        return False
+    uri = rep.get('uri')
+    if isinstance(uri, str) and uri and uri == text:
+        return True
+    for key in ('citedIndex', 'refIndex', 'index'):
+        idx = rep.get(key)
+        if type(idx) is int and f'[{idx}]' in text:
+            return True
+    return False
+
+
+def _signal_cues(sig):
+    rep = sig.get('reported')
+    if not isinstance(rep, dict):
+        return []
+    cues = []
+    for key in ('citedIndex', 'refIndex', 'index'):
+        if type(rep.get(key)) is int:
+            cues.append(f'[{rep[key]}]')
+    for key in ('doi', 'uri', 'p', 'statValue', 'pct', 'estimate'):
+        val = rep.get(key)
+        if val is not None and not isinstance(val, (dict, list, bool)):
+            cues.append(str(val).lower())
+    return [c for c in cues if c]
+
+
+def _narrow_excerpt(sig):
+    raw = str(sig.get('excerpt') or '')
+    cues = _signal_cues(sig)
+    if not raw or not cues:
+        return raw
+    parts = [p for p in re.split(r'(?<=[.!?\n])\s+', raw) if p]
+    if len(parts) <= 1:
+        return raw
+    hits = [p for p in parts if any(c in p.lower() for c in cues)]
+    return ' '.join(hits) if hits else raw
+
+
+def _signal_matches_op(sig, op_page, op_item_id, op_texts):
+    sig_page = sig.get('pageIndex')
+    if op_page is not None and type(sig_page) is int and op_page != sig_page:
+        return False
+    if op_item_id and sig.get('itemId') == op_item_id:
+        return True
+    excerpt = _narrow_excerpt(sig)
+    haystack = f"{excerpt} {sig.get('detail') or ''}" if not excerpt else excerpt
+    return any(_text_overlaps(txt, haystack) or _cue_overlaps(txt, sig) for txt in op_texts)
+
+
+def _op_match_fields(op, idx, changes_by_id):
+    op_id = op.get('id') if isinstance(op.get('id'), str) and op.get('id') else f'red-op-{idx}'
+    ch = changes_by_id.get(op_id, {})
+    op_page = op.get('pageIndex') if type(op.get('pageIndex')) is int else ch.get('pageIndex')
+    op_item_id = op.get('itemId') or ch.get('itemId')
+    op_texts = [v for v in (op.get('before'), op.get('beforeUri')) if isinstance(v, str) and v.strip()]
+    return op_id, op_page, op_item_id, op_texts
+
+
+def _detect_baseline_overlaps(operations, changes, baseline_report):
+    signals = (baseline_report or {}).get('signals') or []
+    if not signals or not operations:
+        return []
+    changes_by_id = {ch['id']: ch for ch in changes if isinstance(ch, dict) and ch.get('id')}
+    overlaps = []
+    for idx, op in enumerate(operations):
+        if op.get('kind') == 'supplement-edit':
+            continue
+        op_id, op_page, op_item_id, op_texts = _op_match_fields(op, idx, changes_by_id)
+        matched = [s for s in signals if _signal_matches_op(s, op_page, op_item_id, op_texts)]
+        if matched:
+            overlaps.append({
+                'operationId': op_id,
+                'kind': op.get('kind'),
+                'pageIndex': op_page,
+                'signalIds': [s.get('id') for s in matched if s.get('id')],
+                'signals': [
+                    {
+                        'id': s.get('id'),
+                        'family': s.get('family'),
+                        'kind': s.get('kind'),
+                        'pageIndex': s.get('pageIndex'),
+                        'excerpt': s.get('excerpt'),
+                        'detail': s.get('detail'),
+                    }
+                    for s in matched
+                ],
+                'warning': 'Operation overlaps pre-existing Layer 0 defect in source PDF.',
+            })
+    return overlaps
+
+
+def _defect_before_after(op, ch):
+    if 'before' in op or 'after' in op:
+        return op.get('before'), op.get('after')
+    if 'beforeUri' in op or 'afterUri' in op:
+        return op.get('beforeUri') or ch.get('beforeUri'), op.get('afterUri') or ch.get('afterUri')
+    return ch.get('before'), ch.get('after')
+
+
+def _build_gold_ledger(paper_id, file_hash, output_sha256, stealth, operations, changes):
+    changes_by_id = {ch['id']: ch for ch in changes if isinstance(ch, dict) and ch.get('id')}
+    defects = []
+    for idx, op in enumerate(operations):
+        op_id = op.get('id') if isinstance(op.get('id'), str) and op.get('id') else f'red-op-{idx}'
+        ch = changes_by_id.get(op_id, {})
+        before_val, after_val = _defect_before_after(op, ch)
+        kind = op.get('kind')
+        family = op.get('family') or ch.get('defectFamily') or ('D2' if kind == 'uri-link' else None)
+        defects.append({
+            'defectId': op.get('defectId') or op_id,
+            'operationId': op_id,
+            'kind': kind,
+            'pageIndex': op.get('pageIndex') if type(op.get('pageIndex')) is int else ch.get('pageIndex'),
+            'bbox': ch.get('bbox') or op.get('bbox'),
+            'itemId': op.get('itemId') or ch.get('itemId'),
+            'supplementName': ch.get('supplementName') or op.get('name'),
+            'before': before_val,
+            'after': after_val,
+            'world': op.get('world'),
+            'family': family,
+            'difficulty': op.get('difficulty'),
+            'rationale': op.get('rationale'),
+            'stealthStatus': stealth['status'],
+        })
+    return {
+        'schema': GOLD_LEDGER_SCHEMA,
+        'paperId': paper_id,
+        'sourceSha256': file_hash,
+        'blindPdfSha256': output_sha256,
+        'stealthPass': stealth['status'] != 'detectable_artifact',
+        'defects': defects,
+    }
+
+
+def _list_text_spans_for_paper(store, paper_id, file_hash, page_index=None, query=None, limit=200):
+    raw = store.source_bytes(paper_id, file_hash)
+    res = list_pdf_text_spans(raw, page_index=page_index, query=query, limit=limit)
+    return {**res, 'paperId': paper_id, 'fileHash': file_hash}
+
+
+def _list_supplements_for_paper(paper_id, file_hash, supplements):
+    return {
+        'paperId': paper_id,
+        'fileHash': file_hash,
+        'supplementCount': len(supplements),
+        'supplements': [
+            {
+                'supplementId': s['supplementId'],
+                'name': s['name'],
+                'kind': s['kind'],
+                'sha256': s['sha256'],
+                'sizeBytes': s['sizeBytes'],
+                'lineCount': s['lineCount'],
+                'text': s['text'],
+            }
+            for s in supplements
+        ],
+    }
+
+
+def _get_baseline(store, paper_id, file_hash, baseline_cache):
+    if baseline_cache.get('report') is None:
+        baseline_cache['report'] = run_blue_sensor(
+            paper_id, file_hash=file_hash, include_external_oracle=False, store=store,
+        )
+    return baseline_cache['report']
+
+
+def _preview_edits(
+    store, service, paper_id, file_hash, operations, preview_page_index, cancelled,
+    supplements=None, baseline_cache=None,
+):
+    source_bytes, edited_bytes, vis_result, blind_supplements = _apply_operations(
+        store, service, paper_id, file_hash, operations, supplements=supplements, cancelled=cancelled,
+    )
     png_b64 = _render_preview_png(edited_bytes, preview_page_index)
     stealth = audit_pdf_stealth(source_bytes, edited_bytes, modified_regions=_modified_regions(vis_result))
+    baseline = _get_baseline(store, paper_id, file_hash, baseline_cache if baseline_cache is not None else {})
+    overlaps = _detect_baseline_overlaps(operations, vis_result.get('changes', []), baseline)
     return {
         'paperId': paper_id,
         'fileHash': file_hash,
@@ -297,23 +574,36 @@ def _preview_edits(store, service, paper_id, file_hash, operations, preview_page
         'previewPageIndex': preview_page_index,
         'appliedCount': len(vis_result.get('changes', [])),
         'stealthAudit': stealth,
+        'baselineOverlaps': overlaps,
+        'blindSupplements': blind_supplements,
         'verification': vis_result.get('verification'),
         'image': png_b64,
     }
 
 
-def _export_edits(store, service, paper_id, file_hash, operations, require_clean_stealth, cancelled):
-    source_bytes, edited_bytes, vis_result = _apply_operations(
-        store, service, paper_id, file_hash, operations, cancelled=cancelled)
+def _export_edits(
+    store, service, paper_id, file_hash, operations, require_clean_stealth, cancelled,
+    supplements=None, baseline_cache=None,
+):
+    source_bytes, edited_bytes, vis_result, blind_supplements = _apply_operations(
+        store, service, paper_id, file_hash, operations, supplements=supplements, cancelled=cancelled,
+    )
     stealth = audit_pdf_stealth(source_bytes, edited_bytes, modified_regions=_modified_regions(vis_result))
     if require_clean_stealth and stealth['status'] == 'detectable_artifact':
         raise ValueError('stealth_audit_failed')
+    assert_blind_supplements(blind_supplements)
+    changes = vis_result.get('changes', [])
+    baseline = _get_baseline(store, paper_id, file_hash, baseline_cache if baseline_cache is not None else {})
+    overlaps = _detect_baseline_overlaps(operations, changes, baseline)
+    gold_ledger = _build_gold_ledger(
+        paper_id, file_hash, vis_result['outputSha256'], stealth, operations, changes,
+    )
     record = {
         'schema': 'falsify.coordinated-red-record.v1',
         'paperId': paper_id,
         'sourceSha256': file_hash,
         'outputSha256': vis_result['outputSha256'],
-        'changes': vis_result.get('changes', []),
+        'changes': changes,
         'verification': vis_result.get('verification'),
         'operations': copy.deepcopy(operations),
     }
@@ -322,7 +612,10 @@ def _export_edits(store, service, paper_id, file_hash, operations, require_clean
         'fileHash': file_hash,
         'outputSha256': vis_result['outputSha256'],
         'pdfBase64': vis_result['file'],
+        'blindSupplements': blind_supplements,
         'stealthAudit': stealth,
+        'baselineOverlaps': overlaps,
+        'goldLedger': gold_ledger,
         'record': record,
     }
 
@@ -333,20 +626,52 @@ def _audit_candidate(store, paper_id, file_hash, candidate_b64, modified_regions
     return audit_pdf_stealth(source_bytes, candidate_bytes, modified_regions=modified_regions)
 
 
-def build_server(store, paper_id, file_hash, service=None):
-    """Build FastMCP coordinated RED server bound to one immutable source PDF."""
+def _sanitize_error_details(details):
+    blocked = {'path', 'filepath', 'file_path', 'cwd', 'dir'}
+    return {k: v for k, v in details.items() if k.lower() not in blocked}
+
+
+def _self_healing_error(exc):
+    payload = _sanitize_error_details(exc.details)
+    return CallToolResult(
+        content=[TextContent(type='text', text=json.dumps(payload, ensure_ascii=False, separators=(',', ':')))],
+        structuredContent=payload,
+        isError=True,
+    )
+
+
+def _run_guarded(bound, file_hash, paper_id, action):
+    captured = {}
+
+    def wrapped():
+        try:
+            return action()
+        except SpanMutationError as exc:
+            captured['err'] = exc
+            return {}
+
+    result = _guard(bound, file_hash, paper_id, wrapped)
+    if 'err' in captured:
+        return _self_healing_error(captured['err'])
+    return result
+
+
+def build_server(store, paper_id, file_hash, service=None, supplements=None):
+    """Build FastMCP coordinated RED server bound to one immutable source PDF and optional supplements."""
     service = service or ChartEditService(store)
+    loaded_supplements = normalize_supplements(supplements)
+    baseline_cache = {'report': None}
     instructions = (
-        'Coordinated RED editor for one selected PDF. Never mutates the input PDF on disk. '
-        'Inspect targets with list_red_targets, prepare chart scenes with prepare_chart_scene, '
-        'preview with preview_coordinated_edits, export blind PDFs with export_coordinated_edits, '
-        'or self-audit any candidate PDF with audit_candidate_pdf.\nSelected PDF: '
+        'Coordinated RED editor for one selected PDF. Never mutates the input PDF or supplements on disk. '
+        'Inspect targets with list_red_targets, list_text_spans, list_pdf_links, and list_red_supplements; '
+        'prepare chart scenes with prepare_chart_scene, preview with preview_coordinated_edits, '
+        'export blind PDFs with export_coordinated_edits, or self-audit with audit_candidate_pdf.\nSelected PDF: '
         + json.dumps({'paperId': paper_id, 'fileHash': file_hash})
     )
     server = FastMCP(name=SERVER_NAME, instructions=instructions, log_level='ERROR')
 
     def call(pid, fn):
-        result = _guard(paper_id, file_hash, pid, fn)
+        result = _run_guarded(paper_id, file_hash, pid, fn)
         return result if isinstance(result, CallToolResult) else _ok(result)
 
     @server.tool(annotations=_READONLY)
@@ -355,11 +680,26 @@ def build_server(store, paper_id, file_hash, service=None):
         return call(paperId, lambda: _list_targets(store, paperId, file_hash, page_index=pageIndex))
 
     @server.tool(annotations=_READONLY)
+    def list_text_spans(
+        paperId: str,
+        pageIndex: int | None = None,
+        query: str | None = None,
+        limit: int = 200,
+    ) -> CallToolResult:
+        """List addressable reading-order PDF prose lines/spans with optional query filter."""
+        return call(paperId, lambda: _list_text_spans_for_paper(
+            store, paperId, file_hash, page_index=pageIndex, query=query, limit=limit,
+        ))
+
+    @server.tool(annotations=_READONLY)
+    def list_red_supplements(paperId: str) -> CallToolResult:
+        """List immutable startup supplements bound to this RED session."""
+        return call(paperId, lambda: _list_supplements_for_paper(paperId, file_hash, loaded_supplements))
+
+    @server.tool(annotations=_READONLY)
     def scan_source_baseline(paperId: str) -> CallToolResult:
         """Run offline Layer 0 BLUE baseline scan on the untouched source PDF before choosing RED targets."""
-        return call(paperId, lambda: run_blue_sensor(
-            paperId, file_hash=file_hash, include_external_oracle=False, store=store,
-        ))
+        return call(paperId, lambda: _get_baseline(store, paperId, file_hash, baseline_cache))
 
     @server.tool(annotations=_READONLY)
     def list_pdf_links(paperId: str, pageIndex: int | None = None) -> CallToolResult:
@@ -380,9 +720,12 @@ def build_server(store, paper_id, file_hash, service=None):
     @server.tool(annotations=_READONLY)
     async def preview_coordinated_edits(paperId: str, operations: list[dict], previewPageIndex: int = 0) -> CallToolResult:
         """Apply operations in memory, render previewPageIndex PNG, and run stealth self-audit."""
-        result = await _cancellable_thread(lambda cancelled: _guard(
+        result = await _cancellable_thread(lambda cancelled: _run_guarded(
             paper_id, file_hash, paperId,
-            lambda: _preview_edits(store, service, paperId, file_hash, operations, previewPageIndex, cancelled),
+            lambda: _preview_edits(
+                store, service, paperId, file_hash, operations, previewPageIndex, cancelled,
+                supplements=loaded_supplements, baseline_cache=baseline_cache,
+            ),
         ))
         if isinstance(result, CallToolResult):
             return result
@@ -391,10 +734,13 @@ def build_server(store, paper_id, file_hash, service=None):
 
     @server.tool(annotations=_EDITING)
     async def export_coordinated_edits(paperId: str, operations: list[dict], requireCleanStealth: bool = False) -> CallToolResult:
-        """Export a blind edited PDF copy + stealth audit + external record."""
+        """Export a blind edited PDF copy + blindSupplements + stealth audit + sealed goldLedger."""
         return await _cancellable_thread(lambda cancelled: call(
             paperId,
-            lambda: _export_edits(store, service, paperId, file_hash, operations, requireCleanStealth, cancelled),
+            lambda: _export_edits(
+                store, service, paperId, file_hash, operations, requireCleanStealth, cancelled,
+                supplements=loaded_supplements, baseline_cache=baseline_cache,
+            ),
         ))
 
     @server.tool(annotations=_READONLY)
@@ -411,15 +757,20 @@ def build_server(store, paper_id, file_hash, service=None):
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog='python app/local/paper_red_mcp.py', description=__doc__)
     parser.add_argument('--pdf', required=True, help='Read only this PDF. Tools cannot open another file.')
+    parser.add_argument(
+        '--supplement', action='append', default=[], dest='supplements',
+        help='Optional UTF-8 supplement file (repeatable, max 12 files, never modified on disk).',
+    )
     args = parser.parse_args(argv)
     try:
         from paper_evidence import default_store
         summary = open_selected(default_store, args.pdf)
+        supplements = load_red_supplements(args.supplements)
     except ValueError as exc:
         print(str(exc), file=sys.stderr)
         return 2
     logging.getLogger('mcp').setLevel(logging.ERROR)
-    build_server(default_store, summary['paperId'], summary['fileHash']).run(transport='stdio')
+    build_server(default_store, summary['paperId'], summary['fileHash'], supplements=supplements).run(transport='stdio')
     return 0
 
 

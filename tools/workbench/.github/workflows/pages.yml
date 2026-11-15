@@ -76,10 +76,12 @@ jobs:
       - name: Portable BLUE sources (offline only)
         run: |
           python app/examples/evidence_blue_v033/build_profile.py
+          python app/examples/evidence_blue_v037/build_profile.py
           python -m unittest discover -s app/examples/evidence_blue_v033 -p "test_*.py" -q
           python -m unittest discover -s app/examples/evidence_blue_v034 -p "test_*.py" -q
           python -m unittest discover -s app/examples/evidence_blue_v035 -p "test_*.py" -q
           python -m unittest discover -s app/examples/evidence_blue_v036 -p "test_*.py" -q
+          python -m unittest discover -s app/examples/evidence_blue_v037 -p "test_*.py" -q
           python -m unittest discover -s tools/evaluation -p "test_*.py" -q
       - name: Shared API dependencies
         working-directory: cloud/api

@@ -40,6 +40,7 @@ INSTRUCTIONS = (
 _CODE = re.compile(r"[a-z0-9_]{1,80}\Z")
 _SHA = re.compile(r"[0-9a-fA-F]{64}\Z")
 _READONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+_ORACLE_READONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=True)
 
 
 async def _cancellable_thread(action):
@@ -129,10 +130,7 @@ def _image_result(payload):
     return _ok({k: v for k, v in payload.items() if k != "data"}, (data, mime))
 
 
-def build_server(store, paper_id, file_hash, enable_analysis=False):
-    """FastMCP stdio app bound to one prepared paper. No write or browse tool is registered."""
-    server = FastMCP(name=SERVER_NAME, instructions=INSTRUCTIONS + "\nSelected PDF: " + json.dumps({"paperId": paper_id, "fileHash": file_hash}), log_level="ERROR")
-
+def _register_core_tools(server, store, paper_id, file_hash):
     @server.tool(annotations=_READONLY)
     def status(paperId: str) -> CallToolResult:
         """Read the prepared summary for the startup PDF. Read-only. Does not open a file or URL."""
@@ -185,71 +183,137 @@ def build_server(store, paper_id, file_hash, enable_analysis=False):
         result = _guard(paper_id, file_hash, paperId, lambda: _audit_paper_statistics(paperId, file_hash, max_signals=maxSignals, store=store))
         return result if isinstance(result, CallToolResult) else _ok(result)
 
+    @server.tool(annotations=_READONLY)
+    def run_blue_sensor(paperId: str, maxSignals: int = 50, digestOnly: bool = False) -> CallToolResult:
+        """Run deterministic Layer 0 offline PDF forensic sensor checks on the startup PDF. Read-only."""
+        from paper_mcp_bundle import run_blue_sensor_payload
+        result = _guard(paper_id, file_hash, paperId, lambda: run_blue_sensor_payload(store, paperId, file_hash, max_signals=maxSignals, digest_only=digestOnly))
+        return result if isinstance(result, CallToolResult) else _ok(result)
+
+
+def _register_analysis_tools(server, store, paper_id, file_hash):
+    from paper_enrichment import analyze
+
+    @server.tool(annotations=_READONLY)
+    def list_analyses(paperId: str) -> CallToolResult:
+        """List derived OCR/chart results, separate from native PDF objects. Read-only."""
+        result = _guard(paper_id, file_hash, paperId, lambda: store.list_analyses(paperId))
+        return result if isinstance(result, CallToolResult) else _ok(result)
+
+    @server.tool(annotations=_READONLY)
+    def read_analysis(paperId: str, analysisId: str) -> CallToolResult:
+        """Read a source-bound derived result with raw values, provenance and uncertainty. Read-only."""
+        result = _guard(paper_id, file_hash, paperId, lambda: store.read_analysis(paperId, analysisId))
+        return result if isinstance(result, CallToolResult) else _ok(result)
+
+    @server.tool(annotations=_READONLY)
+    def ocr_page(paperId: str, pageIndex: int, bbox: list[float] | None = None, language: str = 'en') -> CallToolResult:
+        """Run local OCR on the selected PDF page/region. Produces a transcription, not exact native text. Read-only."""
+        result = _guard(paper_id, file_hash, paperId, lambda: analyze(
+            {'paperId': paperId, 'fileHash': file_hash, 'kind': 'ocr', 'pageIndex': pageIndex, 'bbox': bbox, 'language': language}, store=store))
+        return result if isinstance(result, CallToolResult) else _ok(result)
+
+    @server.tool(annotations=_READONLY)
+    def extract_chart(paperId: str, pageIndex: int, bbox: list[float] | None = None,
+                      chartOptions: dict | None = None) -> CallToolResult:
+        """Read calibrated curve geometry from the selected chart region. Read-only.
+
+        Matching PDF paths retain their source commands and style. Raster
+        curves use PlotTracer or WebPlotDigitizer with OCR or selected ticks.
+
+        If axes need calibration, render_region at the returned inputImage dpi
+        and repeat with chartOptions={imageSha256,calibration,series,plotBbox?}.
+        calibration={x:{scale:linear|log,points:[{pixel,value},{pixel,value}]},y:same}.
+        series=[{id,color:'#rrggbb',name?}], up to 8. plotBbox is in crop pixels.
+        Use exactly that image's sha256. The result records source geometry,
+        pixel estimates and interpolated samples by origin and role. Curve
+        samples are not independent observations or automatically identified
+        means or confidence-interval endpoints.
+        """
+        result = _guard(paper_id, file_hash, paperId, lambda: analyze(
+            {'paperId': paperId, 'fileHash': file_hash, 'kind': 'chart', 'pageIndex': pageIndex, 'bbox': bbox, 'language': 'en',
+             **({'chartOptions': chartOptions} if chartOptions is not None else {})}, store=store))
+        return result if isinstance(result, CallToolResult) else _ok(result)
+
+    @server.tool(annotations=_READONLY)
+    def digitize_points(paperId: str, pageIndex: int, imageSha256: str, calibration: dict,
+                        points: list[list[float]], bbox: list[float] | None = None, dpi: int = 120) -> CallToolResult:
+        """Convert selected image points using two ticks per axis. Read render_region first. Read-only.
+
+        calibration={x:{scale:linear|log,points:[{pixel,value},{pixel,value}]},y:same}.
+        points=[[xPixel,yPixel],...]. Pixels refer to that exact PNG, top-left origin.
+        Report estimates and pixel intervals. This does not infer ticks or verify their selection.
+        """
+        from paper_digitizer import digitize
+        result = _guard(paper_id, file_hash, paperId, lambda: digitize(store, paperId, file_hash, pageIndex,
+            imageSha256, calibration, points, bbox=bbox, dpi=dpi))
+        return result if isinstance(result, CallToolResult) else _ok(result)
+
+
+def _register_supplement_tools(server, store, paper_id, file_hash, supplements):
+    from paper_mcp_bundle import (
+        audit_supplements_payload,
+        list_supplements_payload,
+        read_supplement_payload,
+    )
+
+    @server.tool(annotations=_READONLY)
+    def list_supplements(paperId: str) -> CallToolResult:
+        """List compact metadata for startup-attached supplement files. Read-only."""
+        result = _guard(paper_id, file_hash, paperId, lambda: list_supplements_payload(paperId, file_hash, supplements))
+        return result if isinstance(result, CallToolResult) else _ok(result)
+
+    @server.tool(annotations=_READONLY)
+    def read_supplement(paperId: str, supplementId: str, offset: int = 0, limit: int = 8000) -> CallToolResult:
+        """Read a paginated text slice from one startup-attached supplement file. Read-only."""
+        result = _guard(paper_id, file_hash, paperId, lambda: read_supplement_payload(paperId, file_hash, supplements, supplementId, offset=offset, limit=limit))
+        return result if isinstance(result, CallToolResult) else _ok(result)
+
+    @server.tool(annotations=_READONLY)
+    def audit_supplements(paperId: str, maxSignals: int = 50) -> CallToolResult:
+        """Run deterministic cross-document checks across the startup PDF and attached supplements. Read-only."""
+        result = _guard(paper_id, file_hash, paperId, lambda: audit_supplements_payload(store, paperId, file_hash, supplements, max_signals=maxSignals))
+        return result if isinstance(result, CallToolResult) else _ok(result)
+
+
+def _register_oracle_tools(server, store, paper_id, file_hash):
+    from paper_mcp_bundle import verify_references_payload, verify_registries_payload
+
+    @server.tool(annotations=_ORACLE_READONLY)
+    def verify_references(paperId: str, maxRefs: int = 25, includeClaimGrounding: bool = False) -> CallToolResult:
+        """Verify bibliography references and retractions via bounded P2 Crossref/EuropePMC lookups. Read-only."""
+        result = _guard(paper_id, file_hash, paperId, lambda: verify_references_payload(store, paperId, file_hash, max_refs=maxRefs, include_claim_grounding=includeClaimGrounding))
+        return result if isinstance(result, CallToolResult) else _ok(result)
+
+    @server.tool(annotations=_ORACLE_READONLY)
+    def verify_registries(paperId: str, maxLookups: int = 20) -> CallToolResult:
+        """Verify ClinicalTrials.gov, OSF, PROSPERO, GEO, and PDB identifiers via bounded P2 lookups. Read-only."""
+        result = _guard(paper_id, file_hash, paperId, lambda: verify_registries_payload(store, paperId, file_hash, max_lookups=maxLookups))
+        return result if isinstance(result, CallToolResult) else _ok(result)
+
+
+def build_server(store, paper_id, file_hash, enable_analysis=False, supplements=None, enable_oracle=False):
+    """FastMCP stdio app bound to one prepared paper. No write or browse tool is registered."""
+    selected = {"paperId": paper_id, "fileHash": file_hash}
+    if supplements:
+        selected["supplementCount"] = len(supplements)
+    server = FastMCP(name=SERVER_NAME, instructions=INSTRUCTIONS + "\nSelected PDF: " + json.dumps(selected), log_level="ERROR")
+    _register_core_tools(server, store, paper_id, file_hash)
     if enable_analysis:
-        from paper_enrichment import analyze
-
-        @server.tool(annotations=_READONLY)
-        def list_analyses(paperId: str) -> CallToolResult:
-            """List derived OCR/chart results, separate from native PDF objects."""
-            result = _guard(paper_id, file_hash, paperId, lambda: store.list_analyses(paperId))
-            return result if isinstance(result, CallToolResult) else _ok(result)
-
-        @server.tool(annotations=_READONLY)
-        def read_analysis(paperId: str, analysisId: str) -> CallToolResult:
-            """Read a source-bound derived result with raw values, provenance and uncertainty."""
-            result = _guard(paper_id, file_hash, paperId, lambda: store.read_analysis(paperId, analysisId))
-            return result if isinstance(result, CallToolResult) else _ok(result)
-
-        @server.tool(annotations=_READONLY)
-        def ocr_page(paperId: str, pageIndex: int, bbox: list[float] | None = None, language: str = 'en') -> CallToolResult:
-            """Run local OCR on the selected PDF page/region. Produces a transcription, not exact native text."""
-            result = _guard(paper_id, file_hash, paperId, lambda: analyze(
-                {'paperId':paperId, 'fileHash':file_hash, 'kind':'ocr', 'pageIndex':pageIndex, 'bbox':bbox, 'language':language}, store=store))
-            return result if isinstance(result, CallToolResult) else _ok(result)
-
-        @server.tool(annotations=_READONLY)
-        def extract_chart(paperId: str, pageIndex: int, bbox: list[float] | None = None,
-                          chartOptions: dict | None = None) -> CallToolResult:
-            """Read calibrated curve geometry from the selected chart region.
-
-            Matching PDF paths retain their source commands and style. Raster
-            curves use PlotTracer or WebPlotDigitizer with OCR or selected ticks.
-
-            If axes need calibration, render_region at the returned inputImage dpi
-            and repeat with chartOptions={imageSha256,calibration,series,plotBbox?}.
-            calibration={x:{scale:linear|log,points:[{pixel,value},{pixel,value}]},y:same}.
-            series=[{id,color:'#rrggbb',name?}], up to 8. plotBbox is in crop pixels.
-            Use exactly that image's sha256. The result records source geometry,
-            pixel estimates and interpolated samples by origin and role. Curve
-            samples are not independent observations or automatically identified
-            means or confidence-interval endpoints.
-            """
-            result = _guard(paper_id, file_hash, paperId, lambda: analyze(
-                {'paperId':paperId, 'fileHash':file_hash, 'kind':'chart', 'pageIndex':pageIndex, 'bbox':bbox, 'language':'en',
-                 **({'chartOptions':chartOptions} if chartOptions is not None else {})}, store=store))
-            return result if isinstance(result, CallToolResult) else _ok(result)
-
-        @server.tool(annotations=_READONLY)
-        def digitize_points(paperId: str, pageIndex: int, imageSha256: str, calibration: dict,
-                            points: list[list[float]], bbox: list[float] | None = None, dpi: int = 120) -> CallToolResult:
-            """Convert selected image points using two ticks per axis. Read render_region first.
-
-            calibration={x:{scale:linear|log,points:[{pixel,value},{pixel,value}]},y:same}.
-            points=[[xPixel,yPixel],...]. Pixels refer to that exact PNG, top-left origin.
-            Report estimates and pixel intervals. This does not infer ticks or verify their selection.
-            """
-            from paper_digitizer import digitize
-            result = _guard(paper_id,file_hash,paperId,lambda: digitize(store,paperId,file_hash,pageIndex,
-                imageSha256,calibration,points,bbox=bbox,dpi=dpi))
-            return result if isinstance(result,CallToolResult) else _ok(result)
-
+        _register_analysis_tools(server, store, paper_id, file_hash)
+    if supplements:
+        _register_supplement_tools(server, store, paper_id, file_hash, supplements)
+    if enable_oracle:
+        _register_oracle_tools(server, store, paper_id, file_hash)
     return server
 
 
 def _parser():
     parser = argparse.ArgumentParser(prog="python app/local/paper_mcp.py", description=__doc__)
     parser.add_argument("--pdf", required=True, help="Read only this PDF. Tools cannot open another file.")
-    parser.add_argument('--analysis', action='store_true', help='Enable explicit local OCR/chart model tools; models run only on request.')
+    parser.add_argument('--analysis', action='store_true', help='Enable explicit local OCR/chart model tools; models run only on demand.')
+    parser.add_argument("--supplement", action="append", default=[], help="Read-only startup supplement file path (repeatable, max 12 files / 25 MiB total).")
+    parser.add_argument("--oracle", action="store_true", help="Enable opt-in P2 Crossref/EuropePMC/ClinicalTrials/OSF/GEO/PDB lookup tools.")
     return parser
 
 
@@ -262,11 +326,22 @@ def main(argv=None) -> int:
     try:
         from paper_evidence import default_store
         summary = open_selected(default_store, args.pdf)
+        supplements = []
+        if args.supplement:
+            from paper_mcp_bundle import load_selected_supplements
+            supplements = load_selected_supplements(args.supplement)
     except ValueError as exc:
         print(_fixed(exc), file=sys.stderr)
         return 2
     logging.getLogger("mcp").setLevel(logging.ERROR)
-    build_server(default_store, summary["paperId"], summary["fileHash"], enable_analysis=args.analysis).run(transport="stdio")
+    build_server(
+        default_store,
+        summary["paperId"],
+        summary["fileHash"],
+        enable_analysis=args.analysis,
+        supplements=supplements,
+        enable_oracle=args.oracle,
+    ).run(transport="stdio")
     return 0
 
 

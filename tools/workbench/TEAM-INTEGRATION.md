@@ -1,18 +1,18 @@
-# Workbench alpha.66 소스 동기화
+# Workbench alpha.67 소스 동기화
 
-`tools/workbench`는 `Shinick-Han/falsify-workbench`의 0.2.0-alpha.66 소스 스냅샷입니다.
+`tools/workbench`는 `Shinick-Han/falsify-workbench`의 0.2.0-alpha.67 소스 스냅샷입니다.
 
-- 소스 커밋: `be01d79c00b840b616e3483e333afaf241aee0ac`
+- 소스 커밋: `fe55b4be6ebed023b43fd5a47db39dadecb2af23`
 - 공개 웹: https://shinick-han.github.io/falsify-workbench/
-- 설치 ZIP: https://github.com/Shinick-Han/falsify-workbench/releases/tag/v0.2.0-alpha.66
-- 소스 파일 1,333개를 동기화합니다.
+- 설치 ZIP: https://github.com/Shinick-Han/falsify-workbench/releases/tag/v0.2.0-alpha.67
+- 소스 파일 1,348개를 동기화합니다.
 - 이 저장소의 `INTEGRATION-SOURCE.json`과 이 문서는 팀 통합 메타데이터로 유지합니다.
 
-이번 버전(`0.2.0-alpha.66`)은 경찰과 도둑(BLUE·RED·아레나) 3개 축 1순위 6개 고도화와 표준 `unittest` CI 호환성 보완을 포함합니다:
-1. **BLUE 다중 파일 번들 교차 검증**: 본문 PDF와 보충자료(`Supplementary PDF/DOCX/CSV/JSON/코드·로그`) 동시 투입, 고아 보충 인용(`Table S*`/`Fig. S*`), 파일 간 표본수(`N=`) 및 핵심 수치 모순 정밀 감사
-2. **BLUE 심층 통계·임상 포렌식**: `SPRITE` 유계 분포 타당성, 2×2 분할표(`a/N1 vs c/N2`) 정확 Fisher `p`·`χ²`·비보정 `OR/RR`(`aOR/aRR` 예외 처리), Kaplan-Meier `No. at risk` 단조 감소 위반 정적/오프라인 감지
-3. **BLUE 외부 오라클(`P2`) 철회 문헌 & 사전등록·기탁번호 검증**: Crossref·Europe PMC 철회(`Retracted`) 및 우려 표명(`EoC`) 논문 인용 감지와 `OSF`·`PROSPERO`(`CRD420...`)·`GEO`(`GSE...`)·`PDB` 구문 및 공개 레코드 검증
-4. **RED 원본 사전 결함 스캔(Baseline Guard) & 무손실 PDF `/URI` 링크 변조기**: 주입 전 기존 Layer 0 결함 충돌 경고 및 시각 픽셀 무변화 `/URI` 하이퍼링크 은밀 변조(`W5 D2-1·D2-3`)
-5. **아레나 다자 평가자 일치도(`Krippendorff's α`) & `확인필요` 선택적 예측(`Risk-Coverage / AURC`)**: 명목/서열 α와 보류율·선택적 정확도·보류 순이득(`Abstention Gain`)·`AURC` 정식 산출
+이번 버전(`0.2.0-alpha.67`)은 **Agent-First 4개 축 1순위 6개 과제**를 전면 통합합니다:
+1. **차세대 BLUE MCP 서버 (`paper_mcp.py`, `paper_mcp_bundle.py`)**: 오프라인 `run_blue_sensor`(`digestOnly` 토큰 예산 모드), `--supplement` 다중 보충자료 조회·교차 감사(`list_supplements`, `read_supplement`, `audit_supplements`), `--oracle` 명시 설정 시 `verify_references`·`verify_registries` 제공
+2. **자율형 `BLUE Evidence v0.3.7` 어댑터 (`app/examples/evidence_blue_v037`)**: 모델 호출 전 무비용 Layer 0 정적 포렌식(`SPRITE`/2×2/KM, `supp-*` 보충자료 교차 감사) + 확장 `P2` 철회·사전등록(`OSF`/`PROSPERO`/`GEO`/`PDB`) 다이제스트 자동 결합
+3. **전양식(Full-Modal) 통합 RED MCP (`paper_text_span_mutator.py`, `paper_red_mcp.py`)**: 네이티브 PDF 본문 `text-span` 무흔적 변조(`list_text_spans`, `nearestCandidates` 자가 치유 힌트), `supplement-edit` 보충자료 변조, `Baseline Guard` 겹침 보고, 봉인된 `goldLedger` 분리 출력
+4. **단일 헤드리스 에이전트 JSON CLI & 내장 스킬 (`falsify_cli.py`, `.agents/skills/falsify-blue-auditor`, `.agents/skills/falsify-red-injector`)**: `blue scan`, `red targets`, `red apply`, `blind verify`, `arena score` 정형 JSON stdout 및 종료 코드 계약(`0`/`2`/`3`/`124`)
+5. **헤드리스 상보적 진화 아레나 채점기 & 맹검 번들 검증기 (`tools/evaluation/arena_runner.py`)**: PDF DocInfo/XMP/주석/위젯·보충자료 맹검 검증(`verify_blind_bundle`) 및 1:1 이분 매칭·`Baseline Guard` 면제·`W1-W5`/`D1-D7`/`L1-L4` 층화 재현율·`stealthYield`·`Krippendorff's α`·`AURC`·`feedbackDigest` 산출(`evaluate_arena_match`)
 
 이 브랜치의 Workbench 경로만 갱신하며 공식 프로젝트의 다른 코드와 연구 자료는 유지합니다. 라이선스와 설치·실행 절차는 포함된 upstream 문서를 따릅니다.

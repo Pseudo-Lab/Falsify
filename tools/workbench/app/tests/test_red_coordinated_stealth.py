@@ -224,7 +224,8 @@ class CoordinatedRedMcpTests(unittest.TestCase):
                             self.assertEqual(binding['fileHash'], digest)
                             tools = {t.name for t in (await session.list_tools()).tools}
                             self.assertEqual(tools, {
-                                'list_red_targets', 'scan_source_baseline', 'list_pdf_links',
+                                'list_red_targets', 'list_text_spans', 'list_red_supplements',
+                                'scan_source_baseline', 'list_pdf_links',
                                 'prepare_chart_scene', 'preview_coordinated_edits',
                                 'export_coordinated_edits', 'audit_candidate_pdf',
                             })
