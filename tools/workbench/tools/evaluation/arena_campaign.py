@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import copy
 import hashlib
+import inspect
 import json
 from pathlib import Path
 import sys
@@ -63,7 +64,7 @@ def _require_role(role) -> str:
     if not isinstance(role, str):
         raise ArenaCampaignError('role_invalid', 2)
     chosen = role.strip().lower()
-    if chosen not in ('blue', 'red'):
+    if chosen not in ('blue', 'red', 'both'):
         raise ArenaCampaignError('role_invalid', 2)
     return chosen
 
@@ -120,6 +121,29 @@ def _default_harness(role: str) -> dict:
         'appliedRuleIds': [],
         'appliedPatches': [],
     }
+
+
+def _default_red_harness() -> dict:
+    return {
+        'schema': arena_duel.HARNESS_SCHEMA,
+        'id': 'harness-red',
+        'role': 'red',
+        'instructions': 'Generate stealth-clean blind mutations.',
+        'generation': 0,
+        'appliedRuleIds': [],
+        'appliedPatches': [],
+    }
+
+
+def _campaign_pair(role: str, base_harness: dict, base_red_harness):
+    if role == 'red':
+        return _copy_base(base_harness), None
+    blue = _copy_base(base_harness)
+    if role != 'both':
+        return blue, None
+    if base_red_harness is None:
+        return blue, _default_red_harness()
+    return blue, _copy_base(base_red_harness)
 
 
 def _harness_sha256(harness: dict) -> str:
@@ -181,7 +205,7 @@ def _copy_metrics(metrics) -> dict:
 
 
 def _bind_duel(red_argv, blue_argv, holdout_pdfs, min_difficulty, runs, timeout, max_rules):
-    def duel_fn(source_entry, generation_index, active_harness):
+    def duel_fn(source_entry, generation_index, active_harness, red_harness=None, blue_harness=None):
         del generation_index, active_harness
         supplements = list(source_entry.get('supplements') or [])
         return arena_duel.run_duel(
@@ -194,6 +218,8 @@ def _bind_duel(red_argv, blue_argv, holdout_pdfs, min_difficulty, runs, timeout,
             runs=runs,
             timeout=timeout,
             max_rules=max_rules,
+            red_harness=red_harness,
+            blue_harness=blue_harness,
         )
 
     return duel_fn
@@ -226,17 +252,19 @@ def _baseline(ctx: dict) -> dict:
     ctx['bench'] = bench
     ctx['metrics'] = metrics
     ctx['holdout_fp'] = _fp_int(metrics.get('holdoutPureFp'), 0)
+    ctx['stealth_yield'] = metrics.get('stealthYield')
     return _record(0, 'baseline', ctx['harness'], metrics, None)
 
 
-def _duel_failure(ctx: dict, index: int, error: arena_duel.ArenaDuelError) -> dict:
+def _duel_failure(ctx: dict, index: int, error: arena_duel.ArenaDuelError, harness=None) -> dict:
     if error.code == 'blindness_leak_detected':
         raise ArenaCampaignError('blindness_leak_detected', 3, error.extra)
     if error.code == 'timeout':
         raise ArenaCampaignError('timeout', 124, error.extra)
     if error.code not in _RECOVERABLE_DUEL:
         raise ArenaCampaignError(error.code, error.exit_code, error.extra)
-    return _record(index, 'rolled_back', ctx['harness'], ctx['metrics'], error.code)
+    chosen = harness if isinstance(harness, dict) else ctx['harness']
+    return _record(index, 'rolled_back', chosen, ctx['metrics'], error.code)
 
 
 def _duel_fp(duel: dict, fallback: int) -> int:
@@ -246,16 +274,24 @@ def _duel_fp(duel: dict, fallback: int) -> int:
     return _fp_int(summary.get('totalPureFp'), fallback)
 
 
-def _attempt_apply(ctx: dict, patch, candidate_fp: int):
+def _apply_role(ctx: dict) -> str:
+    role = ctx.get('apply_role') or ctx['role']
+    if role == 'both':
+        return 'blue'
+    return role
+
+
+def _applied_harness(ctx: dict, base, patch, role: str, baseline_fp, candidate_fp):
     try:
         applied = arena_duel.apply_harness_patch(
-            ctx['harness'],
+            base,
             patch,
-            role=ctx['role'],
+            role=role,
             max_generations=ctx['generations'],
-            baseline_holdout_fp=ctx['holdout_fp'],
+            baseline_holdout_fp=baseline_fp,
             candidate_holdout_fp=candidate_fp,
             max_instructions_chars=ctx['max_chars'],
+            compact_rules=ctx['compact_rules'],
         )
     except arena_duel.ArenaDuelError as error:
         return None, error.code
@@ -266,6 +302,12 @@ def _attempt_apply(ctx: dict, patch, candidate_fp: int):
     if isinstance(text, str) and len(text) > ctx['max_chars']:
         return None, 'instructions_too_long'
     return harness, None
+
+
+def _attempt_apply(ctx: dict, patch, candidate_fp: int):
+    return _applied_harness(
+        ctx, ctx['harness'], patch, _apply_role(ctx), ctx['holdout_fp'], candidate_fp,
+    )
 
 
 def _regression_reason(comparison) -> str:
@@ -304,8 +346,111 @@ def _after_duel(ctx: dict, index: int, duel) -> dict:
     return _gate_benchmark(ctx, index, harness, candidate_fp)
 
 
+def _signature_params(fn):
+    try:
+        return list(inspect.signature(fn).parameters.values())
+    except (TypeError, ValueError):
+        return []
+
+
+def _call_both_duel(ctx: dict, source, index: int, target: str):
+    fn = ctx['duel_fn']
+    blue = ctx['harness']
+    red = ctx['red_harness']
+    active = blue if target == 'blue' else red
+    params = _signature_params(fn)
+    names = {param.name for param in params}
+    positional = [
+        param for param in params
+        if param.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+    ]
+    if 'red_harness' in names or 'blue_harness' in names:
+        kwargs = {}
+        if 'red_harness' in names:
+            kwargs['red_harness'] = red
+        if 'blue_harness' in names:
+            kwargs['blue_harness'] = blue
+        return fn(source, index, active, **kwargs)
+    if len(positional) >= 4:
+        return fn(source, index, blue, red)
+    return fn(source, index, active)
+
+
+def _yield_value(node):
+    if not isinstance(node, dict) or 'stealthYield' not in node:
+        return None
+    return _metric_num(node.get('stealthYield'))
+
+
+def _duel_stealth(duel):
+    if not isinstance(duel, dict):
+        return None
+    direct = _yield_value(duel)
+    if direct is not None:
+        return direct
+    for key in ('roundRecord', 'round'):
+        node = duel.get(key)
+        found = _yield_value(node)
+        if found is not None:
+            return found
+        if not isinstance(node, dict):
+            continue
+        evaluation = node.get('evaluation')
+        found = _yield_value(evaluation)
+        if found is not None:
+            return found
+        aggregate = evaluation.get('aggregate') if isinstance(evaluation, dict) else None
+        found = _yield_value(aggregate)
+        if found is not None:
+            return found
+    return None
+
+
+def _stealth_blocked(active, candidate) -> bool:
+    if candidate is None or active is None:
+        return False
+    if candidate < active:
+        return True
+    return active >= 0.5 and candidate < 0.5
+
+
+def _after_red(ctx: dict, index: int, duel) -> dict:
+    current = ctx['red_harness']
+    if not isinstance(duel, dict):
+        return _record(index, 'rolled_back', current, ctx['metrics'], 'duel_invalid')
+    harness, reason = _applied_harness(ctx, current, duel.get('harnessPatch'), 'red', None, None)
+    if harness is None:
+        return _record(index, 'rolled_back', current, ctx['metrics'], reason)
+    candidate = _duel_stealth(duel)
+    if _stealth_blocked(ctx.get('stealth_yield'), candidate):
+        return _record(index, 'rolled_back', current, ctx['metrics'], 'stealth_yield_regression')
+    ctx['red_harness'] = harness
+    if candidate is not None:
+        ctx['stealth_yield'] = candidate
+    return _record(index, 'promoted', harness, ctx['metrics'], None)
+
+
+def _run_both(ctx: dict, index: int, source) -> dict:
+    target = 'blue' if index % 2 else 'red'
+    ctx['apply_role'] = target
+    try:
+        duel = _call_both_duel(ctx, source, index, target)
+    except arena_duel.ArenaDuelError as error:
+        record = _duel_failure(ctx, index, error, ctx['red_harness'] if target == 'red' else ctx['harness'])
+        record['targetRole'] = target
+        return record
+    if target == 'blue':
+        record = _after_duel(ctx, index, duel)
+    else:
+        record = _after_red(ctx, index, duel)
+    record['targetRole'] = target
+    return record
+
+
 def _run_generation(ctx: dict, index: int) -> dict:
     source = ctx['sources'][(index - 1) % len(ctx['sources'])]
+    if ctx['role'] == 'both':
+        return _run_both(ctx, index, source)
     try:
         duel = ctx['duel_fn'](source, index, ctx['harness'])
     except arena_duel.ArenaDuelError as error:
@@ -401,6 +546,9 @@ def _lineage(ctx: dict, records: list[dict]) -> dict:
         'finalHarness': ctx['harness'],
         'finalHarnessSha256': _harness_sha256(ctx['harness']),
     }
+    if ctx['role'] == 'both':
+        lineage['finalBlueHarness'] = ctx['harness']
+        lineage['finalRedHarness'] = ctx['red_harness']
     _scrub_lineage(lineage)
     return lineage
 
@@ -422,17 +570,24 @@ def run_evolution_campaign(
     max_recall_drop: float = 0.0,
     duel_fn=None,
     benchmark_fn=None,
+    base_red_harness: dict | None = None,
+    compact_rules: bool = False,
 ) -> dict:
     """Run a 1..3 generation campaign and return an answer-key-free lineage."""
     count = _require_generations(generations)
     role_name = _require_role(role)
+    if type(compact_rules) is not bool:
+        raise ArenaCampaignError('compact_rules_invalid', 2)
+    harness, red_harness = _campaign_pair(role_name, base_harness, base_red_harness)
     ctx = {
         'sources': _require_sources(source_pdfs),
         'role': role_name,
         'generations': count,
         'max_chars': max_instructions_chars,
         'max_recall_drop': max_recall_drop,
-        'harness': _copy_base(base_harness),
+        'harness': harness,
+        'red_harness': red_harness,
+        'compact_rules': compact_rules,
         'duel_fn': duel_fn or _bind_duel(
             red_argv, blue_argv, holdout_pdfs, min_difficulty, runs, timeout, max_rules,
         ),
@@ -456,7 +611,9 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument('--supplement', action='append', type=Path)
     parser.add_argument('--holdout-pdf', action='append', type=Path)
     parser.add_argument('--base-harness', type=Path)
-    parser.add_argument('--role', default='blue')
+    parser.add_argument('--base-red-harness', type=Path)
+    parser.add_argument('--role', default='blue', choices=('blue', 'red', 'both'))
+    parser.add_argument('--compact-rules', action='store_true')
     parser.add_argument('--red-cmd')
     parser.add_argument('--red-arg', action='append')
     parser.add_argument('--blue-cmd')
@@ -468,6 +625,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument('--max-recall-drop', type=float, default=0.0)
     parser.add_argument('--out', type=Path)
     parser.add_argument('--out-harness', type=Path)
+    parser.add_argument('--out-red-harness', type=Path)
     return parser
 
 
@@ -508,9 +666,13 @@ def _run_cli(args: argparse.Namespace) -> dict:
     role = _require_role(args.role)
     if not args.source_pdf:
         raise ArenaCampaignError('source_pdfs_invalid', 2)
+    red_base = None
+    if args.base_red_harness is not None:
+        red_base = _load_harness(args.base_red_harness, 'red')
+    harness_role = 'blue' if role == 'both' else role
     return run_evolution_campaign(
         _read_sources(args.source_pdf, args.supplement or []),
-        base_harness=_load_harness(args.base_harness, role),
+        base_harness=_load_harness(args.base_harness, harness_role),
         red_argv=_command(args.red_cmd, args.red_arg, 'red_argv_invalid'),
         blue_argv=_command(args.blue_cmd, args.blue_arg, 'blue_argv_invalid'),
         holdout_pdfs=[_file_entry(path) for path in list(args.holdout_pdf or [])],
@@ -520,6 +682,8 @@ def _run_cli(args: argparse.Namespace) -> dict:
         runs=args.runs,
         timeout=args.timeout,
         max_recall_drop=args.max_recall_drop,
+        base_red_harness=red_base,
+        compact_rules=bool(args.compact_rules),
     )
 
 
@@ -556,11 +720,17 @@ def _emit_error(error: ArenaCampaignError, out_path) -> None:
         _write_json(safe, out_path)
 
 
-def _emit_lineage(lineage: dict, out_path, harness_path) -> None:
+def _emit_harness(payload: dict, path) -> None:
+    rendered = json.dumps(payload, ensure_ascii=False, indent=2)
+    Path(path).write_text(rendered + '\n', encoding='utf-8')
+
+
+def _emit_lineage(lineage: dict, out_path, harness_path, red_path=None) -> None:
     _write_json(lineage, out_path)
     if harness_path is not None:
-        rendered = json.dumps(lineage['finalHarness'], ensure_ascii=False, indent=2)
-        Path(harness_path).write_text(rendered + '\n', encoding='utf-8')
+        _emit_harness(lineage['finalHarness'], harness_path)
+    if red_path is not None and isinstance(lineage.get('finalRedHarness'), dict):
+        _emit_harness(lineage['finalRedHarness'], red_path)
 
 
 def _parse(argv):
@@ -584,7 +754,7 @@ def main(argv: list[str] | None = None) -> int:
     except OSError:
         _emit_error(ArenaCampaignError('input_invalid', 2), getattr(args, 'out', None))
         return 2
-    _emit_lineage(lineage, args.out, args.out_harness)
+    _emit_lineage(lineage, args.out, args.out_harness, getattr(args, 'out_red_harness', None))
     return 0
 
 

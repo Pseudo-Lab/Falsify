@@ -45,6 +45,7 @@ from paper_external_grounding import (
 )
 from paper_figure_forensics import audit_figure_forensics
 from paper_flow_and_spin_triage import audit_flow_and_spin_triage
+from paper_internal_consistency import audit_internal_consistency
 from paper_registry_identifiers import (
     audit_identifiers_offline,
     verify_identifiers_online,
@@ -897,7 +898,10 @@ def _figure_forensics(paper_id, actual_hash, max_signals, store):
     return signals, summary
 
 
-def _validate_sensor_args(max_signals, include_external_oracle, include_figure_forensics, include_flow_triage):
+def _validate_sensor_args(
+    max_signals, include_external_oracle, include_figure_forensics, include_flow_triage,
+    include_internal_consistency,
+):
     if isinstance(max_signals, bool) or type(max_signals) is not int or not 1 <= max_signals <= 100:
         raise ValueError("limit")
     if type(include_external_oracle) is not bool:
@@ -906,6 +910,8 @@ def _validate_sensor_args(max_signals, include_external_oracle, include_figure_f
         raise ValueError("include_figure_forensics")
     if type(include_flow_triage) is not bool:
         raise ValueError("include_flow_triage")
+    if type(include_internal_consistency) is not bool:
+        raise ValueError("include_internal_consistency")
 
 
 def _read_bound_tables(store, paper_id):
@@ -954,6 +960,23 @@ def _flow_triage_pack(page_texts, max_signals, store, paper_id):
     return flow_sigs, summary
 
 
+def _internal_consistency_pack(page_texts, max_signals, store, paper_id):
+    ic_res = audit_internal_consistency(
+        page_texts, table_items=_bound_flow_tables(store, paper_id), max_signals=max_signals,
+    )
+    ic_sigs = [_flow_signal_from_triage(sig) for sig in ic_res.get("signals", [])]
+    summary = {
+        "schema": ic_res.get("schema", "falsify.internal-consistency.v1"),
+        "enabled": True,
+        "status": ic_res.get("status"),
+        "sectionsDetected": ic_res.get("sectionsDetected", []),
+        "signalCount": ic_res["signalCount"],
+        "hintCount": ic_res["hintCount"],
+        "triageHints": ic_res["triageHints"],
+    }
+    return ic_sigs, summary
+
+
 def _attach_named(result, key, summary):
     if summary is not None:
         result[key] = summary
@@ -971,10 +994,12 @@ def run_blue_sensor(
     identifier_transport=None,
     include_figure_forensics=False,
     include_flow_triage=False,
+    include_internal_consistency=False,
 ):
     """Run BLUE Layer 0 offline PDF forensic sensor (and opt-in P2 oracle pack)."""
     _validate_sensor_args(
         max_signals, include_external_oracle, include_figure_forensics, include_flow_triage,
+        include_internal_consistency,
     )
     store = _default_store() if store is None else store
     paper_id, actual_hash, summary, raw = _require_bound_pdf(paper_id, store)
@@ -1011,9 +1036,13 @@ def run_blue_sensor(
         _flow_triage_pack(page_texts, max_signals, store, paper_id)
         if include_flow_triage else ([], None)
     )
+    ic_sigs, ic_summary = (
+        _internal_consistency_pack(page_texts, max_signals, store, paper_id)
+        if include_internal_consistency else ([], None)
+    )
     all_signals = (
         link_sigs + shared_sigs + dup_sigs + cite_sigs + mal_sigs
-        + id_offline_sigs + acro_sigs + oracle_sigs + d1_sigs + fig_sigs + flow_sigs
+        + id_offline_sigs + acro_sigs + oracle_sigs + d1_sigs + fig_sigs + flow_sigs + ic_sigs
     )
     capped, truncated = _dedupe_and_number(all_signals, max_signals)
     result = {
@@ -1037,5 +1066,6 @@ def run_blue_sensor(
     }
     _attach_named(result, "figureForensics", fig_summary)
     _attach_named(result, "flowAndSpinTriage", flow_summary)
+    _attach_named(result, "internalConsistency", ic_summary)
     _assert_no_red_keys(result)
     return result

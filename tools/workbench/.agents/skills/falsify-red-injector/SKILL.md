@@ -109,3 +109,11 @@ python app/examples/adversarial_red_v01/runner.py --pdf SOURCE.pdf --out-pdf BLI
 ```
 
 Omit `--pdf` to read `falsify.harness-invocation.v1` or `falsify.red-invocation.v1` from stdin (`pdfPath` or `pdfBase64`, `outPdfPath`, `outGoldPath`, `targetDifficulty`, `redBrief`, `settings`). A missed difficulty or a failed stealth audit exits `3` (`difficulty_target_unmet`, `stealth_audit_failed`). The runner refuses to overwrite the source PDF. `python app/examples/adversarial_red_v01/build_profile.py` prints the `falsify.harness.v1` RED profile.
+
+## 9. Wave 10 chart-shape bundles and `adversarial_red_v03`
+
+`plan_coordinated_mutation` (`app/local/paper_red_mcp.py`, backed by `plan_coordinated_mutations`) discovers native vector `chart-shape` targets in three geometries: `bar`, `scatter`, and `curve`. Default `L3` bundles are `3-surface` edits: `prose + figure + table/supplement`. One surface stays as the anchor; the other two carry the coordinated change. Do not ship a figure-only tweak when a prose or table/supplement partner is available.
+
+`simulate_red_detectability` (`app/local/paper_red_detectability.py`, CLI `red simulate`) includes visual figure-forensics diffing for those `chart-shape` operations. A figure that still matches the untouched render is not a stealthy `L3` defect. Distances stay `L1 < L2 < L3 < L4`.
+
+`redBrief`-steered runs use `app/examples/adversarial_red_v03/`. The brief selects the claim and the target difficulty; the runner still plans with `plan_coordinated_mutation`, simulates detectability, and writes a blind PDF plus a sealed gold ledger. v0.1 and v0.2 remain available for older profiles. The brief must not be copied into the blind bundle.

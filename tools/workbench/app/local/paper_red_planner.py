@@ -613,13 +613,20 @@ def _l3_bundles(discovered, traces, blocked, ids):
     return bundles
 
 
+def _plan_scene(op):
+    plan = op.get('plan') if isinstance(op, dict) else None
+    if isinstance(plan, dict):
+        return plan.get('sceneId')
+    return None
+
+
 def _bundle_key(ops):
     rows = []
     for op in ops:
         rows.append((
             op.get('kind'), op.get('pageIndex'), op.get('before'), op.get('after'),
             op.get('itemId'), op.get('row'), op.get('column'), op.get('beforeUri'),
-            op.get('supplementId'), op.get('name'),
+            op.get('supplementId'), op.get('name'), _plan_scene(op),
         ))
     return tuple(rows)
 
@@ -730,7 +737,47 @@ def _verify_all(paper_id, file_hash, store, supplements, service, candidates):
     return verified
 
 
-def _rank_key(row, target):
+def _brief_names(brief, *keys):
+    if not isinstance(brief, dict):
+        return []
+    found = []
+    for key in keys:
+        value = brief.get(key)
+        if isinstance(value, str) and value:
+            found.append(value)
+        elif isinstance(value, list):
+            for item in value:
+                if isinstance(item, str) and item:
+                    found.append(item)
+    return found
+
+
+def _brief_rank(row, brief):
+    surfaces = set(_brief_names(brief, 'preferredSurfaces', 'targetSurfaces'))
+    families = set(_brief_names(brief, 'targetFamilies'))
+    worlds = set(_brief_names(brief, 'targetWorlds'))
+    if not surfaces and not families and not worlds:
+        return 0
+    have = set(row.get('surfaces') or [])
+    have_families, have_worlds = set(), set()
+    for op in row.get('operations') or []:
+        if not isinstance(op, dict):
+            continue
+        have_families.add(op.get('family'))
+        have_worlds.add(op.get('world'))
+    score = 0
+    if surfaces and surfaces <= have:
+        score += 2
+    elif surfaces & have:
+        score += 1
+    if families & have_families:
+        score += 1
+    if worlds & have_worlds:
+        score += 1
+    return -score
+
+
+def _rank_key(row, target, brief=None):
     met = 0 if _meets(row, target) else 1
     coordinated = 0 if target == 'L3' and _coordinated(row) else 1
     if target != 'L3':
@@ -739,7 +786,7 @@ def _rank_key(row, target):
     if target not in ('L3', 'L4'):
         silent = 0
     gap = abs(distance_rank(row['effectiveDifficulty']) - distance_rank(target))
-    return (met, coordinated, silent, gap, -len(row['operations']))
+    return (_brief_rank(row, brief), met, coordinated, silent, gap, -len(row['operations']))
 
 
 def _pack(rows, target):
@@ -765,6 +812,421 @@ def _queries_for(discovered, claim_query):
     return [claim_query]
 
 
+_MIN_CHART_AREA = 2500.0
+_MAX_CHART_PIXELS = 16_000_000.0
+_MAX_CHART_REGIONS = 4
+_CHART_PAD = 48.0
+_CLUSTER_GAP = 36.0
+
+
+def _charts_enabled(service):
+    if service is not None:
+        return True
+    from paper_chart_edit_service import capability
+    return bool(capability().get('available'))
+
+
+def _fresh_chart_service(store):
+    from paper_chart_edit_service import ChartEditService
+    return ChartEditService(store=store)
+
+
+def _as_box(value):
+    if value is None:
+        return None
+    try:
+        box = [float(value[0]), float(value[1]), float(value[2]), float(value[3])]
+    except (TypeError, ValueError, IndexError):
+        return None
+    if box[2] <= box[0] or box[3] <= box[1]:
+        return None
+    return box
+
+
+def _round_box(box):
+    return [round(box[0], 3), round(box[1], 3), round(box[2], 3), round(box[3], 3)]
+
+
+def _region_key(page_index, box):
+    return (page_index, round(box[0], 1), round(box[1], 1), round(box[2], 1), round(box[3], 1))
+
+
+def _box_area(box):
+    return (box[2] - box[0]) * (box[3] - box[1])
+
+
+def _clamp_box(box, rect):
+    if box is None:
+        return None
+    clamped = [
+        max(float(rect.x0), min(box[0], float(rect.x1))),
+        max(float(rect.y0), min(box[1], float(rect.y1))),
+        max(float(rect.x0), min(box[2], float(rect.x1))),
+        max(float(rect.y0), min(box[3], float(rect.y1))),
+    ]
+    if clamped[2] <= clamped[0] or clamped[3] <= clamped[1]:
+        return None
+    area = _box_area(clamped)
+    if area < _MIN_CHART_AREA or area > _MAX_CHART_PIXELS:
+        return None
+    return clamped
+
+
+def _has_region(regions, key):
+    for item in regions:
+        if item['key'] == key:
+            return True
+    return False
+
+
+def _push_region(regions, page_index, box, rect):
+    if box is None or len(regions) >= _MAX_CHART_REGIONS:
+        return
+    rounded = _clamp_box(_round_box(box), rect)
+    if rounded is None:
+        return
+    key = _region_key(page_index, rounded)
+    if _has_region(regions, key):
+        return
+    regions.append({'pageIndex': page_index, 'bbox': _round_box(rounded), 'key': key})
+
+
+def _filled_box(drawing):
+    if not isinstance(drawing, dict) or drawing.get('fill') is None:
+        return None
+    box = _as_box(drawing.get('rect'))
+    if box is None or _box_area(box) < 80:
+        return None
+    return box
+
+
+def _page_draw_boxes(page):
+    boxes = []
+    try:
+        drawings = page.get_drawings()
+    except Exception:
+        return boxes
+    for drawing in drawings or []:
+        box = _filled_box(drawing)
+        if box is not None:
+            boxes.append(box)
+    return boxes
+
+
+def _overlaps(left, right):
+    if left[2] < right[0] - _CLUSTER_GAP or right[2] < left[0] - _CLUSTER_GAP:
+        return False
+    if left[3] < right[1] - _CLUSTER_GAP or right[3] < left[1] - _CLUSTER_GAP:
+        return False
+    return True
+
+
+def _union(left, right):
+    return [
+        min(left[0], right[0]), min(left[1], right[1]),
+        max(left[2], right[2]), max(left[3], right[3]),
+    ]
+
+
+def _cluster_boxes(boxes):
+    groups = []
+    for box in boxes:
+        groups.append(list(box))
+    changed = True
+    while changed and len(groups) > 1:
+        changed = False
+        current = groups[0]
+        pending = []
+        for other in groups[1:]:
+            if _overlaps(current, other):
+                current = _union(current, other)
+                changed = True
+            else:
+                pending.append(other)
+        pending.append(current)
+        groups = pending
+    return groups
+
+
+def _page_figures(figures, page_index):
+    found = []
+    for figure in figures:
+        if figure.get('pageIndex') == page_index:
+            found.append(figure)
+    return found
+
+
+def _covering_figure(box, figures):
+    for figure in figures:
+        outer = _as_box(figure.get('bbox'))
+        if outer is None:
+            continue
+        inside = outer[0] <= box[0] and outer[1] <= box[1] and box[2] <= outer[2] and box[3] <= outer[3]
+        if inside:
+            return outer
+    return None
+
+
+def _pad_box(box, rect):
+    padded = [
+        box[0] - _CHART_PAD, box[1] - _CHART_PAD,
+        box[2] + _CHART_PAD, box[3] + _CHART_PAD,
+    ]
+    return _clamp_box(padded, rect)
+
+
+def _add_vector_regions(page, page_index, figures, regions):
+    for box in _cluster_boxes(_page_draw_boxes(page)):
+        if len(regions) >= _MAX_CHART_REGIONS:
+            return
+        cover = _covering_figure(box, figures)
+        if cover is not None:
+            _push_region(regions, page_index, cover, page.rect)
+        else:
+            _push_region(regions, page_index, _pad_box(box, page.rect), page.rect)
+
+
+def _add_figure_regions(page, page_index, figures, regions):
+    for figure in figures:
+        if len(regions) >= _MAX_CHART_REGIONS:
+            return
+        _push_region(regions, page_index, _as_box(figure.get('bbox')), page.rect)
+
+
+def _page_regions(page, page_index, figures, regions):
+    local = _page_figures(figures, page_index)
+    _add_vector_regions(page, page_index, local, regions)
+    _add_figure_regions(page, page_index, local, regions)
+
+
+def _chart_regions(store, paper_id, file_hash):
+    import pymupdf
+    raw = store.source_bytes(paper_id, file_hash)
+    figures = _list_targets(store, paper_id, file_hash).get('figures') or []
+    regions = []
+    doc = pymupdf.open(stream=raw, filetype='pdf')
+    try:
+        for index in range(len(doc)):
+            _page_regions(doc[index], index, figures, regions)
+            if len(regions) >= _MAX_CHART_REGIONS:
+                break
+    finally:
+        doc.close()
+    return regions
+
+
+def _prepare_chart(service, paper_id, file_hash, region):
+    try:
+        scene = service.prepare({
+            'paperId': paper_id,
+            'fileHash': file_hash,
+            'pageIndex': region['pageIndex'],
+            'bbox': region['bbox'],
+        })
+    except Exception:
+        return None
+    if not isinstance(scene, dict) or not scene.get('series'):
+        return None
+    return scene
+
+
+def _plot_limits(plot):
+    box = plot if isinstance(plot, list) and len(plot) == 4 else [0.0, 0.0, 1.0, 1.0]
+    try:
+        return float(box[0]), float(box[1]), float(box[2]), float(box[3])
+    except (TypeError, ValueError):
+        return 0.0, 0.0, 1.0, 1.0
+
+
+def _in_plot(x, y, plot):
+    x0, y0, x1, y1 = _plot_limits(plot)
+    return x0 <= x <= x1 and y0 <= y <= y1
+
+
+def _number(value):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
+
+
+def _bar_candidate(point, series, plot):
+    baseline = _number(point.get('baseline', series.get('baseline')))
+    x, y = _number(point.get('x')), _number(point.get('y'))
+    if baseline is None or x is None or y is None:
+        return None
+    span = y - baseline
+    if abs(span) < 4:
+        return None
+    for scale in (1.18, 0.82):
+        new_y = baseline + span * scale
+        moved = abs(new_y - y) >= abs(span) * 0.12 and _in_plot(x, new_y, plot)
+        if moved:
+            return abs(span), x, new_y
+    return None
+
+
+def _scatter_candidate(point, plot):
+    x, y = _number(point.get('x')), _number(point.get('y'))
+    if x is None or y is None:
+        return None
+    x0, y0, x1, y1 = _plot_limits(plot)
+    dx, dy = (x1 - x0) * 0.18, (y1 - y0) * 0.18
+    for new_x, new_y in ((x, y + dy), (x, y - dy), (x + dx, y), (x - dx, y)):
+        if _in_plot(new_x, new_y, plot) and (abs(new_x - x) > 1 or abs(new_y - y) > 1):
+            return abs(new_x - x) + abs(new_y - y), new_x, new_y
+    return None
+
+
+def _best_mark(series, plot):
+    best = None
+    points = series.get('points') or []
+    for index, point in enumerate(points):
+        if not isinstance(point, dict):
+            continue
+        if series.get('kind') == 'bar':
+            found = _bar_candidate(point, series, plot)
+        else:
+            found = _scatter_candidate(point, plot)
+        if found is not None and (best is None or found[0] > best[0]):
+            best = (found[0], index, found[1], found[2])
+    return best
+
+
+def _mark_move(series, plot):
+    best = _best_mark(series, plot)
+    if best is None:
+        return None
+    _delta, index, x, y = best
+    return {
+        'id': 'cs-1',
+        'kind': 'set-values',
+        'seriesId': series.get('id'),
+        'points': [{'index': index, 'x': x, 'y': y}],
+    }
+
+
+def _curve_move(series, plot):
+    points = series.get('points') or []
+    if len(points) < 3:
+        return None
+    xs, ys = [], []
+    for point in points:
+        x, y = _number(point.get('x') if isinstance(point, dict) else None), None
+        y = _number(point.get('y') if isinstance(point, dict) else None)
+        if x is None or y is None:
+            return None
+        xs.append(x)
+        ys.append(y)
+    x0, y0, x1, y1 = _plot_limits(plot)
+    mid_x = (min(xs) + max(xs)) / 2.0
+    mid_y = (min(ys) + max(ys)) / 2.0
+    radius = max(max(xs) - min(xs), max(ys) - min(ys), 12.0) / 2.0
+    delta = max((y1 - y0) * 0.18, 4.0)
+    dy = delta if mid_y + delta <= y1 else -delta
+    return {
+        'id': 'cs-1', 'kind': 'deform', 'seriesId': series.get('id'),
+        'center': [mid_x, mid_y], 'radius': radius, 'dx': 0, 'dy': dy,
+    }
+
+
+def _first_series_edit(series_list, plot, marks):
+    for series in series_list:
+        if not isinstance(series, dict) or not series.get('id'):
+            continue
+        if marks and series.get('kind') not in ('bar', 'scatter'):
+            continue
+        edit = _mark_move(series, plot) if marks else _curve_move(series, plot)
+        if edit is not None:
+            return edit
+    return None
+
+
+def _scene_edit(scene):
+    try:
+        plot = scene.get('plotBbox')
+        series_list = scene.get('series') or []
+        if scene.get('mode') == 'marks':
+            return _first_series_edit(series_list, plot, True)
+        return _first_series_edit(series_list, plot, False)
+    except (TypeError, ValueError):
+        return None
+
+
+def _chart_op(scene, edit, suffix):
+    op = _stamp('chart', suffix, 'D4-1', 'W4', 'L3')
+    op['kind'] = 'chart-shape'
+    op['pageIndex'] = scene.get('pageIndex')
+    op['plan'] = {
+        'schema': 'falsify.chart-edit-plan.v1',
+        'paperId': scene.get('paperId'),
+        'fileHash': scene.get('fileHash'),
+        'sceneId': scene.get('sceneId'),
+        'revision': 1,
+        'operations': [edit],
+    }
+    return op
+
+
+def _first_l3(discovered, traces, blocked):
+    bundles = _l3_bundles(discovered, traces, blocked, {'n': 1})
+    if not bundles:
+        return None
+    return bundles[0]
+
+
+def _chart_with_text(chart, companion):
+    if not companion or companion[0].get('kind') != 'text-span':
+        return None
+    return [chart, companion[0]]
+
+
+def _push_chart_bundles(bundles, chart, companion):
+    if companion:
+        bundles.append([chart] + list(companion))
+    pair = _chart_with_text(chart, companion)
+    if pair is not None:
+        bundles.append(pair)
+    elif not companion:
+        bundles.append([chart])
+
+
+def _collect_chart_bundles(store, paper_id, file_hash, service, discovered, traces, blocked):
+    bundles = []
+    companion = _first_l3(discovered, traces, blocked)
+    suffix = 1
+    for region in _chart_regions(store, paper_id, file_hash):
+        if len(bundles) >= 4:
+            break
+        scene = _prepare_chart(service, paper_id, file_hash, region)
+        if scene is None:
+            continue
+        edit = _scene_edit(scene)
+        if edit is None:
+            continue
+        _push_chart_bundles(bundles, _chart_op(scene, edit, suffix), companion)
+        suffix += 1
+    return bundles[:4]
+
+
+def _chart_bundles_for(store, paper_id, file_hash, service, discovered, traces, blocked):
+    if not _charts_enabled(service):
+        return [], service
+    active = service if service is not None else _fresh_chart_service(store)
+    bundles = _collect_chart_bundles(
+        store, paper_id, file_hash, active, discovered, traces, blocked,
+    )
+    if not bundles:
+        return [], service
+    return bundles, active
+
+
+def _prepend_candidates(primary, existing):
+    found = {'seen': set(), 'ops': []}
+    _extend_unique(found, primary[:4])
+    _extend_unique(found, existing)
+    return found['ops'][:_MAX_CANDIDATES]
+
+
 def plan_coordinated_mutations(
     paper_id,
     *,
@@ -775,6 +1237,7 @@ def plan_coordinated_mutations(
     target_difficulty='L3',
     max_bundles=5,
     claim_query=None,
+    red_brief=None,
 ):
     """Return detectability-verified coordinated mutation bundles for one bound PDF."""
     target = _require_difficulty(target_difficulty)
@@ -790,10 +1253,18 @@ def plan_coordinated_mutations(
     traces = _trace_all(
         paper_id, actual_hash, bound_store, loaded, queries, claim_query is not None,
     )
-    groups = _candidate_groups(discovered, traces, _blocked(baseline.get('signals')))
+    blocked = _blocked(baseline.get('signals'))
+    groups = _candidate_groups(discovered, traces, blocked)
     candidates = _ordered_candidates(groups, target, claim_query)
+    chart_bundles, active = _chart_bundles_for(
+        bound_store, baseline.get('paperId', paper_id), actual_hash, service,
+        discovered, traces, blocked,
+    )
+    if chart_bundles:
+        candidates = _prepend_candidates(chart_bundles, candidates)
+        service = active
     verified = _verify_all(paper_id, actual_hash, bound_store, loaded, service, candidates)
-    ranked = sorted(verified, key=lambda row: _rank_key(row, target))[:limit]
+    ranked = sorted(verified, key=lambda row: _rank_key(row, target, red_brief))[:limit]
     signal_count = baseline.get('signalCount', 0)
     return {
         'schema': SCHEMA,

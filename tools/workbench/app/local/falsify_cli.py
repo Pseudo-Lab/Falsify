@@ -1,11 +1,12 @@
 """Unified headless agent JSON CLI for falsify RED/BLUE workflows.
 
 Usage:
-    python app/local/falsify_cli.py blue scan --pdf PATH [--supplement PATH ...] [--oracle] [--figure-forensics] [--flow-triage] [--recompute-raw] [--audit-code] [--max-signals 50] [--digest-only] [--out JSON_PATH]
+    python app/local/falsify_cli.py blue scan --pdf PATH [--supplement PATH ...] [--oracle] [--figure-forensics] [--flow-triage] [--internal-consistency] [--recompute-raw] [--audit-code] [--max-signals 50] [--digest-only] [--out JSON_PATH]
     python app/local/falsify_cli.py blue scan-workspace --workspace DIR [--max-papers 32] [--max-signals-per-paper 25] [--figure-forensics] [--no-recompute-raw] [--out JSON_PATH]
     python app/local/falsify_cli.py blue validate --pdf BLIND_PDF --report BLUE_REPORT [--supplement PATH ...] [--ledger CANDIDATES_JSON] [--emit-repair-pack] [--csv OUT_CSV] [--out JSON_PATH]
+    python app/local/falsify_cli.py blue finalize --pdf BLIND_PDF --report BLUE_REPORT [--repairs REPAIRS_JSON] [--supplement PATH ...] [--ledger CANDIDATES_JSON] [--out-report FINAL_REPORT_JSON] [--csv OUT_CSV] [--out JSON_PATH]
     python app/local/falsify_cli.py red targets --pdf PATH [--page N] [--query TEXT] [--include-baseline]
-    python app/local/falsify_cli.py red plan --pdf PATH [--supplement PATH ...] [--target-difficulty L1|L2|L3|L4] [--max-bundles 5] [--claim TEXT] [--out JSON_PATH]
+    python app/local/falsify_cli.py red plan --pdf PATH [--supplement PATH ...] [--target-difficulty L1|L2|L3|L4] [--max-bundles 5] [--claim TEXT] [--red-brief BRIEF_JSON_OR_PATH] [--out JSON_PATH]
     python app/local/falsify_cli.py red simulate --pdf PATH --ops OPS_JSON_OR_PATH [--supplement PATH ...] [--max-signals 50] [--out JSON_PATH]
     python app/local/falsify_cli.py red trace --pdf PATH --claim TEXT [--supplement PATH ...] [--max-occurrences 40] [--out JSON_PATH]
     python app/local/falsify_cli.py red apply --pdf PATH --ops OPS_JSON_OR_PATH --out-pdf BLIND_PDF [--out-gold GOLD_JSON] [--out-supplement-dir DIR] [--supplement PATH ...] [--min-difficulty L1|L2|L3|L4] [--require-clean-stealth]
@@ -13,9 +14,9 @@ Usage:
     python app/local/falsify_cli.py arena score --gold GOLD_JSON --blue BLUE_JSON [--blue BLUE_JSON ...] [--baseline BASELINE_JSON] [--out OUT_JSON]
     python app/local/falsify_cli.py arena run-round --pdf BLIND_PDF --agent-cmd EXE [--agent-arg VALUE ...] [--source-pdf SRC_PDF] [--supplement PATH ...] [--gold GOLD_JSON] [--baseline BASELINE_JSON] [--agent-timeout 180] [--runs 1] [--out OUT_JSON]
     python app/local/falsify_cli.py arena distill --round ROUND_JSON [--gold GOLD_JSON] [--max-rules 40] [--out PATCH_JSON]
-    python app/local/falsify_cli.py arena duel --source-pdf SRC_PDF --red-cmd EXE [--red-arg VALUE ...] --blue-cmd EXE [--blue-arg VALUE ...] [--supplement PATH ...] [--holdout-pdf PDF ...] [--min-difficulty L1|L2|L3|L4] [--runs 1] [--agent-timeout 180] [--max-rules 40] [--no-validate-quotes] [--out OUT_JSON]
-    python app/local/falsify_cli.py arena apply-patch --harness HARNESS_JSON --patch PATCH_JSON [--role blue|red] [--max-generations 3] [--baseline-holdout-fp N] [--candidate-holdout-fp N] [--max-instructions-chars 12000] [--out OUT_JSON]
-    python app/local/falsify_cli.py arena evolve --source-pdf SRC_PDF [SRC_PDF ...] [--supplement PATH ...] [--holdout-pdf PDF ...] [--harness HARNESS_JSON] [--role blue|red] --red-cmd EXE [--red-arg VALUE ...] --blue-cmd EXE [--blue-arg VALUE ...] [--generations 3] [--min-difficulty L1|L2|L3|L4] [--runs 1] [--agent-timeout 180] [--max-rules 40] [--max-recall-drop 0.0] [--out OUT_JSON] [--out-harness HARNESS_OUT]
+    python app/local/falsify_cli.py arena duel --source-pdf SRC_PDF --red-cmd EXE [--red-arg VALUE ...] --blue-cmd EXE [--blue-arg VALUE ...] [--supplement PATH ...] [--holdout-pdf PDF ...] [--red-harness HARNESS_JSON] [--blue-harness HARNESS_JSON] [--min-difficulty L1|L2|L3|L4] [--runs 1] [--agent-timeout 180] [--max-rules 40] [--no-validate-quotes] [--out OUT_JSON]
+    python app/local/falsify_cli.py arena apply-patch --harness HARNESS_JSON --patch PATCH_JSON [--role blue|red] [--max-generations 3] [--baseline-holdout-fp N] [--candidate-holdout-fp N] [--max-instructions-chars 12000] [--compact-rules] [--out OUT_JSON]
+    python app/local/falsify_cli.py arena evolve --source-pdf SRC_PDF [SRC_PDF ...] [--supplement PATH ...] [--holdout-pdf PDF ...] [--harness HARNESS_JSON] [--red-harness RED_HARNESS_JSON] [--role blue|red|both] --red-cmd EXE [--red-arg VALUE ...] --blue-cmd EXE [--blue-arg VALUE ...] [--generations 3] [--min-difficulty L1|L2|L3|L4] [--runs 1] [--agent-timeout 180] [--max-rules 40] [--max-recall-drop 0.0] [--compact-rules] [--out OUT_JSON] [--out-harness HARNESS_OUT] [--out-red-harness RED_HARNESS_OUT]
     python app/local/falsify_cli.py arena benchmark [--mode sensor|agent] [--agent-cmd EXE] [--agent-arg VALUE ...] [--case CASE_ID ...] [--baseline-report REPORT_JSON] [--max-recall-drop 0.0] [--allow-holdout-fp-increase] [--out OUT_JSON]
     python app/local/falsify_cli.py mcp-config (--pdf PATH | --workspace DIR) [--role blue|red|both] [--analysis] [--oracle] [--supplement PATH ...] [--format json]
 """
@@ -47,7 +48,7 @@ for _path in (str(_HERE.parent), str(_EVAL_DIR)):
         sys.path.insert(0, _path)
 
 from agreement_selective import compute_krippendorff_alpha, compute_selective_prediction  # noqa: E402
-from blue_report_validate import BlueReportError, validate_blue_report  # noqa: E402
+from blue_report_validate import BlueReportError, finalize_blue_report, validate_blue_report  # noqa: E402
 from paper_blue_sensor import run_blue_sensor  # noqa: E402
 from paper_chart_edit_service import ChartEditService  # noqa: E402
 from paper_evidence import EvidenceStore  # noqa: E402
@@ -67,6 +68,7 @@ from paper_supplement_audit import (  # noqa: E402
     _FORBIDDEN_RED_KEYS,
     audit_paper_with_supplements,
 )
+from paper_tabular_notebook_loader import parse_ipynb_notebook, parse_xlsx_workbook  # noqa: E402
 from paper_uri_mutator import _HINT_TOKENS  # noqa: E402
 
 SCHEMA = "falsify.agent-cli.v1"
@@ -79,7 +81,8 @@ MCP_WORKSPACE_WARNING = "workspace flag requires the w7-c2-mcp-workspace merge"
 GOLD_LEDGER_SCHEMA = "falsify.red-gold-ledger.v1"
 DIGEST_MAX_BYTES = 12 * 1024
 SUPPORTED_SUPP_EXTS = frozenset({
-    ".csv", ".tsv", ".json", ".md", ".txt", ".log", ".py", ".r", ".sql", ".pdf", ".docx",
+    ".csv", ".tsv", ".json", ".md", ".txt", ".log",
+    ".py", ".r", ".rmd", ".qmd", ".sql", ".pdf", ".docx", ".xlsx", ".ipynb",
 })
 _UNAMBIGUOUS_META_TOKENS = (
     "falsify", "red-plan", "candidate", "rationale", "falsify-red",
@@ -258,6 +261,53 @@ def _read_json_file(path_str: str, label: str = "json"):
         raise _CliError("invalid_json", f"Invalid {label} JSON ({path_str}): {exc}", exit_code=2) from None
 
 
+def _decode_structured_supplement(path: Path, ext: str, raw: bytes) -> dict:
+    try:
+        if ext == ".xlsx":
+            parsed = parse_xlsx_workbook(raw, name=path.name)
+            return {
+                "name": path.name,
+                "text": parsed.get("text") or "",
+                "sheets": parsed.get("sheets") or [],
+                "formulaSignals": parsed.get("formulaSignals") or [],
+                "bytes": raw,
+            }
+        parsed = parse_ipynb_notebook(raw, name=path.name)
+        return {
+            "name": path.name,
+            "text": parsed.get("text") or "",
+            "notebook": parsed,
+            "bytes": raw,
+        }
+    except ValueError as exc:
+        if "forbidden_red_key" in str(exc):
+            raise _CliError(
+                "forbidden_red_key",
+                f"Supplement {path.name} contains forbidden RED/gold key(s).",
+                exit_code=3,
+                recovery_hint="Remove RED ledger fields (before/after/patch/gold/plan) before running BLUE scan.",
+                extra={"leaks": [{"surface": "supplement", "file": path.name}]},
+            ) from None
+        raise _CliError("invalid_supplement", f"Invalid supplement {path.name}: {exc}", exit_code=2) from None
+
+
+def _load_json_supplement_entry(path: Path, text: str) -> dict:
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise _CliError("invalid_json", f"Invalid supplement JSON {path.name}: {exc}", exit_code=2) from None
+    red_keys = _find_red_keys(parsed)
+    if red_keys:
+        raise _CliError(
+            "forbidden_red_key",
+            f"Supplement {path.name} contains forbidden RED/gold key(s): {', '.join(red_keys[:5])}",
+            exit_code=3,
+            recovery_hint="Remove RED ledger fields (before/after/patch/gold/plan) before running BLUE scan.",
+            extra={"leaks": [{"surface": "supplement_json", "file": path.name, "keys": red_keys[:10]}]},
+        )
+    return {"name": path.name, "text": text}
+
+
 def _load_supplement_entry(path_str: str) -> dict:
     path = Path(path_str)
     if not path.is_file():
@@ -275,21 +325,11 @@ def _load_supplement_entry(path_str: str) -> dict:
         return {"name": path.name, "pages": _extract_pdf_pages(raw)}
     if ext == ".docx":
         return {"name": path.name, "text": _extract_docx_text(raw)}
+    if ext in (".xlsx", ".ipynb"):
+        return _decode_structured_supplement(path, ext, raw)
     text = raw.decode("utf-8-sig", errors="replace")
     if ext == ".json":
-        try:
-            parsed = json.loads(text)
-        except json.JSONDecodeError as exc:
-            raise _CliError("invalid_json", f"Invalid supplement JSON {path.name}: {exc}", exit_code=2) from None
-        red_keys = _find_red_keys(parsed)
-        if red_keys:
-            raise _CliError(
-                "forbidden_red_key",
-                f"Supplement {path.name} contains forbidden RED/gold key(s): {', '.join(red_keys[:5])}",
-                exit_code=3,
-                recovery_hint="Remove RED ledger fields (before/after/patch/gold/plan) before running BLUE scan.",
-                extra={"leaks": [{"surface": "supplement_json", "file": path.name, "keys": red_keys[:10]}]},
-            )
+        return _load_json_supplement_entry(path, text)
     return {"name": path.name, "text": text}
 
 
@@ -319,6 +359,11 @@ def _strip_bulky_sensor_fields(sensor: dict) -> dict:
         op["retractedReferences"] = list(op.get("retractedReferences") or [])[:5]
         op["registryComparisons"] = list(op.get("registryComparisons") or [])[:5]
         compact["oraclePack"] = op
+    if isinstance(compact.get("internalConsistency"), dict):
+        ic = dict(compact["internalConsistency"])
+        ic["signals"] = [_trim_signal(s) for s in ic.get("signals") or []]
+        ic["triageHints"] = list(ic.get("triageHints") or [])[:5]
+        compact["internalConsistency"] = ic
     compact["signals"] = [_trim_signal(s) for s in compact.get("signals") or []]
     return compact
 
@@ -487,6 +532,7 @@ def _cmd_blue_scan(args, deadline: float | None = None) -> tuple[dict, int]:
         include_external_oracle=bool(args.oracle),
         include_figure_forensics=bool(getattr(args, "figure_forensics", False)),
         include_flow_triage=bool(getattr(args, "flow_triage", False)),
+        include_internal_consistency=bool(getattr(args, "internal_consistency", False)),
         store=store,
     )
     supp_paths, supp_res, raw_res, code_res = _scan_attached_audits(store, pid, fhash, args, deadline)
@@ -604,6 +650,43 @@ def _cmd_blue_validate(args, deadline: float | None = None) -> tuple[dict, int]:
     if args.out:
         _write_json_out(args.out, payload, protected)
     return payload, exit_code
+
+
+def _cmd_blue_finalize(args, deadline: float | None = None) -> tuple[dict, int]:
+    store, summary = _open_pdf_store(args.pdf)
+    pid, fhash = summary["paperId"], summary["fileHash"]
+    report = _read_json_file(args.report, label="--report")
+    repairs = _read_json_file(args.repairs, label="--repairs") if args.repairs else None
+    ledger = _read_json_file(args.ledger, label="--ledger") if args.ledger else None
+    supp_paths = _flatten_paths(getattr(args, "supplement", None))
+    supp_entries = [_load_supplement_entry(p) for p in supp_paths]
+    protected = [p for p in [args.pdf, args.report, args.repairs, args.ledger, *supp_paths] if p]
+    _guard_output_paths([args.out_report, args.csv, args.out], protected)
+    _check_deadline(deadline)
+    result = finalize_blue_report(
+        store.source_bytes(pid, fhash),
+        report,
+        repairs=repairs,
+        ledger=ledger,
+        supplements=supp_entries or None,
+        out_report_path=args.out_report,
+        csv_path=args.csv,
+        paper_id=pid,
+        file_hash=fhash,
+        input_paths=protected,
+    )
+    _check_deadline(deadline)
+    payload = {
+        "schema": SCHEMA,
+        "ok": True,
+        "command": "blue finalize",
+        "finalizeSchema": result["schema"],
+        **{k: v for k, v in result.items() if k not in ("schema", "ok")},
+    }
+    if args.out:
+        extra_out = [p for p in (args.out_report, args.csv) if p]
+        _write_json_out(args.out, payload, [*protected, *extra_out])
+    return payload, 0
 
 
 def _require_readable_file(path_str: str, label: str) -> Path:
@@ -971,7 +1054,8 @@ def _supplements_for_detectability(entries: list[dict] | None):
         if not isinstance(text, str):
             pages = entry.get("pages")
             text = "\n".join(str(page) for page in pages) if isinstance(pages, list) else ""
-        prepared.append({**entry, "text": text})
+        cleaned = {k: v for k, v in entry.items() if k != "bytes"}
+        prepared.append({**cleaned, "text": text})
     return prepared
 
 
@@ -1080,10 +1164,37 @@ def _cmd_red_trace(args, deadline: float | None = None) -> tuple[dict, int]:
     return payload, 0
 
 
+def _load_optional_json_dict(raw_arg: str | None, label: str) -> tuple[dict | None, list[str]]:
+    if not raw_arg:
+        return None, []
+    stripped = str(raw_arg).strip()
+    if stripped.startswith("{"):
+        try:
+            parsed = json.loads(stripped)
+        except json.JSONDecodeError as exc:
+            raise _CliError("invalid_json", f"Invalid {label} JSON: {exc}", exit_code=2) from None
+        paths: list[str] = []
+    else:
+        parsed = _read_json_file(raw_arg, label=label)
+        paths = [raw_arg]
+    if not isinstance(parsed, dict):
+        raise _CliError("invalid_arguments", f"{label} must decode to a JSON object.", exit_code=2)
+    red_keys = _find_red_keys(parsed)
+    if red_keys:
+        raise _CliError(
+            "forbidden_red_key",
+            f"{label} contains forbidden RED/gold key(s): {', '.join(red_keys[:5])}",
+            exit_code=3,
+            recovery_hint="Pass an answer-key-free redBrief object without gold/before/after/patch fields.",
+        )
+    return parsed, paths
+
+
 def _cmd_red_plan(args, deadline: float | None = None) -> tuple[dict, int]:
     store, summary = _open_pdf_store(args.pdf)
     pid, fhash = summary["paperId"], summary["fileHash"]
     supp_paths, supp_entries = _load_optional_supplements(args.supplement)
+    brief_doc, brief_paths = _load_optional_json_dict(getattr(args, "red_brief", None), "--red-brief")
     _check_deadline(deadline)
     try:
         planner = importlib.import_module("paper_red_planner")
@@ -1096,14 +1207,17 @@ def _cmd_red_plan(args, deadline: float | None = None) -> tuple[dict, int]:
             target_difficulty=args.target_difficulty,
             max_bundles=args.max_bundles,
             claim_query=args.claim,
+            red_brief=brief_doc,
         )
     except ValueError as exc:
-        code = "invalid_arguments" if str(exc) in ("target_difficulty_invalid", "limit") else "red_plan_failed"
+        if "forbidden_red_key" in str(exc):
+            raise _CliError("forbidden_red_key", f"RED mutation planner rejected brief: {exc}", exit_code=3) from None
+        code = "invalid_arguments" if str(exc) in ("target_difficulty_invalid", "limit", "red_brief_invalid") else "red_plan_failed"
         raise _CliError(code, f"RED mutation planner failed: {exc}", exit_code=2) from None
     _check_deadline(deadline)
     payload = {"schema": SCHEMA, "ok": True, "command": "red plan", "plan": res}
     if args.out:
-        _write_json_out(args.out, payload, [args.pdf, *supp_paths])
+        _write_json_out(args.out, payload, [args.pdf, *supp_paths, *brief_paths])
     return payload, 0
 
 
@@ -1312,6 +1426,43 @@ def _inspect_pdf_with_source(src_bytes: bytes, blind_bytes: bytes) -> list[dict]
     return leaks
 
 
+def _extract_xlsx_xml_corpus(raw: bytes) -> str:
+    try:
+        with zipfile.ZipFile(io.BytesIO(raw)) as zf:
+            parts = [
+                zf.read(m).decode("utf-8", errors="replace")
+                for m in sorted(zf.namelist())
+                if m.lower().endswith((".xml", ".rels")) and zf.getinfo(m).file_size <= 8 * 1024 * 1024
+            ]
+            return "\n".join(parts)
+    except (zipfile.BadZipFile, OSError, KeyError):
+        raise _CliError("invalid_supplement", "Supplement .xlsx is not a valid ZIP/XLSX archive.", exit_code=2) from None
+
+
+def _inspect_one_supp_blindness(path: Path, ext: str, raw: bytes) -> list[dict]:
+    leaks = []
+    if ext in (".json", ".ipynb"):
+        try:
+            parsed = json.loads(raw.decode("utf-8-sig"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise _CliError("invalid_json", f"Invalid supplement JSON {path.name}: {exc}", exit_code=2) from None
+        red_keys = _find_red_keys(parsed)
+        if red_keys:
+            leaks.append({"code": "forbidden_red_key", "surface": "supplement_json", "file": path.name, "keys": red_keys[:10]})
+        text = json.dumps(parsed, ensure_ascii=False)
+    elif ext == ".pdf":
+        text = "\n".join(_extract_pdf_pages(raw))
+    elif ext == ".docx":
+        text = _extract_docx_text(raw)
+    elif ext == ".xlsx":
+        text = _extract_xlsx_xml_corpus(raw)
+    else:
+        text = raw.decode("utf-8-sig", errors="replace")
+    for item in _scan_text_patterns(text, f"supplement:{path.name}"):
+        leaks.append({**item, "file": path.name})
+    return leaks
+
+
 def _inspect_supplement_blindness(supp_paths: list[str]) -> list[dict]:
     leaks = []
     for p_str in supp_paths:
@@ -1321,24 +1472,7 @@ def _inspect_supplement_blindness(supp_paths: list[str]) -> list[dict]:
         ext = path.suffix.lower()
         if ext not in SUPPORTED_SUPP_EXTS:
             raise _CliError("unsupported_supplement", f"Unsupported supplement extension: {ext}", exit_code=2)
-        raw = path.read_bytes()
-        if ext == ".json":
-            try:
-                parsed = json.loads(raw.decode("utf-8-sig"))
-            except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-                raise _CliError("invalid_json", f"Invalid supplement JSON {path.name}: {exc}", exit_code=2) from None
-            red_keys = _find_red_keys(parsed)
-            if red_keys:
-                leaks.append({"code": "forbidden_red_key", "surface": "supplement_json", "file": path.name, "keys": red_keys[:10]})
-            text = json.dumps(parsed, ensure_ascii=False)
-        elif ext == ".pdf":
-            text = "\n".join(_extract_pdf_pages(raw))
-        elif ext == ".docx":
-            text = _extract_docx_text(raw)
-        else:
-            text = raw.decode("utf-8-sig", errors="replace")
-        for item in _scan_text_patterns(text, f"supplement:{path.name}"):
-            leaks.append({**item, "file": path.name})
+        leaks.extend(_inspect_one_supp_blindness(path, ext, path.read_bytes()))
     return leaks
 
 
@@ -1353,12 +1487,13 @@ def _load_blind_verify_supplements(supp_paths: list[str]) -> list[dict]:
             raise _CliError("unsupported_supplement", f"Unsupported supplement extension: {ext}", exit_code=2)
         raw = path.read_bytes()
         if ext == ".pdf":
-            text = "\n".join(_extract_pdf_pages(raw))
+            items.append({"name": path.name, "text": "\n".join(_extract_pdf_pages(raw))})
         elif ext == ".docx":
-            text = _extract_docx_text(raw)
+            items.append({"name": path.name, "text": _extract_docx_text(raw)})
+        elif ext == ".xlsx":
+            items.append({"name": path.name, "text": _extract_xlsx_xml_corpus(raw), "bytes": raw})
         else:
-            text = raw.decode("utf-8-sig", errors="replace")
-        items.append({"name": path.name, "text": text})
+            items.append({"name": path.name, "text": raw.decode("utf-8-sig", errors="replace")})
     return items
 
 
@@ -1766,6 +1901,8 @@ def _cmd_arena_duel(args, deadline: float | None = None) -> tuple[dict, int]:
     holdout_paths = _flatten_paths(args.holdout_pdf)
     red_argv = [args.red_cmd, *_flatten_paths(args.red_arg)]
     blue_argv = [args.blue_cmd, *_flatten_paths(args.blue_arg)]
+    red_harness = _read_json_file(args.red_harness, label="--red-harness") if getattr(args, "red_harness", None) else None
+    blue_harness = _read_json_file(args.blue_harness, label="--blue-harness") if getattr(args, "blue_harness", None) else None
     _check_deadline(deadline)
     try:
         duel = module.run_duel(
@@ -1779,12 +1916,15 @@ def _cmd_arena_duel(args, deadline: float | None = None) -> tuple[dict, int]:
             timeout=args.agent_timeout,
             validate_quotes=not bool(args.no_validate_quotes),
             max_rules=args.max_rules,
+            red_harness=red_harness,
+            blue_harness=blue_harness,
         )
     except module.ArenaDuelError as exc:
         raise _arena_duel_cli_error(exc, "duel") from None
     _check_deadline(deadline)
     payload = {"schema": SCHEMA, "ok": True, "command": "arena duel", "duel": duel}
-    protected = [args.source_pdf, *supp_paths, *holdout_paths]
+    harness_paths = [p for p in (getattr(args, "red_harness", None), getattr(args, "blue_harness", None)) if p]
+    protected = [args.source_pdf, *supp_paths, *holdout_paths, *harness_paths]
     if args.out:
         _write_json_out(args.out, payload, protected)
     return payload, 0
@@ -1804,6 +1944,7 @@ def _cmd_arena_apply_patch(args, deadline: float | None = None) -> tuple[dict, i
             baseline_holdout_fp=args.baseline_holdout_fp,
             candidate_holdout_fp=args.candidate_holdout_fp,
             max_instructions_chars=args.max_instructions_chars,
+            compact_rules=bool(getattr(args, "compact_rules", False)),
         )
     except module.ArenaDuelError as exc:
         raise _arena_duel_cli_error(exc, "apply-patch") from None
@@ -1836,8 +1977,12 @@ def _evolve_sources(source_paths: list[str], supp_entries: list[dict]) -> list[d
 def _write_evolve_outputs(args, payload: dict, lineage: dict, protected: list[str]) -> None:
     if args.out_harness:
         _write_json_out(args.out_harness, lineage["finalHarness"], protected)
+    out_red = getattr(args, "out_red_harness", None)
+    if out_red and isinstance(lineage.get("finalRedHarness"), dict):
+        extra_red = [args.out_harness] if args.out_harness else []
+        _write_json_out(out_red, lineage["finalRedHarness"], [*protected, *extra_red])
     if args.out:
-        extra = [args.out_harness] if args.out_harness else []
+        extra = [p for p in (args.out_harness, out_red) if p]
         _write_json_out(args.out, payload, [*protected, *extra])
 
 
@@ -1847,12 +1992,16 @@ def _cmd_arena_evolve(args, deadline: float | None = None) -> tuple[dict, int]:
     supp_paths = _flatten_paths(args.supplement)
     holdout_paths = _flatten_paths(args.holdout_pdf)
     sources = _evolve_sources(src_paths, _arena_round_supplements(supp_paths))
+    default_role = "blue" if args.role == "both" else args.role
     base_harness = (
         _read_json_file(args.harness, label="--harness")
-        if args.harness else module._default_harness(args.role)
+        if args.harness else module._default_harness(default_role)
     )
-    protected = [*src_paths, *supp_paths, *holdout_paths, *([args.harness] if args.harness else [])]
-    _guard_output_paths([args.out, args.out_harness], protected)
+    red_harness_arg = getattr(args, "red_harness", None)
+    base_red_harness = _read_json_file(red_harness_arg, label="--red-harness") if red_harness_arg else None
+    input_harnesses = [p for p in (args.harness, red_harness_arg) if p]
+    protected = [*src_paths, *supp_paths, *holdout_paths, *input_harnesses]
+    _guard_output_paths([args.out, args.out_harness, getattr(args, "out_red_harness", None)], protected)
     _check_deadline(deadline)
     try:
         lineage = module.run_evolution_campaign(
@@ -1869,6 +2018,8 @@ def _cmd_arena_evolve(args, deadline: float | None = None) -> tuple[dict, int]:
             max_rules=args.max_rules,
             max_instructions_chars=args.max_instructions_chars,
             max_recall_drop=args.max_recall_drop,
+            base_red_harness=base_red_harness,
+            compact_rules=bool(getattr(args, "compact_rules", False)),
         )
     except module.ArenaCampaignError as exc:
         raise _arena_duel_cli_error(exc, "evolve") from None
@@ -1931,6 +2082,7 @@ def _add_blue_parser(subparsers, parent):
     scan.add_argument("--oracle", action="store_true")
     scan.add_argument("--figure-forensics", action="store_true")
     scan.add_argument("--flow-triage", action="store_true")
+    scan.add_argument("--internal-consistency", action="store_true")
     scan.add_argument("--recompute-raw", action="store_true")
     scan.add_argument("--audit-code", action="store_true")
     scan.add_argument("--max-signals", type=int, default=50)
@@ -1957,6 +2109,18 @@ def _add_blue_parser(subparsers, parent):
     validate.add_argument("--emit-repair-pack", action="store_true")
     validate.add_argument("--csv")
     validate.add_argument("--out")
+    finalize = blue_sub.add_parser(
+        "finalize", parents=[parent],
+        help="Finalize a BLUE report: apply quote repairs, restore Zero-Drop rows, auto-downgrade unverified quotes",
+    )
+    finalize.add_argument("--pdf", required=True)
+    finalize.add_argument("--report", required=True)
+    finalize.add_argument("--repairs")
+    finalize.add_argument("--supplement", action="append", nargs="+")
+    finalize.add_argument("--ledger")
+    finalize.add_argument("--out-report")
+    finalize.add_argument("--csv")
+    finalize.add_argument("--out")
 
 
 def _add_red_parser(subparsers, parent):
@@ -1976,6 +2140,7 @@ def _add_red_parser(subparsers, parent):
     plan.add_argument("--target-difficulty", choices=["L1", "L2", "L3", "L4"], default="L3")
     plan.add_argument("--max-bundles", type=int, default=5)
     plan.add_argument("--claim")
+    plan.add_argument("--red-brief")
     plan.add_argument("--out")
     simulate = red_sub.add_parser("simulate", parents=[parent], help="Simulate Layer 0 detectability without writing a PDF")
     simulate.add_argument("--pdf", required=True)
@@ -2054,6 +2219,8 @@ def _add_arena_evolution_parsers(arena_sub, parent):
     duel.add_argument("--blue-arg", action="append", nargs="+")
     duel.add_argument("--supplement", action="append", nargs="+")
     duel.add_argument("--holdout-pdf", action="append", nargs="+")
+    duel.add_argument("--red-harness")
+    duel.add_argument("--blue-harness")
     duel.add_argument("--min-difficulty", choices=["L1", "L2", "L3", "L4"], default=None)
     duel.add_argument("--runs", type=int, default=1)
     duel.add_argument("--agent-timeout", type=int, default=180)
@@ -2072,6 +2239,7 @@ def _add_arena_evolution_parsers(arena_sub, parent):
     apply_patch.add_argument("--baseline-holdout-fp", type=int, default=None)
     apply_patch.add_argument("--candidate-holdout-fp", type=int, default=None)
     apply_patch.add_argument("--max-instructions-chars", type=int, default=12000)
+    apply_patch.add_argument("--compact-rules", action="store_true")
     apply_patch.add_argument("--out")
 
     evolve = arena_sub.add_parser(
@@ -2082,7 +2250,8 @@ def _add_arena_evolution_parsers(arena_sub, parent):
     evolve.add_argument("--supplement", action="append", nargs="+")
     evolve.add_argument("--holdout-pdf", action="append", nargs="+")
     evolve.add_argument("--harness")
-    evolve.add_argument("--role", choices=["blue", "red"], default="blue")
+    evolve.add_argument("--red-harness")
+    evolve.add_argument("--role", choices=["blue", "red", "both"], default="blue")
     evolve.add_argument("--red-cmd", required=True)
     evolve.add_argument("--red-arg", action="append", nargs="+")
     evolve.add_argument("--blue-cmd", required=True)
@@ -2094,12 +2263,14 @@ def _add_arena_evolution_parsers(arena_sub, parent):
     evolve.add_argument("--max-rules", type=int, default=40)
     evolve.add_argument("--max-instructions-chars", type=int, default=16000)
     evolve.add_argument("--max-recall-drop", type=float, default=0.0)
+    evolve.add_argument("--compact-rules", action="store_true")
     evolve.add_argument("--out")
     evolve.add_argument("--out-harness")
+    evolve.add_argument("--out-red-harness")
 
     bench = arena_sub.add_parser(
         "benchmark", parents=[parent],
-        help="Run the 18-case deterministic RED/BLUE + Holdout regression benchmark suite",
+        help="Run the 24-case deterministic RED/BLUE + Holdout regression benchmark suite",
     )
     bench.add_argument("--mode", choices=["sensor", "agent"], default="sensor")
     bench.add_argument("--agent-cmd")
@@ -2138,6 +2309,7 @@ _DISPATCH = {
     ("blue", "scan"): _cmd_blue_scan,
     ("blue", "scan-workspace"): _cmd_blue_scan_workspace,
     ("blue", "validate"): _cmd_blue_validate,
+    ("blue", "finalize"): _cmd_blue_finalize,
     ("red", "targets"): _cmd_red_targets,
     ("red", "plan"): _cmd_red_plan,
     ("red", "simulate"): _cmd_red_simulate,
@@ -2163,7 +2335,7 @@ def main(argv: list[str] | None = None) -> int:
         if handler is None:
             raise _CliError(
                 "invalid_arguments",
-                "Specify one of: blue scan, blue scan-workspace, blue validate, red targets, red plan, "
+                "Specify one of: blue scan, blue scan-workspace, blue validate, blue finalize, red targets, red plan, "
                 "red simulate, red trace, red apply, blind verify, arena score, arena run-round, "
                 "arena distill, arena duel, arena apply-patch, arena evolve, arena benchmark, mcp-config.",
                 exit_code=2,

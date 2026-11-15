@@ -1,6 +1,7 @@
 """Pure BLUE report validation: verbatim quote gate, Zero-Drop restoration, 12-column CSV.
 
-Schema: ``falsify.blue-report-validation.v1``.
+Schema: ``falsify.blue-report-validation.v1``. ``finalize_blue_report`` emits
+``falsify.blue-report-finalize.v1`` and a gate-clean ``falsify.blue-report.v1``.
 
 The module is deliberately side-effect free except for an explicit ``csv_path``
 argument, so the CLI stays a thin JSON envelope around testable functions.
@@ -17,6 +18,7 @@ import hashlib
 import io
 import json
 import math
+import os
 import re
 import zipfile
 import xml.etree.ElementTree as ET
@@ -33,7 +35,18 @@ from paper_text_span_mutator import (
 
 SCHEMA = "falsify.blue-report-validation.v1"
 REPAIR_PACK_SCHEMA = "falsify.blue-repair-pack.v1"
+FINALIZE_SCHEMA = "falsify.blue-report-finalize.v1"
+BLUE_REPORT_SCHEMA = "falsify.blue-report.v1"
+AUTO_DOWNGRADE_PREFIX = "[인용 미검증 자동 강등] "
 MAX_REPAIR_PACK_BYTES = 16384
+_MAX_SUPPLEMENT_ENTRY_BYTES = 25 * 1024 * 1024
+_PLAIN_TEXT_EXTS = frozenset({
+    ".py", ".r", ".md", ".rmd", ".qmd", ".txt", ".csv", ".tsv", ".json", ".log", ".sql",
+})
+_JSON_SUPPLEMENT_EXTS = frozenset({".json", ".ipynb"})
+_FINAL_REPORT_SKIP = frozenset({
+    "findings", "verdicts", "candidateLedger", "resolvedOk", "schema", "candidates", "entries",
+})
 _LEDGER_SCHEMAS = frozenset({
     "falsify.red-gold-ledger.v1",
     "falsify.coordinated-red-record.v1",
@@ -638,29 +651,65 @@ def _entry_is_red_document(entry: dict) -> bool:
     return any(key in _FORBIDDEN_RED_KEYS for key in entry)
 
 
+def _entry_label(entry: dict) -> str:
+    """Supplement filename, falling back to the basename of ``path``."""
+    for key in ("name", "filename"):
+        value = entry.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    path = entry.get("path")
+    if isinstance(path, str) and path.strip():
+        return Path(path).name
+    return ""
+
+
+def _json_bearing_name(name: str) -> bool:
+    return Path(name).suffix.lower() in _JSON_SUPPLEMENT_EXTS
+
+
 def _append_text_payload(payloads: list, name: str, text) -> None:
     if isinstance(text, (dict, list)):
         payloads.append(text)
         return
-    if isinstance(text, str) and name.lower().endswith(".json"):
+    if isinstance(text, str) and _json_bearing_name(name):
         parsed = _parse_json_text(text)
         if parsed is not None:
             payloads.append(parsed)
 
 
 def _append_bytes_payload(payloads: list, name: str, raw) -> None:
-    if not isinstance(raw, (bytes, bytearray)) or not name.lower().endswith(".json"):
+    if not isinstance(raw, (bytes, bytearray)) or not _json_bearing_name(name):
         return
     parsed = _parse_json_text(bytes(raw).decode("utf-8-sig", errors="replace"))
     if parsed is not None:
         payloads.append(parsed)
 
 
+def _append_path_payload(payloads: list, entry: dict) -> None:
+    """Parse a path-only ``.json``/``.ipynb`` so metadata is leak-checked."""
+    if payloads:
+        return
+    path = entry.get("path")
+    if not isinstance(path, str) or not path.strip():
+        return
+    if entry.get("text") is not None or isinstance(entry.get("bytes"), (bytes, bytearray)):
+        return
+    name = _entry_label(entry)
+    if not _json_bearing_name(name):
+        return
+    try:
+        raw = Path(path).read_bytes()
+    except OSError:
+        return
+    _append_bytes_payload(payloads, name, raw)
+
+
 def _supplement_payloads(entry: dict) -> list:
-    name = str(entry.get("name") or entry.get("filename") or "")
+    name = _entry_label(entry)
     payloads: list = []
     _append_text_payload(payloads, name, entry.get("text"))
     _append_bytes_payload(payloads, name, entry.get("bytes"))
+    _append_path_payload(payloads, entry)
     if _entry_is_red_document(entry):
         payloads.append(entry)
     return payloads
@@ -669,7 +718,7 @@ def _supplement_payloads(entry: dict) -> list:
 def _guard_supplement_leaks(entries: list[dict]) -> None:
     leaks: list[str] = []
     for entry in entries:
-        label = str(entry.get("name") or entry.get("filename") or "supplement")
+        label = _entry_label(entry) or "supplement"
         for payload in _supplement_payloads(entry):
             _collect_json_leaks(payload, label, leaks)
     if leaks:
@@ -771,31 +820,416 @@ def _page_pairs(pages: list) -> list[tuple[int | None, str]]:
     return pairs
 
 
+def _reject_oversized_entry(size: int) -> None:
+    if size > _MAX_SUPPLEMENT_ENTRY_BYTES:
+        _fail(
+            "invalid_arguments",
+            "Supplement entry exceeds 25 MiB.",
+            exit_code=2,
+            recovery_hint="Split the workbook or notebook before BLUE quote checks.",
+        )
+
+
+def _reject_xml_payload(payload: bytes) -> None:
+    """Reject DTD declarations before the stdlib XML parser sees the bytes."""
+    _reject_oversized_entry(len(payload))
+    lowered = payload.lower()
+    if b"<!doctype" in lowered or b"<!entity" in lowered:
+        _fail(
+            "invalid_arguments",
+            "Supplement XML rejects DOCTYPE and ENTITY declarations.",
+            exit_code=2,
+            recovery_hint="Remove DTD declarations from the workbook XML.",
+        )
+
+
+def _zip_xml(archive: zipfile.ZipFile, name: str) -> bytes | None:
+    try:
+        info = archive.getinfo(name)
+    except KeyError:
+        return None
+    _reject_oversized_entry(info.file_size)
+    with archive.open(info) as handle:
+        payload = handle.read(_MAX_SUPPLEMENT_ENTRY_BYTES + 1)
+    _reject_oversized_entry(len(payload))
+    _reject_xml_payload(payload)
+    return payload
+
+
+def _xml_root(payload: bytes):
+    try:
+        return ET.fromstring(payload)
+    except ET.ParseError:
+        return None
+
+
+def _local_name(tag: str) -> str:
+    return tag.rsplit("}", 1)[-1]
+
+
+def _first_child(node, name: str):
+    for child in list(node):
+        if _local_name(child.tag) == name:
+            return child
+    return None
+
+
+def _attr_local(node, suffix: str) -> str:
+    wanted = "}" + suffix
+    for key, value in node.attrib.items():
+        if key == suffix or key.endswith(wanted):
+            return str(value)
+    return ""
+
+
+def _direct_text(node, tag: str) -> str:
+    child = _first_child(node, tag)
+    if child is None or not child.text:
+        return ""
+    return child.text
+
+
+def _join_sheet_path(target: str) -> str:
+    parts: list[str] = []
+    cleaned = target.replace("\\", "/").split("?", 1)[0]
+    for part in cleaned.split("/"):
+        if part in ("", "."):
+            continue
+        if part == ".." and parts:
+            parts.pop()
+            continue
+        if part != "..":
+            parts.append(part)
+    if parts and parts[0].lower() == "xl":
+        return "/".join(parts)
+    return "xl/" + "/".join(parts)
+
+
+def _sheet_rels(archive: zipfile.ZipFile) -> dict[str, str]:
+    payload = _zip_xml(archive, "xl/_rels/workbook.xml.rels")
+    if payload is None:
+        return {}
+    root = _xml_root(payload)
+    if root is None:
+        return {}
+    rels: dict[str, str] = {}
+    for node in root.iter():
+        if _local_name(node.tag) != "Relationship":
+            continue
+        kind = node.attrib.get("Type") or ""
+        ident = node.attrib.get("Id") or ""
+        target = node.attrib.get("Target") or ""
+        if ident and target and "worksheet" in kind:
+            rels[ident] = target
+    return rels
+
+
+def _fallback_sheets(archive: zipfile.ZipFile) -> list[tuple[str, str]]:
+    names = [
+        info.filename for info in archive.infolist()
+        if info.filename.startswith("xl/worksheets/") and info.filename.endswith(".xml")
+        and not info.filename.endswith("/")
+    ]
+    return [(Path(name).stem, name) for name in sorted(names)]
+
+
+def _workbook_sheets(archive: zipfile.ZipFile) -> list[tuple[str, str]]:
+    rels = _sheet_rels(archive)
+    payload = _zip_xml(archive, "xl/workbook.xml")
+    if payload is None:
+        return _fallback_sheets(archive)
+    root = _xml_root(payload)
+    if root is None:
+        return _fallback_sheets(archive)
+    sheets: list[tuple[str, str]] = []
+    for node in root.iter():
+        if _local_name(node.tag) != "sheet":
+            continue
+        target = rels.get(_attr_local(node, "id")) or ""
+        if not target:
+            continue
+        sheets.append((str(node.attrib.get("name") or "Sheet"), _join_sheet_path(target)))
+    if sheets:
+        return sheets
+    return _fallback_sheets(archive)
+
+
+def _shared_strings(archive: zipfile.ZipFile) -> list[str]:
+    payload = _zip_xml(archive, "xl/sharedStrings.xml")
+    if payload is None:
+        return []
+    root = _xml_root(payload)
+    if root is None:
+        return []
+    strings: list[str] = []
+    for node in root.iter():
+        if _local_name(node.tag) != "si":
+            continue
+        parts = [elem.text or "" for elem in node.iter() if _local_name(elem.tag) == "t" and elem.text]
+        strings.append("".join(parts))
+    return strings
+
+
+def _column_index(ref: str) -> int:
+    number = 0
+    for char in ref:
+        if not char.isalpha():
+            break
+        number = number * 26 + (ord(char.upper()) - 64)
+    return number
+
+
+def _row_number(ref: str, fallback: int) -> int:
+    digits = "".join(char for char in ref if char.isdigit())
+    if digits.isdigit():
+        return int(digits)
+    return fallback
+
+
+def _shared_at(strings: list[str], value: str) -> str:
+    if value.isdigit() and int(value) < len(strings):
+        return strings[int(value)]
+    return value
+
+
+def _inline_text(cell) -> str:
+    inline = _first_child(cell, "is")
+    node = inline if inline is not None else cell
+    parts = [elem.text for elem in node.iter() if _local_name(elem.tag) == "t" and elem.text]
+    return "".join(parts)
+
+
+def _shown_cell_value(cell, kind: str, strings: list[str]) -> str:
+    if kind == "inlineStr":
+        return _inline_text(cell)
+    value = _direct_text(cell, "v")
+    if kind == "s":
+        return _shared_at(strings, value)
+    return value
+
+
+def _formula_text(raw: str) -> str:
+    text = raw.strip()
+    if not text:
+        return ""
+    if text.startswith("="):
+        return text
+    return "=" + text
+
+
+def _cell_display(cell, strings: list[str]) -> str:
+    """Show static formula text and the cached value together in one cell."""
+    kind = cell.attrib.get("t") or ""
+    formula = _formula_text(_direct_text(cell, "f"))
+    shown = _shown_cell_value(cell, kind, strings)
+    if formula and shown:
+        return f"{formula} {shown}"
+    return formula or shown
+
+
+def _row_line(cells: list[tuple[int, str]]) -> str:
+    ordered = [text for _index, text in sorted(cells) if text]
+    return "\t".join(ordered)
+
+
+def _sheet_rows(root, strings: list[str]) -> list[str]:
+    grouped: dict[int, list[tuple[int, str]]] = {}
+    order: list[int] = []
+    for cell in root.iter():
+        if _local_name(cell.tag) != "c":
+            continue
+        text = _cell_display(cell, strings)
+        if not text:
+            continue
+        ref = cell.attrib.get("r") or ""
+        row_num = _row_number(ref, len(order) + 1)
+        if row_num not in grouped:
+            grouped[row_num] = []
+            order.append(row_num)
+        grouped[row_num].append((_column_index(ref), text))
+    return [_row_line(grouped[num]) for num in order]
+
+
+def _sheet_lines(archive: zipfile.ZipFile, name: str, path: str, strings: list[str]) -> list[str]:
+    lines = [f"[Sheet: {name}]"]
+    payload = _zip_xml(archive, path)
+    if payload is None:
+        return lines
+    root = _xml_root(payload)
+    if root is None:
+        return lines
+    lines.extend(line for line in _sheet_rows(root, strings) if line)
+    return lines
+
+
+def _xlsx_archive_text(archive: zipfile.ZipFile) -> str:
+    strings = _shared_strings(archive)
+    lines: list[str] = []
+    for name, path in _workbook_sheets(archive):
+        lines.extend(_sheet_lines(archive, name, path, strings))
+    return "\n".join(lines)
+
+
+def _xlsx_text(raw: bytes) -> str:
+    _reject_oversized_entry(len(raw))
+    try:
+        with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+            return _xlsx_archive_text(archive)
+    except zipfile.BadZipFile:
+        return ""
+
+
+def _pack_lines(chunks: list[str]) -> str:
+    lines: list[str] = []
+    for chunk in chunks:
+        for line in chunk.splitlines():
+            if line.strip():
+                lines.append(line)
+    return "\n".join(lines)
+
+
+def _join_source(value) -> str:
+    if isinstance(value, list):
+        return "".join(str(part) for part in value)
+    if isinstance(value, str):
+        return value
+    return ""
+
+
+def _error_plain(output: dict) -> str:
+    parts: list[str] = []
+    for key in ("ename", "evalue"):
+        value = output.get(key)
+        if isinstance(value, str) and value.strip():
+            parts.append(value)
+    trace = output.get("traceback")
+    if isinstance(trace, list):
+        parts.extend(str(item) for item in trace if str(item).strip())
+    return "\n".join(parts)
+
+
+def _output_plain(output: dict) -> str:
+    kind = str(output.get("output_type") or "")
+    if kind == "stream":
+        return _join_source(output.get("text"))
+    if kind in {"execute_result", "display_data"}:
+        data = output.get("data")
+        if isinstance(data, dict):
+            return _join_source(data.get("text/plain"))
+        return ""
+    if kind == "error":
+        return _error_plain(output)
+    return ""
+
+
+def _notebook_chunks(data: dict) -> list[str]:
+    cells = data.get("cells")
+    if not isinstance(cells, list):
+        return []
+    chunks: list[str] = []
+    for cell in cells:
+        if not isinstance(cell, dict) or cell.get("cell_type") not in {"markdown", "code"}:
+            continue
+        chunks.append(_join_source(cell.get("source")))
+        if cell.get("cell_type") != "code":
+            continue
+        for output in cell.get("outputs") or []:
+            if isinstance(output, dict):
+                chunks.append(_output_plain(output))
+    return chunks
+
+
+def _ipynb_text(text: str) -> str:
+    parsed = _parse_json_text(text)
+    if isinstance(parsed, dict):
+        return _pack_lines(_notebook_chunks(parsed))
+    return text
+
+
+def _render_notebook(value) -> str:
+    if isinstance(value, str):
+        return _ipynb_text(value)
+    if isinstance(value, dict):
+        return _pack_lines(_notebook_chunks(value))
+    return ""
+
+
+def _is_notebook(name: str, value) -> bool:
+    if Path(name).suffix.lower() == ".ipynb":
+        return True
+    return isinstance(value, dict) and isinstance(value.get("cells"), list)
+
+
+def _texts_from_structured(name: str, value) -> list[tuple[int | None, str]]:
+    if _is_notebook(name, value):
+        return [(None, _render_notebook(value))]
+    return [(None, json.dumps(value, ensure_ascii=False))]
+
+
+def _texts_from_text(name: str, text: str) -> list[tuple[int | None, str]]:
+    if Path(name).suffix.lower() == ".ipynb":
+        return [(None, _ipynb_text(text))]
+    return [(None, text)]
+
+
 def _texts_from_bytes(raw: bytes, name: str) -> list[tuple[int | None, str]]:
+    ext = Path(name).suffix.lower()
     if raw.startswith(b"%PDF-"):
         return _pdf_page_texts(raw)
-    if name.lower().endswith(".docx") or raw[:2] == b"PK":
+    if ext == ".xlsx":
+        return [(None, _xlsx_text(raw))]
+    if ext == ".ipynb":
+        return [(None, _ipynb_text(raw.decode("utf-8-sig", errors="replace")))]
+    if ext in _PLAIN_TEXT_EXTS:
+        return [(None, raw.decode("utf-8-sig", errors="replace"))]
+    if ext == ".docx" or raw[:2] == b"PK":
         return [(None, _docx_text(raw))]
     return [(None, raw.decode("utf-8-sig", errors="replace"))]
 
 
-def _texts_for_entry(entry: dict) -> list[tuple[int | None, str]]:
-    pages = entry.get("pages")
-    if isinstance(pages, list):
-        return _page_pairs(pages)
-    text = entry.get("text")
-    if isinstance(text, str):
-        return [(None, text)]
-    if isinstance(text, (dict, list)):
-        return [(None, json.dumps(text, ensure_ascii=False))]
+def _load_entry_bytes(entry: dict) -> tuple[bytes, str] | None:
+    name = _entry_label(entry)
     raw = entry.get("bytes")
     if isinstance(raw, (bytes, bytearray)):
-        return _texts_from_bytes(bytes(raw), str(entry.get("name") or entry.get("filename") or ""))
+        return bytes(raw), name
+    path = entry.get("path")
+    if not isinstance(path, str) or not path.strip():
+        return None
+    if entry.get("text") is not None or isinstance(entry.get("pages"), list):
+        return None
+    try:
+        return Path(path).read_bytes(), name or Path(path).name
+    except OSError as exc:
+        _fail(
+            "invalid_arguments",
+            f"Supplement path could not be read: {exc}",
+            exit_code=2,
+            recovery_hint="Pass a readable supplement path, bytes, or text.",
+        )
+
+
+def _texts_from_declared(entry: dict) -> list[tuple[int | None, str]]:
+    name = _entry_label(entry)
+    text = entry.get("text")
+    pages = entry.get("pages")
+    if isinstance(pages, list) and Path(name).suffix.lower() not in {".xlsx", ".ipynb"}:
+        return _page_pairs(pages)
+    if isinstance(text, str):
+        return _texts_from_text(name, text)
+    if isinstance(text, (dict, list)):
+        return _texts_from_structured(name, text)
     return [(None, "")]
 
 
+def _texts_for_entry(entry: dict) -> list[tuple[int | None, str]]:
+    loaded = _load_entry_bytes(entry)
+    if loaded is not None:
+        return _texts_from_bytes(loaded[0], loaded[1])
+    return _texts_from_declared(entry)
+
+
 def _records_for_entry(entry: dict, idx: int) -> list[dict]:
-    name = str(entry.get("name") or entry.get("filename") or f"supplement-{idx + 1}")
+    name = _entry_label(entry) or f"supplement-{idx + 1}"
     ext = Path(name).suffix.lower()
     records = []
     for page_index, text in _texts_for_entry(entry):
@@ -1628,3 +2062,392 @@ def validate_blue_report(pdf_bytes, report, *, ledger=None, supplements=None, cs
             result, report, pdf_bytes=raw, supplements=supplements,
         )
     return result
+
+
+# --------------------------------------------------------------- finalize
+
+
+def _path_key(path) -> str:
+    return os.path.normcase(os.path.realpath(os.path.abspath(str(path))))
+
+
+def _paths_collide(left, right) -> bool:
+    if left in (None, "") or right in (None, ""):
+        return False
+    return _path_key(left) == _path_key(right)
+
+
+def _guard_output_collision(out_report_path, csv_path, input_paths) -> None:
+    """Refuse outputs that resolve onto each other or onto an input path."""
+    if _paths_collide(out_report_path, csv_path):
+        _fail(
+            "cannot_overwrite_input",
+            "out_report_path and csv_path resolve to the same file.",
+            exit_code=2,
+            recovery_hint="Write the finalized report and the CSV to different paths.",
+        )
+    for output in (out_report_path, csv_path):
+        if not output:
+            continue
+        for src in input_paths or ():
+            if src and _paths_collide(output, src):
+                _fail(
+                    "cannot_overwrite_input",
+                    f"Output path cannot match an input path: {output}",
+                    exit_code=2,
+                    recovery_hint="Write JSON/CSV outputs to paths distinct from the inputs.",
+                )
+
+
+def _guard_finalize_leaks(report, ledger, repairs, supplements) -> None:
+    leaks: list[str] = []
+    labeled = (
+        ("report", report),
+        ("ledger", ledger),
+        ("repairs", repairs),
+        ("supplements", supplements),
+    )
+    for label, value in labeled:
+        for path in forbidden_keys(value):
+            leaks.append(f"{label}.{path}")
+    if leaks:
+        _fail(
+            "forbidden_red_key",
+            f"BLUE finalize input contains forbidden RED key(s): {', '.join(leaks[:5])}",
+            exit_code=3,
+            recovery_hint="Remove RED/gold ledger fields before finalizing a BLUE report.",
+            extra={"leaks": leaks[:10]},
+        )
+
+
+def _repair_id(item: dict) -> str:
+    for key in ("findingId", "candidateId", "id"):
+        value = item.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+def _normalize_repair(item) -> tuple[str, dict] | None:
+    if not isinstance(item, dict):
+        return None
+    ident = _repair_id(item)
+    if not ident:
+        return None
+    return ident, item
+
+
+def _pairs_from_list(items: list) -> list[tuple[str, dict]]:
+    pairs = []
+    for item in items:
+        pair = _normalize_repair(item)
+        if pair is not None:
+            pairs.append(pair)
+    return pairs
+
+
+def _repair_pairs_from_dict(repairs: dict) -> list[tuple[str, dict]]:
+    nested = repairs.get("repairs")
+    if isinstance(nested, list):
+        return _pairs_from_list(nested)
+    if _repair_id(repairs):
+        pair = _normalize_repair(repairs)
+        return [pair] if pair else []
+    pairs: list[tuple[str, dict]] = []
+    for key, value in repairs.items():
+        if isinstance(value, str):
+            pairs.append((str(key), {"quote": value}))
+        elif isinstance(value, dict):
+            pairs.append((str(key), value))
+    return pairs
+
+
+def _repair_pairs(repairs) -> list[tuple[str, dict]]:
+    if repairs is None:
+        return []
+    if isinstance(repairs, list):
+        return _pairs_from_list(repairs)
+    if isinstance(repairs, dict):
+        return _repair_pairs_from_dict(repairs)
+    _fail(
+        "invalid_arguments",
+        "repairs must be a list, a findingId mapping, or {'repairs': [...]}.",
+        exit_code=2,
+        recovery_hint="Pass repairs as a list of {findingId, quote, verdictLabel} objects.",
+    )
+
+
+def _target_matches(repair_id: str, target: dict, index: int) -> bool:
+    if not repair_id:
+        return False
+    if repair_id == finding_id(target, index):
+        return True
+    for key in ("candidateId", "id", "findingId", "reportNumber"):
+        value = target.get(key)
+        if isinstance(value, str) and value.strip() == repair_id:
+            return True
+    return False
+
+
+def _apply_quote_repair(target: dict, repair: dict) -> bool:
+    quote = repair.get("quote")
+    if not isinstance(quote, str):
+        return False
+    target["quote"] = quote
+    target["excerpt"] = ""
+    return True
+
+
+def _apply_verdict_repair(target: dict, repair: dict) -> bool:
+    action = str(repair.get("action") or "")
+    raw = repair.get("verdictLabel", repair.get("verdict"))
+    if action == "downgrade_verdictLabel_to_확인필요":
+        raw = "확인필요"
+    label = normalize_verdict_label(raw) if isinstance(raw, str) else ""
+    if label != "확인필요":
+        return False
+    target["verdictLabel"] = "확인필요"
+    if "verdict" in target:
+        target["verdict"] = "needs_check"
+    return True
+
+
+def _apply_repair_to_target(target: dict, repair: dict) -> bool:
+    quoted = _apply_quote_repair(target, repair)
+    verdict = _apply_verdict_repair(target, repair)
+    return quoted or verdict
+
+
+def _apply_repairs_to(targets: list, pairs: list[tuple[str, dict]]) -> int:
+    applied = 0
+    for index, target in enumerate(targets):
+        if not isinstance(target, dict):
+            continue
+        for ident, repair in pairs:
+            if _target_matches(ident, target, index) and _apply_repair_to_target(target, repair):
+                applied += 1
+    return applied
+
+
+def _apply_all_repairs(findings: list, entries: list, repairs) -> int:
+    pairs = _repair_pairs(repairs)
+    return _apply_repairs_to(findings, pairs) + _apply_repairs_to(entries, pairs)
+
+
+def _copied_report_findings(report) -> list[dict]:
+    rows = report_findings(report)
+    validate_findings(rows)
+    return [dict(item) for item in rows]
+
+
+def _copied_ledger_entries(ledger, report) -> list:
+    copied = []
+    for item in _resolve_ledger_entries(ledger, report):
+        copied.append(dict(item) if isinstance(item, dict) else item)
+    return copied
+
+
+def _clear_quote_fields(finding: dict) -> str:
+    original = finding_quote(finding)
+    for key in QUOTE_FIELDS:
+        finding[key] = ""
+    return original
+
+
+def _prefix_rationale(finding: dict) -> None:
+    rationale = finding.get("rationale")
+    text = rationale if isinstance(rationale, str) else ""
+    if text.startswith(AUTO_DOWNGRADE_PREFIX):
+        finding["rationale"] = text
+        return
+    finding["rationale"] = AUTO_DOWNGRADE_PREFIX + text
+
+
+def _downgrade_unverified(finding: dict) -> dict:
+    updated = dict(finding)
+    updated["unverifiedQuote"] = _clear_quote_fields(updated)
+    updated["autoDowngraded"] = True
+    updated["verdictLabel"] = "확인필요"
+    if "verdict" in finding:
+        updated["verdict"] = "needs_check"
+    _prefix_rationale(updated)
+    return updated
+
+
+def _classify_rows(rows, pages, records, max_candidates: int, start: int = 0):
+    kept, dropped, ids = [], [], []
+    for offset, finding in enumerate(rows):
+        if not isinstance(finding, dict):
+            continue
+        index = start + offset
+        record = check_finding_quote(finding, index, pages, max_candidates, records)
+        if isinstance(record, dict) and record.get("status") == "missing":
+            dropped.append(_downgrade_unverified(finding))
+            ids.append(finding_id(finding, index))
+        else:
+            kept.append(finding)
+    return kept, dropped, ids
+
+
+def _finalize_rows(reconciled, pages, records, max_candidates: int):
+    findings = reconciled["findings"]
+    resolved = reconciled["resolvedOk"]
+    kept_findings, dropped_findings, ids_a = _classify_rows(
+        findings, pages, records, max_candidates, 0,
+    )
+    kept_resolved, dropped_resolved, ids_b = _classify_rows(
+        resolved, pages, records, max_candidates, len(findings),
+    )
+    active = kept_findings + dropped_findings + dropped_resolved
+    return active, kept_resolved, ids_a + ids_b
+
+
+def _benign_metadata(report) -> dict:
+    if not isinstance(report, dict):
+        return {}
+    kept = {}
+    for key, value in report.items():
+        if key in _FINAL_REPORT_SKIP or key in _FORBIDDEN_RED_KEYS:
+            continue
+        kept[key] = value
+    return kept
+
+
+def _finalized_report(report, paper_id: str, digest: str, findings: list, resolved: list) -> dict:
+    payload = {
+        "schema": BLUE_REPORT_SCHEMA,
+        "paperId": paper_id,
+        "fileHash": digest,
+        "findings": findings,
+        "resolvedOk": resolved,
+    }
+    for key, value in _benign_metadata(report).items():
+        if key not in payload:
+            payload[key] = value
+    return payload
+
+
+def _write_report_json(path, payload: dict) -> None:
+    target = Path(path)
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+    except OSError as exc:
+        _fail(
+            "output_write_failed",
+            f"Unable to write report JSON: {exc}",
+            exit_code=2,
+            recovery_hint="Choose a writable output path.",
+        )
+
+
+def _zero_drop_payload(reconciled) -> dict:
+    return {
+        "summary": reconciled["summary"],
+        "recoveredFindingIds": [
+            str(item.get("reportNumber") or "")
+            for item in reconciled["findings"]
+            if item.get("zeroDropRecovered") is True
+        ],
+    }
+
+
+def _note_downgrades(warnings: list[str], ids: list[str]) -> None:
+    if ids:
+        _push_warning(
+            warnings,
+            f"Auto-downgraded {len(ids)} unverified quote(s) to 확인필요.",
+        )
+
+
+def _require_clean_quotes(checks: dict) -> None:
+    if checks.get("missingCount") != 0:
+        _fail(
+            "invalid_blue_report",
+            "Finalized report still has missing quotes.",
+            exit_code=2,
+            recovery_hint="Auto-downgrade should clear every unverified quote.",
+        )
+
+
+def _finalize_payload(paper_identifier, digest, applied, downgraded_ids, final_checks,
+                      reconciled, finalized, out_report_path, csv_result, warnings) -> dict:
+    return {
+        "schema": FINALIZE_SCHEMA,
+        "ok": True,
+        "paperId": paper_identifier,
+        "fileHash": digest,
+        "appliedRepairCount": applied,
+        "autoDowngradedCount": len(downgraded_ids),
+        "autoDowngradedFindingIds": downgraded_ids,
+        "quoteCheck": final_checks,
+        "zeroDrop": _zero_drop_payload(reconciled),
+        "finalizedReport": finalized,
+        "outReportPath": str(out_report_path) if out_report_path is not None else None,
+        "csv": csv_result,
+        "warnings": warnings,
+    }
+
+
+def finalize_blue_report(
+    pdf_bytes,
+    report,
+    *,
+    repairs=None,
+    ledger=None,
+    supplements=None,
+    out_report_path=None,
+    csv_path=None,
+    max_candidates: int = 5,
+    paper_id: str | None = None,
+    file_hash: str | None = None,
+    input_paths=(),
+) -> dict:
+    """Apply quote repairs, restore Zero-Drop rows, and downgrade unverified quotes.
+
+    The returned ``finalizedReport`` is a ``falsify.blue-report.v1`` document whose
+    quote gate is clean: every still-missing quote has been moved to
+    ``unverifiedQuote`` and the finding abstains as ``확인필요``.
+    """
+    _require_max_candidates(max_candidates)
+    raw = _require_pdf_bytes(pdf_bytes)
+    _guard_finalize_leaks(report, ledger, repairs, supplements)
+    _guard_output_collision(out_report_path, csv_path, input_paths)
+    findings = _copied_report_findings(report)
+    entries = _copied_ledger_entries(ledger, report)
+    applied = _apply_all_repairs(findings, entries, repairs)
+    supplement_records = None if supplements is None else _prepare_supplements(supplements)
+    reconciled = reconcile_candidate_ledger(entries, findings)
+    pages = _page_records(raw)
+    final_findings, final_resolved, downgraded_ids = _finalize_rows(
+        reconciled, pages, supplement_records, max_candidates,
+    )
+    final_checks = _quote_check(
+        final_findings + final_resolved, pages, max_candidates, supplement_records,
+    )
+    _require_clean_quotes(final_checks)
+    digest = file_hash or hashlib.sha256(raw).hexdigest()
+    paper_identifier = paper_id or _report_paper_id(report, f"paper-{digest[:12]}")
+    warnings = _ledger_override_warning(ledger, report)
+    _note_downgrades(warnings, downgraded_ids)
+    finalized = _finalized_report(
+        report, paper_identifier, digest, final_findings, final_resolved,
+    )
+    if out_report_path is not None:
+        _write_report_json(out_report_path, finalized)
+    csv_result = None
+    if csv_path is not None:
+        csv_result = _emit_csv(
+            csv_path,
+            {"findings": final_findings, "resolvedOk": final_resolved},
+            paper_identifier,
+            _csv_defaults(report),
+            warnings,
+        )
+    return _finalize_payload(
+        paper_identifier, digest, applied, downgraded_ids, final_checks,
+        reconciled, finalized, out_report_path, csv_result, warnings,
+    )

@@ -91,3 +91,25 @@ python app/local/falsify_cli.py blue validate --pdf BLIND.pdf --report BLUE_REPO
 - **`zeroDrop.summary`** always carries exactly `stage1Count`, `resolvedOkCount`, `reportedDefectCount`, `recoveredCount`.
 - **`--csv`** writes the score.py-compatible 12-column BLUE rows (`paper_id, team, judge_type, model, iteration, location, defect_type, label, evidence, time_sec, tokens, is_holdout`) that `tools/evaluation/agreement_selective.py` reads. `label` maps to `아님|맞음|확인필요`, `defect_type` is whitelisted to `D1..D7`, `D4-1`, `S1` (`D3` fallback is recorded in `warnings`), text cells starting with `= + - @` get a leading `'`, encoding is UTF-8 without BOM, quoting is RFC 4180.
 - **Exit codes**: `0` all quotes located after restoration; `3` any `missing` quote remains, or the report/ledger carries forbidden RED keys (`before`, `after`, `patch`, `gold`, `why_hard`, `candidateRationales`, `plan`); `2` malformed input (bad JSON, unknown `verdictLabel`, non-object finding, `> 5000` findings, unreadable PDF); `124` timeout. Every failure keeps the `{"schema":"falsify.agent-cli.v1","ok":false,"error","message","recoveryHint"}` envelope; success returns `ok` plus `paperId`, `fileHash`, `quoteCheck`, `zeroDrop`, `csv`, `warnings`.
+
+## 6. Wave 10 supplements, internal consistency, and `blue finalize`
+
+`app/local/blue_report_validate.py` checks these supplements with the stdlib only (`zipfile`, `xml.etree`, `json`). XML `<!DOCTYPE` / `<!ENTITY` and entries larger than 25 MiB are rejected.
+
+- **`.xlsx`** (bytes or `path`): multi-sheet workbooks. `xl/sharedStrings.xml`, `xl/workbook.xml`, and `xl/worksheets/sheet*.xml` become `[Sheet: <sheetName>]` plus tab-separated cell lines (`supplementName`, 1-based `lineNumber`). A formula cell keeps the static `<f>` text (with a leading `=`) and the cached `<v>` value side by side, so a quote can match either and the `<f>` vs `<v>` pair can be compared without executing the workbook.
+- **`.ipynb`** (bytes or text): markdown cells, code `source`, and plain-text outputs (`stream`, `text/plain`, error text). `_guard_supplement_leaks` parses the notebook JSON, including metadata, and rejects forbidden RED keys (exit `3`).
+- **`.Rmd` / `.qmd`**: UTF-8 text lines, the same treatment as `.py`, `.r`, and `.md`.
+
+`audit_internal_consistency` (`python app/local/falsify_cli.py blue scan --internal-consistency`) keeps deterministic IMRaD `signals` separate from advisory `triageHints`. A triage hint is not a `defect` until a verbatim quote supports it.
+
+Portable bundle `app/examples/evidence_blue_v040/` (`evidence_blue_v040`) is the Wave 10 evidence profile: the v0.3.9 quote gate plus workbook, notebook, R Markdown / Quarto, and internal-consistency surfaces.
+
+Close a report in two turns so a hallucinated quote cannot remain a committed defect:
+
+```bash
+python app/local/falsify_cli.py blue validate --pdf BLIND.pdf --report BLUE_REPORT.json --emit-repair-pack
+# optional one repair turn: paste a verbatim substring into quote, or set verdictLabel to 확인필요
+python app/local/falsify_cli.py blue finalize --pdf BLIND.pdf --report BLUE_REPORT.json --out FINAL.json --csv BLUE_12COL.csv
+```
+
+`blue finalize` calls `finalize_blue_report` (`falsify.blue-report-finalize.v1`). It applies the repair list or finding-id map, restores Zero-Drop candidates, and moves every quote that is still `missing` into `unverifiedQuote` with `autoDowngraded`, `verdictLabel` `확인필요`, and the rationale prefix `[인용 미검증 자동 강등] `. A hallucinated `맞음` in `resolvedOk` is moved back into active `findings`. The embedded `finalizedReport` is gate-clean `falsify.blue-report.v1`: `validate_blue_report` returns `ok` and `quoteCheck.missingCount == 0`. `--csv` remains the 12-column RFC 4180 score file.

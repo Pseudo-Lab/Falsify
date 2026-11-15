@@ -10,10 +10,12 @@ from __future__ import annotations
 import argparse
 from collections import Counter
 import hashlib
+import io
 import json
 from pathlib import Path
 import re
 import sys
+import zipfile
 
 _EVAL_DIR = Path(__file__).resolve().parent
 if str(_EVAL_DIR) not in sys.path:
@@ -333,6 +335,18 @@ def _scan_json_red_keys(value, name: str, leaks: list[dict], depth: int = 0) -> 
             _scan_json_red_keys(item, name, leaks, depth + 1)
 
 
+def _decode_xlsx_blind_bytes(raw: bytes) -> str:
+    try:
+        with zipfile.ZipFile(io.BytesIO(raw)) as zf:
+            parts = []
+            for member in sorted(zf.namelist()):
+                if member.lower().endswith(('.xml', '.rels')) and zf.getinfo(member).file_size <= 8 * 1024 * 1024:
+                    parts.append(zf.read(member).decode('utf-8', errors='replace'))
+            return '\n'.join(parts) if parts else raw.decode('utf-8', errors='replace')
+    except (zipfile.BadZipFile, OSError, KeyError):
+        return raw.decode('utf-8', errors='replace')
+
+
 def _supplement_text_and_name(entry, idx: int) -> tuple[str, str]:
     if not isinstance(entry, dict):
         raise ValueError('supplement_invalid')
@@ -340,7 +354,10 @@ def _supplement_text_and_name(entry, idx: int) -> tuple[str, str]:
     if isinstance(entry.get('text'), str):
         return name, entry['text']
     if isinstance(entry.get('bytes'), (bytes, bytearray, memoryview)):
-        return name, bytes(entry['bytes']).decode('utf-8', errors='replace')
+        raw = bytes(entry['bytes'])
+        if name.lower().endswith('.xlsx'):
+            return name, _decode_xlsx_blind_bytes(raw)
+        return name, raw.decode('utf-8', errors='replace')
     if isinstance(entry.get('content'), str):
         return name, entry['content']
     raise ValueError('supplement_invalid')

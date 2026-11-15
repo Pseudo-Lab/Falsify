@@ -156,7 +156,7 @@ def _write_supplements(workspace: Path, supplements) -> list[str]:
     return names
 
 
-def _red_payload(min_difficulty, names: list[str]) -> bytes:
+def _red_payload(min_difficulty, names: list[str], extra: dict | None = None) -> bytes:
     body = {
         'schema': 'falsify.red-invocation.v1',
         'sourcePdf': 'source.pdf',
@@ -166,7 +166,30 @@ def _red_payload(min_difficulty, names: list[str]) -> bytes:
         'minDifficulty': min_difficulty,
         'supplementNames': names,
     }
+    if extra:
+        body.update(extra)
     return json.dumps(body, ensure_ascii=False).encode('utf-8')
+
+
+def _harness_red_fields(red_harness) -> dict | None:
+    """Scrub-check a RED harness and return the brief fields forwarded to RED only."""
+    if red_harness is None:
+        return None
+    _require_base(red_harness)
+    brief = red_harness.get('redBrief')
+    rules = red_harness.get('accumulatedRules') or []
+    probe = {
+        'summary': {'axes': {}},
+        'rules': [rule for rule in list(rules) if isinstance(rule, dict)],
+        'instructions': str(red_harness.get('instructions') or ''),
+    }
+    if brief is not None:
+        probe['redBrief'] = brief
+    _rescrub(probe)
+    fields = {'harnessGeneration': red_harness.get('generation', 0)}
+    if brief is not None:
+        fields['redBrief'] = brief
+    return fields
 
 
 def _default_red_adapter(timeout: int):
@@ -300,7 +323,7 @@ def _read_red_output(workspace: Path, raw: bytes):
     return _from_files(workspace)
 
 
-def _execute_red(source: bytes, red_argv, supplements, min_difficulty, timeout: int, red_adapter) -> dict:
+def _execute_red(source: bytes, red_argv, supplements, min_difficulty, timeout: int, red_adapter, red_fields=None) -> dict:
     argv = _require_argv(red_argv, 'red_argv_invalid')
     adapter = red_adapter or _default_red_adapter(timeout)
     if not callable(adapter):
@@ -310,7 +333,7 @@ def _execute_red(source: bytes, red_argv, supplements, min_difficulty, timeout: 
     try:
         names = _write_supplements(workspace, supplements)
         (workspace / 'source.pdf').write_bytes(source)
-        payload = _red_payload(min_difficulty, names)
+        payload = _red_payload(min_difficulty, names, red_fields)
         raw = _call_red(adapter, argv, payload, workspace, workspace / 'red-stdout.bin')
         blind, gold, blind_supplements, mode = _read_red_output(workspace, raw)
     finally:
@@ -651,13 +674,19 @@ def run_duel(
     max_rules: int = 40,
     red_adapter=None,
     blue_adapter=None,
+    red_harness: dict | None = None,
+    blue_harness: dict | None = None,
 ) -> dict:
     """Run one isolated RED pass, a cleanroom BLUE round, and an answer-key-free patch."""
     source = _require_pdf(source_pdf_bytes, 'source_pdf_invalid')
     minimum = _require_difficulty(min_difficulty)
     argv = _require_argv(blue_argv, 'blue_argv_invalid')
+    if blue_harness is not None:
+        _require_base(blue_harness)
     sensor = _bind_sensor(source, 'source_pdf_invalid')
-    red = _execute_red(source, red_argv, supplements, minimum, timeout, red_adapter)
+    red = _execute_red(
+        source, red_argv, supplements, minimum, timeout, red_adapter, _harness_red_fields(red_harness),
+    )
     verification = _gate_bundle(red['blind'], red['supplements'], source, red['gold'], minimum, sensor)
     inner = _blue_inner(blue_adapter, timeout)
     captured: list[bytes] = []
@@ -828,6 +857,76 @@ def _copy_harness(base: dict, role: str, instructions: str, generation: int, bas
     return harness
 
 
+def _require_bool(value, code: str) -> bool:
+    if type(value) is not bool:
+        raise ArenaDuelError(code, 2)
+    return value
+
+
+def _root_instructions(base: dict) -> str:
+    saved = base.get('rootInstructions')
+    if isinstance(saved, str):
+        return saved
+    text = str(base.get('instructions') or '')
+    marker = text.find('[Co-Evolution ')
+    if marker < 0:
+        return text
+    return text[:marker].rstrip()
+
+
+def _compact_block(role: str, generation: int, rules: list[dict]) -> str:
+    lines = [f'[Co-Evolution {role} compacted gen {generation}]']
+    for rule in rules:
+        statement = str(rule.get('statement') or '').strip()
+        if statement:
+            lines.append(f"- {rule.get('ruleId')}: {statement}")
+    return '\n'.join(lines)
+
+
+def _joined_rules(base: dict, added: list[dict]) -> list[dict]:
+    current = []
+    for rule in list(base.get('accumulatedRules') or []):
+        if isinstance(rule, dict):
+            current.append(dict(rule))
+    for rule in added:
+        current.append(dict(rule))
+    return current
+
+
+def _scrub_accumulated(rules: list[dict]) -> None:
+    _rescrub({'summary': {'axes': {}}, 'rules': rules})
+
+
+def _compacted_rules(base: dict, added: list[dict]) -> dict:
+    try:
+        return arena_round.compact_harness_rules(_joined_rules(base, added))
+    except arena_round.ArenaRoundError as error:
+        code = 'patch_not_scrubbed' if error.code == 'distill_scrub_failed' else error.code
+        raise ArenaDuelError(code, error.exit_code) from None
+
+
+def _instruction_update(base, patch, role, generation, added, limit, compact_rules):
+    root = _root_instructions(base)
+    if compact_rules:
+        rules = [rule for rule in list(_compacted_rules(base, added).get('rules') or []) if isinstance(rule, dict)]
+        text = _bound_instructions(root, _compact_block(role, generation, rules), limit)
+        return text, root, rules, len(rules)
+    text = _bound_instructions(
+        base.get('instructions'),
+        _rules_block(role, generation, _brief_for(patch, role), added),
+        limit,
+    )
+    return text, root, _joined_rules(base, added), None
+
+
+def _carry_red_brief(harness: dict, patch: dict, role: str) -> None:
+    if role != 'red':
+        return
+    brief = patch.get('redBrief')
+    if isinstance(brief, dict):
+        harness['redBrief'] = dict(brief)
+
+
 def apply_harness_patch(
     base_harness: dict,
     patch: dict,
@@ -837,8 +936,10 @@ def apply_harness_patch(
     baseline_holdout_fp: int | None = None,
     candidate_holdout_fp: int | None = None,
     max_instructions_chars: int = 12000,
+    compact_rules: bool = False,
 ) -> dict:
     """Merge one scrubbed patch or refuse on generation cap, scrub, or holdout regression."""
+    compacting = _require_bool(compact_rules, 'compact_rules_invalid')
     _require_base(base_harness)
     _require_patch(patch)
     _rescrub(patch)
@@ -848,14 +949,21 @@ def apply_harness_patch(
     _check_cap(generation, maximum)
     guard = _holdout_guard(baseline_holdout_fp, candidate_holdout_fp)
     added = _new_rules(patch, base_harness.get('appliedRuleIds') or [])
-    block = _rules_block(role_name, generation + 1, _brief_for(patch, role_name), added)
-    instructions = _bound_instructions(base_harness.get('instructions'), block, max_instructions_chars)
+    instructions, root, accumulated, compact_count = _instruction_update(
+        base_harness, patch, role_name, generation + 1, added, max_instructions_chars, compacting,
+    )
+    _scrub_accumulated(accumulated)
     rule_ids = [str(rule.get('ruleId')) for rule in added]
-    base_id, applied, known = _next_identity(base_harness, generation + 1, str(patch.get('patchId') or ''), rule_ids)
+    base_id, applied, known = _next_identity(
+        base_harness, generation + 1, str(patch.get('patchId') or ''), rule_ids,
+    )
     harness = _copy_harness(
         base_harness, role_name, instructions, generation + 1, base_id, applied, known,
     )
-    return {
+    harness['rootInstructions'] = root
+    harness['accumulatedRules'] = accumulated
+    _carry_red_brief(harness, patch, role_name)
+    payload = {
         'schema': PATCH_APPLY_SCHEMA,
         'ok': True,
         'promoted': True,
@@ -865,6 +973,9 @@ def apply_harness_patch(
         'holdoutGuard': guard,
         'harness': harness,
     }
+    if compact_count is not None:
+        payload['compactedRuleCount'] = compact_count
+    return payload
 
 
 # --------------------------------------------------------------------------------------
@@ -897,6 +1008,7 @@ def _build_parser() -> argparse.ArgumentParser:
     apply.add_argument('--baseline-holdout-fp', type=int)
     apply.add_argument('--candidate-holdout-fp', type=int)
     apply.add_argument('--max-instructions-chars', type=int, default=12000)
+    apply.add_argument('--compact-rules', action='store_true')
     apply.add_argument('--out', type=Path)
     return parser
 
@@ -956,6 +1068,7 @@ def _cmd_apply(args: argparse.Namespace) -> int:
         baseline_holdout_fp=args.baseline_holdout_fp,
         candidate_holdout_fp=args.candidate_holdout_fp,
         max_instructions_chars=args.max_instructions_chars,
+        compact_rules=bool(args.compact_rules),
     )
     _write_json(result, args.out)
     return 0

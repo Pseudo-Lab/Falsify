@@ -4,6 +4,8 @@ import csv
 import io
 import re
 
+from paper_tabular_notebook_loader import extract_rmd_qmd_chunks, parse_ipynb_notebook
+
 SCHEMA = "falsify.code-supplement-audit.v1"
 _FORBIDDEN = frozenset({
     "before", "after", "patch", "gold", "why_hard", "candidateRationales", "plan",
@@ -47,6 +49,10 @@ _ADJUST_RE = re.compile(
     re.IGNORECASE,
 )
 _RAW_P_RE = re.compile(r"pvalue|p_value|p_val|\bp\s*=", re.IGNORECASE)
+_OUTPUT_CLAIM_RE = re.compile(
+    r"\b(?P<prefix>train|test|validation|val)?[\s_-]*(?P<name>auc|accuracy|acc|n|p-value|pvalue|p)\b\s*[:=]\s*(?P<value>\d+(?:\.\d+)?)",
+    re.IGNORECASE,
+)
 _R_ALT_RE = re.compile(
     r"\b(?:t\.test|wilcox\.test|fisher\.test|cor\.test)\s*\((?P<body>[^)]{0,500})\)",
     re.IGNORECASE,
@@ -208,6 +214,8 @@ def _take_supplement(supp, scripts, counts):
         return
     if suffix in _CODE_SUFFIXES:
         scripts.append({"name": name, "text": text, "suffix": suffix})
+        return
+    _take_extra(supp, scripts, name, suffix)
 
 
 def _partition_supplements(supplements):
@@ -702,7 +710,7 @@ def _collect(claims, scripts, csv_counts):
     if len(prepared) == 1:
         script, facts = prepared[0]
         signals.extend(_method_signals(claims, script, facts))
-    return _dedupe(signals)
+    return _remap_lines(_dedupe(signals), scripts)
 
 
 def _dedupe(signals):
@@ -723,6 +731,206 @@ def _number(signals, max_signals):
     return numbered, len(signals) > max_signals
 
 
+def _parsed_notebook(supp):
+    stored = supp.get("notebook")
+    if isinstance(stored, dict) and "combinedCode" in stored:
+        return stored
+    name = _supp_name(supp)
+    raw = supp.get("bytes")
+    if isinstance(raw, (bytes, bytearray)) and _suffix(name) == ".ipynb":
+        return parse_ipynb_notebook(bytes(raw), name=name)
+    text = supp.get("text")
+    if isinstance(text, str) and text.lstrip().startswith("{"):
+        return parse_ipynb_notebook(text, name=name)
+    return None
+
+
+def _append_notebook(supp, scripts, name):
+    parsed = _parsed_notebook(supp)
+    if parsed is None:
+        return
+    language = parsed.get("language") or "python"
+    text = parsed.get("combinedCode") or ""
+    if not str(text).strip():
+        return
+    scripts.append({
+        "name": name,
+        "text": text,
+        "suffix": ".r" if language == "r" else ".py",
+        "lineOffsets": parsed.get("lineOffsets") or [],
+        "outputLines": parsed.get("outputLines") or [],
+    })
+
+
+def _padded_chunks(chunks, language):
+    lines = []
+    for chunk in chunks:
+        if chunk.get("language") != language:
+            continue
+        start = chunk.get("startLine") or 1
+        while len(lines) < start - 1:
+            lines.append("")
+        lines.extend(str(chunk.get("code") or "").splitlines())
+    if not lines:
+        return ""
+    return "\n".join(lines) + "\n"
+
+
+def _append_literate(supp, scripts, name):
+    chunks = extract_rmd_qmd_chunks(_supp_text(supp), name=name)
+    for language, suffix in (("python", ".py"), ("r", ".r")):
+        text = _padded_chunks(chunks, language)
+        if text.strip():
+            scripts.append({"name": name, "text": text, "suffix": suffix})
+
+
+def _take_extra(supp, scripts, name, suffix):
+    if suffix == ".ipynb":
+        _append_notebook(supp, scripts, name)
+        return
+    if suffix in {".rmd", ".qmd"}:
+        _append_literate(supp, scripts, name)
+
+
+def _offset_lookup(scripts):
+    found = {}
+    for script in scripts:
+        offsets = script.get("lineOffsets")
+        if offsets:
+            found[script["name"]] = offsets
+    return found
+
+
+def _apply_line_offset(signal, offsets):
+    if not offsets:
+        return
+    lineno = signal.get("lineNumber")
+    if type(lineno) is not int or lineno < 1 or lineno > len(offsets):
+        return
+    info = offsets[lineno - 1]
+    cell_line = info.get("cellLine") or lineno
+    signal["lineNumber"] = cell_line
+    computed = signal.get("computed")
+    if isinstance(computed, dict):
+        computed["lineNumber"] = cell_line
+        computed["cellIndex"] = info.get("cellIndex")
+
+
+def _remap_lines(signals, scripts):
+    lookup = _offset_lookup(scripts)
+    for signal in signals:
+        _apply_line_offset(signal, lookup.get(signal.get("supplementName")))
+    return signals
+
+
+def _metric_tol(token):
+    decimals = len(token.split(".", 1)[1]) if "." in str(token) else 0
+    return max(1e-6, 0.5 * (10 ** (-decimals))) + 1e-9
+
+
+def _metric_label(match):
+    prefix = (match.group("prefix") or "").lower()
+    if prefix == "val":
+        prefix = "validation"
+    name = match.group("name").lower().replace("-", "")
+    if name in {"pvalue", "p"}:
+        name = "p"
+    if name == "acc":
+        name = "accuracy"
+    if prefix:
+        return f"{prefix} {name}"
+    return name
+
+
+def _labeled_metrics(text):
+    found = []
+    for line_no, line in enumerate(str(text or "").splitlines(), start=1):
+        for match in _OUTPUT_CLAIM_RE.finditer(line):
+            found.append({
+                "label": _metric_label(match),
+                "value": float(match.group("value")),
+                "token": match.group("value"),
+                "line": line_no,
+                "snippet": line.strip()[:180],
+            })
+    return found
+
+
+def _claims_metrics(claims):
+    found = []
+    for claim in claims:
+        for item in _labeled_metrics(claim["text"]):
+            item["claim"] = claim
+            found.append(item)
+    return found
+
+
+def _metric_far(left, right):
+    tolerance = max(_metric_tol(left["token"]), _metric_tol(right["token"]))
+    return abs(left["value"] - right["value"]) > tolerance
+
+
+def _same_label_conflict(output_item, manuscript_items):
+    same = [item for item in manuscript_items if item["label"] == output_item["label"]]
+    if not same:
+        return None
+    if any(not _metric_far(output_item, item) for item in same):
+        return None
+    return same[0]
+
+
+def _output_signal(manuscript, output_item, name):
+    claim = manuscript["claim"]
+    return {
+        "kind": "notebook_output_claim_mismatch",
+        "family": "D6",
+        "subtype": "ipynb-output-mismatch",
+        "pageIndex": claim["pageIndex"],
+        "segmentId": claim.get("id"),
+        "excerpt": " ".join(claim["text"].split())[:220],
+        "supplementName": name,
+        "lineNumber": output_item["line"],
+        "codeSnippet": output_item["snippet"],
+        "detail": "Saved notebook output contradicts the same named manuscript metric.",
+        "reported": {"label": manuscript["label"], "value": manuscript["value"]},
+        "computed": {
+            "label": output_item["label"],
+            "value": output_item["value"],
+            "supplementName": name,
+            "output": output_item["snippet"],
+        },
+    }
+
+
+def _output_conflicts(manuscript, parsed, name):
+    signals = []
+    for item in _labeled_metrics("\n".join(parsed.get("outputLines") or [])):
+        match = _same_label_conflict(item, manuscript)
+        if match is None:
+            continue
+        signals.append(_output_signal(match, item, name))
+    return signals
+
+
+def _notebook_output_signals(claims, supplements):
+    manuscript = _claims_metrics(claims)
+    signals = []
+    for supp in supplements or []:
+        if not isinstance(supp, dict) or _suffix(_supp_name(supp)) != ".ipynb":
+            continue
+        parsed = _parsed_notebook(supp)
+        if parsed is None:
+            continue
+        signals.extend(_output_conflicts(manuscript, parsed, _supp_name(supp)))
+    return signals
+
+
+def _all_script_signals(claims, scripts, csv_counts, supplements):
+    signals = _collect(claims, scripts, csv_counts)
+    signals.extend(_notebook_output_signals(claims, supplements))
+    return _dedupe(signals)
+
+
 def audit_code_supplements(page_items, supplements, *, max_signals=30):
     """Compare static analysis scripts with manuscript claims. Never executes code."""
     _validate_limit(max_signals)
@@ -732,7 +940,7 @@ def audit_code_supplements(page_items, supplements, *, max_signals=30):
     if not scripts:
         return _empty()
     claims = _claims_from(_normalize_pages(page_items))
-    signals = _collect(claims, scripts, csv_counts)
+    signals = _all_script_signals(claims, scripts, csv_counts, supplements)
     numbered, truncated = _number(signals, max_signals)
     return {
         "schema": SCHEMA,

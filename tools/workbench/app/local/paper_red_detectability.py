@@ -31,6 +31,10 @@ exporting a blind PDF.
     (the evidence store item cache is not re-extracted for an in-memory copy),
     so a sum drift is reported exactly as Layer 0 reports it after re-extraction.
 
+    Visual operations (``chart-shape``, ``chart-redraw``, ``region``,
+    ``region-replace``) also diff figure-forensic signals on a fresh in-memory
+    evidence store of the edited PDF. Text and table edits skip that pass.
+
 ``trace_claim_propagation``
     Reports where a numeric or short textual claim appears across prose, table,
     figure, citation and supplement surfaces. Ids come from
@@ -41,6 +45,7 @@ Both functions are pure read-only: no file writes, no network, no subprocess,
 and no export of the edited bytes.
 """
 import copy
+import hashlib
 import math
 
 from blue_evidence_refs import _occurrences, ref_id
@@ -79,6 +84,14 @@ _KIND_SURFACE = {
 }
 _FAMILY_SURFACE = {'D2': 'citation', 'D4': 'supplement', 'D4-1': 'supplement'}
 _TABLE_ARITHMETIC_KINDS = frozenset({'table_sum_mismatch', 'percentage_mismatch'})
+_VISUAL_KINDS = frozenset({'chart-shape', 'chart-redraw', 'region', 'region-replace'})
+_FIGURE_SIGNAL_KINDS = frozenset({
+    'duplicate_figure_panel',
+    'mirrored_figure_panel',
+    'rotated_figure_panel',
+    'cropped_figure_panel',
+    'chart_printed_value_mismatch',
+})
 
 
 class _OutputStore:
@@ -195,6 +208,8 @@ def _op_surface(kind):
 
 def _signal_surface(signal):
     kind = str(signal.get('kind') or '')
+    if kind in _FIGURE_SIGNAL_KINDS:
+        return 'figure'
     if kind == 'cross_modal_number_mismatch':
         reported = signal.get('reported')
         target = reported.get('target') if isinstance(reported, dict) else None
@@ -345,8 +360,32 @@ def _op_values(op):
     ]
 
 
+def _page_of(op, change):
+    if type(op.get('pageIndex')) is int:
+        return op.get('pageIndex')
+    return change.get('pageIndex')
+
+
+def _same_page(op, change, signal):
+    op_page = _page_of(op, change)
+    sig_page = signal.get('pageIndex')
+    if type(op_page) is int and type(sig_page) is int and op_page != sig_page:
+        return False
+    return True
+
+
+def _owns_figure_signal(op, change, signal):
+    if op.get('kind') not in _VISUAL_KINDS:
+        return False
+    if str(signal.get('kind') or '') not in _FIGURE_SIGNAL_KINDS:
+        return False
+    return _same_page(op, change, signal)
+
+
 def _op_owns_signal(op, change, signal):
     """Fallback ownership test when the shared matcher cannot attribute a signal."""
+    if _owns_figure_signal(op, change, signal):
+        return True
     if op.get('kind') == 'supplement-edit':
         return False
     op_page = op.get('pageIndex') if type(op.get('pageIndex')) is int else change.get('pageIndex')
@@ -424,6 +463,54 @@ def _distance_counts(results):
     return counts
 
 
+def _ops_need_figure_diff(operations):
+    for op in operations or []:
+        if isinstance(op, dict) and op.get('kind') in _VISUAL_KINDS:
+            return True
+    return False
+
+
+def _figure_report_signals(paper_id, file_hash, bound):
+    from paper_figure_forensics import audit_figure_forensics
+    try:
+        report = audit_figure_forensics(paper_id, file_hash=file_hash, store=bound, max_signals=30)
+    except (ValueError, KeyError, TypeError):
+        return []
+    fresh = []
+    for signal in report.get('signals') or []:
+        if signal.get('kind') in _FIGURE_SIGNAL_KINDS:
+            fresh.append(signal)
+    return fresh
+
+
+def _store_for_edited_pdf(pdf_bytes):
+    from paper_evidence import EvidenceStore
+    digest = hashlib.sha256(pdf_bytes).hexdigest()
+    edited = EvidenceStore()
+    summary = edited.prepare(pdf_bytes, digest)
+    return edited, summary['paperId'], summary['fileHash']
+
+
+def _figure_delta(store, paper_id, file_hash, output_bytes):
+    baseline = _figure_report_signals(paper_id, file_hash, store)
+    try:
+        edited_store, edited_id, edited_hash = _store_for_edited_pdf(output_bytes)
+    except (ValueError, KeyError, TypeError):
+        return []
+    edited = _figure_report_signals(edited_id, edited_hash, edited_store)
+    return _merge_new_signals({'signals': baseline}, edited)
+
+
+def _with_figure_delta(store, paper_id, file_hash, source_bytes, output_bytes, ops, sensor_fresh):
+    if output_bytes == source_bytes or not _ops_need_figure_diff(ops):
+        return sensor_fresh
+    figure_fresh = _figure_delta(store, paper_id, file_hash, output_bytes)
+    if not figure_fresh:
+        return sensor_fresh
+    combined = list(sensor_fresh) + list(figure_fresh)
+    return _merge_new_signals({'signals': []}, combined)
+
+
 def simulate_red_detectability(
     paper_id,
     operations,
@@ -459,9 +546,12 @@ def simulate_red_detectability(
         paper_id, file_hash=file_hash, max_signals=limit,
         include_external_oracle=False, store=store,
     )
-    fresh = _merge_new_signals(
+    sensor_fresh = _merge_new_signals(
         baseline,
         _output_signals(store, paper_id, _source, output_bytes, ops, changes, limit),
+    )
+    fresh = _with_figure_delta(
+        store, paper_id, file_hash, _source, output_bytes, ops, sensor_fresh,
     )
     context = {
         'changes': _changes_by_id(changes),

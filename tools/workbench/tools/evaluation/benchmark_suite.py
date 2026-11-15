@@ -7,8 +7,10 @@ from __future__ import annotations
 
 import argparse
 import importlib
+import importlib.util
 import json
 from pathlib import Path
+import re
 import sys
 
 SCHEMA = 'falsify.benchmark-report.v1'
@@ -92,7 +94,57 @@ _CLEAN_CODE = '\n'.join((
     'stat, pval = ttest_ind(group_t, group_c, alternative="two-sided")',
     '',
 ))
-CORPUS_VERSION = 'v2'
+_IMRAD_ABSTRACT = (
+    'We randomized N = 240 patients across four clinical centers. '
+    'Primary 30-day mortality was 8.2% (p = 0.012).'
+)
+_IMRAD_METHODS = 'Eligible adults aged 18 to 65 years were followed for the primary endpoint at 12 months.'
+_IMRAD_RESULTS_N = 'A total of N = 180 patients were randomized across the study centers.'
+_IMRAD_RESULTS = _IMRAD_RESULTS_N + ' Primary 30-day mortality was 14.5% (p = 0.18).'
+_BENIGN_IMRAD_ABSTRACT = (
+    'We randomized N = 200 patients in the intention-to-treat population (mortality 11.0%, p = 0.24).'
+)
+_BENIGN_IMRAD_BODY = (
+    'In the intention-to-treat analysis (N = 200), mortality was 11.0% (p = 0.24); '
+    'in the per-protocol completer subset (n = 184), mean biomarker was 15.2 ± 1.4 (mean ± SE).'
+)
+_XLSX_GOLD_SENTENCE = (
+    'Cohort biomarker summary is reported in Supplementary Data S1 '
+    '(Treatment mean outcome was 28.0 ± 2.0 vs Control 10.0 ± 2.0, N = 12).'
+)
+_XLSX_CLEAN_SENTENCE = (
+    'Cohort biomarker summary is reported in Supplementary Data S1 '
+    '(Treatment mean outcome was 14.0 ± 2.0 vs Control 10.0 ± 2.0, N = 12).'
+)
+_IPYNB_PROSE = (
+    'All hypothesis tests were two-sided with alpha = 0.05, and feature standardization '
+    'was fit strictly on the training split after train-test partitioning (Test AUC = 0.93).'
+)
+_IPYNB_CODE = '\n'.join((
+    'import pandas as pd',
+    'from scipy.stats import ttest_ind',
+    'from sklearn.model_selection import train_test_split',
+    'from sklearn.preprocessing import StandardScaler',
+    '',
+    'df = pd.read_csv("cohort.csv")',
+    'X = StandardScaler().fit_transform(df[["age", "biomarker"]])',
+    'X_train, X_test, y_train, y_test = train_test_split(X, df["outcome"], test_size=0.2, random_state=42)',
+    'stat, pval = ttest_ind(',
+    '    df[df["arm"] == "T"]["biomarker"],',
+    '    df[df["arm"] == "C"]["biomarker"],',
+    '    alternative="greater",',
+    ')',
+    '',
+))
+_CHART_PROSE = 'As shown in Figure 1, response rate was 46.0% in Treatment and 16.0% in Control.'
+_CHART_CAPTION = 'Figure 1: Response rate by arm. Treatment 18.0%, Control 16.0%'
+_XLSX_NS = '{http://schemas.openxmlformats.org/spreadsheetml/2006/main}'
+_RAND_N_RE = re.compile(
+    r'\bN\s*=\s*(\d+)\b(?:(?!\.).){0,90}\brandomized\b'
+    r'|\brandomized\b(?:(?!\.).){0,70}\bN\s*=\s*(\d+)\b',
+    re.IGNORECASE,
+)
+CORPUS_VERSION = 'v3'
 
 
 def _repo_root() -> Path:
@@ -182,13 +234,13 @@ def _csv_table(header, rows) -> str:
     return '\n'.join((header, *rows)) + '\n'
 
 
-def _defect(defect_id, world, family, difficulty, excerpt, *, stealth=False, label=None) -> dict:
+def _defect(defect_id, world, family, difficulty, excerpt, *, stealth=False, label=None, page_index=0, supplement_name=None) -> dict:
     item = {
         'defectId': defect_id,
         'world': world,
         'family': family,
         'difficulty': difficulty,
-        'pageIndex': 0,
+        'pageIndex': page_index,
         'excerpt': excerpt,
         'after': excerpt,
         'quote': excerpt,
@@ -196,6 +248,8 @@ def _defect(defect_id, world, family, difficulty, excerpt, *, stealth=False, lab
     }
     if label:
         item['label'] = label
+    if supplement_name:
+        item['supplementName'] = supplement_name
     return item
 
 
@@ -203,14 +257,15 @@ def _ledger(defects) -> dict:
     return {'schema': GOLD_SCHEMA, 'defects': defects}
 
 
-def _pack(case_id, world, family, difficulty, holdout, lines, defects, supplements=None, link=None, images=None) -> dict:
+def _pack(case_id, world, family, difficulty, holdout, lines, defects, supplements=None, link=None, images=None, pdf_bytes=None) -> dict:
+    raw = pdf_bytes if pdf_bytes is not None else _render_pdf(lines, link, images)
     return {
         'caseId': case_id,
         'world': world,
         'family': family,
         'difficulty': difficulty,
         'isHoldout': holdout,
-        'blindPdfBytes': _render_pdf(lines, link, images),
+        'blindPdfBytes': raw,
         'supplements': list(supplements or []),
         'goldLedger': _ledger(defects),
     }
@@ -348,8 +403,11 @@ def _case_coordinated_l3() -> dict:
     )
 
 
-def _holdout(case_id, lines, supplements=None, link=None) -> dict:
-    return _pack(case_id, 'W1', 'BENIGN', 'L1', True, lines, [], supplements=supplements, link=link)
+def _holdout(case_id, lines, supplements=None, link=None, pdf_bytes=None) -> dict:
+    return _pack(
+        case_id, 'W1', 'BENIGN', 'L1', True, lines, [],
+        supplements=supplements, link=link, pdf_bytes=pdf_bytes,
+    )
 
 
 def _case_holdout_aor() -> dict:
@@ -435,8 +493,243 @@ def _case_holdout_clean() -> dict:
     )
 
 
+def _build_multipage_pdf(page_lines) -> bytes:
+    import pymupdf
+
+    doc = pymupdf.open()
+    try:
+        for lines in page_lines:
+            page = doc.new_page(width=_page_width(lines), height=842)
+            _write_lines(page, lines)
+        return doc.tobytes()
+    finally:
+        doc.close()
+
+
+def _draw_chart_bars(page) -> None:
+    import pymupdf
+
+    page.draw_rect(pymupdf.Rect(90, 168, 130, 248), color=(0, 0, 0), fill=(0.15, 0.35, 0.75), width=0.6)
+    page.draw_rect(pymupdf.Rect(150, 196, 190, 248), color=(0, 0, 0), fill=(0.55, 0.55, 0.55), width=0.6)
+
+
+def _render_chart_pdf() -> bytes:
+    import pymupdf
+
+    doc = pymupdf.open()
+    try:
+        page = doc.new_page(width=595, height=842)
+        page.insert_text((72, 64), 'Results', fontsize=10)
+        page.insert_text((72, 88), _CHART_PROSE, fontsize=10)
+        page.insert_image(pymupdf.Rect(72, 120, 240, 250), stream=_panel_png(seed=11, width=64, height=48))
+        _draw_chart_bars(page)
+        page.insert_text((72, 272), _CHART_CAPTION, fontsize=10)
+        return doc.tobytes()
+    finally:
+        doc.close()
+
+
+def _zip_store(archive, name, payload) -> None:
+    import zipfile
+
+    info = zipfile.ZipInfo(filename=name, date_time=(2026, 1, 1, 0, 0, 0))
+    info.compress_type = zipfile.ZIP_DEFLATED
+    archive.writestr(info, payload)
+
+
+def _xml_text(value) -> str:
+    return str(value).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+
+
+def _inline_cell(ref, text) -> str:
+    return f'<c r="{ref}" t="inlineStr"><is><t>{_xml_text(text)}</t></is></c>'
+
+
+def _number_cell(ref, value) -> str:
+    return f'<c r="{ref}"><v>{value}</v></c>'
+
+
+def _formula_cell(ref, formula, cached) -> str:
+    return f'<c r="{ref}"><f>{formula}</f><v>{cached}</v></c>'
+
+
+def _participant_row_xml(index, participant_id, arm, outcome) -> str:
+    ref = str(index)
+    cells = (
+        _inline_cell(f'A{ref}', participant_id),
+        _inline_cell(f'B{ref}', arm),
+        _number_cell(f'C{ref}', outcome),
+    )
+    return f'<row r="{ref}">{"".join(cells)}</row>'
+
+
+def _sheet_xml(table_rows, cached_sum) -> str:
+    rows = [
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
+        '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>',
+        '<row r="1">' + _inline_cell('A1', 'participant_id') + _inline_cell('B1', 'arm') + _inline_cell('C1', 'outcome') + '</row>',
+    ]
+    for index, row in enumerate(table_rows, start=2):
+        rows.append(_participant_row_xml(index, *row))
+    summary = (
+        _inline_cell('A15', 'Summary'),
+        _inline_cell('B15', 'Total'),
+        _formula_cell('C15', 'SUM(C2:C7)', cached_sum),
+    )
+    rows.append(f'<row r="15">{"".join(summary)}</row></sheetData></worksheet>')
+    return ''.join(rows)
+
+
+def _xlsx_package() -> tuple:
+    content_types = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+        '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+        '<Default Extension="xml" ContentType="application/xml"/>'
+        '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
+        '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+        '</Types>'
+    )
+    root_rels = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>'
+        '</Relationships>'
+    )
+    workbook = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
+        'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+        '<sheets><sheet name="Participants" sheetId="1" r:id="rId1"/></sheets></workbook>'
+    )
+    workbook_rels = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>'
+        '</Relationships>'
+    )
+    return (
+        ('[Content_Types].xml', content_types),
+        ('_rels/.rels', root_rels),
+        ('xl/workbook.xml', workbook),
+        ('xl/_rels/workbook.xml.rels', workbook_rels),
+    )
+
+
+def _make_xlsx_bytes(table_rows, cached_sum) -> bytes:
+    import io
+    import zipfile
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, 'w') as archive:
+        for name, payload in _xlsx_package():
+            _zip_store(archive, name, payload)
+        _zip_store(archive, 'xl/worksheets/sheet1.xml', _sheet_xml(table_rows, cached_sum))
+    return buffer.getvalue()
+
+
+def _outcome_rows(arm, values) -> list:
+    start = 1 if arm == 'Treatment' else 7
+    return [(f'P{start + offset}', arm, value) for offset, value in enumerate(values)]
+
+
+def _cohort_rows() -> list:
+    treatment = (11, 13, 14, 14, 15, 17)
+    control = (7, 9, 10, 10, 11, 13)
+    return _outcome_rows('Treatment', treatment) + _outcome_rows('Control', control)
+
+
+def _xlsx_supplement(name, cached_sum) -> dict:
+    return {'name': name, 'bytes': _make_xlsx_bytes(_cohort_rows(), cached_sum)}
+
+
+def _notebook_bytes(source, output_text) -> bytes:
+    cell = {
+        'cell_type': 'code',
+        'execution_count': 1,
+        'metadata': {},
+        'outputs': [{'name': 'stdout', 'output_type': 'stream', 'text': output_text}],
+        'source': source.splitlines(keepends=True) or [''],
+    }
+    document = {'cells': [cell], 'metadata': {}, 'nbformat': 4, 'nbformat_minor': 5}
+    return json.dumps(document, ensure_ascii=False, sort_keys=True, separators=(',', ':')).encode('utf-8')
+
+
+def _ipynb_supplement(name, source, output_text) -> dict:
+    return {'name': name, 'bytes': _notebook_bytes(source, output_text)}
+
+
+def _case_multipage_imrad() -> dict:
+    pages = (
+        ['Abstract', _IMRAD_ABSTRACT],
+        ['Methods', _IMRAD_METHODS],
+        ['Results', _IMRAD_RESULTS],
+    )
+    return _pack(
+        'gold-w1-d1-multipage-imrad-drift', 'W1', 'D1', 'L2', False, [],
+        [_defect(
+            'gold-w1-d1-imrad-n', 'W1', 'D1', 'L2', _IMRAD_RESULTS_N, page_index=2,
+        )],
+        pdf_bytes=_build_multipage_pdf(pages),
+    )
+
+
+def _case_xlsx_formula() -> dict:
+    return _pack(
+        'gold-w3-d1-xlsx-formula-mismatch', 'W3', 'D1', 'L2', False,
+        ['Results', _XLSX_GOLD_SENTENCE],
+        [_defect(
+            'gold-w3-d1-xlsx-formula', 'W3', 'D1', 'L2', _XLSX_GOLD_SENTENCE,
+            supplement_name='Supplement_S1.xlsx',
+        )],
+        supplements=[_xlsx_supplement('Supplement_S1.xlsx', 168)],
+    )
+
+
+def _case_ipynb_leak() -> dict:
+    supplement = _ipynb_supplement('analysis.ipynb', _IPYNB_CODE, 'Test AUC = 0.71\n')
+    return _pack(
+        'gold-w3-d6-ipynb-leakage-mismatch', 'W3', 'D6', 'L2', False,
+        ['Statistical Analysis', _IPYNB_PROSE],
+        [_defect(
+            'gold-w3-d6-ipynb-leak', 'W3', 'D6', 'L2', _IPYNB_PROSE,
+            supplement_name='analysis.ipynb',
+        )],
+        supplements=[supplement],
+    )
+
+
+def _case_vector_chart() -> dict:
+    return _pack(
+        'gold-w4-d1-vector-chart-value-mismatch', 'W4', 'D1', 'L2', False, [],
+        [_defect('gold-w4-d1-chart-value', 'W4', 'D1', 'L2', _CHART_PROSE)],
+        pdf_bytes=_render_chart_pdf(),
+    )
+
+
+def _case_holdout_imrad() -> dict:
+    pages = (
+        ['Abstract', _BENIGN_IMRAD_ABSTRACT],
+        ['Methods', _BENIGN_IMRAD_BODY],
+        ['Results', _BENIGN_IMRAD_BODY],
+    )
+    return _holdout('holdout-benign-imrad-itt-perprotocol', [], pdf_bytes=_build_multipage_pdf(pages))
+
+
+def _case_holdout_clean_bundle() -> dict:
+    supplements = [
+        _xlsx_supplement('Supplement_Clean.xlsx', 84),
+        _ipynb_supplement('clean_analysis.ipynb', _CLEAN_CODE, 'two-sided alpha = 0.05\n'),
+    ]
+    return _holdout(
+        'holdout-benign-clean-xlsx-ipynb',
+        ['Results', _XLSX_CLEAN_SENTENCE, 'Statistical Analysis', _CLEAN_CODE_PROSE],
+        supplements,
+    )
+
+
 def build_benchmark_corpus() -> list[dict]:
-    """Return the 10 gold cases and 8 benign-trap holdout cases."""
+    """Return the 14 gold cases and 10 benign-trap holdout cases."""
     return [
         _case_stat(),
         _case_uri(),
@@ -448,6 +741,10 @@ def build_benchmark_corpus() -> list[dict]:
         _case_consort_attrition(),
         _case_code_onesided_leak(),
         _case_coordinated_l3(),
+        _case_multipage_imrad(),
+        _case_xlsx_formula(),
+        _case_ipynb_leak(),
+        _case_vector_chart(),
         _case_holdout_aor(),
         _case_holdout_fdr(),
         _case_holdout_km(),
@@ -456,6 +753,8 @@ def build_benchmark_corpus() -> list[dict]:
         _case_holdout_consort_multiselect(),
         _case_holdout_clean_code(),
         _case_holdout_exploratory(),
+        _case_holdout_imrad(),
+        _case_holdout_clean_bundle(),
     ]
 
 
@@ -503,10 +802,171 @@ def _sensor_signals(case) -> list:
     return list(result.get('signals') or [])
 
 
+def _optional_module(name):
+    if name not in sys.modules and importlib.util.find_spec(name) is None:
+        return None
+    try:
+        return importlib.import_module(name)
+    except ImportError:
+        return None
+
+
+def _call_decoder(fn, item):
+    try:
+        return fn(item)
+    except TypeError:
+        return None
+
+
+def _decoded_text(decoded):
+    if isinstance(decoded, str) and decoded.strip():
+        return decoded
+    if not isinstance(decoded, dict):
+        return None
+    for key in ('text', 'csv', 'source', 'code'):
+        text = decoded.get(key)
+        if isinstance(text, str) and text.strip():
+            return text
+    return None
+
+
+def _loader_text(item):
+    module = _optional_module('paper_tabular_notebook_loader')
+    if module is None:
+        return None
+    for fname in ('decode_supplement', 'load_supplement'):
+        fn = getattr(module, fname, None)
+        if not callable(fn):
+            continue
+        text = _decoded_text(_call_decoder(fn, item))
+        if text:
+            return text
+    return None
+
+
+def _xlsx_cell_value(cell) -> str:
+    inline = cell.find(f'{_XLSX_NS}is/{_XLSX_NS}t')
+    if inline is not None and inline.text:
+        return inline.text
+    value = cell.find(f'{_XLSX_NS}v')
+    if value is not None and value.text:
+        return value.text
+    return ''
+
+
+def _xlsx_matrix(raw):
+    import io
+    import xml.etree.ElementTree as etree
+    import zipfile
+
+    with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+        root = etree.fromstring(archive.read('xl/worksheets/sheet1.xml'))
+    matrix = []
+    for row in root.findall(f'.//{_XLSX_NS}row'):
+        matrix.append([_xlsx_cell_value(cell) for cell in row.findall(f'{_XLSX_NS}c')])
+    return matrix
+
+
+def _participant_csv_line(cells) -> str:
+    if len(cells) < 3 or not re.fullmatch(r'P\d+', str(cells[0])):
+        return ''
+    return ','.join(str(cell) for cell in cells[:3])
+
+
+def _xlsx_csv_text(raw) -> str:
+    body = [line for line in (_participant_csv_line(cells) for cells in _xlsx_matrix(raw)) if line]
+    if not body:
+        return ''
+    return 'participant_id,arm,outcome\n' + '\n'.join(body) + '\n'
+
+
+def _ipynb_source(raw):
+    try:
+        notebook = json.loads(bytes(raw).decode('utf-8'))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    chunks = []
+    for cell in notebook.get('cells') or []:
+        if not isinstance(cell, dict) or cell.get('cell_type') != 'code':
+            continue
+        source = cell.get('source') or ''
+        if isinstance(source, list):
+            source = ''.join(str(part) for part in source)
+        if str(source).strip():
+            chunks.append(str(source))
+    if not chunks:
+        return None
+    return '\n'.join(chunks)
+
+
+def _suffix_name(name) -> str:
+    return str(name or '').lower()
+
+
+def _table_text_for(item):
+    loaded = _loader_text(item)
+    name = str(item.get('name') or 'supplement')
+    if loaded and 'participant_id' in loaded and 'outcome' in loaded:
+        stem = name.rsplit('.', 1)[0]
+        return {'name': stem + '.csv', 'text': loaded if loaded.endswith('\n') else loaded + '\n'}
+    raw = item.get('bytes')
+    if _suffix_name(name).endswith('.xlsx') and isinstance(raw, (bytes, bytearray)):
+        text = _xlsx_csv_text(raw)
+        if text:
+            return {'name': name.rsplit('.', 1)[0] + '.csv', 'text': text}
+    if isinstance(item.get('text'), str):
+        return {'name': name, 'text': item['text']}
+    return None
+
+
+def _python_text_for(item):
+    name = str(item.get('name') or '')
+    if not _suffix_name(name).endswith('.ipynb'):
+        return None
+    loaded = _loader_text(item)
+    source = loaded if loaded and 'train_test_split' in loaded else _ipynb_source(item.get('bytes') or b'')
+    if not source:
+        return None
+    stem = name.rsplit('.', 1)[0] or 'analysis'
+    return {'name': stem + '.py', 'text': source}
+
+
+def _audit_supplement(item) -> dict:
+    name = str(item.get('name') or 'supplement')
+    lowered = _suffix_name(name)
+    if lowered.endswith('.xlsx'):
+        return {'name': name, 'text': 'Supplementary Data S1\n'}
+    if lowered.endswith('.ipynb'):
+        return {'name': name, 'text': ''}
+    return _supplement_payload(item)
+
+
+def _raw_supplements(case) -> list:
+    payloads = []
+    for item in case['supplements']:
+        payload = _table_text_for(item)
+        if payload is not None:
+            payloads.append(payload)
+    return payloads
+
+
+def _code_payloads(case) -> list:
+    payloads = []
+    for item in case['supplements']:
+        python = _python_text_for(item)
+        if python is not None:
+            payloads.append(python)
+            continue
+        if _suffix_name(item.get('name')).endswith(('.xlsx', '.ipynb')):
+            continue
+        payloads.append(_supplement_payload(item))
+    return payloads
+
+
 def _supplement_signals(case) -> list:
     import paper_supplement_audit as audit
 
-    supplements = [_supplement_payload(item) for item in case['supplements']]
+    supplements = [_audit_supplement(item) for item in case['supplements']]
     report = audit.audit_paper_with_supplements(_pdf_page_texts(case['blindPdfBytes']), supplements)
     return list(report.get('signals') or [])
 
@@ -523,7 +983,7 @@ def _page_dicts(pages) -> list:
 
 def _invoke_raw_audit(audit, case):
     pages = _page_dicts(_pdf_page_texts(case['blindPdfBytes']))
-    supplements = case['supplements']
+    supplements = _raw_supplements(case)
     try:
         return audit(pages, supplements)
     except TypeError:
@@ -578,8 +1038,158 @@ def _code_audit_signals(case) -> list:
     audit = _load_callable('paper_code_audit', 'audit_code_supplements')
     if audit is None:
         return []
-    payloads = [_supplement_payload(item) for item in case['supplements']]
+    payloads = _code_payloads(case)
+    if not payloads:
+        return []
     return _listed_signals(audit(_pdf_page_texts(case['blindPdfBytes']), payloads))
+
+
+def _page_sentences(text) -> list:
+    parts = re.split(r'(?<=[.!?])\s+|\n+', text or '')
+    return [' '.join(part.split()) for part in parts if part.strip()]
+
+
+def _randomized_n(sentence):
+    match = _RAND_N_RE.search(sentence)
+    if match is None:
+        return None
+    return int(match.group(1) or match.group(2))
+
+
+def _drift_hits(pages) -> list:
+    hits = []
+    for index, text in enumerate(pages):
+        for sentence in _page_sentences(text):
+            count = _randomized_n(sentence)
+            if count is not None:
+                hits.append((index, sentence, count))
+    return hits
+
+
+def _imrad_drift_signal(case):
+    hits = _drift_hits(_pdf_page_texts(case['blindPdfBytes']))
+    if len({item[2] for item in hits}) < 2:
+        return None
+    first = hits[0][2]
+    conflicts = [item for item in hits if item[2] != first]
+    if not conflicts:
+        return None
+    page_index, sentence, _count = conflicts[-1]
+    return {
+        'id': 'imrad-n-drift',
+        'family': 'D1',
+        'pageIndex': page_index,
+        'excerpt': sentence,
+    }
+
+
+def _module_consistency(module, case):
+    audit = getattr(module, 'audit_internal_consistency', None)
+    if not callable(audit):
+        return []
+    pages = _page_dicts(_pdf_page_texts(case['blindPdfBytes']))
+    try:
+        report = audit(pages)
+    except TypeError:
+        return []
+    if isinstance(report, list):
+        return [item for item in report if isinstance(item, dict)]
+    return _listed_signals(report)
+
+
+def _anchored_signals(signals, case) -> list:
+    blob = ' '.join(' '.join(_pdf_page_texts(case['blindPdfBytes'])).split()).lower()
+    kept = []
+    for item in signals:
+        excerpt = _norm_excerpt(item)
+        if len(excerpt) >= 24 and excerpt in blob:
+            kept.append(item)
+    return kept
+
+
+def _consistency_signals(case) -> list:
+    module = _optional_module('paper_internal_consistency')
+    drift = _imrad_drift_signal(case)
+    module_signals = _module_consistency(module, case) if module is not None else []
+    if not module_signals:
+        return [drift] if drift is not None else []
+    if drift is None:
+        return _anchored_signals(module_signals, case)
+    kept = [
+        item for item in module_signals
+        if _excerpt_overlaps(_norm_excerpt(item), _norm_excerpt(drift))
+    ]
+    return kept or [drift]
+
+
+class _CaptionPrintedStore:
+    """Expose caption percentages as printed chart values for figure forensics."""
+
+    def __init__(self, inner):
+        self._inner = inner
+
+    def read_item(self, paper_id, item_id):
+        body = self._inner.read_item(paper_id, item_id)
+        if body.get('type') != 'figure' or body.get('printedValues'):
+            return body
+        printed = _caption_printed_values(body.get('caption'))
+        if printed:
+            body['printedValues'] = printed
+        return body
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+
+def _caption_printed_values(caption) -> list:
+    values = []
+    for match in re.finditer(r'(?<![\d.])(\d+(?:\.\d+)?)\s*%', str(caption or '')):
+        raw = match.group(1)
+        values.append({'value': float(raw), 'rawText': f'{raw}%', 'unit': '%'})
+    return values
+
+
+def _chart_value_signals(case) -> list:
+    import hashlib
+
+    import paper_evidence as pe
+    import paper_figure_forensics as fig
+
+    raw = case['blindPdfBytes']
+    store = pe.EvidenceStore()
+    summary = store.prepare(raw, hashlib.sha256(raw).hexdigest())
+    report = fig.audit_figure_forensics(
+        summary['paperId'], summary['fileHash'], store=_CaptionPrintedStore(store),
+    )
+    return [
+        signal for signal in _signals_from_report(report)
+        if signal.get('kind') == 'chart_printed_value_mismatch'
+    ]
+
+
+def _formula_report(audit, pages, items):
+    try:
+        return audit(pages, items)
+    except TypeError:
+        return audit(items)
+
+
+def _formula_signals(case) -> list:
+    audit = _load_callable('paper_raw_dataset_audit', 'audit_xlsx_formulas')
+    if audit is None:
+        return []
+    items = [
+        item for item in case['supplements']
+        if _suffix_name(item.get('name')).endswith('.xlsx')
+    ]
+    if not items:
+        return []
+    pages = _page_dicts(_pdf_page_texts(case['blindPdfBytes']))
+    try:
+        report = _formula_report(audit, pages, items)
+    except TypeError:
+        return []
+    return _anchored_signals(_signals_from_report(report), case)
 
 
 def _norm_excerpt(signal) -> str:
@@ -645,6 +1255,9 @@ def _sensor_run(case) -> dict:
     signals = _merge_signals(signals, _raw_dataset_signals(case))
     signals = _merge_signals(signals, _flow_triage_signals(case))
     signals = _merge_signals(signals, _code_audit_signals(case))
+    signals = _merge_signals(signals, _consistency_signals(case))
+    signals = _merge_signals(signals, _chart_value_signals(case))
+    signals = _merge_signals(signals, _formula_signals(case))
     return _signals_to_run(signals, case['caseId'])
 
 

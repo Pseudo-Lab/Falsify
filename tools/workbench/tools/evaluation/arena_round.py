@@ -47,6 +47,7 @@ except ImportError:  # pragma: no cover - harness_adapter is stdlib-only today
 
 ROUND_SCHEMA = 'falsify.arena-round.v1'
 PATCH_SCHEMA = 'falsify.harness-patch.v1'
+COMPACT_RULES_SCHEMA = 'falsify.harness-rule-compaction.v1'
 ERROR_SCHEMA = 'falsify.arena-round-error.v1'
 INVOCATION_SCHEMA = 'falsify.harness-invocation.v1'
 BLUE_REPORT_SCHEMA = 'falsify.blue-report.v1'
@@ -994,6 +995,230 @@ def _scrub(patch: dict, secrets: list[str], ids: set[str]) -> None:
     _scrub_codes(patch, hits)
     if hits:
         raise DistillScrubError(hits)
+
+
+_FAILURE_ALIASES = {
+    'early_red': 'early_caught',
+    'earlyred': 'early_caught',
+    'purefp': 'pure_fp',
+    'pure_false_positive': 'pure_fp',
+    'false_positive': 'pure_fp',
+    'fp': 'pure_fp',
+    'miss': 'missed',
+}
+_SEVERITY_RANK = {'missed': 0, 'flip': 1, 'pure_fp': 2, 'early_caught': 3}
+_FAMILY_RE = re.compile(
+    r'(?:family|계열)\s*(?:code|코드)?\s*[:#-]?\s*([A-Za-z][A-Za-z0-9-]{0,12})',
+    re.IGNORECASE,
+)
+_SURFACE_RE = re.compile(
+    r'(?:surface|표면)\s*(?:code|코드)?\s*[:#-]?\s*([A-Za-z][A-Za-z0-9-]{0,12})',
+    re.IGNORECASE,
+)
+_LEAD_CODE_RE = re.compile(r'^\s*([A-Z][A-Z0-9]{0,6}(?:-[A-Z0-9]{1,3})?)\b')
+
+
+def _code_token(value) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    code = re.sub(r'[^A-Za-z0-9-]+', '', text).upper()
+    if not code:
+        return None
+    if CODE_RE.fullmatch(code):
+        return code
+    return 'S' + hashlib.sha256(code.encode('utf-8')).hexdigest()[:6].upper()
+
+
+def _failure_token(rule: dict) -> str:
+    raw = rule.get('failureClass')
+    if raw is None:
+        raw = rule.get('kind')
+    token = str(raw or 'other').strip().lower().replace('-', '_').replace(' ', '_')
+    return _FAILURE_ALIASES.get(token, token or 'other')
+
+
+def _axes_token(rule: dict, key: str) -> str | None:
+    axes = rule.get('axes')
+    if not isinstance(axes, dict) or key not in axes:
+        return None
+    return _code_token(axes.get(key))
+
+
+def _id_tokens(rule_id: str) -> dict:
+    parts = [part for part in re.split(r'[^A-Za-z0-9]+', str(rule_id or '')) if part]
+    lowered = [part.lower() for part in parts]
+    found = {}
+    for index, name in enumerate(lowered):
+        axis = {'family': 'family', 'surface': 'surface'}.get(name)
+        if axis and index + 1 < len(parts):
+            found[axis] = _code_token(parts[index + 1])
+    if 'family' not in found and len(parts) >= 2 and lowered[0] in ('fn', 'fp', 'rule'):
+        if lowered[1] not in ('family', 'surface'):
+            found['family'] = _code_token(parts[1])
+    return {key: value for key, value in found.items() if value}
+
+
+def _statement_stem(statement: str) -> str:
+    text = re.sub(r'\d+', '', statement.lower())
+    text = re.sub(r'[^a-z0-9가-힣]+', '-', text).strip('-')
+    return text[:64]
+
+
+def _statement_axes(statement: str) -> dict:
+    text = str(statement or '')
+    found = {}
+    family = _FAMILY_RE.search(text)
+    surface = _SURFACE_RE.search(text)
+    if family:
+        found['family'] = _code_token(family.group(1))
+    if surface:
+        found['surface'] = _code_token(surface.group(1))
+    if 'family' not in found:
+        lead = _LEAD_CODE_RE.match(text)
+        if lead:
+            found['family'] = _code_token(lead.group(1))
+    return {key: value for key, value in found.items() if value}
+
+
+def _axis_value(rule: dict, key: str) -> str | None:
+    if key in rule:
+        direct = _code_token(rule.get(key))
+        if direct:
+            return direct
+    from_axes = _axes_token(rule, key)
+    if from_axes:
+        return from_axes
+    from_id = _id_tokens(str(rule.get('ruleId') or '')).get(key)
+    if from_id:
+        return from_id
+    return _statement_axes(str(rule.get('statement') or '')).get(key)
+
+
+def _rule_signature(rule: dict) -> tuple[str, str, str]:
+    family = _axis_value(rule, 'family')
+    surface = _axis_value(rule, 'surface') or 'NA'
+    if not family:
+        stem = _statement_stem(str(rule.get('statement') or ''))
+        family = _code_token(stem) if stem else 'NA'
+    return family or 'NA', surface, _failure_token(rule)
+
+
+def _support_value(rule: dict) -> int:
+    for key in ('supportCount', 'count'):
+        value = rule.get(key)
+        if type(value) is int and value >= 0:
+            return value
+    return 1
+
+
+def _statement_key(rule: dict) -> tuple:
+    priority = rule.get('priority', 0)
+    if isinstance(priority, bool) or not isinstance(priority, (int, float)):
+        priority = 0
+    statement = str(rule.get('statement') or '')
+    noisy = 1 if re.search(r'\d', statement) else 0
+    return (float(priority), -noisy, len(statement), statement)
+
+
+def _constituent_ids(rule: dict) -> list:
+    nested = rule.get('mergedRuleIds')
+    if isinstance(nested, list) and nested:
+        return nested
+    return [rule.get('ruleId')]
+
+
+def _merged_ids(members: list[dict]) -> list[str]:
+    found = []
+    seen: set[str] = set()
+    for rule in members:
+        for candidate in _constituent_ids(rule):
+            rule_id = str(candidate or '').strip()
+            if not rule_id or rule_id in seen:
+                continue
+            seen.add(rule_id)
+            found.append(rule_id)
+    return found
+
+
+def _merge_group(signature: tuple[str, str, str], members: list[dict]) -> dict:
+    best = max(members, key=_statement_key)
+    family, surface, failure = signature
+    return {
+        'ruleId': 'cr-' + hashlib.sha256('|'.join(signature).encode('utf-8')).hexdigest()[:12],
+        'failureClass': failure,
+        'family': family,
+        'surface': surface,
+        'statement': str(best.get('statement') or ''),
+        'supportCount': sum(_support_value(rule) for rule in members),
+        'mergedRuleIds': _merged_ids(members),
+    }
+
+
+def _severity_key(rule: dict) -> tuple:
+    rank = _SEVERITY_RANK.get(str(rule.get('failureClass') or ''), 9)
+    return (rank, -int(rule.get('supportCount') or 0), str(rule.get('ruleId') or ''))
+
+
+def _group_rules(rules: list) -> list[dict]:
+    groups: dict[tuple, list] = {}
+    order: list[tuple] = []
+    for rule in rules:
+        if not isinstance(rule, dict):
+            continue
+        signature = _rule_signature(rule)
+        bucket = groups.get(signature)
+        if bucket is None:
+            bucket = []
+            groups[signature] = bucket
+            order.append(signature)
+        bucket.append(rule)
+    return [_merge_group(signature, groups[signature]) for signature in order]
+
+
+def _scrub_compact(document: dict) -> None:
+    probe = dict(document)
+    probe['summary'] = {'axes': {}}
+    try:
+        _scrub(probe, [], set())
+    except DistillScrubError:
+        raise ArenaRoundError('distill_scrub_failed', 3) from None
+
+
+def _leak_view(rule: dict) -> dict:
+    view = dict(rule)
+    for key in ('family', 'surface'):
+        if key in view:
+            view[key] = _code_token(view.get(key)) or 'NA'
+    if 'ruleId' not in view:
+        view['ruleId'] = 'rule'
+    return view
+
+
+def _scrub_input_rules(rules: list) -> None:
+    views = [_leak_view(rule) for rule in rules if isinstance(rule, dict)]
+    _scrub_compact({'schema': COMPACT_RULES_SCHEMA, 'rules': views, 'scrubbed': True})
+
+
+def compact_harness_rules(rules: list[dict], *, max_rules: int = 24) -> dict:
+    """Merge repeated harness rules into one scrubbed, severity-ordered set."""
+    limit = _validate_int(max_rules, 'max_rules', 1, 100)
+    if not isinstance(rules, list):
+        raise ArenaRoundError('rules_invalid')
+    _scrub_input_rules(rules)
+    chosen = sorted(_group_rules(rules), key=_severity_key)[:limit]
+    document = {
+        'schema': COMPACT_RULES_SCHEMA,
+        'inputRuleCount': len(rules),
+        'outputRuleCount': len(chosen),
+        'droppedCount': len(rules) - len(chosen),
+        'rules': chosen,
+        'scrubbed': True,
+    }
+    _scrub_compact(document)
+    return document
 
 
 def distill_round(round_record, *, gold_ledger=None, max_rules=40) -> dict:

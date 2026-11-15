@@ -37,6 +37,13 @@ V2_GOLD_CASES = (
     'gold-w3-d6-code-onesided-leak',
     'gold-w3-d6-coordinated-l3-stealth',
 )
+V3_GOLD_CASES = (
+    'gold-w1-d1-multipage-imrad-drift',
+    'gold-w3-d1-xlsx-formula-mismatch',
+    'gold-w3-d6-ipynb-leakage-mismatch',
+    'gold-w4-d1-vector-chart-value-mismatch',
+)
+V3_SENSOR_CASES = V3_GOLD_CASES
 V1_HOLDOUT_CASES = (
     'holdout-benign-multivariable-aor',
     'holdout-benign-fdr-padj',
@@ -49,14 +56,22 @@ V2_HOLDOUT_CASES = (
     'holdout-benign-clean-twosided-code',
     'holdout-benign-exploratory-secondary',
 )
+V3_HOLDOUT_CASES = (
+    'holdout-benign-imrad-itt-perprotocol',
+    'holdout-benign-clean-xlsx-ipynb',
+)
 SENSOR_LAYER0_CASES = V1_LAYER0_CASES + ('gold-w3-d1-rawdata-row-mismatch',)
 HOOK_LAYER0_CASES = SENSOR_LAYER0_CASES + (
     'gold-w1-d1-consort-attrition',
     'gold-w3-d6-code-onesided-leak',
+    'gold-w1-d1-multipage-imrad-drift',
 )
 SEMANTIC_CASES = V1_SEMANTIC_CASES + ('gold-w3-d6-coordinated-l3-stealth',)
-CASE_IDS = V1_LAYER0_CASES + V1_SEMANTIC_CASES + V2_GOLD_CASES + V1_HOLDOUT_CASES + V2_HOLDOUT_CASES
-HOLDOUT_CASES = V1_HOLDOUT_CASES + V2_HOLDOUT_CASES
+CASE_IDS = (
+    V1_LAYER0_CASES + V1_SEMANTIC_CASES + V2_GOLD_CASES + V3_GOLD_CASES
+    + V1_HOLDOUT_CASES + V2_HOLDOUT_CASES + V3_HOLDOUT_CASES
+)
+HOLDOUT_CASES = V1_HOLDOUT_CASES + V2_HOLDOUT_CASES + V3_HOLDOUT_CASES
 
 
 def _semantic_runner(case):
@@ -123,14 +138,44 @@ def _flow_stub_audit(pages):
     }
 
 
+def _page_blob(pages) -> str:
+    chunks = []
+    for page in pages:
+        if isinstance(page, str):
+            chunks.append(page)
+        elif isinstance(page, dict):
+            chunks.append(str(page.get('text') or ''))
+        else:
+            chunks.append(str(page))
+    return '\n'.join(chunks)
+
+
 def _code_stub_audit(pages, supplements):
-    excerpt = _gold_excerpt('gold-w3-d6-code-onesided-leak')
-    blob = '\n'.join(str(page) for page in pages)
+    blob = _page_blob(pages)
     code = '\n'.join(str(item.get('text') or '') for item in supplements)
     signals = []
-    if excerpt in blob and 'alternative="greater"' in code:
-        signals.append({'id': 'code-onesided', 'family': 'D6', 'pageIndex': 0, 'excerpt': excerpt})
+    for case_id in ('gold-w3-d6-code-onesided-leak', 'gold-w3-d6-ipynb-leakage-mismatch'):
+        excerpt = _gold_excerpt(case_id)
+        if excerpt in blob and 'alternative="greater"' in code:
+            signals.append({'id': case_id, 'family': 'D6', 'pageIndex': 0, 'excerpt': excerpt})
     return {'signals': signals}
+
+
+def _consistency_stub_audit(pages):
+    excerpt = _gold_excerpt('gold-w1-d1-multipage-imrad-drift')
+    signals = []
+    if excerpt in _page_blob(pages):
+        signals.append({'id': 'imrad-drift', 'family': 'D1', 'pageIndex': 2, 'excerpt': excerpt})
+    return {
+        'signals': signals,
+        'triageHints': [{
+            'id': 'hint-imrad',
+            'family': 'D1',
+            'pageIndex': 2,
+            'excerpt': 'triage hint should not score as a defect',
+            'decision': 'defect',
+        }],
+    }
 
 
 def _stub_modules():
@@ -138,7 +183,13 @@ def _stub_modules():
     flow.audit_flow_and_spin_triage = _flow_stub_audit
     code = types.ModuleType('paper_code_audit')
     code.audit_code_supplements = _code_stub_audit
-    return {'paper_flow_and_spin_triage': flow, 'paper_code_audit': code}
+    consistency = types.ModuleType('paper_internal_consistency')
+    consistency.audit_internal_consistency = _consistency_stub_audit
+    return {
+        'paper_flow_and_spin_triage': flow,
+        'paper_code_audit': code,
+        'paper_internal_consistency': consistency,
+    }
 
 
 def _report_shell(recall, pure_fp, aurc=0.0):
@@ -149,14 +200,16 @@ def _report_shell(recall, pure_fp, aurc=0.0):
 
 
 class CorpusTests(unittest.TestCase):
-    def test_corpus_has_ten_gold_and_eight_holdout_cases(self):
+    def test_corpus_has_fourteen_gold_and_ten_holdout_cases(self):
         corpus = bench.build_benchmark_corpus()
         ids = [case['caseId'] for case in corpus]
         self.assertEqual(ids, list(CASE_IDS))
         gold = [case for case in corpus if not case['isHoldout']]
         holdout = [case for case in corpus if case['isHoldout']]
-        self.assertEqual(len(gold), 10)
-        self.assertEqual(len(holdout), 8)
+        self.assertEqual(len(gold), 14)
+        self.assertEqual(len(holdout), 10)
+        self.assertEqual(bench.CORPUS_VERSION, 'v3')
+        self.assertEqual(bench.SCHEMA, 'falsify.benchmark-report.v1')
         for case in gold:
             self.assertEqual(case['goldLedger']['schema'], bench.GOLD_SCHEMA)
             self.assertGreater(len(case['goldLedger']['defects']), 0)
@@ -169,11 +222,11 @@ class SensorBenchmarkTests(unittest.TestCase):
     def test_sensor_mode_layer0_recall_and_clean_holdout(self):
         report = bench.run_benchmark_suite(mode='sensor')
         self.assertEqual(report['schema'], bench.SCHEMA)
-        self.assertEqual(report['corpusVersion'], 'v2')
+        self.assertEqual(report['corpusVersion'], 'v3')
         gold = report['goldSummary']
         holdout = report['holdoutSummary']
-        self.assertEqual(gold['caseCount'], 10)
-        self.assertEqual(holdout['caseCount'], 8)
+        self.assertEqual(gold['caseCount'], 14)
+        self.assertEqual(holdout['caseCount'], 10)
         self.assertEqual(gold['semanticRecall'], 0.0)
         self.assertEqual(holdout['totalPureFp'], 0)
         self.assertEqual(holdout['pureFpRatePerPaper'], 0.0)
@@ -183,9 +236,13 @@ class SensorBenchmarkTests(unittest.TestCase):
         self.assertIn('overallAccuracy', gold['selective'])
         self.assertEqual(gold['stealthYield'], 1.0)
         by_id = {row['caseId']: row for row in report['caseResults']}
-        for case_id in SENSOR_LAYER0_CASES:
-            self.assertEqual(by_id[case_id]['fn'], 0)
-            self.assertGreater(by_id[case_id]['tp'], 0)
+        for case_id in SENSOR_LAYER0_CASES + V3_SENSOR_CASES:
+            self.assertEqual(by_id[case_id]['fn'], 0, case_id)
+            self.assertGreater(by_id[case_id]['tp'], 0, case_id)
+        if importlib.util.find_spec('paper_internal_consistency') is not None:
+            drifted = by_id['gold-w1-d1-multipage-imrad-drift']
+            self.assertEqual(drifted['fn'], 0)
+            self.assertGreater(drifted['tp'], 0)
         for case_id in SEMANTIC_CASES:
             self.assertEqual(by_id[case_id]['tp'], 0)
             self.assertGreater(by_id[case_id]['fn'], 0)
@@ -232,6 +289,53 @@ class SensorBenchmarkTests(unittest.TestCase):
         by_id = {row['caseId']: row for row in report['caseResults']}
         for case_id in HOOK_LAYER0_CASES:
             self.assertEqual(by_id[case_id]['fn'], 0)
+
+    def test_vector_chart_value_mismatch_is_caught_by_figure_forensics(self):
+        import hashlib
+
+        bench._ensure_local()
+        import paper_evidence as pe
+        import paper_figure_forensics as fig
+
+        case = next(
+            item for item in bench.build_benchmark_corpus()
+            if item['caseId'] == 'gold-w4-d1-vector-chart-value-mismatch'
+        )
+        raw = case['blindPdfBytes']
+        store = pe.EvidenceStore()
+        summary = store.prepare(raw, hashlib.sha256(raw).hexdigest())
+        report = fig.audit_figure_forensics(
+            summary['paperId'], summary['fileHash'], store=bench._CaptionPrintedStore(store),
+        )
+        claims = [signal for signal in report['signals'] if signal['kind'] == 'chart_printed_value_mismatch']
+        self.assertGreaterEqual(len(claims), 1)
+        excerpt = case['goldLedger']['defects'][0]['excerpt']
+        self.assertTrue(any(excerpt[:40] in signal['excerpt'] or signal['excerpt'][:40] in excerpt for signal in claims))
+        scored = bench.run_benchmark_suite(mode='sensor', case_ids=[case['caseId']])
+        row = scored['caseResults'][0]
+        self.assertGreaterEqual(row['tp'], 1)
+        self.assertEqual(row['fn'], 0)
+        self.assertEqual(row['pureFp'], 0)
+
+    def test_v3_cases_score_when_optional_modules_are_absent(self):
+        real = importlib.util.find_spec
+
+        def _hidden(name, package=None):
+            if name in ('paper_internal_consistency', 'paper_tabular_notebook_loader'):
+                return None
+            return real(name, package)
+
+        with patch.object(importlib.util, 'find_spec', side_effect=_hidden):
+            report = bench.run_benchmark_suite(
+                mode='sensor', case_ids=list(V3_GOLD_CASES + V3_HOLDOUT_CASES),
+            )
+        by_id = {row['caseId']: row for row in report['caseResults']}
+        for case_id in V3_GOLD_CASES:
+            self.assertEqual(by_id[case_id]['fn'], 0, case_id)
+            self.assertGreater(by_id[case_id]['tp'], 0, case_id)
+            self.assertEqual(by_id[case_id]['pureFp'], 0, case_id)
+        for case_id in V3_HOLDOUT_CASES:
+            self.assertEqual(by_id[case_id]['pureFp'], 0, case_id)
 
 
 class AgentRunnerTests(unittest.TestCase):

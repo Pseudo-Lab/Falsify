@@ -166,7 +166,14 @@ def _image_result(payload):
     return _ok({k: v for k, v in payload.items() if k != "data"}, (data, mime))
 
 
-def _invoke_blue_sensor(store, paper_id, file_hash, max_signals, digest_only, include_figure_forensics, include_flow_triage):
+def _reply(result):
+    return result if isinstance(result, CallToolResult) else _ok(result)
+
+
+def _invoke_blue_sensor(
+    store, paper_id, file_hash, max_signals, digest_only,
+    include_figure_forensics, include_flow_triage, include_internal_consistency=False,
+):
     import inspect
     from paper_mcp_bundle import run_blue_sensor_payload
     params = inspect.signature(run_blue_sensor_payload).parameters
@@ -179,6 +186,10 @@ def _invoke_blue_sensor(store, paper_id, file_hash, max_signals, digest_only, in
         kwargs["include_flow_triage"] = include_flow_triage
     elif type(include_flow_triage) is not bool:
         raise ValueError("include_flow_triage")
+    if "include_internal_consistency" in params:
+        kwargs["include_internal_consistency"] = include_internal_consistency
+    elif type(include_internal_consistency) is not bool:
+        raise ValueError("include_internal_consistency")
     return run_blue_sensor_payload(store, paper_id, file_hash, **kwargs)
 
 
@@ -186,20 +197,17 @@ def _register_core_tools(server, store, binding):
     @server.tool(annotations=_READONLY)
     def status(paperId: str) -> CallToolResult:
         """Read the prepared summary for the startup PDF. Read-only. Does not open a file or URL."""
-        result = _guard_bound(binding, paperId, lambda: store.status(paperId))
-        return result if isinstance(result, CallToolResult) else _ok(result)
+        return _reply(_guard_bound(binding, paperId, lambda: store.status(paperId)))
 
     @server.tool(annotations=_READONLY)
     def list_items(paperId: str, kind: str | None = None, pageIndex: int | None = None, offset: int = 0, limit: int = 50) -> CallToolResult:
         """List table and figure metadata for the startup PDF. Read-only. No other file can be named."""
-        result = _guard_bound(binding, paperId, lambda: store.list_items(paperId, kind=kind, page_index=pageIndex, offset=offset, limit=limit))
-        return result if isinstance(result, CallToolResult) else _ok(result)
+        return _reply(_guard_bound(binding, paperId, lambda: store.list_items(paperId, kind=kind, page_index=pageIndex, offset=offset, limit=limit)))
 
     @server.tool(annotations=_READONLY)
     def read_item(paperId: str, itemId: str) -> CallToolResult:
         """Read one table's raw cells or one figure's metadata. Read-only. Cell text is uncorrected."""
-        result = _guard_bound(binding, paperId, lambda: store.read_item(paperId, itemId))
-        return result if isinstance(result, CallToolResult) else _ok(result)
+        return _reply(_guard_bound(binding, paperId, lambda: store.read_item(paperId, itemId)))
 
     @server.tool(annotations=_READONLY)
     async def render_region(paperId: str, pageIndex: int, bbox: list[float] | None = None, dpi: int = 120) -> CallToolResult:
@@ -211,42 +219,49 @@ def _register_core_tools(server, store, binding):
     def read_page_text(paperId: str, pageIndex: int, sectionOnly: bool = False) -> CallToolResult:
         """Read native PDF page text in reading order for the startup PDF. Read-only."""
         from paper_evidence_text import read_page_text as _read_page_text
-        result = _guard_bound(binding, paperId, lambda: _read_page_text(paperId, pageIndex, section_only=sectionOnly, store=store))
-        return result if isinstance(result, CallToolResult) else _ok(result)
+        return _reply(_guard_bound(binding, paperId, lambda: _read_page_text(paperId, pageIndex, section_only=sectionOnly, store=store)))
 
     @server.tool(annotations=_READONLY)
     def search_text(paperId: str, query: str, limit: int = 20, caseSensitive: bool = False) -> CallToolResult:
         """Search native PDF text across pages of the startup PDF. Read-only."""
         from paper_evidence_text import search_text as _search_text
-        result = _guard_bound(binding, paperId, lambda: _search_text(paperId, query, limit=limit, case_sensitive=caseSensitive, store=store))
-        return result if isinstance(result, CallToolResult) else _ok(result)
+        return _reply(_guard_bound(binding, paperId, lambda: _search_text(paperId, query, limit=limit, case_sensitive=caseSensitive, store=store)))
 
     @server.tool(annotations=_READONLY)
     def list_references(paperId: str, offset: int = 0, limit: int = 50) -> CallToolResult:
         """List segmented bibliography/reference entries from the startup PDF. Read-only."""
         from paper_evidence_text import list_references as _list_references
-        result = _guard_bound(binding, paperId, lambda: _list_references(paperId, offset=offset, limit=limit, store=store))
-        return result if isinstance(result, CallToolResult) else _ok(result)
+        return _reply(_guard_bound(binding, paperId, lambda: _list_references(paperId, offset=offset, limit=limit, store=store)))
 
     @server.tool(annotations=_READONLY)
     def audit_statistics(paperId: str, maxSignals: int = 30) -> CallToolResult:
         """Run deterministic arithmetic, p-value, CI, and cross-modal pre-checks on the startup PDF. Read-only."""
         from paper_stat_audit import audit_paper_statistics as _audit_paper_statistics
-        result = _guard_bound(binding, paperId, lambda: _audit_paper_statistics(paperId, binding.file_hash, max_signals=maxSignals, store=store))
-        return result if isinstance(result, CallToolResult) else _ok(result)
+        return _reply(_guard_bound(binding, paperId, lambda: _audit_paper_statistics(paperId, binding.file_hash, max_signals=maxSignals, store=store)))
 
     @server.tool(annotations=_READONLY)
-    def run_blue_sensor(paperId: str, maxSignals: int = 50, digestOnly: bool = False, includeFigureForensics: bool = False, includeFlowTriage: bool = False) -> CallToolResult:
+    def run_blue_sensor(
+        paperId: str, maxSignals: int = 50, digestOnly: bool = False,
+        includeFigureForensics: bool = False, includeFlowTriage: bool = False,
+        includeInternalConsistency: bool = False,
+    ) -> CallToolResult:
         """Run deterministic Layer 0 offline PDF forensic sensor checks on the startup PDF. Read-only."""
-        result = _guard_bound(binding, paperId, lambda: _invoke_blue_sensor(store, paperId, binding.file_hash, maxSignals, digestOnly, includeFigureForensics, includeFlowTriage))
-        return result if isinstance(result, CallToolResult) else _ok(result)
+        return _reply(_guard_bound(binding, paperId, lambda: _invoke_blue_sensor(
+            store, paperId, binding.file_hash, maxSignals, digestOnly,
+            includeFigureForensics, includeFlowTriage, includeInternalConsistency,
+        )))
 
     @server.tool(annotations=_READONLY)
     def audit_figures(paperId: str, maxSignals: int = 30, dpi: int = 96, maxFigures: int = 24) -> CallToolResult:
         """Audit placed figure panels and chart claims on the startup PDF. Read-only."""
         from paper_mcp_bundle import audit_figures_payload
-        result = _guard_bound(binding, paperId, lambda: audit_figures_payload(store, paperId, binding.file_hash, max_signals=maxSignals, dpi=dpi, max_figures=maxFigures))
-        return result if isinstance(result, CallToolResult) else _ok(result)
+        return _reply(_guard_bound(binding, paperId, lambda: audit_figures_payload(store, paperId, binding.file_hash, max_signals=maxSignals, dpi=dpi, max_figures=maxFigures)))
+
+    @server.tool(annotations=_READONLY)
+    def audit_internal_consistency(paperId: str, maxSignals: int = 30) -> CallToolResult:
+        """Audit cross-section IMRaD sample-size, metric, and protocol consistency on the startup PDF. Read-only."""
+        from paper_mcp_bundle import audit_internal_consistency_payload
+        return _reply(_guard_bound(binding, paperId, lambda: audit_internal_consistency_payload(store, paperId, binding.file_hash, max_signals=maxSignals)))
 
 
 def _register_analysis_tools(server, store, binding):

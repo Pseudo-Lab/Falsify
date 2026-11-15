@@ -12,6 +12,7 @@ import re
 import statistics
 
 import paper_stat_math as psm
+from paper_tabular_notebook_loader import audit_xlsx_formulas, parse_xlsx_workbook
 
 SCHEMA = "falsify.raw-dataset-audit.v1"
 _FORBIDDEN = frozenset({
@@ -320,6 +321,103 @@ def _dataset_rows(supp):
     if not rows:
         return None
     return {"name": _supplement_name(supp), "rows": rows}
+
+
+def _row_dict(headers, raw):
+    cells = list(raw) if isinstance(raw, (list, tuple)) else []
+    row = {}
+    for index, header in enumerate(headers):
+        key = str(header).strip()
+        if not key or key in row:
+            continue
+        row[key] = cells[index] if index < len(cells) else ""
+    return row
+
+
+def _rows_from_sheet(sheet):
+    headers = [str(cell) for cell in sheet.get("headers") or []]
+    rows = []
+    for raw in sheet.get("rows") or []:
+        row = _row_dict(headers, raw)
+        if row and not all(_is_missing(value) for value in row.values()):
+            rows.append(row)
+    return rows
+
+
+def _xlsx_workbook(supp):
+    name = _supplement_name(supp)
+    if _suffix(name) != ".xlsx":
+        return None
+    if isinstance(supp.get("sheets"), list):
+        return {"name": name, "sheets": supp["sheets"], "text": supp.get("text") or ""}
+    raw = supp.get("bytes")
+    if isinstance(raw, (bytes, bytearray)):
+        return parse_xlsx_workbook(bytes(raw), name=name)
+    return None
+
+
+def _items_from_workbook(parsed):
+    items = []
+    for sheet in parsed.get("sheets") or []:
+        if not isinstance(sheet, dict):
+            continue
+        rows = _usable_rows(_rows_from_sheet(sheet))
+        if not rows:
+            continue
+        items.append({
+            "name": parsed.get("name") or "workbook.xlsx",
+            "rows": rows,
+            "sheetName": str(sheet.get("sheetName") or ""),
+        })
+    return items
+
+
+def _collect_one_raw(supp, loaded, books):
+    if not isinstance(supp, dict):
+        return
+    _assert_no_red(supp)
+    book = _xlsx_workbook(supp)
+    if book is not None:
+        books.append(book)
+        loaded.extend(_items_from_workbook(book))
+        return
+    item = _dataset_rows(supp)
+    if item is not None:
+        loaded.append(item)
+
+
+def _prepare_raw_inputs(supplements, page_items, max_signals):
+    loaded, books = [], []
+    for supp in supplements or []:
+        _collect_one_raw(supp, loaded, books)
+    formula_signals = []
+    for book in books:
+        formula_signals.extend(audit_xlsx_formulas(book, page_items=page_items, max_signals=max_signals))
+    _assert_no_red(formula_signals)
+    return loaded, formula_signals
+
+
+def _datasets_from_loaded(loaded):
+    sole = len(loaded) == 1
+    datasets = []
+    for item in loaded:
+        dataset = _build_dataset(item["name"], item["rows"], sole)
+        if item.get("sheetName"):
+            dataset["sheetName"] = item["sheetName"]
+        datasets.append(dataset)
+    return datasets
+
+
+def _raw_report(datasets, numbered, truncated):
+    return {
+        "schema": SCHEMA,
+        "status": "ok",
+        "datasetCount": len(datasets),
+        "signalCount": len(numbered),
+        "truncated": truncated,
+        "signals": numbered,
+        "datasets": [_public_dataset(dataset) for dataset in datasets],
+    }
 
 
 def _flag_value(value):
@@ -740,8 +838,15 @@ def _n_signal(claim, dataset, group, reported, computed):
     )
 
 
+def _copy_sheet_name(payload, dataset):
+    sheet = dataset.get("sheetName")
+    computed = payload.get("computed")
+    if sheet and isinstance(computed, dict):
+        computed["sheetName"] = sheet
+
+
 def _signal(kind, family, subtype, claim, dataset, variable, reported, computed, group, detail):
-    return {
+    payload = {
         "kind": kind,
         "family": family,
         "subtype": subtype,
@@ -755,6 +860,8 @@ def _signal(kind, family, subtype, claim, dataset, variable, reported, computed,
         "reported": reported,
         "computed": computed,
     }
+    _copy_sheet_name(payload, dataset)
+    return payload
 
 
 def _close(computed, token):
@@ -984,25 +1091,11 @@ def _public_dataset(dataset):
 def audit_raw_datasets(page_items, supplements, *, table_items=None, max_signals=50):
     """Recompute row-level supplement statistics and compare them with the manuscript."""
     _validate_limit(max_signals)
-    loaded = []
-    for supp in supplements or []:
-        if not isinstance(supp, dict):
-            continue
-        dataset = _dataset_rows(supp)
-        if dataset is not None:
-            loaded.append(dataset)
-    if not loaded:
+    loaded, formula_signals = _prepare_raw_inputs(supplements, page_items, max_signals)
+    if not loaded and not formula_signals:
         return _empty_report()
-    sole = len(loaded) == 1
-    datasets = [_build_dataset(item["name"], item["rows"], sole) for item in loaded]
+    datasets = _datasets_from_loaded(loaded)
     claims = list(_iter_claims(page_items, table_items))
-    numbered, truncated = _number_signals(_collect_signals(datasets, claims), max_signals)
-    return {
-        "schema": SCHEMA,
-        "status": "ok",
-        "datasetCount": len(datasets),
-        "signalCount": len(numbered),
-        "truncated": truncated,
-        "signals": numbered,
-        "datasets": [_public_dataset(dataset) for dataset in datasets],
-    }
+    combined = _dedupe(_collect_signals(datasets, claims) + formula_signals)
+    numbered, truncated = _number_signals(combined, max_signals)
+    return _raw_report(datasets, numbered, truncated)

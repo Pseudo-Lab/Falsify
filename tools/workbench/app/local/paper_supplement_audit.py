@@ -3,6 +3,7 @@ import math
 import re
 
 from paper_stat_math import check_count_percentage
+from paper_tabular_notebook_loader import parse_ipynb_notebook, parse_xlsx_workbook
 
 SCHEMA = "falsify.paper-supplement-audit.v1"
 
@@ -134,13 +135,46 @@ def _safe_float(tok):
 
 
 def infer_supplement_kind(name):
-    """Infer supplement kind ('table-data', 'code-or-log', or 'supplement-doc') from filename."""
+    """Infer supplement kind from a filename."""
     low = str(name or "").lower()
+    if low.endswith(".xlsx"):
+        return "tabular"
+    if low.endswith((".ipynb", ".rmd", ".qmd")):
+        return "code"
     if low.endswith((".csv", ".tsv")):
         return "table-data"
     if low.endswith((".py", ".r", ".log", ".json")):
         return "code-or-log"
     return "supplement-doc"
+
+
+def _is_table_kind(kind):
+    return kind in {"table-data", "tabular"}
+
+
+def _is_code_log_kind(kind):
+    return kind in {"code-or-log", "code"}
+
+
+def _text_from_bytes(name, raw):
+    low = str(name or "").lower()
+    if low.endswith(".xlsx"):
+        parsed = parse_xlsx_workbook(raw, name=name or "workbook.xlsx")
+        return parsed.get("text") or ""
+    if low.endswith(".ipynb"):
+        parsed = parse_ipynb_notebook(raw, name=name or "notebook.ipynb")
+        return parsed.get("text") or ""
+    return ""
+
+
+def _supplement_body(name, supp):
+    text = supp.get("text")
+    if isinstance(text, str) and text.strip():
+        return text
+    raw = supp.get("bytes")
+    if isinstance(raw, (bytes, bytearray)):
+        return _text_from_bytes(name, bytes(raw))
+    return text or ""
 
 
 def _name_for_search(name):
@@ -229,7 +263,7 @@ def _normalize_supplement(supp, idx):
     name = str(supp.get("name") or supp.get("filename") or supp.get("fileId") or f"supplement-{idx + 1}")
     kind = supp.get("kind") or infer_supplement_kind(name)
     raw_segs = supp.get("segments") if supp.get("segments") is not None else supp.get("pages")
-    segs = _normalize_segments(raw_segs if raw_segs is not None else (supp.get("text") or ""))
+    segs = _normalize_segments(raw_segs if raw_segs is not None else _supplement_body(name, supp))
     return {"fileId": str(supp.get("fileId") or f"supp-file-{idx}"), "name": name, "kind": kind, "segments": segs}
 
 
@@ -341,7 +375,7 @@ def _looks_like_summary_table(headers):
 
 
 def _extract_csv_sample_claims(supp, default_anchor):
-    if supp["kind"] != "table-data" or _SUBGROUP_RE.search(_name_for_search(supp["name"])):
+    if not _is_table_kind(supp["kind"]) or _SUBGROUP_RE.search(_name_for_search(supp["name"])):
         return []
     rows = _parse_delimited_rows("\n".join(s["text"] for s in supp["segments"]))
     if not rows:
@@ -441,7 +475,7 @@ def _parse_cell_metric_value(raw):
 
 
 def _extract_csv_metric_claims(supp, default_anchor):
-    if supp["kind"] != "table-data":
+    if not _is_table_kind(supp["kind"]):
         return []
     rows = _parse_delimited_rows("\n".join(s["text"] for s in supp["segments"]))
     if not rows or len(rows) < 2:
@@ -670,11 +704,30 @@ def _percentage_signals(rows, meta):
     return signals
 
 
+def _tabular_blocks(text, meta):
+    if "[Sheet:" not in text:
+        return [(text, meta)]
+    blocks = []
+    for part in re.split(r"(?m)^\[Sheet:[^\]]*\]\s*", text):
+        if part.strip():
+            blocks.append((part.strip("\n"), meta))
+    if blocks:
+        return blocks
+    return [(text, meta)]
+
+
+def _table_block_meta(supp):
+    first = supp["segments"][0] if supp["segments"] else {"id": "s0", "pageIndex": 0}
+    return {"segmentId": first["id"], "pageIndex": first.get("pageIndex", 0), "fileName": supp["name"]}
+
+
 def _table_text_blocks(supp):
-    if supp["kind"] == "table-data":
+    if _is_table_kind(supp["kind"]):
         text = "\n".join(seg["text"] for seg in supp["segments"])
-        first = supp["segments"][0] if supp["segments"] else {"id": "s0", "pageIndex": 0}
-        return [(text, {"segmentId": first["id"], "pageIndex": first.get("pageIndex", 0), "fileName": supp["name"]})]
+        meta = _table_block_meta(supp)
+        if supp["kind"] == "tabular":
+            return _tabular_blocks(text, meta)
+        return [(text, meta)]
     return [
         (seg["text"], {"segmentId": seg["id"], "pageIndex": seg["pageIndex"], "fileName": supp["name"]})
         for seg in supp["segments"]
@@ -745,7 +798,7 @@ def _detect_metric_mismatches(main_segs, supps):
     supp_claims = _extract_supplement_metrics(supps)
     signals, seen = [], set()
     for mc in main_claims:
-        cands = [sc for sc in supp_claims if sc["metricKey"] == mc["metricKey"] and (sc["anchorKey"] == mc["anchorKey"] if mc["anchorKey"] else sc["suppKind"] == "code-or-log")]
+        cands = [sc for sc in supp_claims if sc["metricKey"] == mc["metricKey"] and (sc["anchorKey"] == mc["anchorKey"] if mc["anchorKey"] else _is_code_log_kind(sc["suppKind"]))]
         if not cands or any(_metrics_consistent(mc, sc) for sc in cands):
             continue
         sc = cands[0]
