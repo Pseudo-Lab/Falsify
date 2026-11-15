@@ -1,0 +1,170 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:falsify:season13:fact-card:1.0",
+  "title": "Falsify Season 13 Fact Card",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "paper_id",
+    "pmcid",
+    "doi",
+    "license",
+    "title",
+    "year",
+    "tables",
+    "citations",
+    "claim_anchors"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "enum": ["falsify.fact_card/1.0"]
+    },
+    "paper_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "pmcid": {
+      "type": "string",
+      "pattern": "^PMC\\d+$"
+    },
+    "doi": {
+      "type": "string",
+      "pattern": "^10\\.\\d{4,9}/\\S+$"
+    },
+    "license": {
+      "type": "string",
+      "enum": ["CC BY", "CC BY 4.0", "CC0"]
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1
+    },
+    "year": {
+      "type": "integer",
+      "minimum": 1900,
+      "maximum": 2100
+    },
+    "journal": {
+      "type": "string"
+    },
+    "authors": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "registrations": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "tables": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/table" }
+    },
+    "citations": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/citation" }
+    },
+    "claim_anchors": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/claim_anchor" }
+    }
+  },
+  "$defs": {
+    "table": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["table_id", "rows"],
+      "properties": {
+        "table_id": { "type": "string", "minLength": 1 },
+        "title": { "type": "string" },
+        "rows": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/table_row" }
+        }
+      }
+    },
+    "table_row": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["metric", "group"],
+      "properties": {
+        "metric": { "type": "string", "minLength": 1 },
+        "group": { "type": "string", "minLength": 1 },
+        "value": { "type": ["number", "string"] },
+        "mean": { "type": ["number", "string"] },
+        "sd": { "type": ["number", "string"] },
+        "percentage": { "type": ["number", "string"] },
+        "unit": { "type": "string" },
+        "ci": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": { "type": "number" }
+        },
+        "ci_low": { "type": ["number", "string"] },
+        "ci_high": { "type": ["number", "string"] },
+        "p_value": { "type": ["number", "string"] },
+        "n": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "citation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ref_id", "raw", "doi", "first_author", "year", "title"],
+      "properties": {
+        "ref_id": { "type": "string", "minLength": 1 },
+        "raw": { "type": "string", "minLength": 1 },
+        "doi": { "type": "string" },
+        "first_author": { "type": "string", "minLength": 1 },
+        "year": { "type": "integer", "minimum": 1800, "maximum": 2100 },
+        "title": { "type": "string", "minLength": 1 },
+        "journal": { "type": "string" }
+      }
+    },
+    "claim_anchor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "primary_endpoint",
+        "design",
+        "subgroup_condition",
+        "effect_direction",
+        "p_value",
+        "ci",
+        "null_value"
+      ],
+      "properties": {
+        "anchor_id": { "type": "string", "minLength": 1 },
+        "primary_endpoint": { "type": "string", "minLength": 1 },
+        "is_primary": { "type": "boolean" },
+        "design": {
+          "type": "string",
+          "enum": ["rct", "observational", "cohort", "cross-sectional", "case-control", "meta-analysis", "quasi-experimental"]
+        },
+        "subgroup_condition": { "type": ["string", "null"] },
+        "effect_direction": {
+          "type": "string",
+          "enum": ["increase", "decrease", "benefit", "harm", "null", "no_difference"]
+        },
+        "p_value": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+        "alpha": { "type": "number", "minimum": 0, "maximum": 1 },
+        "ci": {
+          "type": ["array", "null"],
+          "minItems": 2,
+          "maxItems": 2,
+          "items": { "type": "number" }
+        },
+        "null_value": { "type": ["number", "null"] },
+        "statistically_significant": { "type": ["boolean", "null"] },
+        "keywords": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,4 @@
+paper_id,team,judge_type,model,iteration,location,defect_type,label,evidence,time_sec,tokens,is_holdout
+PMC9000001,blue-example,rule,falsify-gates-v1,1,L18,D1,맞음,Mean mismatch for Fatigue Severity Score reduction: prose 14.36 vs table 12.36,0.02,0,false
+PMC9000001,blue-example,rule,falsify-gates-v1,1,L42,D2,아님,Citation metadata matches resolved record,0.02,0,false
+PMC9000001,blue-example,rule,falsify-gates-v1,1,L55,D3,확인필요,Unanchored claim: no matching endpoint found,0.02,0,false

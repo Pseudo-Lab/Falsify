@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:falsify:season13:red-submission:1.0",
+  "title": "Falsify Season 13 Red Attack Package",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "paper_id",
+    "team",
+    "defect_type",
+    "location",
+    "patch",
+    "target_quote",
+    "intended_label"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "enum": ["falsify.red_submission/1.0"]
+    },
+    "submission_type": {
+      "type": "string",
+      "enum": ["red_attack"]
+    },
+    "case_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "paper_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "team": {
+      "type": "string",
+      "minLength": 1
+    },
+    "defect_type": {
+      "type": "string",
+      "minLength": 1
+    },
+    "detector_spec": {
+      "type": ["string", "object"]
+    },
+    "custom_detector": {
+      "type": ["string", "object"]
+    },
+    "location": {
+      "type": "string",
+      "minLength": 1
+    },
+    "patch": {
+      "type": "string",
+      "minLength": 1
+    },
+    "target_quote": {
+      "type": "string",
+      "minLength": 1
+    },
+    "intended_label": {
+      "type": "string",
+      "minLength": 1
+    },
+    "blind_input": {
+      "type": "string"
+    },
+    "why_hard": {
+      "type": "string"
+    },
+    "how_to_catch": {
+      "type": "string"
+    }
+  }
+}

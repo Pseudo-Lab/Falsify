@@ -1,0 +1,13 @@
+{
+  "schema_version": "falsify.red_submission/1.0",
+  "submission_type": "red_attack",
+  "case_id": "PMC9000001-red-d1-01",
+  "paper_id": "PMC9000001",
+  "team": "red-example",
+  "defect_type": "D1",
+  "location": "L18",
+  "target_quote": "In the intervention arm, mean Fatigue Severity Score reduction was 14.36 ± 3.18 points (95% CI [-1.85, -0.42], p = 0.002).",
+  "patch": "--- a/PMC9000001.md\n+++ b/PMC9000001.md\n@@ -16,3 +16,3 @@\n-In the intervention arm, mean Fatigue Severity Score reduction was 12.36 ± 3.18 points (95% CI [-1.85, -0.42], p = 0.002).\n+In the intervention arm, mean Fatigue Severity Score reduction was 14.36 ± 3.18 points (95% CI [-1.85, -0.42], p = 0.002).\n",
+  "intended_label": "아님",
+  "blind_input": "In the intervention arm, mean Fatigue Severity Score reduction was 14.36 ± 3.18 points (95% CI [-1.85, -0.42], p = 0.002)."
+}

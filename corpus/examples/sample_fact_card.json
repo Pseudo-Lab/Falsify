@@ -1,0 +1,97 @@
+{
+  "schema_version": "falsify.fact_card/1.0",
+  "paper_id": "PMC9000001",
+  "pmcid": "PMC9000001",
+  "doi": "10.1371/journal.pone.0000001",
+  "license": "CC BY 4.0",
+  "title": "Synthetic Trial of a Structured Sleep Hygiene Coaching App for Daytime Fatigue",
+  "year": 2025,
+  "journal": "Synthetic Open Medicine",
+  "authors": ["Kim S", "Lee H", "Park J"],
+  "registrations": ["NCT05000001"],
+  "tables": [
+    {
+      "table_id": "Table 2",
+      "title": "Primary and secondary outcomes at 12 weeks",
+      "rows": [
+        {
+          "metric": "Fatigue Severity Score reduction",
+          "group": "Intervention",
+          "mean": 12.36,
+          "sd": 3.18,
+          "ci": [-1.85, -0.42],
+          "p_value": 0.002,
+          "n": 120,
+          "unit": "points"
+        },
+        {
+          "metric": "Fatigue Severity Score reduction",
+          "group": "Control",
+          "mean": 8.10,
+          "sd": 3.40,
+          "ci": [-0.30, 0.45],
+          "p_value": 0.68,
+          "n": 118,
+          "unit": "points"
+        },
+        {
+          "metric": "Adherence rate",
+          "group": "Intervention",
+          "percentage": 78.4,
+          "n": 120,
+          "unit": "%"
+        },
+        {
+          "metric": "Secondary sleep latency",
+          "group": "Overall",
+          "mean": -4.2,
+          "ci": [-9.1, 0.7],
+          "p_value": 0.09,
+          "n": 238,
+          "unit": "minutes"
+        }
+      ]
+    }
+  ],
+  "citations": [
+    {
+      "ref_id": "1",
+      "raw": "1. Kim S, Choi Y. Digital sleep interventions in primary care. Synth Sleep Med. 2023;11:42-50. doi:10.1371/journal.pone.0000099",
+      "doi": "10.1371/journal.pone.0000099",
+      "first_author": "Kim",
+      "year": 2023,
+      "title": "Digital sleep interventions in primary care",
+      "journal": "Synth Sleep Med"
+    }
+  ],
+  "claim_anchors": [
+    {
+      "anchor_id": "A1",
+      "primary_endpoint": "Fatigue Severity Score reduction at 12 weeks",
+      "is_primary": true,
+      "design": "rct",
+      "subgroup_condition": null,
+      "effect_direction": "decrease",
+      "p_value": 0.002,
+      "alpha": 0.05,
+      "ci": [-1.85, -0.42],
+      "null_value": 0.0,
+      "statistically_significant": true,
+      "keywords": ["fatigue", "severity", "score", "12 weeks"]
+    },
+    {
+      "anchor_id": "A2",
+      "primary_endpoint": "Secondary sleep latency at 12 weeks",
+      "is_primary": false,
+      "design": "rct",
+      "subgroup_condition": null,
+      "effect_direction": "null",
+      "p_value": 0.09,
+      "alpha": 0.05,
+      "ci": [-9.1, 0.7],
+      "null_value": 0.0,
+      "statistically_significant": false,
+      "keywords": ["sleep", "latency"]
+    }
+  ]
+}
