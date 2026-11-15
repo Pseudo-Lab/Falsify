@@ -22,7 +22,7 @@
       if(blueProgress?.hasResult)return {gate:'B1',title:'BLUE 결과를 확인하세요',detail:blueProgress.name,label:'결과 보기',action:()=>{const external=globalThis.FalsifyDocumentBlueExternal?.getExternalResponses?.();const target=external?.items?.length?$('#external-blue'):$('#doc-blue-findings').closest('.role-step');focusTarget(target);}};
 
       if(blueProgress?.name)return {gate:'B1',title:'논문을 검토할 준비가 됐습니다',detail:blueProgress.name,label:'지시문 작성',action:()=>focusTarget($('#external-blue .prompt-instructions textarea')||$('#external-blue textarea[aria-label="BLUE 외부 응답"]'))};
-      return {gate:'B1',title:'BLUE 검토 파일을 입력하세요',detail:'검토할 논문을 직접 고르세요.',label:'BLUE 파일 입력',action:()=>focusTarget($('#doc-blue-file'))};
+      return {gate:'B1',title:'BLUE 검토 파일을 입력하세요',detail:'BLUE(블라인드 검증기)가 정답지 없이 결함을 찾아낼 시험 논문을 직접 고르세요.',label:'BLUE 파일 입력',action:()=>focusTarget($('#doc-blue-file'))};
   }
   function signSpec(){
     if(view==='review')return {gate:'H1',title:'실행 결과를 사람이 평가하세요',detail:'기록된 RED / BLUE 실행을 골라 판정과 근거를 남깁니다.',label:'평가할 실행 선택',action:()=>focusTarget($('#evaluation-run'))};
@@ -41,7 +41,7 @@
       if(p.hasResult)return {gate:'R1',title:'RED 결과를 확인하세요',detail,label:'결과 보기',action:()=>focusTarget($('#red-result-step'))};
       return {gate:'R1',title:'논문을 보고 검토 지시를 적으세요',detail:p.name,label:'지시문 작성',action:()=>focusTarget($('#external-red .prompt-instructions textarea')||$('#paper-before-stage'))};
     }
-    return {gate:'R1',title:'논문 파일을 입력하세요',detail:'RED는 입력 파일에서 근거 있는 해석 왜곡 후보를 준비합니다.',label:'RED 파일 입력',action:()=>focusTarget($('#paper-file'))};
+    return {gate:'R1',title:'논문 파일을 입력하세요',detail:'RED(결함 주입 테스트기)는 BLUE 검증력을 시험할 은닉 결함 후보를 준비합니다.',label:'RED 파일 입력',action:()=>focusTarget($('#paper-file'))};
   }
   function animateSign(previous,next){
     const message=$('.sign-message');clearTimeout(flapTimer);

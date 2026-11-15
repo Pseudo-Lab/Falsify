@@ -82,6 +82,30 @@
     }catch(e){if(binding===self)msg('문서 바인딩 실패: '+e.message,true);}
     finally{if(binding===self){binding=null;busy=false;controls();}}
   });
+  function classifyCandidate(c){
+    const fn=typeof C.classifyDefect==='function'?C.classifyDefect:globalThis.FalsifyAdversarialTaxonomy?.classifyDefect;
+    if(typeof fn==='function')return fn(c);
+    return {defectFamily:null,oracleSource:null,surface:'prose'};
+  }
+  function blindnessScan(items){
+    const fn=typeof C.scanBlindnessLeaks==='function'?C.scanBlindnessLeaks:globalThis.FalsifyAdversarialTaxonomy?.scanBlindnessLeaks;
+    if(typeof fn==='function')return fn({candidates:items});
+    return {clean:true,issues:[]};
+  }
+  function blindnessLeakMessage(items){
+    if(!items.length)return '';
+    const res=blindnessScan(items);
+    if(res.clean)return '';
+    const sample=res.issues.map(x=>x.snippet).filter(Boolean).slice(0,3).join(', ');
+    return '맹검 누출 차단: After 문구에 결함 주입 힌트 문자열이 포함되어 있어 BLUE 블라인드 검증을 오염시킵니다'+(sample?' ('+sample+')':'')+'.';
+  }
+  function assertBlindnessClean(items){const m=blindnessLeakMessage(items);if(m)throw new Error(m);}
+  function updateCandidateLeakWarning(warn,c){
+    const res=blindnessScan([c]);
+    if(res.clean){warn.hidden=true;warn.textContent='';return;}
+    const sample=res.issues.map(x=>x.snippet).filter(Boolean).slice(0,2).join(', ');
+    warn.hidden=false;warn.textContent='맹검 누출 경고: After 문구에 결함 주입 힌트가 포함되어 있습니다'+(sample?' ('+sample+')':'')+'.';
+  }
   function renderCandidates(){
     const list=$('#red-candidates');list.replaceChildren();$('#red-empty').hidden=!!candidates.length;$('#red-empty').textContent=emptyNote();$('#red-export').hidden=!candidates.length;
     candidates.forEach((c,i)=>{
@@ -96,10 +120,10 @@
       const comparison=document.createElement('div');comparison.className='red-ab';const before=document.createElement('div'),beforeTitle=document.createElement('h3'),beforeText=document.createElement('p');beforeTitle.textContent='Before · 원본 인용';beforeText.textContent=c.before;before.append(beforeTitle,beforeText);
       const after=document.createElement('div'),label=document.createElement('label'),area=document.createElement('textarea');area.id='red-after-'+i;area.rows=4;area.maxLength=4000;area.value=c.after;label.htmlFor=area.id;label.textContent='After · 직접 편집 가능';after.append(label,area);comparison.append(before,after);section.append(comparison);
       if(c.uncertainty){const uncertainty=document.createElement('p');uncertainty.className='muted';uncertainty.textContent=c.uncertainty;notes.append(uncertainty);}section.append(notes);
-      const marks=globalThis.FalsifyChangeMarks,afterText=document.createElement('p');afterText.className='red-change-preview';afterText.ariaLabel='변경 문구 강조';after.append(afterText);
-      const paint=()=>{if(marks){marks.paintText(beforeText,c.before,c.after,'before');marks.paintText(afterText,c.before,c.after,'after');}else afterText.hidden=true;};paint();
+      const marks=globalThis.FalsifyChangeMarks,afterText=document.createElement('p'),leakWarn=document.createElement('p');afterText.className='red-change-preview';afterText.ariaLabel='변경 문구 강조';leakWarn.className='red-blindness-warning error';leakWarn.hidden=true;after.append(afterText,leakWarn);
+      const paint=()=>{if(marks){marks.paintText(beforeText,c.before,c.after,'before');marks.paintText(afterText,c.before,c.after,'after');}else afterText.hidden=true;updateCandidateLeakWarning(leakWarn,c);};paint();
       check.addEventListener('change',()=>{c.selected=check.checked;changed();});area.addEventListener('input',()=>{c.after=area.value;c.edited=true;paint();changed();});list.append(section);
-    });controls();
+    });controls();const leak=blindnessLeakMessage(candidates.filter(c=>c.selected));if(leak)exportStatus(leak,true);
   }
   const MODEL_ID=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$/;
   // Validated proposals only. Manual JSON is not recorded as a model run; a broker result may carry its own model id.
@@ -272,9 +296,10 @@
   for(const [id,name] of [['#red-budget','budget']])$(id).addEventListener('change',()=>{const field=$(id);if(!keepEdits()){field.value=settings[name];return;}settings[name]=field.value;discard();msg('검토 설정이 바뀌어 이전 응답·후보 선택을 무효화했습니다. 새 요청을 만드세요.');});
   const typeControl=$('#red-types')||$('#red-level');typeControl?.addEventListener('change',()=>{typesDirty=true;manualRequest=null;msg('다음 RED 요청에 선택한 공격 유형을 사용합니다. 현재 후보는 유지됩니다.');});
   $('#red-language')?.addEventListener('change',()=>{msg('다음 RED 검토의 근거를 '+($('#red-language').value==='en'?'영어':'한국어')+'로 요청합니다. 인용문과 현재 후보는 그대로입니다.');});
-  function plan(patches,extra={}){return {schema:'falsify.document-edit-plan.v1',revision:doc.revision,sourceHash:doc.sourceHash,sourceFileHash:doc.fileHash,sourceName:doc.name,format:doc.format,selected:patches,
+  function planRationale(c){const cls=classifyCandidate(c);return {id:c.id,rationale:c.rationale,evidence:c.evidence,uncertainty:c.uncertainty,attackTypes:Array.isArray(c.attackTypes)?c.attackTypes.slice():[],defectFamily:cls.defectFamily,oracleSource:cls.oracleSource,surface:cls.surface};}
+  function plan(patches,extra={}){const chosen=candidates.filter(c=>c.selected);return {schema:'falsify.document-edit-plan.v1',revision:doc.revision,sourceHash:doc.sourceHash,sourceFileHash:doc.fileHash,sourceName:doc.name,format:doc.format,selected:patches,
     harness:request?.harness||null,harnessHash:response?.harnessHash||null,
-    candidateRationales:candidates.filter(c=>c.selected).map(c=>({id:c.id,rationale:c.rationale,evidence:c.evidence,uncertainty:c.uncertainty})),reviewProvenance:response?.provenance,coverage:response?.coverage||null,
+    candidateRationales:chosen.map(planRationale),blindnessCheck:blindnessScan(chosen),reviewProvenance:response?.provenance,coverage:response?.coverage||null,
     status:{domainReview:'pending',teamApproval:'pending',gold:'pending',metric:null},...extra};}
   $('#red-plan').addEventListener('click',()=>{try{jsonDownload(plan(C.patches(doc,candidates),exported?{outputFileHash:exported.outputFileHash,verification:exported.verification}:{}),'falsify-document-edit-plan.json');exportStatus('선택 변경과 근거를 저장했습니다.');}catch(e){exportStatus(e.message,true);}});
   function base64(bytes){let s='';for(let i=0;i<bytes.length;i+=32768)s+=String.fromCharCode(...bytes.subarray(i,i+32768));return btoa(s);}
@@ -479,7 +504,7 @@
     if(busy||!doc)return;
     if(!exportSourceReady())return;
     const current=generation,pdf=doc.format==='PDF'?pdfMode(B.capabilities()):null;busy=true;preview?.clear();controls();exportStatus(pdf?.kind==='reflow'?'선택 변경만 적용하고 재배치·자체검사 중':'선택 변경만 적용하고 보존 검사 중');
-    try{const patches=C.patches(doc,candidates);let output,reported=null,browserGuard=null;
+    try{const patches=C.patches(doc,candidates);assertBlindnessClean(candidates.filter(c=>c.selected));let output,reported=null,browserGuard=null;
       // Same request body as before: only checked candidates' Before plus the user's current After; progress is staged text, never an invented percentage.
       if(browserExportAvailable()){
         const phase=await exportBrowserPdf(current,patches);if(!phase)return;
@@ -500,7 +525,7 @@
   function keepEdits(){return !unrecorded()||confirm('선택·편집한 RED 후보가 아직 기록되지 않았습니다. 계속하면 후보와 편집 내용이 사라집니다. 계속할까요?');}
   function invalidate(){epoch++;exported=null;lastSaved=null;failure=null;saved.clear();pending.clear();preview?.clear();}
   function discard(){generation++;cancelCurrent();analysisReset();busy=!!binding;if(doc)doc.revision=crypto.randomUUID();candidates=[];response=null;request=null;manualRequest=null;typesDirty=false;invalidate();renderCandidates();}
-  function changed(){exported=null;preview?.clear();exportStatus('');analysisReset();controls();}
+  function changed(){exported=null;preview?.clear();const leak=blindnessLeakMessage(candidates.filter(c=>c.selected));exportStatus(leak,!!leak);analysisReset();controls();}
   // One root per execution: a final snapshot first awaits (or retries) the original response save and links to it via snapshotOf.
   // If the original cannot be persisted the final snapshot is not recorded either, so no second root ever appears.
   // isCurrent is live-only: the ledger checks it right before persisting, so a source/settings reset cancels a stale save.

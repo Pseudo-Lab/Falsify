@@ -1,0 +1,132 @@
+/* Airport-style Layer 0 BLUE defect sensor & P0/P2 forensic panel. */
+.blue-sensor-panel {
+  background: var(--paper, #fff);
+  border: 1px solid var(--line, #d9dde0);
+  border-radius: 10px;
+  padding: 18px 20px;
+  margin: 0 0 20px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.blue-sensor-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.blue-sensor-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.blue-oracle-tier {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: var(--charcoal, #202326);
+  color: var(--yellow, #ffcc00);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.blue-oracle-tier.is-p2 {
+  background: var(--yellow, #ffcc00);
+  color: var(--ink, #111315);
+  border: 1px solid var(--ink, #111315);
+}
+
+.blue-sensor-summary {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink, #111315);
+  margin: 6px 0;
+}
+
+.blue-sensor-forensic {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--muted, #5a626a);
+  margin: 6px 0;
+}
+
+.blue-sensor-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 12px 0 6px;
+}
+
+.blue-sensor-details {
+  margin-top: 10px;
+}
+
+.blue-sensor-list {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0 0;
+  display: grid;
+  gap: 8px;
+}
+
+.blue-sensor-item {
+  border: 1px solid var(--line, #d9dde0);
+  border-radius: 6px;
+  padding: 8px 10px;
+  background: var(--surface, #f3f4f4);
+  font-size: 12px;
+}
+
+.blue-sensor-item-head {
+  font-weight: 600;
+  margin-bottom: 3px;
+}
+
+.blue-sensor-item-quote {
+  color: var(--muted, #5a626a);
+  margin-top: 3px;
+  word-break: break-word;
+}
+
+.blue-sensor-status {
+  font-size: 12px;
+  color: var(--muted, #5a626a);
+  margin-top: 8px;
+}
+
+.blue-sensor-status.error {
+  color: var(--red-ink, #8e302b);
+}
+
+.blue-verdict-label {
+  display: inline-block;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: #e8ebed;
+  color: var(--ink, #111315);
+  margin: 4px 0;
+}
+
+.blue-verdict-label.is-recovered {
+  background: var(--yellow, #ffcc00);
+  border: 1px solid var(--ink, #111315);
+}
+
+.blue-zerodrop-audit {
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 12px;
+  border-left: 4px solid var(--ink, #111315);
+  background: var(--surface, #f3f4f4);
+  margin: 8px 0 12px;
+}

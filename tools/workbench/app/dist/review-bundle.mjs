@@ -91,7 +91,7 @@ function checkRunIdentity(r,prior){
   checkRunConditions(r);
   checkRunOptionalFields(r);
 }
-function validateRedResponse(r,doc,V){if(r.level!==undefined&&![1,2,3].includes(r.level))fail('malformed','RED level is malformed.');if(r.attackTypes!==undefined){V.red.types(r.attackTypes);if(r.level!==undefined&&(r.attackTypes.length!==1||r.attackTypes[0]!==V.red.types(r.level)[0]))fail('malformed','RED level and attack types disagree.');}else if(r.level===undefined)fail('malformed','RED attack types are missing.');const candidates=V.red.validateResponse(doc,r.response);if(r.attackTypes&&candidates.some(c=>c.attackTypes.some(t=>!r.attackTypes.includes(t))))fail('malformed','Candidate attack types were not selected.');}
+function validateRedResponse(r,doc,V){if(r.level!==undefined&&![1,2,3,4].includes(r.level))fail('malformed','RED level is malformed.');if(r.attackTypes!==undefined){V.red.types(r.attackTypes);if(r.level!==undefined&&JSON.stringify(r.attackTypes)!==JSON.stringify(V.red.types(r.level)))fail('malformed','RED level and attack types disagree.');}else if(r.level===undefined)fail('malformed','RED attack types are missing.');const candidates=V.red.validateResponse(doc,r.response);if(r.attackTypes&&candidates.some(c=>c.attackTypes.some(t=>!r.attackTypes.includes(t))))fail('malformed','Candidate attack types were not selected.');}
 function checkRunSegments(r){
   if(!Array.isArray(r.segments)||!r.segments.length||r.segments.length>LIMITS.segments||r.segments.some(s=>!plain(s)||typeof s.id!=='string'||!s.id||s.id.length>80||typeof s.label!=='string'||s.label.length>200||typeof s.text!=='string'||!s.text.trim())||new Set(r.segments.map(s=>s.id)).size!==r.segments.length)fail('malformed','Run source segments are malformed.');
 }
@@ -231,7 +231,7 @@ export async function buildHarnessArchive(harnessRecord,validators){
 
 const PAPER_ORIGINS=['human','external-ai-import','ai-proposal'];
 const PAPER_VERDICTS=['uncertain','supported','unsupported','mixed'];
-const FINDING_VERDICTS=['pending','supported','unsupported','mixed','uncertain'];
+const FINDING_VERDICTS=['pending','supported','pre-existing','spin-boundary','gold-error','unsupported','mixed','uncertain'];
 const PAPER_BANNED=/^(pdf|pdfBytes|sourcePdf|sourcePDF|binary|bytes|contentBase64|gold|harness|attestation)$/;
 const LEGACY_ANCHOR_KEYS=['bbox','occurrence','start','end','fontSize','fontName','color'];
 const REAL_ANCHOR_KEYS=['bbox','end','occurrence','start','style'];

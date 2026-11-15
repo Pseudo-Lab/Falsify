@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.0-alpha.62
+
+- Implement Confluence-grounded Cops-and-Robbers (`BLUE` blind defect verifier vs `RED` defect-injection stress tester) v2 co-evolution architecture across RED, BLUE, Human Audit (`H1`), and Co-Evolution Arena (`A1`).
+- Separate RED oracle-based defect families (`D1` numeric/table/chart mismatch, `D2` citation/bibliography/URI distortion, `D3` claim-exceeding-evidence/spin, `D4-1` outcome status mislabeling, `S1` domain polarity/mechanism inversion) from `L1`–`L4` stealth difficulty, and enforce a pre-export Blindness Leak Gate (`adversarial-taxonomy.js`, `document-red-core.js`, `red_service.py`, `paper_stealth_audit.py`).
+- Add Layer 0 deterministic BLUE forensic sensor (`paper_blue_sensor.py`, `blue-defect-sensor-core.js`, `blue-defect-sensor-ui.js`) covering `P0` offline stat/citation checks, PDF `/URI` vs printed DOI/URL mismatches, `AcroForm` widget inspection, multiple-testing adjusted `p`-value guard (`paper_stat_audit.py`), and opt-in `P2` external oracle comparison (Crossref/Europe PMC/DataCite/`ClinicalTrials.gov`).
+- Introduce External BLUE Two-Stage Zero-Drop protocol (`prompt-instructions.js`, `external-exchange.js`, `external-proposals.js`, `external-blue-ui.js`) separating `검증됨_이상없음` audit rows from active defects and auto-recovering silently dropped Stage 1 suspicions as `확인필요`.
+- Upgrade `H1` review with 4-way non-gold precision audit (`pre-existing`, `spin-boundary`, `gold-error`, `unsupported`) and add `A1` Co-Evolution Arena (`coevolution-arena.js`) with `P0`/`P2`/`Holdout` Strict+Inclusive dual scoreboards, same-family model bias warnings, repeat-run flip tracking, `tools/evaluation/score.py` 12-column CSV + Red JSON export, and answer-key-free `C1` Harness briefs.
+
 ## 0.2.0-alpha.61
 
 - Add deterministic BLUE statistical & arithmetic pre-audit (`paper_stat_math.py`, `paper_stat_audit.py`, read-only MCP `audit_statistics`) checking exact `z`/`t(df)`/`χ²(df)`/`F(df1,df2)`-to-`p` consistency, `n/N (%)` ratios, GRIM integer granularity, `CI` containment/log-symmetry, and 3-way prose-table-figure value reconciliation.

@@ -1,6 +1,7 @@
 /* Portable, offline external response adapter. AGPL-3.0-only. */
-(function(root,factory){if(typeof module==='object'&&module.exports)module.exports=factory(require('./external-red.js'));else root.FalsifyExternalExchange=factory(root.FalsifyExternalRed);})(typeof globalThis==='object'?globalThis:this,function(red){
+(function(root,factory){if(typeof module==='object'&&module.exports){let s=null;try{s=require('./blue-defect-sensor-core.js');}catch{}module.exports=factory(require('./external-red.js'),s);}else root.FalsifyExternalExchange=factory(root.FalsifyExternalRed,root.FalsifyBlueDefectSensor);})(typeof globalThis==='object'?globalThis:this,function(red,sensor){
   'use strict';
+  const getSensor=()=>sensor||globalThis.FalsifyBlueDefectSensor||null;
   const id=()=>typeof crypto!=='undefined'&&crypto.randomUUID?crypto.randomUUID():'external-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2);
   const strings=v=>Array.isArray(v)?v.filter(x=>typeof x==='string'):typeof v==='string'&&v?[v]:[];
   const evidence=v=>Array.isArray(v)?v.map(x=>JSON.parse(JSON.stringify(x))):typeof v==='string'&&v?[v]:[];
@@ -47,15 +48,49 @@
     return false;
   }
   function json(raw){const text=raw.trim().replace(/^\uFEFF/,'');try{return JSON.parse(text);}catch{}const fence=/```(?:json)?\s*\n([\s\S]*?)```/i.exec(text);if(fence){try{return JSON.parse(fence[1]);}catch{}}return null;}
-  function markdownFindings(raw){
-    const lines=raw.split(/\r?\n/), cells=line=>line.trim().replace(/^\|/,'').replace(/\|$/,'').split(/(?<!\\)\|/).map(x=>x.trim().replace(/\\\|/g,'|'));
-    const names=['번호','쪽','위치(절,그림,표)','유형','심각도','인용한 원문','왜 결함인가','확신'];
+  const tableCells=line=>line.trim().replace(/^\|/,'').replace(/\|$/,'').split(/(?<!\\)\|/).map(x=>x.trim().replace(/\\\|/g,'|'));
+  const sepLine=line=>/^\s*\|?[\s:|\-]+\|?\s*$/.test(line||'');
+  const parsePageNum=v=>{const m=/^\s*(\d+)\s*(?:쪽|p(?:age)?\.?)?\s*$/i.exec(v||'');return m?Number(m[1]):undefined;};
+  function readTableRows(lines,startRow,headerLen,mapRow){
+    const entries=[],malformed=[];let j=startRow;const fenced=startRow>=3&&/^\s*`{3,}(?:\w+)?\s*$/.test(lines[startRow-3]);
+    for(;j<lines.length;j++){if(!lines[j].includes('|')||!lines[j].trim())break;const row=tableCells(lines[j]);if(row.length<headerLen){malformed.push(j+1);continue;}entries.push(mapRow(row));}
+    if(fenced&&/^\s*`{3,}\s*$/.test(lines[j]||''))j++;
+    return {entries,malformed,endLine:j};
+  }
+  function markdownStage1(lines){
     for(let i=0;i+1<lines.length;i++){
-      const header=cells(lines[i]).map(x=>x.replace(/\s/g,'')), index=names.map(n=>header.indexOf(n.replace(/\s/g,'')));
-      if(index.some(n=>n<0)||!/^\s*\|?[\s:|\-]+\|?\s*$/.test(lines[i+1]))continue;
-      const entries=[],malformed=[];let j=i+2;const fenced=i>0&&/^\s*`{3,}(?:\w+)?\s*$/.test(lines[i-1]);
-      for(;j<lines.length;j++){if(!lines[j].includes('|')||!lines[j].trim())break;const row=cells(lines[j]);if(row.length<header.length){malformed.push(j+1);continue;}const v=index.map(n=>row[n]);const page=/^\s*(\d+)\s*(?:쪽|p(?:age)?\.?)?\s*$/i.exec(v[1]);entries.push({reportNumber:v[0],page:page?Number(page[1]):undefined,locationLabel:v[2],findingType:v[3],severity:v[4],quote:v[5],rationale:v[6],confidence:v[7]});}
-      if(fenced&&/^\s*`{3,}\s*$/.test(lines[j]||''))j++;if(entries.length)return {entries,malformed,report:lines.slice(j).join('\n').trim()};
+      if(!sepLine(lines[i+1]))continue;
+      const h=tableCells(lines[i]).map(x=>x.replace(/\s/g,'').toLowerCase());
+      const cols=['후보id','쪽','위치','유형','인용한원문','의심내용'].map(n=>h.indexOf(n));
+      if(cols.some(n=>n<0))continue;
+      const res=readTableRows(lines,i+2,h.length,row=>{const v=cols.map(n=>row[n]);return {candidateId:v[0],page:parsePageNum(v[1]),locationLabel:v[2],defectFamily:v[3],quote:v[4],suspicion:v[5]};});
+      if(res.entries.length)return res;
+    }
+    return null;
+  }
+  function stage2HeaderIndices(header){
+    const h=header.map(x=>x.replace(/\s/g,''));
+    const base=['번호','쪽','위치(절,그림,표)','유형','인용한원문','왜결함인가','확신'].map(n=>h.indexOf(n));
+    if(base.some(n=>n<0))return null;
+    const sevIdx=h.indexOf('심각도'),verIdx=h.indexOf('판정');
+    if(sevIdx<0&&verIdx<0)return null;
+    return {base,sevIdx:sevIdx>=0?sevIdx:verIdx,verIdx};
+  }
+  function markdownFindings(raw){
+    const lines=raw.split(/\r?\n/),stage1=markdownStage1(lines),startAt=stage1?stage1.endLine:0;
+    for(let i=startAt;i+1<lines.length;i++){
+      if(!sepLine(lines[i+1]))continue;
+      const header=tableCells(lines[i]),idx=stage2HeaderIndices(header);if(!idx)continue;
+      const res=readTableRows(lines,i+2,header.length,row=>{
+        const b=idx.base.map(n=>row[n]),entry={reportNumber:b[0],page:parsePageNum(b[1]),locationLabel:b[2],findingType:b[3],severity:row[idx.sevIdx],quote:b[4],rationale:b[5],confidence:b[6]};
+        if(idx.verIdx>=0)entry.verdictLabel=row[idx.verIdx];
+        return entry;
+      });
+      if(stage1&&getSensor()?.reconcileCandidateLedger){
+        const rec=getSensor().reconcileCandidateLedger(stage1.entries,res.entries);
+        return {entries:rec.findings,malformed:res.malformed,report:lines.slice(res.endLine).join('\n').trim(),zeroDropSummary:rec.summary};
+      }
+      if(res.entries.length)return {entries:res.entries,malformed:res.malformed,report:lines.slice(res.endLine).join('\n').trim()};
     }
     return null;
   }
@@ -143,7 +178,7 @@
     batch.items.push(item);
   }
   function copyFindingFields(item,entry){
-        for(const key of ['findingType','severity','confidence','locationLabel','reportNumber'])if(typeof entry[key]==='string')item[key]=entry[key];if(item.pageIndex===null&&Number.isInteger(entry.page)&&entry.page>0)item.pageIndex=entry.page-1;
+        for(const key of ['findingType','severity','confidence','locationLabel','reportNumber','verdictLabel','defectFamily'])if(typeof entry[key]==='string')item[key]=entry[key];if(entry.zeroDropRecovered===true)item.zeroDropRecovered=true;if(item.pageIndex===null&&Number.isInteger(entry.page)&&entry.page>0)item.pageIndex=entry.page-1;
   }
   function createResponseItem(entry,role){
         return {id:id(),kind:role==='red'?'change':'finding',rationale:typeof entry.rationale==='string'?entry.rationale:typeof entry.description==='string'?entry.description:typeof entry.message==='string'?entry.message:'',evidence:evidence(entry.evidence),references:evidence(entry.references),attackTypes:strings(entry.attackTypes),uncertainty:typeof entry.uncertainty==='string'?entry.uncertainty:'',segmentId:typeof entry.segmentId==='string'?entry.segmentId:null,pageIndex:Number.isInteger(entry.pageIndex)&&entry.pageIndex>=0?entry.pageIndex:null,matchStatus:'missing',anchor:null,matches:[]};
@@ -162,19 +197,37 @@
     if(out.length||Array.isArray(prose)||Array.isArray(obj.tableEdits)||Array.isArray(obj.visualEdits))return out;
     return null;
   }
+  function applyZeroDropResult(batch,rec){
+    if(!rec||!rec.summary)return;
+    batch.zeroDropSummary=rec.summary;
+    if(rec.summary.recoveredCount>0){
+      batch.diagnostics.push({code:'zero-drop-recovered',count:rec.summary.recoveredCount,message:'1단계 의심 원장 중 최종 보고에서 누락된 '+rec.summary.recoveredCount+'건을 확인필요 항목으로 자동 복원했습니다.'});
+    }
+  }
+  function blueJsonItems(obj,batch){
+    let list=obj.findings??obj.verdicts??obj.items;
+    if(!Array.isArray(list)&&(typeof obj.quote==='string'||typeof obj.rationale==='string'))list=[obj];
+    if(Array.isArray(obj.candidateLedger)){
+      const s=getSensor(),rawList=Array.isArray(list)?list:[];
+      if(s&&typeof s.reconcileCandidateLedger==='function'){const rec=s.reconcileCandidateLedger(obj.candidateLedger,rawList);applyZeroDropResult(batch,rec);return rec.findings;}
+      return rawList;
+    }
+    return list;
+  }
   function responseItems(raw,obj,role,batch){
     const table=readFindingTable(raw,obj,role,batch);
     if(table)return table.entries;
     if(Array.isArray(obj))return obj;
     if(obj&&typeof obj==='object'){
-      let list=role==='red'?collectRedJsonList(obj,batch):(obj.findings??obj.items);
-      if(!Array.isArray(list)&&(role==='red'?typeof obj.before==='string'||structuredKind(obj):typeof obj.quote==='string'||typeof obj.rationale==='string'))list=[obj];
+      if(role==='blue')return blueJsonItems(obj,batch);
+      let list=collectRedJsonList(obj,batch);
+      if(!Array.isArray(list)&&(typeof obj.before==='string'||structuredKind(obj)))list=[obj];
       return list;
     }
     return null;
   }
   function readFindingTable(raw,obj,role,batch){
-    const table=role==='blue'&&!obj?markdownFindings(raw):null;if(table&&table.report)batch.report=table.report;if(table)for(const line of table.malformed)batch.diagnostics.push({code:'malformed-item',line,message:'이 표 행을 읽지 못했습니다.'});
+    const table=role==='blue'&&!obj?markdownFindings(raw):null;if(table&&table.report)batch.report=table.report;if(table?.zeroDropSummary)applyZeroDropResult(batch,{summary:table.zeroDropSummary});if(table)for(const line of table.malformed)batch.diagnostics.push({code:'malformed-item',line,message:'이 표 행을 읽지 못했습니다.'});
     return table;
   }
   function readBatchMetadata(obj,options,role,batch){

@@ -34,6 +34,17 @@ def prepare(data, *, store=None):
     return _store(store).prepare(raw, digest)
 
 
+def _query_blue_sensor(paper_id, data, store):
+    max_signals = data.get('maxSignals', 50)
+    include_external = data.get('includeExternalOracle', False)
+    if type(max_signals) is not int or not 1 <= max_signals <= 100:
+        raise ValueError('paper_evidence_request_invalid')
+    if type(include_external) is not bool:
+        raise ValueError('paper_evidence_request_invalid')
+    from paper_blue_sensor import run_blue_sensor
+    return run_blue_sensor(paper_id, max_signals=max_signals, include_external_oracle=include_external, store=store)
+
+
 def query(data, *, store=None):
     if not isinstance(data, dict):
         raise ValueError('paper_evidence_request_invalid')
@@ -41,6 +52,7 @@ def query(data, *, store=None):
     fields = {
         'status': set(), 'list': {'kind', 'pageIndex', 'offset', 'limit'},
         'item': {'itemId'}, 'render': {'pageIndex', 'bbox', 'dpi'}, 'analyses': set(), 'analysis': {'analysisId'},
+        'blue_sensor': {'maxSignals', 'includeExternalOracle'},
     }
     if not isinstance(operation, str) or operation not in fields or set(data) - {'paperId', 'operation'} - fields[operation]:
         raise ValueError('paper_evidence_operation_invalid')
@@ -54,6 +66,7 @@ def query(data, *, store=None):
         if operation == 'analysis': return store.read_analysis(paper_id, data.get('analysisId'))
         if operation == 'list': return store.list_items(paper_id, kind=data.get('kind'), page_index=data.get('pageIndex'), offset=data.get('offset', 0), limit=data.get('limit', 50))
         if operation == 'item': return store.read_item(paper_id, data.get('itemId'))
+        if operation == 'blue_sensor': return _query_blue_sensor(paper_id, data, store)
         return store.render_region(paper_id, data.get('pageIndex'), bbox=data.get('bbox'), dpi=data.get('dpi', 120))
     except KeyError:
         raise ValueError('paper_evidence_expired_or_missing') from None

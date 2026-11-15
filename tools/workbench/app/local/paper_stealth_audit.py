@@ -1,14 +1,29 @@
 """Forensic and visual stealth self-audit for RED edited PDFs."""
+from collections import Counter
 import hashlib
 import io
 import math
+import re
 
 import numpy as np
 import pikepdf
 import pymupdf
 
 SCHEMA = 'falsify.red-stealth-audit.v1'
-LEAK_TOKENS = ('falsify', 'red-plan', 'attack', 'candidate', 'rationale', 'before', 'after')
+BLINDNESS_SCHEMA = 'falsify.red-blindness-audit.v1'
+LEAK_TOKENS = (
+    'falsify', 'red-plan', 'attack', 'candidate', 'rationale', 'before', 'after',
+    'falsify-red', 'tampered', 'answer-key', 'answer_key', '변조', '정답', '의도적',
+)
+BLINDNESS_TEXT_PATTERNS = (
+    re.compile(r'\b\d+\s+intentional\s+(?:errors?|defects?|flaws?|mutations?)\b', re.I),
+    re.compile(r'\b(?:intentional|injected|planted|synthetic)\s+(?:errors?|defects?|flaws?|mutations?)\b', re.I),
+    re.compile(r'\b(?:answer[\s_-]*key|tampered[\s_-]*(?:copy|pdf|version)|red[\s_-]*team[\s_-]*injected)\b', re.I),
+    re.compile(r'(?:의도적\s*(?:오류|결함)|변조본|주입된?\s*결함|결함\s*\d+\s*개|오류\s*\d+\s*개\s*(?:주입|포함)|정답지|정답표)'),
+)
+BLINDNESS_META_PATTERNS = BLINDNESS_TEXT_PATTERNS + (
+    re.compile(r'(?:falsify-red|red-plan|tampered|변조|정답)', re.I),
+)
 SEAM_WARNING_THRESHOLD = 40
 
 
@@ -57,7 +72,113 @@ def _check_metadata(src_bytes, src_doc, out_bytes, out_doc):
     for token in LEAK_TOKENS:
         if token in out_corpus and token not in src_corpus:
             issues.append({'code': 'metadata_leak', 'severity': 'detectable_artifact', 'token': token})
+    for pat in BLINDNESS_TEXT_PATTERNS:
+        if len(pat.findall(out_corpus)) > len(pat.findall(src_corpus)):
+            issues.append({'code': 'metadata_leak', 'severity': 'detectable_artifact', 'token': pat.pattern})
     return not issues, issues
+
+
+def _snippet(text, start, end):
+    lo = max(0, start - 20)
+    hi = min(len(text), end + 20)
+    return ' '.join(text[lo:hi].split())
+
+
+def _diff_pattern_matches(src_text, out_text, patterns, surface, page_index=None):
+    issues = []
+    if not out_text:
+        return issues
+    for pat in patterns:
+        src_counts = Counter(m.group(0).lower() for m in pat.finditer(src_text or ''))
+        for m in pat.finditer(out_text):
+            key = m.group(0).lower()
+            if src_counts[key] > 0:
+                src_counts[key] -= 1
+                continue
+            item = {
+                'code': 'blindness_hint_leak',
+                'severity': 'detectable_artifact',
+                'surface': surface,
+                'pattern': pat.pattern,
+                'snippet': _snippet(out_text, m.start(), m.end()),
+            }
+            if page_index is not None:
+                item['pageIndex'] = page_index
+            issues.append(item)
+    return issues
+
+
+def _extract_annot_strings(page):
+    items = []
+    for annot in list(page.annots() or []):
+        info = annot.info or {}
+        for key in ('content', 'title', 'subject', 'id'):
+            val = info.get(key)
+            if isinstance(val, str) and val.strip():
+                items.append(val.strip())
+        uri = getattr(annot, 'uri', None)
+        if isinstance(uri, str) and uri.strip():
+            items.append(uri.strip())
+    for link in page.get_links() or []:
+        uri = link.get('uri') if isinstance(link, dict) else None
+        if isinstance(uri, str) and uri.strip():
+            items.append(uri.strip())
+    return items
+
+
+def _scan_page_annot_leaks(src_doc, out_doc):
+    issues = []
+    for idx in range(len(out_doc)):
+        out_items = _extract_annot_strings(out_doc[idx])
+        if not out_items:
+            continue
+        src_items = _extract_annot_strings(src_doc[idx]) if idx < len(src_doc) else []
+        added = list((Counter(out_items) - Counter(src_items)).elements())
+        if not added:
+            continue
+        issues.extend(_diff_pattern_matches('\n'.join(src_items), '\n'.join(added), BLINDNESS_META_PATTERNS, 'annotation', page_index=idx))
+    return issues
+
+
+def _visible_lines(page):
+    return [line.strip() for line in (page.get_text('text') or '').splitlines() if line.strip()]
+
+
+def _scan_page_text_leaks(src_doc, out_doc):
+    issues = []
+    for idx in range(len(out_doc)):
+        out_lines = _visible_lines(out_doc[idx])
+        src_lines = _visible_lines(src_doc[idx]) if idx < len(src_doc) else []
+        added_lines = list((Counter(out_lines) - Counter(src_lines)).elements())
+        if not added_lines:
+            continue
+        src_text = (src_doc[idx].get_text('text') or '') if idx < len(src_doc) else ''
+        issues.extend(_diff_pattern_matches(src_text, '\n'.join(added_lines), BLINDNESS_TEXT_PATTERNS, 'text', page_index=idx))
+    return issues
+
+
+def _scan_blindness_leaks(src_bytes, src_doc, out_bytes, out_doc):
+    src_corpus = _metadata_corpus(src_bytes, src_doc)
+    out_corpus = _metadata_corpus(out_bytes, out_doc)
+    issues = _diff_pattern_matches(src_corpus, out_corpus, BLINDNESS_META_PATTERNS, 'metadata')
+    issues.extend(_scan_page_annot_leaks(src_doc, out_doc))
+    issues.extend(_scan_page_text_leaks(src_doc, out_doc))
+    return issues
+
+
+def audit_blindness_leaks(source_pdf_bytes: bytes, edited_pdf_bytes: bytes) -> dict:
+    """Scan edited PDF metadata, annotations/URIs, and newly introduced text lines for blindness-breaking hints."""
+    src_bytes = _as_pdf_bytes(source_pdf_bytes, 'source')
+    out_bytes = _as_pdf_bytes(edited_pdf_bytes, 'edited')
+    with pymupdf.open(stream=src_bytes, filetype='pdf') as src_doc, pymupdf.open(stream=out_bytes, filetype='pdf') as out_doc:
+        issues = _scan_blindness_leaks(src_bytes, src_doc, out_bytes, out_doc)
+    return {
+        'schema': BLINDNESS_SCHEMA,
+        'sourceSha256': _sha256(src_bytes),
+        'outputSha256': _sha256(out_bytes),
+        'clean': not issues,
+        'issues': issues,
+    }
 
 
 def _normalize_regions(modified_regions):
@@ -268,12 +389,15 @@ def audit_pdf_stealth(source_pdf_bytes: bytes, edited_pdf_bytes: bytes, modified
         issues.extend(order_issues)
         ext_ok, seam_issues, seam_metrics = _check_boundary_seams(src_doc, out_doc, regions)
         issues.extend(seam_issues)
+        blind_issues = _scan_blindness_leaks(src_bytes, src_doc, out_bytes, out_doc)
+        issues.extend(blind_issues)
     checks = {
         'metadataClean': meta_clean,
         'pageCountPreserved': pages_ok,
         'unmodifiedPagesIdentical': unmod_ok,
         'readingOrderOk': order_ok,
         'exteriorPixelsPreserved': ext_ok,
+        'blindnessClean': not blind_issues,
     }
     return {
         'schema': SCHEMA,

@@ -90,7 +90,7 @@ details.reference > *{display:block}
 <details id="reference" class="reference">
 <summary>자세한 안내</summary>
 <p>Harness 화면에서 사용할 RED와 BLUE를 고른 뒤 <strong>선택한 RED·BLUE만 남기기</strong>를 누르면 내 도구 목록을 정리할 수 있습니다. 이전 실행·검수 기록은 유지되며, 삭제한 도구 복원으로 다시 꺼낼 수 있습니다. 팀 서랍에 보관한 페이지는 Confluence에서 따로 관리합니다.</p>
-<p class="note">이 안내는 웹앱 0.2.0-alpha.61를 기준으로 합니다. 글꼴 편집은 PC 연결 없이 브라우저에서 사용할 수 있습니다. sourceBuildVerified는 false입니다.</p>
+<p class="note">이 안내는 웹앱 0.2.0-alpha.62를 기준으로 합니다. 글꼴 편집은 PC 연결 없이 브라우저에서 사용할 수 있습니다. sourceBuildVerified는 false입니다.</p>
 <h3>원본 서식으로 그래프 고치기</h3>
 <p><b class="ui">표·그래프·그림 고치기</b>에서 그림이나 페이지 영역을 선택하고 <b class="ui">그래프 고치기</b>를 누르세요. 곡선을 위아래로 끌어 봉우리·골을 만들고, 가운데·양옆 손잡이로 위치와 폭을 바꿉니다. 막대는 끝점, 산점은 점을 끌어 움직입니다. <b class="ui">원본 비교</b>로 확인한 뒤 <b class="ui">내보내기</b>를 누르면 PDF를 바로 받습니다. 정밀 좌표와 그래프 분석은 접힌 영역에 있습니다. 공개 웹과 PC companion을 함께 업데이트하세요.</p>
 <h3>원본 배치로 수정본 만들기</h3>
@@ -220,7 +220,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\install-connection.ps1</co
 <li><strong>저장</strong>: <b class="ui">PDF 다운로드</b>를 누르면 선택한 후보와 현재 After를 적용한 파일을 바로 받습니다. PDF 하나만 내려받으며, 변경 계획은 별도 버튼으로 저장합니다. <b class="ui">변경 계획 JSON 저장</b>은 변경 근거를 따로 남기며 <strong>BLUE에 넣지 않습니다</strong>. 계획은 검수에서만 대조합니다. PDF는 <b class="ui">다운로드한 사본 미리보기</b>로 받은 바이트를 다시 확인해 그려 볼 수 있습니다(화면 확인용).</li>
 </ol>
 <p>유효한 모델 응답은 자동 기록됩니다. 고른 후보·편집 After는 완성본 다운로드나 <b class="ui">RED 실행 결과 기록</b>으로 저장됩니다. 근거 인용은 앱이 원문과 다시 대조합니다. 모델이 유보하거나 거절하면 후보를 강제로 만들거나 자동 재시도하지 않습니다.</p>
-<p class="note">이 제한은 숫자·대괄호·URL 문자열을 정규식으로 비교하는 좁은 검사입니다. 저자명이나 다른 서지 표기 변경을 의미적으로 막지 않으며, 팀의 과학적 변경 규칙은 이것과 별도로 정합니다. <b class="ui">공격 단계</b> 지침은 해석 왜곡만 다루며 프로젝트 전체의 D1·D2 설계를 구현한 것이 아닙니다.</p>
+<p class="note">이 제한은 숫자·대괄호·URL 문자열을 정규식으로 비교하는 좁은 검사입니다. 저자명이나 다른 서지 표기 변경을 의미적으로 막지 않으며, 팀의 과학적 변경 규칙은 이것과 별도로 정합니다. 오라클 기준 결함 분류는 D1(수치·표·그림 불일치), D2(인용·서지·링크 왜곡), D3(근거보다 센 결론·스핀), D4-1(결과 지위 오표기), S1(도메인 기전·극성 역전) 다섯 계열과 L1~L4 은닉 난이도를 지원하며, 결함 주입 힌트 문자열이 포함된 사본은 내보내기 전에 차단합니다.</p>
 </section>
 
 <section id="pdf-export" aria-labelledby="pdf-export-title">
@@ -261,6 +261,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\start-companion.ps1 -NoIns
 <li><strong>긴 문서</strong>: 한 묶음이면 원문 전체를 한 번에 보냅니다. 여러 묶음(N개)이면 묶음 읽기 N회 + 재확인 대상 선택 1회 + 최종 판단 1회, 총 N+2회가 필요하며 예산이 모자라면 시작하지 않습니다. 재확인은 모델이 고른 <strong>일부 원문 구간</strong>(최대 8곳)만 다시 읽는 것이지 PDF 전체를 다시 읽는 것이 아닙니다.</li>
 <li><strong>결과</strong>: <b class="ui">결과 · BLUE 지적</b>에 지적과 원문 인용이 나옵니다. "전체 추출 텍스트 전달 완료"는 텍스트를 다 보냈다는 뜻일 뿐 정확도나 결함 전수 탐지를 뜻하지 않습니다. 유보·거절은 그대로 표시하고 자동 재시도하지 않습니다. 저장은 자동이며, 실패하면 <b class="ui">BLUE 실행 결과 기록</b>으로 다시 시도합니다.</li>
 </ul>
+<p class="note">BLUE 화면의 <b class="ui">Layer 0 즉시 감식</b>은 모델을 부르지 않고 오프라인(P0)에서 수치·통계 정합성(다중 검정 보정 p-값 표기 구분 포함)과 참고문헌·본문 인용 누락을 먼저 점검합니다. PC companion이 연결된 PDF에서는 하이퍼링크(<code>/URI</code>)·양식 필드(<code>AcroForm</code>) 포렌식과 명시적 <b class="ui">외부 오라클 대조 실행</b>(P2, Crossref·임상등록부)을 추가로 반영할 수 있습니다. 외부 AI 답변에서는 1단계 의심 목록과 최종 표를 대조해 근거 없이 빠진 항목을 <b class="ui">확인필요 · Zero-Drop 누락 복원</b>으로 자동 보전합니다.</p>
 </section>
 
 <section id="review" aria-labelledby="review-title">
@@ -274,6 +275,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\start-companion.ps1 -NoIns
 </ol>
 <p><b class="ui">RED 변경을 추가해서 함께 보기</b>: BLUE 입력 파일의 SHA-256이 RED 최종 출력 해시와 일치하면 왼쪽에 원래 문장·바꾼 문장·원래 공격 의도를 보여 줍니다. 달라진 표현을 표시하고, 오른쪽에는 인용이 겹친 BLUE 지적부터 보여 줍니다. 인용 일치만으로 탐지 성공을 정하지 않습니다. 일치 기록이 없으면 다운로드 때 받은 <b class="ui">RED 변경 계획 JSON</b>을 직접 추가할 수 있습니다. 계획만으로 알 수 없는 공격 의도는 미기록으로 표시합니다. RED 없이 BLUE만 검수해도 됩니다.</p>
 <p>RED를 보면서 판정하면 <b class="ui">RED 공개 대조 · 블라인드 아님</b>이 기록됩니다. 항목별 판정·RED 대조문은 로컬 백업과 명시적으로 팀 공유한 실험 아카이브에 보존합니다. 검수 추가 후 다시 공유해야 최신 검수가 반영됩니다. 사람 검수는 과학적 gold·팀 승인·정량 탐지율을 자동 확정하지 않으며 모델 입력에도 들어가지 않습니다.</p>
+<p class="note">정답지 외 BLUE 지적을 감사할 때는 <b class="ui">실제 원문 결함</b>(원본 자체 결함 발견), <b class="ui">스핀/과장 경계</b>, <b class="ui">정답지 오류 (Gold v2 후보)</b>, <b class="ui">순수 오탐</b>을 구분해 기록할 수 있습니다. 이를 통해 단순 정답지 불일치를 일괄 오탐으로 묶지 않고 BLUE의 실제 검증 성능과 순수 오탐을 분리합니다.</p>
 </section>
 
 <section id="harness" aria-labelledby="harness-title">
@@ -339,6 +341,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\start-companion.ps1 -NoIns
 <p>Confluence에서 불러온 실험은 별도의 <strong>임시 검수</strong>로 확인합니다. 새 실행으로 세거나 로컬 결과표·Harness 선택·백업에 자동 병합하지 않습니다. ID가 같은 로컬 기록도 덮어쓰지 않습니다. 기존 로컬 기록과 임시 팀 기록의 판정은 구분됩니다.</p>
 <p>입력 해시·역할·모델·난이도·예산·평가 조건을 확인하고 비교하세요. 자체 평가는 독립 검수가 아니며 점수나 버전 차이가 인과적 성능 우열을 증명하지 않습니다. 팀 전체 순위나 정답을 자동 확정하는 기능은 아닙니다.</p>
 <p>브라우저마다 원래 로컬 기록은 따로입니다. 팀 공유한 사례는 다른 브라우저에서도 임시로 열 수 있습니다. 그곳에서 추가한 검수도 Confluence에 다시 공유해야 남습니다. 저장·열람만으로 모델이나 CLI를 실행하지 않습니다.</p>
+<p class="note"><b class="ui">경찰(BLUE) ↔ 도둑(RED) 상보적 진화 아레나</b>는 실험 조건(<code>P0</code> 오프라인 · <code>P2</code> 외부 오라클 · <code>Holdout</code> 무결함 대조군)별로 RED 주입 탐지율과 BLUE 지적의 엄격·포괄 정밀도를 함께 집계합니다. 동일 모델 계열 자가 대결 편향 경고, 동일 입력 반복 실행의 판정 뒤집힘 추적, 팀 평가 스크립트용 12열 CSV·Red JSON 내보내기, 정답을 노출하지 않는 다음 세대 <code>C1</code> Harness 개선 지침 초안을 제공합니다.</p>
 </section>
 
 <section id="storage" aria-labelledby="storage-title">

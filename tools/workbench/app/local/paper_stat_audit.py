@@ -17,7 +17,12 @@ DISCLAIMER = (
 )
 MAX_AUDIT_PAGES = 80
 _NUM = r"[-−]?\d+(?:\.\d+)?"
-_P_TAIL = r"[,;:\(\s]*(?:p|P)\s*(?P<op>=|<|<=|>|>=|≤|≥)\s*(?P<p>\d*\.?\d+(?:[eE][-−+]?\d+)?)"
+_P_MOD = (
+    r"(?i:(?:bonferroni|fdr|holm|hochberg|benjamini|tukey|sidak|šidák|dunnett|scheffe|scheffé|"
+    r"games|howell|adjusted|adj\.?|corrected|unadjusted|raw|nominal|exact|two|one|tailed|bh|fwer|"
+    r"multiple|comparisons?|testing|보정된?|다중비교|다중검정)[-\s,]*){0,6}"
+)
+_P_TAIL = rf"[,;:\(\s]*(?:{_P_MOD})?\b(?:[pP](?:[_-]?adj)?|[qQ](?:[- ]?value)?)\s*(?P<op>=|<|<=|>|>=|≤|≥)\s*(?P<p>\d*\.?\d+(?:[eE][-−+]?\d+)?)"
 _T_PAREN_RE = re.compile(rf"\bt\s*\(\s*(?P<df1>\d+(?:\.\d+)?)\s*\)\s*=\s*(?P<val>{_NUM})\s*{_P_TAIL}")
 _T_COMMA_RE = re.compile(rf"\bt\s*=\s*(?P<val>{_NUM})\s*,\s*df\s*=\s*(?P<df1>\d+(?:\.\d+)?)\s*{_P_TAIL}", re.I)
 _F_RE = re.compile(rf"\bF\s*\(\s*(?P<df1>\d+(?:\.\d+)?)\s*,\s*(?P<df2>\d+(?:\.\d+)?)\s*\)\s*=\s*(?P<val>{_NUM})\s*{_P_TAIL}")
@@ -47,6 +52,30 @@ _CAPTION_START_RE = re.compile(r"^\s*(?:Table|Figure|Fig\.?)\s+\d+[A-Za-z]?\s*[:
 _INLINE_PCT_RE = re.compile(r"(?<![\d.])(\d+(?:\.\d+)?)\s*%")
 _INLINE_P_RE = re.compile(r"\b[pP]\s*(=|<|<=|>|>=|≤|≥)\s*(\d*\.?\d+(?:[eE][-−+]?\d+)?)")
 _RATIO_KINDS = frozenset({"OR", "AOR", "RR", "ARR", "HR", "AHR", "IRR"})
+_MULT_TEST_RE = re.compile(
+    r"(?:"
+    r"\b(?:bonferroni|fdr|benjamini|hochberg|holm|tukey|dunnett|fwer)\b"
+    r"|\bfalse\s+discovery\s+rate\b"
+    r"|\b(?:sidak|šidák|scheffe|scheffé)\b"
+    r"|\bgames[- ]howell\b"
+    r"|\badjusted\s+p(?:[- ]?values?)?\b"
+    r"|\bp[- ]?adjusted\b"
+    r"|(?<![a-z0-9])p[_-]?adj(?![a-z0-9])"
+    r"|\bq[- ]values?\b"
+    r"|\bmultiple[- ]comparisons?\b"
+    r"|\bmultiple[- ]testing\b"
+    r"|\bfamily[- ]?wise\b"
+    r"|다중\s*비교|다중\s*검정|보정(?:된)?\s*p"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def has_multiple_testing_adjustment(context_text: str) -> bool:
+    """Return True if context_text contains an explicit multiple-testing adjustment cue."""
+    if not isinstance(context_text, str) or not context_text.strip():
+        return False
+    return bool(_MULT_TEST_RE.search(context_text))
 
 
 def _default_store():
@@ -96,7 +125,31 @@ def _stat_matches(text):
             yield kind, match
 
 
-def _scan_stat_pvalues(text, page_index, item_id=None):
+def _sentence_window(norm, start, end, radius=140):
+    lo = max(0, start - radius)
+    hi = min(len(norm), end + radius)
+    left_seg = norm[lo:start]
+    left_break = max(left_seg.rfind("\n"), left_seg.rfind(". "), left_seg.rfind("! "), left_seg.rfind("? "))
+    if left_break >= 0:
+        lo += left_break + 1
+    right_seg = norm[end:hi]
+    right_breaks = [pos for pos in (right_seg.find("\n"), right_seg.find(". "), right_seg.find("! "), right_seg.find("? ")) if pos >= 0]
+    if right_breaks:
+        hi = end + min(right_breaks) + 1
+    return norm[lo:hi]
+
+
+def _should_suppress_stat_mismatch(norm, match, res, rep_p, p_dec, header_context):
+    local_ctx = _sentence_window(norm, match.start(), match.end(), radius=140)
+    window = f"{header_context} {local_ctx}".strip()
+    if has_multiple_testing_adjustment(window) and rep_p >= res["computedPRange"][0] - 1e-6:
+        return True
+    if res["operator"] == "=" and p_dec <= 2 and res["status"] == "inconsistent":
+        return abs(rep_p - res["computedP"]) <= 0.01 + 1e-9
+    return False
+
+
+def _scan_stat_pvalues(text, page_index, item_id=None, header_context=""):
     norm = _norm_text(text)
     signals = []
     for kind, match in _stat_matches(norm):
@@ -116,6 +169,8 @@ def _scan_stat_pvalues(text, page_index, item_id=None):
         except ValueError:
             continue
         if res["status"] != "consistent":
+            if _should_suppress_stat_mismatch(norm, match, res, rep_p, p_dec, header_context):
+                continue
             detail = f"{kind} reported p {groups['op']} {groups['p']} is {res['status']} (computed p={res['computedP']:.4g})"
             if res["oneTailedCompatible"]:
                 detail += "; compatible with one-tailed p"
@@ -357,8 +412,9 @@ def _audit_table_item(item, page_index, item_id):
             continue
         col_hdr = " ".join(grid.get((hr, c), "") for hr in header_rows)
         row_hdr = grid.get((r, 0), "")
-        context_text = f"{col_hdr} {row_hdr} {text}"
-        signals.extend(_scan_stat_pvalues(text, page_index, item_id=item_id))
+        header_context = f"{col_hdr} {row_hdr}".strip()
+        context_text = f"{header_context} {text}"
+        signals.extend(_scan_stat_pvalues(text, page_index, item_id=item_id, header_context=header_context))
         signals.extend(_scan_ci_expressions(context_text if "CI" in context_text.upper() else text, page_index, item_id=item_id))
     return signals
 

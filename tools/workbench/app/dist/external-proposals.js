@@ -69,7 +69,7 @@
     return false;
   }
   function dedupeKey(x){
-    return JSON.stringify([x.kind,x.before,x.after,x.quote,x.sourceQuote,x.segmentId,x.pageIndex,x.anchor,x.tableTarget,x.visualTarget,x.rationale,x.evidence,x.references,x.attackTypes,x.uncertainty,x.findingType,x.severity,x.confidence,x.locationLabel,x.reportNumber]);
+    return JSON.stringify([x.kind,x.before,x.after,x.quote,x.sourceQuote,x.segmentId,x.pageIndex,x.anchor,x.tableTarget,x.visualTarget,x.rationale,x.evidence,x.references,x.attackTypes,x.uncertainty,x.findingType,x.severity,x.confidence,x.locationLabel,x.reportNumber,x.verdictLabel,x.zeroDropRecovered,x.defectFamily]);
   }
   function create({fileHash,role='red',segments}){
     if(typeof fileHash!=='string'||!fileHash||!['red','blue'].includes(role)||!Array.isArray(segments))throw Error('Invalid document');
@@ -139,7 +139,7 @@
       Object.assign(item,updated);
     }
     function update(id,fields){
-      const item=find(id),allowed=['after','afterValue','rationale','evidence','references','attackTypes','uncertainty'];
+      const item=find(id),allowed=['after','afterValue','rationale','evidence','references','attackTypes','uncertainty','verdictLabel','defectFamily'];
       for(const k of Object.keys(fields||{}))if(!allowed.includes(k))throw Error('Unsupported field');
       const updated={...item,...clone(fields)};
       applyUpdateFields(item,updated,fields||{});

@@ -1,0 +1,22 @@
+/* Cops-and-Robbers Co-Evolution Arena (A1) */
+.coevolution-arena{margin-top:28px;min-width:0;max-width:100%;overflow-wrap:anywhere}
+.coevolution-arena .arena-head{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-bottom:14px}
+.coevolution-arena .arena-meta-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(200px,100%),1fr));gap:14px;margin:14px 0}
+.coevolution-arena .arena-meta-row label{display:block;font-size:12px;font-weight:600;color:var(--muted);min-width:0}
+.coevolution-arena .arena-meta-row input{width:100%;min-height:40px;margin-top:6px;padding:8px 10px;border:1px solid #9aa3aa;border-radius:var(--radius);background:var(--paper);color:var(--ink)}
+.coevolution-arena .arena-banner{margin:12px 0;padding:12px 14px;border:1px solid #d59b2d;border-left:4px solid #b56a00;border-radius:var(--radius);background:#fff9eb;color:var(--ink);font-size:13px}
+.coevolution-arena .arena-banner.is-v2{border-color:#7d8c99;border-left-color:#246388;background:#f4f8fb}
+.coevolution-arena .arena-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(260px,100%),1fr));gap:14px;margin:16px 0}
+.coevolution-arena .arena-card{padding:14px;border:1px solid var(--line);border-radius:var(--radius);background:var(--paper);min-width:0}
+.coevolution-arena .arena-card h3,.coevolution-arena .arena-card h4{margin:0 0 8px;font-size:14px}
+.coevolution-arena .arena-card p{margin:4px 0;font-size:13px;line-height:1.55}
+.coevolution-arena .arena-table-wrap{overflow:auto;max-width:100%;margin:14px 0}
+.coevolution-arena .arena-table{border-collapse:collapse;width:100%;font-size:13px;font-variant-numeric:tabular-nums}
+.coevolution-arena .arena-table th,.coevolution-arena .arena-table td{padding:10px 12px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+.coevolution-arena .arena-condition-list{display:grid;gap:10px;margin:12px 0}
+.coevolution-arena .arena-condition-row{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:10px 12px;border:1px solid var(--line);border-radius:var(--radius);background:var(--paper);min-width:0}
+.coevolution-arena .arena-condition-row select{width:auto;min-width:0;max-width:100%;min-height:38px;padding:6px 10px}
+.coevolution-arena .arena-brief-preview{white-space:pre-wrap;overflow-wrap:anywhere;background:var(--surface);padding:12px;border-radius:var(--radius);font-size:12px;line-height:1.6;margin:8px 0 0}
+.coevolution-arena .arena-gold-list{margin:8px 0 0;padding-left:18px;font-size:13px}
+.coevolution-arena .arena-status{min-height:20px;margin-top:10px;font-size:13px}
+.review-defect-badge{font-size:12px;font-weight:600;margin:0 0 10px}
