@@ -43,6 +43,10 @@ from paper_external_grounding import (
     plain,
     verify_bibliography,
 )
+from paper_registry_identifiers import (
+    audit_identifiers_offline,
+    verify_identifiers_online,
+)
 from paper_stat_audit import audit_paper_statistics
 
 SCHEMA = "falsify.blue-defect-sensor.v1"
@@ -724,40 +728,80 @@ def _apply_datacite_fallback(bib_results, bib_transport):
     return updated, verified_datacite
 
 
+def _retraction_bib_signal(item, page_idx):
+    rtype = item.get("retractionType") or "retraction"
+    kind = "expression_of_concern_citation" if rtype == "expression_of_concern" else "retracted_citation"
+    doi = (item.get("parsed") or {}).get("doi")
+    rec = item.get("retrievedRecord") or {}
+    label = doi or rec.get("title") or f"ref [{item.get('index')}]"
+    sig = _signal(
+        "D2", kind, "retracted-reference",
+        page_idx, item.get("rawText", ""),
+        f"Cited work ({label}) is flagged as {rtype} by {item.get('provider')}",
+        {"refIndex": item.get("index"), "doi": doi},
+        {
+            "retractionType": rtype,
+            "retractionDetails": item.get("retractionDetails"),
+            "retrievedTitle": rec.get("title", ""),
+        },
+    )
+    entry = {
+        "index": item.get("index"),
+        "doi": doi,
+        "status": item.get("status"),
+        "provider": item.get("provider"),
+        "retractionType": rtype,
+        "retractionDetails": item.get("retractionDetails"),
+        "retrievedTitle": rec.get("title", ""),
+        "rawText": str(item.get("rawText") or "")[:220],
+    }
+    return sig, entry
+
+
+def _mismatch_bib_signal(item, page_idx):
+    st = item.get("status")
+    doi = (item.get("parsed") or {}).get("doi")
+    mismatched_item = {
+        "index": item.get("index"),
+        "doi": doi,
+        "status": st,
+        "provider": item.get("provider"),
+        "rawText": str(item.get("rawText") or "")[:220],
+    }
+    if st == "metadata_mismatch":
+        sig = _signal(
+            "D2", "doi_metadata_mismatch", "chimera-reference",
+            page_idx, item.get("rawText", ""),
+            f"DOI {doi} metadata strongly diverges from bibliography text",
+            {"refIndex": item.get("index"), "doi": doi},
+            item.get("mismatchDetails") or {},
+        )
+        return sig, mismatched_item
+    sig = _signal(
+        "D2", "doi_not_found", "unresolved-doi",
+        page_idx, item.get("rawText", ""),
+        f"DOI {doi} returned 404 from Crossref" + (" and DataCite" if item.get("dataciteStatus") == 404 else ""),
+        {"refIndex": item.get("index"), "doi": doi},
+        {"dataciteStatus": item.get("dataciteStatus")},
+    )
+    return sig, mismatched_item
+
+
 def _oracle_bib_signals(results, entries):
     by_idx = {e["index"]: e["pageIndex"] for e in entries if e["index"] is not None}
     fallback_page = entries[0]["pageIndex"] if entries else 0
-    signals, mismatched = [], []
+    signals, mismatched, retracted_refs = [], [], []
     for item in results:
-        st = item.get("status")
-        if st not in ("metadata_mismatch", "doi_not_found_in_crossref"):
-            continue
         page_idx = by_idx.get(item.get("index"), fallback_page)
-        doi = (item.get("parsed") or {}).get("doi")
-        mismatched.append({
-            "index": item.get("index"),
-            "doi": doi,
-            "status": st,
-            "provider": item.get("provider"),
-            "rawText": str(item.get("rawText") or "")[:220],
-        })
-        if st == "metadata_mismatch":
-            signals.append(_signal(
-                "D2", "doi_metadata_mismatch", "chimera-reference",
-                page_idx, item.get("rawText", ""),
-                f"DOI {doi} metadata strongly diverges from bibliography text",
-                {"refIndex": item.get("index"), "doi": doi},
-                item.get("mismatchDetails") or {},
-            ))
-        elif st == "doi_not_found_in_crossref":
-            signals.append(_signal(
-                "D2", "doi_not_found", "unresolved-doi",
-                page_idx, item.get("rawText", ""),
-                f"DOI {doi} returned 404 from Crossref" + (" and DataCite" if item.get("dataciteStatus") == 404 else ""),
-                {"refIndex": item.get("index"), "doi": doi},
-                {"dataciteStatus": item.get("dataciteStatus")},
-            ))
-    return signals, mismatched
+        if item.get("retracted") is True:
+            ret_sig, ret_entry = _retraction_bib_signal(item, page_idx)
+            signals.append(ret_sig)
+            retracted_refs.append(ret_entry)
+        if item.get("status") in ("metadata_mismatch", "doi_not_found_in_crossref"):
+            mis_sig, mis_entry = _mismatch_bib_signal(item, page_idx)
+            signals.append(mis_sig)
+            mismatched.append(mis_entry)
+    return signals, mismatched, retracted_refs
 
 
 def _oracle_trial_checks(page_texts, trial_transport):
@@ -787,7 +831,10 @@ def _oracle_trial_checks(page_texts, trial_transport):
     return signals, comp.get("registryComparisons", [])
 
 
-def _run_external_oracle(paper_id, entries, page_texts, store, bib_transport, trial_transport):
+def _run_external_oracle(
+    paper_id, entries, page_texts, store, bib_transport, trial_transport,
+    extracted_identifiers=None, identifier_transport=None,
+):
     refs = list_references(paper_id, offset=0, limit=MAX_ORACLE_REFS, store=store).get("references") or []
     if not refs and entries:
         refs = [{"index": e["index"], "rawText": e["rawText"], "doi": e["dois"][0] if e["dois"] else None, "year": e["year"]}
@@ -801,16 +848,20 @@ def _run_external_oracle(paper_id, entries, page_texts, store, bib_transport, tr
         bib_summary["verifiedByDatacite"] = dc_count
         bib_summary["doiNotFoundInCrossref"] = max(0, bib_summary.get("doiNotFoundInCrossref", 0) - dc_count)
         bib_summary["verifiedMatch"] = bib_summary.get("verifiedMatch", 0)
-    bib_signals, mismatched = _oracle_bib_signals(updated_results, entries)
+    bib_signals, mismatched, retracted_refs = _oracle_bib_signals(updated_results, entries)
     trial_signals, registry_comparisons = _oracle_trial_checks(page_texts, trial_transport)
+    id_res = verify_identifiers_online(extracted_identifiers or {}, transport=identifier_transport)
+    id_signals = id_res.get("signals", [])
     oracle_pack = {
         "tier": "P2",
         "bibliographySummary": {"status": bib_out.get("status"), "checkedCount": bib_out.get("checkedCount", 0), "counts": bib_summary},
         "mismatchedReferences": mismatched[:MAX_ORACLE_REFS],
+        "retractedReferences": retracted_refs[:MAX_ORACLE_REFS],
         "registryComparisons": registry_comparisons,
+        "identifierChecks": {k: v for k, v in id_res.items() if k != "signals"},
     }
     _assert_no_red_keys(oracle_pack)
-    return bib_signals + trial_signals, oracle_pack
+    return bib_signals + id_signals + trial_signals, oracle_pack
 
 
 def _dedupe_and_number(signals, max_signals):
@@ -835,6 +886,7 @@ def run_blue_sensor(
     store=None,
     bib_transport=None,
     trial_transport=None,
+    identifier_transport=None,
 ):
     """Run BLUE Layer 0 offline PDF forensic sensor (and opt-in P2 oracle pack)."""
     if isinstance(max_signals, bool) or type(max_signals) is not int or not 1 <= max_signals <= 100:
@@ -857,12 +909,21 @@ def run_blue_sensor(
         mal_sigs = _detect_malformed_dois(entries, uri_summary["links"])
         acro_sigs, acro_summary = _scan_acroform_widgets(doc, page_limit)
 
+    id_audit = audit_identifiers_offline(page_texts)
+    id_offline_sigs = id_audit["signals"]
+    extracted_identifiers = id_audit["identifiers"]
     d1_sigs = _collect_d1_signals(paper_id, actual_hash, max_signals, store)
     oracle_sigs, oracle_pack = (
-        _run_external_oracle(paper_id, entries, page_texts, store, bib_transport, trial_transport)
+        _run_external_oracle(
+            paper_id, entries, page_texts, store, bib_transport, trial_transport,
+            extracted_identifiers=extracted_identifiers, identifier_transport=identifier_transport,
+        )
         if include_external_oracle else ([], None)
     )
-    all_signals = link_sigs + shared_sigs + dup_sigs + cite_sigs + mal_sigs + acro_sigs + oracle_sigs + d1_sigs
+    all_signals = (
+        link_sigs + shared_sigs + dup_sigs + cite_sigs + mal_sigs
+        + id_offline_sigs + acro_sigs + oracle_sigs + d1_sigs
+    )
     capped, truncated = _dedupe_and_number(all_signals, max_signals)
     result = {
         "schema": SCHEMA,
@@ -874,6 +935,7 @@ def run_blue_sensor(
         "signals": capped,
         "uriLinks": uri_summary,
         "acroForm": acro_summary,
+        "identifiers": extracted_identifiers,
         "bibliography": {
             "status": bib_status,
             "referenceCount": len(entries),

@@ -57,6 +57,20 @@ _STOPWORDS = frozenset({
     'using', 'based', 'study', 'studies', 'analysis', 'effect', 'effects', 'after',
 })
 _NON_SURNAME_PREFIXES = frozenset({'van', 'von', 'der', 'den', 'de', 'del', 'la', 'le', 'da', 'di'})
+_RETRACTION_UPDATE_TYPES = frozenset({
+    'retraction', 'withdrawal', 'removal',
+    'expression-of-concern', 'expression_of_concern',
+})
+_EOC_UPDATE_TYPES = frozenset({'expression-of-concern', 'expression_of_concern'})
+_RETRACTED_TITLE_RE = re.compile(
+    r'^\s*(?:\[?\s*retracted(?:\s+article)?\s*\]?|retraction\s*:|withdrawn\s*:)',
+    re.IGNORECASE,
+)
+_EOC_TITLE_RE = re.compile(
+    r'^\s*(?:\[\s*expression\s+of\s+concern\s*\]|expression\s+of\s+concern\s*:)',
+    re.IGNORECASE,
+)
+_RAW_RETRACTION_ACK_RE = re.compile(r'(?:\bretracted\b|\bretraction\b|철회)', re.IGNORECASE)
 
 
 def plain(value):
@@ -258,6 +272,84 @@ def _crossref_authors(row):
     return '; '.join(authors_list)[:1000], surnames
 
 
+def _title_retraction_kind(title):
+    if _RETRACTED_TITLE_RE.match(title or ''):
+        return 'retraction'
+    if _EOC_TITLE_RE.match(title or ''):
+        return 'expression_of_concern'
+    return None
+
+
+def _collect_crossref_updates(row):
+    kinds, details = [], []
+    for field in ('update-to', 'updated-by'):
+        items = row.get(field)
+        if not isinstance(items, list):
+            continue
+        for item in items[:10]:
+            if not isinstance(item, dict):
+                continue
+            utype = str(item.get('type') or '').strip().lower()
+            if utype in _RETRACTION_UPDATE_TYPES:
+                kinds.append('expression_of_concern' if utype in _EOC_UPDATE_TYPES else 'retraction')
+                details.append({'source': field, 'type': utype, 'doi': plain(item.get('DOI', ''))})
+    return kinds, details
+
+
+def _collect_crossref_relations(row):
+    rel = row.get('relation')
+    if not isinstance(rel, dict):
+        return [], []
+    kinds, details = [], []
+    for key in ('is-retracted-by', 'has-retraction'):
+        items = rel.get(key)
+        if isinstance(items, list) and items:
+            ids = [plain(x.get('id', '')) for x in items[:5] if isinstance(x, dict) and x.get('id')]
+            kinds.append('retraction')
+            details.append({'source': f'relation.{key}', 'ids': ids})
+    return kinds, details
+
+
+def _crossref_retraction_info(row, title):
+    u_kinds, u_details = _collect_crossref_updates(row)
+    r_kinds, r_details = _collect_crossref_relations(row)
+    kinds = u_kinds + r_kinds
+    details = u_details + r_details
+    title_kind = _title_retraction_kind(title)
+    if title_kind:
+        kinds.append(title_kind)
+        details.append({'source': 'title_prefix', 'type': title_kind})
+    if not kinds:
+        return False, None, None
+    rtype = 'retraction' if 'retraction' in kinds else 'expression_of_concern'
+    return True, rtype, {'sources': details}
+
+
+def _epmc_retraction_info(row, title):
+    kinds, details = [], []
+    pub_list = (row.get('pubTypeList') or {}).get('pubType') if isinstance(row.get('pubTypeList'), dict) else None
+    pub_types = [pub_list] if isinstance(pub_list, str) else (pub_list if isinstance(pub_list, list) else [])
+    for pt in pub_types[:20]:
+        low = plain(pt).lower()
+        if 'retracted publication' in low or 'retraction of' in low:
+            kinds.append('retraction')
+            details.append({'source': 'pubTypeList', 'type': plain(pt)})
+        elif 'expression of concern' in low:
+            kinds.append('expression_of_concern')
+            details.append({'source': 'pubTypeList', 'type': plain(pt)})
+    if str(row.get('isRetracted') or '').strip().upper() == 'Y':
+        kinds.append('retraction')
+        details.append({'source': 'isRetracted', 'value': 'Y'})
+    title_kind = _title_retraction_kind(title)
+    if title_kind:
+        kinds.append(title_kind)
+        details.append({'source': 'title_prefix', 'type': title_kind})
+    if not kinds:
+        return False, None, None
+    rtype = 'retraction' if 'retraction' in kinds else 'expression_of_concern'
+    return True, rtype, {'sources': details}
+
+
 def _normalize_crossref_work(row, response_hash, retrieved_at):
     if not isinstance(row, dict):
         return None
@@ -272,6 +364,7 @@ def _normalize_crossref_work(row, response_hash, retrieved_at):
     url = 'https://doi.org/' + quote(doi, safe='/') if doi else ''
     if not title and not doi:
         return None
+    retracted, rtype, rdetails = _crossref_retraction_info(row, title)
     text = f"Title: {title}\nAuthors: {authors}\nYear: {year or ''}\nDOI: {doi}"
     if abstract:
         text += f"\nAbstract{' (TRUNCATED PREFIX)' if truncated else ''}: {abstract}"
@@ -279,6 +372,7 @@ def _normalize_crossref_work(row, response_hash, retrieved_at):
         'provider': 'crossref', 'doi': doi, 'title': title,
         'authors': authors, 'authorSurnames': surnames,
         'year': year, 'abstract': abstract, 'abstractTruncated': truncated, 'url': url,
+        'retracted': retracted, 'retractionType': rtype, 'retractionDetails': rdetails,
         'kind': 'metadata-and-abstract' if abstract else 'metadata-only',
         'text': text, 'textSha256': hashlib.sha256(text.encode('utf-8')).hexdigest(),
         'responseSha256': response_hash, 'retrievedAt': retrieved_at,
@@ -303,6 +397,7 @@ def _normalize_epmc_work(row, response_hash, retrieved_at):
     )
     if not title and not doi:
         return None
+    retracted, rtype, rdetails = _epmc_retraction_info(row, title)
     text = f"Title: {title}\nAuthors: {authors[:1000]}\nYear: {year or ''}\nDOI: {doi}"
     if abstract:
         text += f"\nAbstract{' (TRUNCATED PREFIX)' if truncated else ''}: {abstract}"
@@ -310,6 +405,7 @@ def _normalize_epmc_work(row, response_hash, retrieved_at):
         'provider': 'europepmc', 'doi': doi, 'title': title,
         'authors': authors[:1000], 'authorSurnames': surnames,
         'year': year, 'abstract': abstract, 'abstractTruncated': truncated, 'url': url,
+        'retracted': retracted, 'retractionType': rtype, 'retractionDetails': rdetails,
         'kind': 'metadata-and-abstract' if abstract else 'metadata-only',
         'text': text, 'textSha256': hashlib.sha256(text.encode('utf-8')).hexdigest(),
         'responseSha256': response_hash, 'retrievedAt': retrieved_at,
@@ -423,7 +519,7 @@ def _query_crossref_bib(query_str, transport):
     at = datetime.now(timezone.utc).isoformat()
     path = '/works?' + urlencode({
         'query.bibliographic': query_str[:220], 'rows': 3,
-        'select': 'DOI,title,author,published,abstract,type',
+        'select': 'DOI,title,author,published,abstract,type,update-to,relation',
     })
     status, data, sha, err = _call_transport(transport, 'crossref', path)
     receipt = {'provider': 'crossref', 'queryType': 'bibliographic', 'status': 'ok' if status == 200 else 'failed',
@@ -450,6 +546,18 @@ def _pick_primary_receipt(receipts, preferred_provider=None):
     return receipts[0] if receipts else {'provider': 'none', 'responseSha256': None, 'retrievedAt': datetime.now(timezone.utc).isoformat()}
 
 
+def _resolve_entry_retraction(raw_text, records):
+    retracted_recs = [r for r in records if r and r.get('retracted')]
+    if not retracted_recs:
+        return {'retracted': False, 'retractionType': None}
+    if _RAW_RETRACTION_ACK_RE.search(raw_text or ''):
+        return {'retracted': False, 'retractionType': None, 'retractionAcknowledged': True}
+    types = [r.get('retractionType') for r in retracted_recs if r.get('retractionType')]
+    rtype = 'retraction' if 'retraction' in types else (types[0] if types else 'retraction')
+    details = [r.get('retractionDetails') for r in retracted_recs if r.get('retractionDetails')]
+    return {'retracted': True, 'retractionType': rtype, 'retractionDetails': details}
+
+
 def _verify_doi_entry(parsed, transport):
     doi = parsed['doi']
     cr_rec, cr_receipt = _query_crossref_doi(doi, transport)
@@ -461,14 +569,17 @@ def _verify_doi_entry(parsed, transport):
     base = {'index': parsed['index'], 'rawText': parsed['rawText'], 'parsed': parsed, 'requests': receipts,
             'provider': primary['provider'], 'responseSha256': primary['responseSha256'], 'retrievedAt': primary['retrievedAt']}
     if cr_receipt['httpStatus'] == 404:
-        return {**base, 'status': 'doi_not_found_in_crossref', 'retrievedRecord': record, 'scope': CROSSREF_404_NOTE}
+        ret_meta = _resolve_entry_retraction(parsed['rawText'], [epmc_rec] if epmc_rec else [])
+        return {**base, 'status': 'doi_not_found_in_crossref', 'retrievedRecord': record, 'scope': CROSSREF_404_NOTE, **ret_meta}
     if record is None:
-        return {**base, 'status': 'lookup_failed', 'retrievedRecord': None, 'scope': SCOPE_NOTE}
+        return {**base, 'status': 'lookup_failed', 'retrievedRecord': None, 'scope': SCOPE_NOTE, 'retracted': False, 'retractionType': None}
     comp = _compare_record(parsed, record)
     if _is_chimera_mismatch(comp):
         return {**base, 'status': 'metadata_mismatch', 'retrievedRecord': record, 'mismatchDetails': comp,
+                'retracted': False, 'retractionType': None,
                 'scope': SCOPE_NOTE + ' Retrieved DOI metadata strongly diverges from reference text (D2/chimera candidate).'}
-    return {**base, 'status': 'verified_match', 'retrievedRecord': record, 'matchDetails': comp, 'scope': SCOPE_NOTE}
+    ret_meta = _resolve_entry_retraction(parsed['rawText'], [cr_rec, epmc_rec])
+    return {**base, 'status': 'verified_match', 'retrievedRecord': record, 'matchDetails': comp, 'scope': SCOPE_NOTE, **ret_meta}
 
 
 def _metadata_query_string(parsed):
@@ -510,10 +621,14 @@ def _verify_metadata_entry(parsed, transport):
     base = {'index': parsed['index'], 'rawText': parsed['rawText'], 'parsed': parsed, 'requests': receipts,
             'provider': primary['provider'], 'responseSha256': primary['responseSha256'], 'retrievedAt': primary['retrievedAt']}
     if not any(r['status'] == 'ok' for r in receipts):
-        return {**base, 'status': 'lookup_failed', 'retrievedRecord': None, 'scope': SCOPE_NOTE}
+        return {**base, 'status': 'lookup_failed', 'retrievedRecord': None, 'scope': SCOPE_NOTE,
+                'retracted': False, 'retractionType': None}
     if best and comp and _is_high_metadata_match(parsed, comp):
-        return {**base, 'status': 'verified_by_metadata', 'retrievedRecord': best, 'matchDetails': comp, 'scope': SCOPE_NOTE}
+        ret_meta = _resolve_entry_retraction(parsed['rawText'], [best])
+        return {**base, 'status': 'verified_by_metadata', 'retrievedRecord': best, 'matchDetails': comp,
+                'scope': SCOPE_NOTE, **ret_meta}
     return {**base, 'status': 'unverified_no_match', 'retrievedRecord': best,
+            'retracted': False, 'retractionType': None,
             'scope': f'{SCOPE_NOTE} {MISSING_MATCH_NOTE}'}
 
 
@@ -533,10 +648,14 @@ def _summarize_bib_results(results, truncated):
         'lookup_failed': 'lookupFailed',
     }
     counts = {key: 0 for key in status_keys.values()}
+    retracted_count = 0
     for item in results:
         mapped = status_keys.get(item['status'])
         if mapped:
             counts[mapped] += 1
+        if item.get('retracted') is True:
+            retracted_count += 1
+    counts['retractedCount'] = retracted_count
     non_failed = len(results) - counts['lookupFailed']
     status = 'completed' if non_failed == len(results) else 'partial' if non_failed > 0 else 'failed'
     return {
@@ -560,7 +679,8 @@ def verify_bibliography(references, *, max_refs=25, transport=fetch_json):
         return {
             'status': 'empty', 'checkedCount': 0, 'truncated': False,
             'summary': {'verifiedMatch': 0, 'verifiedByMetadata': 0, 'metadataMismatch': 0,
-                        'doiNotFoundInCrossref': 0, 'unverifiedNoMatch': 0, 'lookupFailed': 0},
+                        'doiNotFoundInCrossref': 0, 'unverifiedNoMatch': 0, 'lookupFailed': 0,
+                        'retractedCount': 0},
             'results': [], 'limitations': f'{SCOPE_NOTE} {MISSING_MATCH_NOTE}',
         }
     with ThreadPoolExecutor(max_workers=4) as pool:

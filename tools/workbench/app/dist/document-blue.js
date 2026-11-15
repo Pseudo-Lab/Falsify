@@ -6,7 +6,39 @@
   let externalCollection=null,externalIdentity=null,externalAliases=[];
   function externalSource(){return doc?{fileHash:doc.fileHash,sourceHash:doc.sourceHash,segments:[...doc.segments,...externalAliases].map(s=>({...s})),revision:doc.revision,name:doc.name}:null;}
   function externalStore(){const source=externalSource();if(!source)throw Error('먼저 BLUE 파일을 선택하세요.');if(!globalThis.FalsifyExternalProposals)throw Error('외부 응답 모듈이 준비되지 않았습니다.');if(!externalCollection||externalIdentity!==source.fileHash+':'+source.sourceHash){externalCollection=FalsifyExternalProposals.create({fileHash:source.fileHash,role:'blue',segments:source.segments});externalIdentity=source.fileHash+':'+source.sourceHash;externalCollection.subscribe(snapshot=>document.dispatchEvent(new CustomEvent('falsify:blue-external-responses',{detail:snapshot})));}return externalCollection;}
-  globalThis.FalsifyDocumentBlueExternal={getSource:externalSource,acceptExternalResponse(batch){const source=externalSource();if(!source||batch.role!=='blue'||batch.fileHash!==source.fileHash)throw Error('BLUE 응답과 현재 파일이 일치하지 않습니다.');const store=externalStore();store.append(batch);controls();return store.snapshot();},getExternalResponses(){return externalCollection&&externalIdentity===doc?.fileHash+':'+doc?.sourceHash?externalCollection.snapshot():null;},setEnabled(id,value){return externalStore().setEnabled(id,value);},bind(id,location){return externalStore().bind(id,location);},restore(snapshot){const restored=externalStore().restore(snapshot);controls();return restored;},records(){return doc?FalsifyLab.externalRecords(doc.fileHash):[];},async record(){if(!globalThis.FalsifyLab?.recordExternal)throw Error('외부 BLUE 기록 기능이 준비되지 않았습니다.');const current=doc,source=externalSource(),snapshot=externalStore().snapshot();if(externalAliases.length)source.sourceHash=await hash(new TextEncoder().encode(source.segments.map(s=>s.text).join('\n\n')));return FalsifyLab.recordExternal(source,snapshot,()=>doc===current);}};
+  function sanitizeSupplementalSegments(suppSegments){
+    if(!Array.isArray(suppSegments))throw Error('보충자료 구간 목록 형식이 올바르지 않습니다.');
+    const out=[];
+    for(const item of suppSegments){
+      const text=typeof item?.text==='string'?item.text:'';
+      if(!text.trim())continue;
+      const rawLabel=item?.label==null?'보충자료 '+(out.length+1):String(item.label);
+      out.push({id:'supp-'+out.length,label:rawLabel.slice(0,120),text});
+    }
+    return out;
+  }
+  function updateSupplementalSummary(suppCount){
+    const el=$('#doc-blue-summary');if(!el)return;
+    const base=String(el.textContent||'').replace(/ · 보충자료 \d+개 구간 포함$/,'');
+    el.textContent=suppCount>0?base+' · 보충자료 '+suppCount+'개 구간 포함':base;
+  }
+  async function setSupplementalSegments(suppSegments,expectedFileHash){
+    const frozen=doc,current=generation;
+    if(!frozen||busy)throw Error('현재 BLUE 문서가 없거나 작업 중입니다.');
+    if(frozen.fileHash!==expectedFileHash)throw Error('보충자료 대상 문서 해시가 일치하지 않습니다.');
+    const sanitized=sanitizeSupplementalSegments(suppSegments);
+    const baseSegments=frozen.segments.filter(s=>!String(s?.id||'').startsWith('supp-'));
+    const combinedSegments=[...baseSegments,...sanitized];
+    const sourceHash=await hash(new TextEncoder().encode(combinedSegments.map(s=>s.text).join('\n\n')));
+    if(current!==generation||doc!==frozen)return null;
+    generation++;
+    doc={...frozen,revision:crypto.randomUUID(),sourceHash,segments:combinedSegments};
+    invalidate();
+    updateSupplementalSummary(sanitized.length);
+    controls();
+    return {sourceHash,revision:doc.revision,segmentCount:combinedSegments.length,supplementalCount:sanitized.length};
+  }
+  globalThis.FalsifyDocumentBlueExternal={getSource:externalSource,getPdfFile(){return doc?sourceFile:null;},setSupplementalSegments,acceptExternalResponse(batch){const source=externalSource();if(!source||batch.role!=='blue'||batch.fileHash!==source.fileHash)throw Error('BLUE 응답과 현재 파일이 일치하지 않습니다.');const store=externalStore();store.append(batch);controls();return store.snapshot();},getExternalResponses(){return externalCollection&&externalIdentity===doc?.fileHash+':'+doc?.sourceHash?externalCollection.snapshot():null;},setEnabled(id,value){return externalStore().setEnabled(id,value);},bind(id,location){return externalStore().bind(id,location);},restore(snapshot){const restored=externalStore().restore(snapshot);controls();return restored;},records(){return doc?FalsifyLab.externalRecords(doc.fileHash):[];},async record(){if(!globalThis.FalsifyLab?.recordExternal)throw Error('외부 BLUE 기록 기능이 준비되지 않았습니다.');const current=doc,source=externalSource(),snapshot=externalStore().snapshot();if(externalAliases.length)source.sourceHash=await hash(new TextEncoder().encode(source.segments.map(s=>s.text).join('\n\n')));return FalsifyLab.recordExternal(source,snapshot,()=>doc===current);}};
   function shippedHelper(){try{const nodes=document.scripts?[...document.scripts]:[];return nodes.some(s=>{const src=String(s&&(typeof s.getAttribute==='function'?s.getAttribute('src'):s.src)||'');return src==='pending-job.js'||src.endsWith('/pending-job.js');});}catch{return false;}}
   function observedCalls(job){const n=job?.state==='completed'?job.result?.coverage?.calls:job?.progress?.completedCalls;return Number.isSafeInteger(n)&&n>=0?{observedCalls:n}:{};}
   function helperReady(){return !!(P&&typeof P.hold==='function'&&typeof P.note==='function'&&typeof P.read==='function'&&typeof P.matches==='function'&&typeof P.recover==='function');}
@@ -29,7 +61,7 @@
   function cancel(){const old=job,l=jobLink;job=null;jobLink=null;if(old&&l)void l.request('/api/blue/jobs/'+encodeURIComponent(old)+'/cancel',{}).catch(()=>{});}
   function invalidate(){epoch++;savedId=null;saving=false;failure=null;result=null;findings=[];request=null;$('#doc-blue-findings').replaceChildren();$('#doc-blue-result-summary').textContent='';$('#doc-blue-record-status').textContent='';}
   function emitBlueState(){document.dispatchEvent(new CustomEvent('falsify:blue-state',{detail:{name:doc?.name||'',busy,hasResult:!!result||!!(externalCollection&&externalIdentity===doc?.fileHash+':'+doc?.sourceHash&&externalCollection.snapshot().batches.length),file:sourceFile,handoff:handoffMode,phase:busy&&!doc?'import':'review'}}));}
-  function clear(keepFile=false,restore=true){if(restore){previousFailure=null;const previous=document.querySelector('#doc-blue-retry-previous');if(previous)previous.hidden=true;}handoffMode=false;visualPicker?.clear();paperEvidenceUI?.clear();paperEnrichmentUI?.clear();enrichmentBusy=false;generation++;cancel();abort?.abort();abort=null;doc=null;externalAliases=[];sourceFile=null;relation=null;busy=false;clearSticky();invalidate();if(keepFile!==true)$('#doc-blue-file').value='';$('#doc-blue-response').value='';$('#doc-blue-consent').checked=false;$('#blue-harness-consent').checked=false;if($('#blue-visual-select'))$('#blue-visual-select').checked=false;if($('#blue-visual-consent'))$('#blue-visual-consent').checked=false;if($('#blue-visual-regions'))$('#blue-visual-regions').value='';$('#doc-blue-summary').textContent='아직 파일을 입력하지 않았습니다. 수정 파일 또는 원본/대조군을 직접 선택하세요.';msg('');controls();if(restore)restorePending();}
+  function clear(keepFile=false,restore=true){if(restore){previousFailure=null;const previous=document.querySelector('#doc-blue-retry-previous');if(previous)previous.hidden=true;}handoffMode=false;visualPicker?.clear();paperEvidenceUI?.clear();paperEnrichmentUI?.clear();enrichmentBusy=false;generation++;cancel();abort?.abort();abort=null;doc=null;externalAliases=[];sourceFile=null;relation=null;busy=false;clearSticky();invalidate();if(keepFile!==true)$('#doc-blue-file').value='';$('#doc-blue-response').value='';$('#doc-blue-consent').checked=false;$('#blue-harness-consent').checked=false;if($('#blue-visual-select'))$('#blue-visual-select').checked=false;if($('#blue-visual-consent'))$('#blue-visual-consent').checked=false;if($('#blue-visual-regions'))$('#blue-visual-regions').value='';$('#doc-blue-summary').textContent='아직 파일을 입력하지 않았습니다. 수정 파일 또는 원본/대조군을 직접 선택하세요.';msg('');document.dispatchEvent(new CustomEvent('falsify:blue-supplement-reset'));controls();if(restore)restorePending();}
   document.addEventListener('falsify:workspace-reset',clear);$('#doc-blue-clear').addEventListener('click',clear);
   // A user-chosen file is an independent BLUE input: clear() drops any RED relation.
   // Replacing the input asks first while a BLUE job runs or a result has not been recorded.

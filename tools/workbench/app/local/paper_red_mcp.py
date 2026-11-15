@@ -18,10 +18,12 @@ import pymupdf
 from mcp.server.fastmcp import FastMCP
 from mcp.types import CallToolResult, ToolAnnotations
 
+from paper_blue_sensor import run_blue_sensor
 from paper_chart_edit_service import ChartEditService, SCHEMA as CHART_SCHEMA, default_service
 from paper_evidence_text import _extract_raw_blocks, _order_blocks
 from paper_mcp import _cancellable_thread, _guard, _ok, open_selected
 from paper_stealth_audit import audit_pdf_stealth
+from paper_uri_mutator import list_pdf_uri_links, mutate_pdf_uri_links
 from paper_visual_edit import SCHEMA as VISUAL_SCHEMA, export_visual
 
 SERVER_NAME = 'Falsify Coordinated RED Editor'
@@ -105,6 +107,15 @@ def _list_targets(store, paper_id, file_hash, page_index=None):
     }
 
 
+def _list_links(store, paper_id, file_hash, page_index=None):
+    page_count = store.status(paper_id)['pageCount']
+    if page_index is not None and (type(page_index) is not int or not 0 <= page_index < page_count):
+        raise ValueError('paper_evidence_page_invalid')
+    res = list_pdf_uri_links(store.source_bytes(paper_id, file_hash))
+    links = [lnk for lnk in res['links'] if page_index is None or lnk['pageIndex'] == page_index]
+    return {**res, 'paperId': paper_id, 'fileHash': file_hash, 'linkCount': len(links), 'links': links}
+
+
 def _sync_scene_to_default(service, scene_id):
     if service is default_service or not hasattr(service, 'scenes') or not scene_id:
         return
@@ -157,6 +168,20 @@ def _normalize_region_op(op, op_id, kind, store, paper_id):
     return normalized
 
 
+def _normalize_uri_op(op, op_id):
+    out = {
+        'id': op_id,
+        'kind': 'uri-link',
+        'pageIndex': op.get('pageIndex'),
+        'annotIndex': op.get('annotIndex'),
+        'afterUri': op.get('afterUri'),
+    }
+    for key in ('linkId', 'beforeUri', 'rationale'):
+        if op.get(key) is not None:
+            out[key] = op.get(key)
+    return out
+
+
 def _normalize_operations(operations, store, paper_id, file_hash, service):
     if not isinstance(operations, list):
         raise ValueError('visual_operation_invalid')
@@ -172,39 +197,67 @@ def _normalize_operations(operations, store, paper_id, file_hash, service):
             normalized.append(_normalize_shape_op(op, op_id, paper_id, file_hash, service))
         elif kind in ('chart-redraw', 'region-replace', 'region'):
             normalized.append(_normalize_region_op(op, op_id, kind, store, paper_id))
+        elif kind == 'uri-link':
+            normalized.append(_normalize_uri_op(op, op_id))
         else:
             raise ValueError('visual_operation_invalid')
     return normalized
+
+
+def _empty_vis_result(source_bytes, file_hash):
+    return {
+        'schema': 'falsify.visual-edit-export.v1',
+        'sourceSha256': file_hash,
+        'outputSha256': file_hash,
+        'file': base64.b64encode(source_bytes).decode('ascii'),
+        'changes': [],
+        'verification': {'status': 'passed', 'issues': [], 'checks': ['page-count'], 'scope': 'source-preservation'},
+    }
+
+
+def _apply_uri_ops(edited_bytes, vis_result, uri_ops):
+    uri_res = mutate_pdf_uri_links(edited_bytes, uri_ops, require_clean_stealth=True)
+    out_bytes = uri_res['pdfBytes']
+    vis_result['outputSha256'] = uri_res['outputSha256']
+    vis_result['file'] = base64.b64encode(out_bytes).decode('ascii')
+    for op, ch in zip(uri_ops, uri_res['changes']):
+        vis_result['changes'].append({'id': op['id'], 'kind': 'uri-link', **ch})
+    checks = vis_result.setdefault('verification', {}).setdefault('checks', [])
+    if 'uri-link' not in checks:
+        checks.append('uri-link')
+    return out_bytes, vis_result
 
 
 def _apply_operations(store, service, paper_id, file_hash, operations, cancelled=None):
     source_bytes = store.source_bytes(paper_id, file_hash)
     normalized = _normalize_operations(operations, store, paper_id, file_hash, service)
     if not normalized:
-        vis_result = {
-            'schema': 'falsify.visual-edit-export.v1',
-            'sourceSha256': file_hash,
-            'outputSha256': file_hash,
-            'file': base64.b64encode(source_bytes).decode('ascii'),
-            'changes': [],
-            'verification': {'status': 'passed', 'issues': [], 'checks': ['page-count'], 'scope': 'source-preservation'},
+        return source_bytes, source_bytes, _empty_vis_result(source_bytes, file_hash)
+    visual_ops = [op for op in normalized if op['kind'] != 'uri-link']
+    uri_ops = [op for op in normalized if op['kind'] == 'uri-link']
+    if visual_ops:
+        vis_req = {
+            'schema': VISUAL_SCHEMA,
+            'paperId': paper_id,
+            'fileHash': file_hash,
+            'revision': 'red-coordinated',
+            'operations': visual_ops,
         }
-        return source_bytes, source_bytes, vis_result
-    vis_req = {
-        'schema': VISUAL_SCHEMA,
-        'paperId': paper_id,
-        'fileHash': file_hash,
-        'revision': 'red-coordinated',
-        'operations': normalized,
-    }
-    vis_result = export_visual(vis_req, store=store, cancelled=cancelled)
-    edited_bytes = base64.b64decode(vis_result['file'], validate=True)
+        vis_result = export_visual(vis_req, store=store, cancelled=cancelled)
+        edited_bytes = base64.b64decode(vis_result['file'], validate=True)
+    else:
+        edited_bytes = source_bytes
+        vis_result = _empty_vis_result(source_bytes, file_hash)
+    if uri_ops:
+        edited_bytes, vis_result = _apply_uri_ops(edited_bytes, vis_result, uri_ops)
     return source_bytes, edited_bytes, vis_result
 
 
 def _modified_regions(vis_result):
     regions = []
     for change in vis_result.get('changes', []):
+        if change.get('kind') == 'uri-link':
+            continue
         if type(change.get('pageIndex')) is int and isinstance(change.get('bbox'), list) and len(change['bbox']) == 4:
             regions.append({'pageIndex': change['pageIndex'], 'bbox': change['bbox']})
     return regions
@@ -300,6 +353,18 @@ def build_server(store, paper_id, file_hash, service=None):
     def list_red_targets(paperId: str, pageIndex: int | None = None) -> CallToolResult:
         """List extracted paragraphs/text blocks, tables, and scientific figures for the startup PDF."""
         return call(paperId, lambda: _list_targets(store, paperId, file_hash, page_index=pageIndex))
+
+    @server.tool(annotations=_READONLY)
+    def scan_source_baseline(paperId: str) -> CallToolResult:
+        """Run offline Layer 0 BLUE baseline scan on the untouched source PDF before choosing RED targets."""
+        return call(paperId, lambda: run_blue_sensor(
+            paperId, file_hash=file_hash, include_external_oracle=False, store=store,
+        ))
+
+    @server.tool(annotations=_READONLY)
+    def list_pdf_links(paperId: str, pageIndex: int | None = None) -> CallToolResult:
+        """List embedded PDF /Link annotations carrying /A -> /S /URI actions."""
+        return call(paperId, lambda: _list_links(store, paperId, file_hash, page_index=pageIndex))
 
     @server.tool(annotations=_READONLY)
     async def prepare_chart_scene(paperId: str, pageIndex: int, bbox: list[float], options: dict | None = None) -> CallToolResult:

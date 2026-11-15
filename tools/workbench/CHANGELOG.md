@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2.0-alpha.65
+
+- Fix companion HTTP `supplement_audit` page-text extraction in `paper_evidence_http.py` (`_require_bound_pdf` + `_open_pdf` instead of unsupported `kind='page'` on `EvidenceStore.list_items`) and add end-to-end HTTP adapter regression test in `test_paper_supplement_audit.py`.
+
+## 0.2.0-alpha.64
+
+- Add BLUE multi-file supplement/code/log bundle cross-verification (`blue-supplement-bundle.js`, `paper_supplement_audit.py`, `paper_evidence_http.py`, `document-blue.js`) detecting orphan cited `Table S*`/`Fig. S*` items (`D4-1`), cross-file `N=` sample-size mismatches (`D1`), and main-vs-supplement metric contradictions (`D1`) while seamlessly attaching `supp-*` segments to local and external BLUE runs.
+- Expand Layer 0 deterministic statistical & clinical forensics (`paper_stat_math.py`, `paper_stat_audit.py`, `blue-defect-sensor-core.js`) with bounded `SPRITE` mean/SD/N/min/max feasibility, 2×2 contingency table (`a/N1 vs c/N2`) exact Fisher `p` / Pearson & Yates `χ²` / crude `OR`·`RR` verification (exempting adjusted `aOR`/`aRR`), and Kaplan-Meier `Number at risk` monotonicity checks across Python and offline browser `P0`.
+- Add `P2` retracted/expression-of-concern citation detection (Crossref `update-to`/`relation` + Europe PMC `Retracted Publication`) and `OSF` (`osf.io/...`), `PROSPERO` (`CRD420...`), `GEO` (`GSE...`), and `PDB` structural `P0` + fixed-host TLS `P2` registry verification (`paper_external_grounding.py`, `paper_registry_identifiers.py`, `paper_blue_sensor.py`).
+- Add RED pre-injection `Baseline Guard` source flaw & candidate-overlap scanner plus pixel-preserving lossless PDF `/URI` hyperlink mutator (`W5 D2-1`·`D2-3`) across browser (`red-baseline-uri.js`) and Coordinated RED MCP (`paper_uri_mutator.py`, `paper_red_mcp.py` `scan_source_baseline`, `list_pdf_links`, and `uri-link` operations) with strict blindness leak rejection.
+- Upgrade Co-Evolution Arena (`coevolution-arena.js`) and `tools/evaluation/agreement_selective.py` with exact nominal & ordinal `Krippendorff's α` multi-rater / multi-run agreement and `확인필요` selective prediction (`Abstention Rate`, `Selective Accuracy`, `Abstention Gain`, `Risk-Coverage Curve`, `AURC`).
+
 ## 0.2.0-alpha.63
 
 - Fix `#blue-defect-sensor` panel class in `blue-defect-sensor-ui.js` so `visual-workflow.js` `:scope > .role-step` keeps `[intake, execute, result]` indices intact, keeping `#blue-defect-sensor` visible directly below BLUE intake and keeping `#doc-blue-request` visible after `BLUE로 보내기` in `latex-source.browser.cjs` CI & GitHub Pages deployment.

@@ -412,4 +412,130 @@ test('coevolution-arena: mount(doc) renders UI, persists conditions, downloads e
   assert.equal(dispatched[1].role,'red');
   assert.equal(dispatched[1].version,'2');
   assert.match(dispatched[1].instructions,/\[RED Co-Evolution Brief\]/);
+
+  assert.ok(get('arena-agreement-card'));
+  assert.ok(get('arena-selective-card'));
+  assert.match(dump,/다중 판정 일치도 · Krippendorff's α/);
+  assert.match(dump,/유보\(확인필요\) 선택적 예측 · Risk-Coverage/);
+  get('arena-export-metrics-json').click();
+  assert.equal(downloads.length,3);
+  const metricsPayload=JSON.parse(downloads[2].text);
+  assert.equal(metricsPayload.schema,'falsify.arena-academic-metrics.v1');
+  assert.ok(metricsPayload.agreement);
+  assert.ok(metricsPayload.selectivePrediction);
+});
+
+test('coevolution-arena: Krippendorff alpha nominal/ordinal, missing data, unanimous, and ledger extraction',()=>{
+  const k11=[
+    [1,1,null,1],
+    [2,2,3,2],
+    [3,3,3,3],
+    [3,3,3,3],
+    [2,2,2,2],
+    [1,2,3,4],
+    [4,4,4,4],
+    [1,1,2,1],
+    [2,2,2,2],
+    [null,5,5,5],
+    [null,null,1,1],
+    [null,null,3,null]
+  ];
+  const nom=Arena.computeKrippendorffAlpha(k11,{level:'nominal'});
+  assert.equal(nom.status,'ok');
+  assert.equal(nom.pairableUnits,11);
+  assert.equal(nom.alpha,0.7434);
+  assert.equal(nom.band,'잠정 합의 (0.67–0.80)');
+
+  const ord=Arena.computeKrippendorffAlpha(k11,{level:'ordinal'});
+  assert.equal(ord.status,'ok');
+  assert.equal(ord.alpha,0.8154);
+  assert.equal(ord.band,'신뢰 가능 (≥0.80)');
+
+  const ins=Arena.computeKrippendorffAlpha([[null,'아님'],['pending',''],['맞음']]);
+  assert.equal(ins.status,'insufficient_pairs');
+  assert.equal(ins.alpha,null);
+  assert.equal(ins.pairableUnits,0);
+  assert.deepEqual(ins.categories,[]);
+
+  const una=Arena.computeKrippendorffAlpha([['아님','아님','pending'],{unitId:'u2',ratings:['아님','','아님']}]);
+  assert.equal(una.status,'unanimous');
+  assert.equal(una.alpha,1);
+  assert.equal(una.observedDisagreement,0);
+  assert.equal(una.expectedDisagreement,0);
+
+  const fx=makeFixture();
+  const ledgerAgree=Arena.computeLedgerAgreement(fx.runs,fx.reviews);
+  assert.equal(ledgerAgree.humanReviews.nominal.pairableUnits,1);
+  assert.equal(ledgerAgree.blueRuns.nominal.pairableUnits,7);
+  assert.equal(typeof ledgerAgree.blueRuns.ordinal.alpha,'number');
+});
+
+test('coevolution-arena: selective prediction AURC, abstention gain, brief guidance, and JS/Python parity',()=>{
+  const items=[
+    {tier:1,isCorrect:true},
+    {tier:1,isCorrect:true},
+    {tier:1,isCorrect:true},
+    {tier:1,isCorrect:true},
+    {tier:2,isCorrect:true},
+    {tier:2,isCorrect:false},
+    {tier:2,isCorrect:false},
+    {tier:3,isCorrect:false},
+    {tier:3,isCorrect:false},
+    {tier:3,isCorrect:false}
+  ];
+  const sel=Arena.computeSelectivePrediction(items);
+  assert.equal(sel.status,'ok');
+  assert.equal(sel.totalEvaluated,10);
+  assert.equal(sel.committedCount,4);
+  assert.equal(sel.abstainedCount,6);
+  assert.equal(sel.abstentionRate,0.6);
+  assert.equal(sel.coverageAtCommitted,0.4);
+  assert.equal(sel.selectiveAccuracy,1);
+  assert.equal(sel.selectiveRisk,0);
+  assert.equal(sel.fullCoverageAccuracy,0.5);
+  assert.equal(sel.abstentionGain,0.5);
+  assert.equal(sel.aurc,0.1607);
+  assert.equal(sel.riskCoverageCurve.length,3);
+
+  const fx=makeFixture();
+  const ledgerSel=Arena.computeSelectivePrediction(fx);
+  assert.equal(ledgerSel.status,'ok');
+  assert.equal(ledgerSel.committedCount,7);
+
+  const sb=Arena.computeDualScoreboard(fx);
+  const lowAlpha={nominal:{alpha:0.45,status:'ok'},ordinal:{alpha:0.5,status:'ok'}};
+  const negGain={abstentionGain:-0.12};
+  const brief=Arena.buildCoevolutionBrief({role:'blue',scoreboard:sb,agreement:lowAlpha,selectivePrediction:negGain});
+  assert.match(brief.instructionsText,/Krippendorff α < 0\.667/);
+  assert.match(brief.instructionsText,/Abstention Gain < 0/);
+
+  const {spawnSync}=require('node:child_process');
+  const os=require('node:os');
+  const wavePy='C:\\Users\\user\\source\\falsify\\coordination\\ocr-chart-wave-20261103\\runtime\\Scripts\\python.exe';
+  const pyBin=fs.existsSync(wavePy)?wavePy:(process.env.PYTHON||'python');
+  const tmpFile=path.join(os.tmpdir(),'falsify-parity-'+process.pid+'.json');
+  const units=[
+    ['맞음','맞음','확인필요'],
+    ['아님','아님','아님'],
+    ['확인필요','아님',null],
+    ['맞음','pending','맞음']
+  ];
+  fs.writeFileSync(tmpFile,JSON.stringify({units,items}),'utf8');
+  try{
+    const run=spawnSync(pyBin,[path.resolve(__dirname,'../../tools/evaluation/agreement_selective.py'),'--units-json',tmpFile],{encoding:'utf8'});
+    if(!run.error&&run.status===0){
+      const pyRes=JSON.parse(run.stdout);
+      const jsNom=Arena.computeKrippendorffAlpha(units,{level:'nominal'});
+      const jsOrd=Arena.computeKrippendorffAlpha(units,{level:'ordinal'});
+      assert.equal(jsNom.alpha,pyRes.nominal_alpha);
+      assert.equal(jsOrd.alpha,pyRes.ordinal_alpha);
+      assert.equal(sel.abstentionRate,pyRes.abstention_rate);
+      assert.equal(sel.selectiveAccuracy,pyRes.selective_accuracy);
+      assert.equal(sel.abstentionGain,pyRes.abstention_gain);
+      assert.equal(sel.aurc,pyRes.aurc);
+      assert.deepEqual(sel.riskCoverageCurve,pyRes.risk_coverage_curve);
+    }
+  }finally{
+    try{fs.unlinkSync(tmpFile);}catch{}
+  }
 });

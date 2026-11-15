@@ -5,10 +5,12 @@ external dependencies. All functions keep low cyclomatic complexity.
 """
 from decimal import Decimal, InvalidOperation, ROUND_HALF_EVEN, ROUND_HALF_UP
 import math
+import re
 
 _TINY = 1e-300
 _RATIO_KINDS = frozenset({"OR", "AOR", "RR", "ARR", "HR", "AHR", "IRR"})
 _OPERATORS = frozenset({"=", "<", "<=", ">", ">="})
+_KM_SKIP_RE = re.compile(r"(?:left[- ]?truncat|delayed[- ]?entry|time[- ]?varying|지연\s*진입|시간\s*의존)", re.I)
 
 
 def _validate_positive(value, name):
@@ -381,3 +383,360 @@ def check_ci_bounds(estimate, lower, upper, measure_kind=None, *, decimals=None)
         "geomMid": geom_mid,
         "logAsymmetry": log_asym,
     }
+
+
+def _validate_nonneg_int_param(value, name):
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValueError(name)
+    return value
+
+
+def _sprite_validate_inputs(mean, sd, n, min_val, max_val, mean_decimals, sd_decimals):
+    if isinstance(n, bool) or not isinstance(n, int) or n < 2:
+        raise ValueError("n")
+    m_dec = _validate_nonneg_int_param(mean_decimals, "mean_decimals")
+    s_dec = _validate_nonneg_int_param(sd_decimals, "sd_decimals")
+    mean_v, _ = _to_float_and_decimals(mean, m_dec)
+    sd_v, _ = _to_float_and_decimals(sd, s_dec)
+    min_f, _ = _to_float_and_decimals(min_val, 0)
+    max_f, _ = _to_float_and_decimals(max_val, 0)
+    if min_f >= max_f:
+        raise ValueError("bounds")
+    if sd_v < 0.0:
+        raise ValueError("sd")
+    return mean_v, sd_v, min_f, max_f, m_dec, s_dec
+
+
+def _sprite_int_var_min(s_val, n):
+    k = s_val % n
+    return (k * (n - k)) / (n * (n - 1))
+
+
+def _sprite_int_var_max(s_val, n, a, b):
+    span = b - a
+    excess = s_val - n * a
+    nb, rem = divmod(excess, span)
+    if rem == 0:
+        sum_sq = nb * (b * b) + (n - nb) * (a * a)
+    else:
+        sum_sq = nb * (b * b) + (a + rem) * (a + rem) + (n - nb - 1) * (a * a)
+    return max(0.0, (sum_sq - (s_val * s_val) / n) / (n - 1))
+
+
+def _sprite_int_candidates(n, a, b, s_lo, s_hi):
+    if s_hi - s_lo <= 2000:
+        return range(s_lo, s_hi + 1)
+    s_mid = max(s_lo, min(s_hi, round(0.5 * n * (a + b))))
+    radius = min(b - a + 2, 200)
+    cands = set(range(s_lo, min(s_hi + 1, s_lo + 100)))
+    cands.update(range(max(s_lo, s_hi - 99), s_hi + 1))
+    cands.update(range(max(s_lo, s_mid - radius), min(s_hi + 1, s_mid + radius + 1)))
+    return cands
+
+
+def _sprite_int_sd_bounds(n, a, b, s_lo, s_hi):
+    if s_hi - s_lo >= n - 1 or (s_lo % n) == 0 or (s_lo // n) != (s_hi // n):
+        var_min = 0.0
+    else:
+        var_min = min(_sprite_int_var_min(s_lo, n), _sprite_int_var_min(s_hi, n))
+    var_max = max(_sprite_int_var_max(s, n, a, b) for s in _sprite_int_candidates(n, a, b, s_lo, s_hi))
+    return math.sqrt(var_min), math.sqrt(var_max)
+
+
+def _sprite_cont_sd_bounds(n, min_f, max_f, mu_lo, mu_hi):
+    mid = 0.5 * (min_f + max_f)
+    mu_star = min(mu_hi, max(mu_lo, mid))
+    var_max = (n / (n - 1)) * (max_f - mu_star) * (mu_star - min_f)
+    return 0.0, math.sqrt(max(0.0, var_max))
+
+
+def _sprite_result(consistent, reason, mean_v, sd_v, n, min_f, max_f, use_int, sd_bounds, rep_sd_range):
+    return {
+        "consistent": consistent,
+        "reason": reason,
+        "mean": mean_v,
+        "sd": sd_v,
+        "n": n,
+        "minVal": min_f,
+        "maxVal": max_f,
+        "integerScale": use_int,
+        "sdBounds": sd_bounds,
+        "reportedSdRange": rep_sd_range,
+    }
+
+
+def check_sprite(mean, sd, n, min_val, max_val, *, mean_decimals=2, sd_decimals=2, integer_scale=True):
+    """Check SPRITE mathematical feasibility of (mean, SD, N) on bounded scale [min_val, max_val]."""
+    mean_v, sd_v, min_f, max_f, m_dec, s_dec = _sprite_validate_inputs(
+        mean, sd, n, min_val, max_val, mean_decimals, sd_decimals
+    )
+    mean_eps = 0.5 * (10.0 ** (-m_dec))
+    sd_eps = 0.5 * (10.0 ** (-s_dec))
+    rep_mu_lo, rep_mu_hi = mean_v - mean_eps, mean_v + mean_eps
+    rep_sd_range = [max(0.0, sd_v - sd_eps), sd_v + sd_eps]
+    use_int = bool(integer_scale) and min_f.is_integer() and max_f.is_integer()
+    if rep_mu_hi < min_f - 1e-12 or rep_mu_lo > max_f + 1e-12:
+        return _sprite_result(False, "mean_out_of_bounds", mean_v, sd_v, n, min_f, max_f, use_int, [None, None], rep_sd_range)
+    mu_lo, mu_hi = max(min_f, rep_mu_lo), min(max_f, rep_mu_hi)
+    if use_int:
+        a, b = int(min_f), int(max_f)
+        s_lo = max(n * a, math.ceil(n * mu_lo - 1e-12))
+        s_hi = min(n * b, math.floor(n * mu_hi + 1e-12))
+        if s_lo > s_hi:
+            return _sprite_result(False, "grim_infeasible", mean_v, sd_v, n, min_f, max_f, use_int, [None, None], rep_sd_range)
+        sd_min, sd_max = _sprite_int_sd_bounds(n, a, b, s_lo, s_hi)
+    else:
+        sd_min, sd_max = _sprite_cont_sd_bounds(n, min_f, max_f, mu_lo, mu_hi)
+    if rep_sd_range[1] < sd_min - 1e-12:
+        return _sprite_result(False, "sd_below_min", mean_v, sd_v, n, min_f, max_f, use_int, [sd_min, sd_max], rep_sd_range)
+    if rep_sd_range[0] > sd_max + 1e-12:
+        return _sprite_result(False, "sd_above_max", mean_v, sd_v, n, min_f, max_f, use_int, [sd_min, sd_max], rep_sd_range)
+    return _sprite_result(True, "ok", mean_v, sd_v, n, min_f, max_f, use_int, [sd_min, sd_max], rep_sd_range)
+
+
+def _log_choose(n, k):
+    return math.lgamma(n + 1) - math.lgamma(k + 1) - math.lgamma(n - k + 1)
+
+
+def _fisher_exact_2x2(a, n1, c, n2):
+    m1, n_tot = a + c, n1 + n2
+    x_min, x_max = max(0, m1 - n2), min(n1, m1)
+    if x_max - x_min > 50000:
+        return None, None
+    denom = _log_choose(n_tot, m1)
+    log_obs = _log_choose(n1, a) + _log_choose(n2, m1 - a) - denom
+    p_obs = math.exp(log_obs)
+    p_two = 0.0
+    p_left = 0.0
+    p_right = 0.0
+    for x in range(x_min, x_max + 1):
+        lp = _log_choose(n1, x) + _log_choose(n2, m1 - x) - denom
+        px = math.exp(lp)
+        if lp <= log_obs + 1e-9 or px <= p_obs + 1e-12:
+            p_two += px
+        if x <= a:
+            p_left += px
+        if x >= a:
+            p_right += px
+    return min(1.0, p_two), min(1.0, p_left, p_right)
+
+
+def _chi2_2x2(a, b, c, d):
+    n1, n2, m1, m0 = a + b, c + d, a + c, b + d
+    n_tot = n1 + n2
+    denom = n1 * n2 * m1 * m0
+    if denom == 0:
+        return 0.0, 1.0, 0.0, 1.0
+    diff = abs(a * d - b * c)
+    p_chi2 = (n_tot * diff * diff) / denom
+    y_diff = max(0.0, diff - 0.5 * n_tot)
+    y_chi2 = (n_tot * y_diff * y_diff) / denom
+    return p_chi2, stat_pvalue("chi2", p_chi2, df1=1), y_chi2, stat_pvalue("chi2", y_chi2, df1=1)
+
+
+def _add_ratio_and_inv(cands, num, den):
+    if den > 0.0:
+        val = num / den
+        cands.append(val)
+        if val > 0.0:
+            cands.append(1.0 / val)
+
+
+def _ratios_2x2(a, b, c, d):
+    has_zero = a == 0 or b == 0 or c == 0 or d == 0
+    ah, bh, ch, dh = (a + 0.5, b + 0.5, c + 0.5, d + 0.5) if has_zero else (float(a), float(b), float(c), float(d))
+    or_val = (ah * dh) / (bh * ch)
+    or_cands = [or_val, 1.0 / or_val]
+    _add_ratio_and_inv(or_cands, float(a * d), float(b * c))
+    n1, n2 = a + b, c + d
+    rr_val = ((a + 0.5) / (n1 + 1.0)) / ((c + 0.5) / (n2 + 1.0)) if (a == 0 or c == 0) else (a / n1) / (c / n2)
+    rr_cands = [rr_val, 1.0 / rr_val]
+    if a > 0 and c > 0:
+        _add_ratio_and_inv(rr_cands, a / n1, c / n2)
+    elif a == 0 and c > 0:
+        rr_cands.append(0.0)
+    return or_val, rr_val, or_cands, rr_cands
+
+
+def _norm_2x2_kind(reported_kind):
+    if reported_kind is None:
+        return None, False
+    k = re.sub(r"[^A-Z]", "", str(reported_kind).upper())
+    if k in ("AOR", "ARR") or "ADJ" in k:
+        return k, True
+    if k in ("OR", "ODDSRATIO"):
+        return "OR", False
+    if k in ("RR", "RISKRATIO", "RELATIVERISK"):
+        return "RR", False
+    return k or None, True
+
+
+def _match_2x2_est(rep_est, est_decimals, cands):
+    eps = 0.5 * (10.0 ** (-est_decimals)) + 1e-9
+    return any(abs(rep_est - cand) <= eps for cand in cands)
+
+
+def _match_2x2_p_single(p_cand, op, rep_p, tol):
+    if op == "=":
+        return abs(p_cand - rep_p) <= tol + 1e-12
+    if op == "<":
+        return p_cand < rep_p + 1e-12
+    if op == "<=":
+        return p_cand <= rep_p + 1e-12
+    if op == ">":
+        return p_cand > rep_p - 1e-12
+    return p_cand >= rep_p - 1e-12
+
+
+def _match_2x2_p(rep_p, op, p_decimals, candidates):
+    tol = 0.01 if p_decimals <= 2 else 0.5 * (10.0 ** (-p_decimals))
+    return any(_match_2x2_p_single(c, op, rep_p, tol) for c in candidates if c is not None)
+
+
+def _validate_2x2_counts(events1, total1, events2, total2):
+    for val, name in ((events1, "events1"), (total1, "total1"), (events2, "events2"), (total2, "total2")):
+        if isinstance(val, bool) or not isinstance(val, int):
+            raise ValueError(name)
+    if total1 < 1 or total2 < 1:
+        raise ValueError("total")
+    if not 0 <= events1 <= total1 or not 0 <= events2 <= total2:
+        raise ValueError("events")
+
+
+def _normalize_2x2_op(p_op):
+    op = str(p_op or "=").strip().replace("≤", "<=").replace("≥", ">=")
+    if op == "==":
+        op = "="
+    if op not in _OPERATORS:
+        raise ValueError("p_op")
+    return op
+
+
+def check_two_by_two(
+    events1,
+    total1,
+    events2,
+    total2,
+    *,
+    reported_kind=None,
+    reported_est=None,
+    est_decimals=2,
+    reported_p=None,
+    p_op="=",
+    p_decimals=3,
+    one_tailed=False,
+):
+    """Verify 2x2 contingency table crude OR/RR and Fisher/Pearson/Yates p-values."""
+    _validate_2x2_counts(events1, total1, events2, total2)
+    op = _normalize_2x2_op(p_op)
+    e_dec = _validate_nonneg_int_param(est_decimals, "est_decimals")
+    p_dec = _validate_nonneg_int_param(p_decimals, "p_decimals")
+    b, d = total1 - events1, total2 - events2
+    fisher_p, fisher_one = _fisher_exact_2x2(events1, total1, events2, total2)
+    p_chi2, pearson_p, y_chi2, yates_p = _chi2_2x2(events1, b, events2, d)
+    or_val, rr_val, or_cands, rr_cands = _ratios_2x2(events1, b, events2, d)
+    kind_norm, adjusted_exempt = _norm_2x2_kind(reported_kind)
+    issues = []
+    est_ok = None
+    if reported_est is not None and not adjusted_exempt and kind_norm in ("OR", "RR"):
+        rep_est, _ = _to_float_and_decimals(reported_est, e_dec)
+        est_ok = _match_2x2_est(rep_est, e_dec, or_cands if kind_norm == "OR" else rr_cands)
+        if not est_ok:
+            issues.append(f"{kind_norm.lower()}_mismatch")
+    p_ok = None
+    if reported_p is not None:
+        rep_p, _ = _to_float_and_decimals(reported_p, p_dec)
+        if not 0.0 <= rep_p <= 1.0:
+            raise ValueError("reported_p")
+        p_cands = [fisher_p, pearson_p, yates_p]
+        if one_tailed:
+            p_cands.extend([fisher_one, 0.5 * pearson_p, 0.5 * yates_p])
+        p_ok = _match_2x2_p(rep_p, op, p_dec, p_cands)
+        if not p_ok:
+            issues.append("p_mismatch")
+    return {
+        "consistent": not issues,
+        "estConsistent": est_ok,
+        "pConsistent": p_ok,
+        "issues": issues,
+        "events1": events1,
+        "total1": total1,
+        "events2": events2,
+        "total2": total2,
+        "or": or_val,
+        "rr": rr_val,
+        "fisherP": fisher_p,
+        "fisherOneSidedP": fisher_one,
+        "pearsonChi2": p_chi2,
+        "pearsonP": pearson_p,
+        "yatesChi2": y_chi2,
+        "yatesP": yates_p,
+        "adjustedExempt": adjusted_exempt,
+    }
+
+
+def _km_entry_row(entry, idx):
+    if isinstance(entry, dict):
+        arm = str(entry.get("arm") or entry.get("label") or entry.get("name") or f"Arm {idx + 1}")
+        raw = entry["counts"] if "counts" in entry else entry.get("values")
+        return arm, list(raw or [])
+    if isinstance(entry, (list, tuple)):
+        return f"Arm {idx + 1}", list(entry)
+    raise ValueError("series_rows")
+
+
+def _normalize_km_rows(series_rows):
+    if isinstance(series_rows, dict):
+        return [(str(k), list(v)) for k, v in series_rows.items()]
+    if not isinstance(series_rows, (list, tuple)):
+        raise ValueError("series_rows")
+    if series_rows and all(isinstance(x, (int, float)) and not isinstance(x, bool) for x in series_rows):
+        return [("Arm 1", list(series_rows))]
+    return [_km_entry_row(entry, idx) for idx, entry in enumerate(series_rows)]
+
+
+def _km_baseline_for(arm, idx, baseline_totals, num_rows):
+    if baseline_totals is None:
+        return None
+    if isinstance(baseline_totals, dict):
+        return baseline_totals.get(arm)
+    if isinstance(baseline_totals, (list, tuple)):
+        return baseline_totals[idx] if idx < len(baseline_totals) else None
+    if isinstance(baseline_totals, int) and not isinstance(baseline_totals, bool) and num_rows == 1:
+        return baseline_totals
+    return None
+
+
+def _km_check_arm(arm, counts, baseline):
+    violations = []
+    if not counts:
+        return violations
+    clean = []
+    for val in counts:
+        if isinstance(val, bool) or not isinstance(val, (int, float)) or not math.isfinite(val) or val < 0:
+            raise ValueError("km_count")
+        clean.append(int(val) if float(val).is_integer() else float(val))
+    if baseline is not None and clean[0] > baseline:
+        violations.append({
+            "arm": arm, "kind": "exceeds_baseline", "index": 0,
+            "prev": baseline, "value": clean[0], "baseline": baseline,
+        })
+    for t in range(1, len(clean)):
+        if clean[t] > clean[t - 1]:
+            violations.append({
+                "arm": arm, "kind": "non_monotonic", "index": t,
+                "prev": clean[t - 1], "value": clean[t], "baseline": baseline,
+            })
+    return violations
+
+
+def check_km_at_risk(series_rows, *, baseline_totals=None, context_text=""):
+    """Check Kaplan-Meier 'Number at risk' sequences for non-increasing monotonicity."""
+    if _KM_SKIP_RE.search(context_text or ""):
+        return {"consistent": True, "skipped": True, "skipReason": "delayed_entry_or_time_varying", "violations": []}
+    rows = _normalize_km_rows(series_rows)
+    violations = []
+    for idx, (arm, counts) in enumerate(rows):
+        base = _km_baseline_for(arm, idx, baseline_totals, len(rows))
+        violations.extend(_km_check_arm(arm, counts, base))
+    return {"consistent": not violations, "skipped": False, "violations": violations}

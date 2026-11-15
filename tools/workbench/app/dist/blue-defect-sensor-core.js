@@ -23,6 +23,27 @@
     {kind:'chi2',re:/(?:χ2|χ²|chi2|chi\^2|chi-square)\s*\(\s*(\d+(?:\.\d+)?)\s*(?:,\s*[Nn]\s*=\s*\d+)?\s*\)\s*=\s*([-−]?\d+(?:\.\d+)?)\s*[,;:(\s]*(?:p|P)\s*(=|<|<=|>|>=|≤|≥)\s*(\d*\.?\d+(?:[eE][-−+]?\d+)?)/gi}
   ];
   const TINY=1e-300;
+  const CONT_UNIT_RE=/\b(?:kg|mg|cm|mm|mmhg|years?|age|bmi|seconds?|minutes?|hours?|ms|hz|ml|mmol|%)\b/i;
+  const NON_SD_RE=/\b(?:SE|SEM|S\.E\.M?|standard\s+error|CI|IQR|median)\b/i;
+  const INT_SCALE_CUE_RE=/\b(?:Likert|point\s+scale|scored?)\b/i;
+  const N_EQ_RE=/\b[Nn]\s*=\s*(\d{1,6})\b/g;
+  const BOUNDS_RES=[
+    /\b(?:Likert(?:\s+scale)?|scale|scored?|rated|rating|points?)\s*(?:of|from|:|=|\()?\s*(\d+(?:\.\d+)?)\s*(?:-|–|—|to|~)\s*(\d+(?:\.\d+)?)(?!\s*(?:items?|questions?|patients?|subjects?|months?|years?|weeks?|days?|%|mg|kg|cm)\b)/i,
+    /(\d+(?:\.\d+)?)\s*(?:-|–|—|to|~)\s*(\d+(?:\.\d+)?)\s*(?:[- ]?point\s+)?(?:Likert|scale|score|rating)\b/i,
+    /\brange\s*(?:of|from|:|=)?\s*(\d+(?:\.\d+)?)\s*(?:-|–|—|to|~)\s*(\d+(?:\.\d+)?)(?!\s*(?:items?|questions?|patients?|subjects?|months?|years?|weeks?|days?|%|mg|kg|cm)\b)/i,
+    /\bmin(?:imum)?\s*(?:=|:)?\s*(\d+(?:\.\d+)?)\s*[,;/]\s*max(?:imum)?\s*(?:=|:)?\s*(\d+(?:\.\d+)?)/i
+  ];
+  const TWO_BY_TWO_VS_RE=/(?<![\d.])(\d{1,6})\s*\/\s*(\d{1,6})(?:[^.\n]{0,45}?)\b(?:vs\.?|versus|compared\s+(?:with|to))\b(?:[^.\n]{0,45}?)(\d{1,6})\s*\/\s*(\d{1,6})(?![\d./])/i;
+  const FRAC_RE=/(?<![\d.])(\d{1,6})\s*\/\s*(\d{1,6})(?![\d./])/g;
+  const TWO_BY_TWO_RATIO_RE=/\b(a?OR|a?RR|odds\s+ratio|risk\s+ratio|relative\s+risk)\s*(?:=|:|of)?\s*(\d+(?:\.\d+)?)/i;
+  const INLINE_P_RE=/\b[pP]\s*(=|<|<=|>|>=|≤|≥)\s*(\d*\.?\d+(?:[eE][-−+]?\d+)?)/;
+  const ADJ_2X2_RE=/\b(?:aOR|aRR|adjusted|multivariable|multivariate|logistic\s+regression|cox|propensity|weighted|iptw|matched\s+analysis|mantel[- ]?haenszel|stratified|mcnemar|paired|cluster|mixed[- ]?effects?|gee)\b|보정|다변량/i;
+  const ONE_TAILED_RE=/\b(?:one[- ]?(?:tailed|sided)|단측)\b/i;
+  const KM_HEADER_RE=/(?:number|no\.?|patients?|subjects?)\s+at\s+risk|위험군\s*수/i;
+  const KM_TIME_AXIS_RE=/\b(?:time|months?|years?|weeks?|days?|follow[- ]?up|hours?)\b|개월|시간|주차/i;
+  const KM_STOP_RE=/^\s*(?:Table|Figure|Fig\.?|Results|Discussion|Methods|Introduction|References|Conclusion|Appendix)\b/i;
+  const KM_SKIP_RE=/(?:left[- ]?truncat|delayed[- ]?entry|time[- ]?varying|지연\s*진입|시간\s*의존)/i;
+  const KM_INT_RE=/^\d{1,6}(?:,\d{3})*$/;
   const LANCZOS=[0.9999999999998099,676.5203681218851,-1259.1392167224028,771.3234287776531,-176.6150291621406,12.507343278686905,-0.13857109526572012,9.984369578019572e-6,1.5056327351493116e-7];
   const activeReports=new Map();
 
@@ -171,6 +192,332 @@
     return out;
   }
 
+  function pickOpt(obj,k1,k2,fallback){
+    if(obj&&obj[k1]!==undefined)return obj[k1];
+    if(obj&&obj[k2]!==undefined)return obj[k2];
+    return fallback;
+  }
+  function normSpriteArgs(meanOrObj,sd,n,minVal,maxVal,opts){
+    const isObj=Boolean(meanOrObj&&typeof meanOrObj==='object'&&!Array.isArray(meanOrObj));
+    const o=isObj?meanOrObj:(opts||{});
+    return {
+      mean:isObj?o.mean:meanOrObj,sd:isObj?o.sd:sd,n:isObj?o.n:n,
+      minVal:isObj?pickOpt(o,'minVal','min_val'):minVal,
+      maxVal:isObj?pickOpt(o,'maxVal','max_val'):maxVal,
+      meanDecimals:pickOpt(o,'meanDecimals','mean_decimals',2),
+      sdDecimals:pickOpt(o,'sdDecimals','sd_decimals',2),
+      integerScale:pickOpt(o,'integerScale','integer_scale',true)
+    };
+  }
+  function parseSpriteMeta(cfg){
+    const nVal=Number(cfg.n),meanV=safeFloat(cfg.mean),sdV=safeFloat(cfg.sd),minF=safeFloat(cfg.minVal),maxF=safeFloat(cfg.maxVal);
+    if(!Number.isInteger(nVal)||nVal<2)throw new Error('Invalid SPRITE n');
+    if(meanV===null||sdV===null||sdV<0||minF===null||maxF===null||minF>=maxF)throw new Error('Invalid SPRITE values');
+    const mEps=0.5*Math.pow(10,-Math.max(0,cfg.meanDecimals|0));
+    const sEps=0.5*Math.pow(10,-Math.max(0,cfg.sdDecimals|0));
+    const useInt=Boolean(cfg.integerScale)&&Number.isInteger(minF)&&Number.isInteger(maxF);
+    return {meanV,sdV,n:nVal,minF,maxF,mEps,sEps,useInt};
+  }
+  function spriteIntVarMin(sVal,n){const k=sVal%n;return (k*(n-k))/(n*(n-1));}
+  function spriteIntVarMax(sVal,n,a,b){
+    const span=b-a,excess=sVal-n*a,nb=Math.floor(excess/span),rem=excess%span;
+    const sumSq=rem===0?nb*b*b+(n-nb)*a*a:nb*b*b+(a+rem)*(a+rem)+(n-nb-1)*a*a;
+    return Math.max(0,(sumSq-(sVal*sVal)/n)/(n-1));
+  }
+  function spriteIntSdBounds(n,a,b,sLo,sHi){
+    const hasMult=(sHi-sLo>=n-1)||(sLo%n===0)||(Math.floor(sLo/n)!==Math.floor(sHi/n));
+    const varMin=hasMult?0:Math.min(spriteIntVarMin(sLo,n),spriteIntVarMin(sHi,n));
+    let varMax=0;
+    const step=sHi-sLo>2000?Math.max(1,Math.floor((sHi-sLo)/500)):1;
+    for(let s=sLo;s<=sHi;s+=step)varMax=Math.max(varMax,spriteIntVarMax(s,n,a,b));
+    if(step>1){
+      const mid=Math.max(sLo,Math.min(sHi,Math.round(0.5*n*(a+b))));
+      for(let s=Math.max(sLo,mid-60);s<=Math.min(sHi,mid+60);s++)varMax=Math.max(varMax,spriteIntVarMax(s,n,a,b));
+      varMax=Math.max(varMax,spriteIntVarMax(sHi,n,a,b));
+    }
+    return [Math.sqrt(varMin),Math.sqrt(varMax)];
+  }
+  function spriteContSdBounds(n,minF,maxF,muLo,muHi){
+    const muStar=Math.min(muHi,Math.max(muLo,0.5*(minF+maxF)));
+    return [0,Math.sqrt(Math.max(0,(n/(n-1))*(maxF-muStar)*(muStar-minF)))];
+  }
+  function spriteResult(consistent,reason,p,sdBounds,repSdRange){
+    return {consistent,reason,mean:p.meanV,sd:p.sdV,n:p.n,minVal:p.minF,maxVal:p.maxF,integerScale:p.useInt,sdBounds,reportedSdRange:repSdRange};
+  }
+  function checkSprite(meanOrObj,sd,n,minVal,maxVal,opts){
+    const p=parseSpriteMeta(normSpriteArgs(meanOrObj,sd,n,minVal,maxVal,opts));
+    const repSd=[Math.max(0,p.sdV-p.sEps),p.sdV+p.sEps];
+    if(p.meanV+p.mEps<p.minF-1e-12||p.meanV-p.mEps>p.maxF+1e-12)return spriteResult(false,'mean_out_of_bounds',p,[null,null],repSd);
+    const muLo=Math.max(p.minF,p.meanV-p.mEps),muHi=Math.min(p.maxF,p.meanV+p.mEps);
+    let bounds;
+    if(p.useInt){
+      const sLo=Math.max(p.n*p.minF,Math.ceil(p.n*muLo-1e-12)),sHi=Math.min(p.n*p.maxF,Math.floor(p.n*muHi+1e-12));
+      if(sLo>sHi)return spriteResult(false,'grim_infeasible',p,[null,null],repSd);
+      bounds=spriteIntSdBounds(p.n,p.minF,p.maxF,sLo,sHi);
+    }else bounds=spriteContSdBounds(p.n,p.minF,p.maxF,muLo,muHi);
+    if(repSd[1]<bounds[0]-1e-12)return spriteResult(false,'sd_below_min',p,bounds,repSd);
+    if(repSd[0]>bounds[1]+1e-12)return spriteResult(false,'sd_above_max',p,bounds,repSd);
+    return spriteResult(true,'ok',p,bounds,repSd);
+  }
+
+  function logChoose(n,k){return lnGamma(n+1)-lnGamma(k+1)-lnGamma(n-k+1);}
+  function fisherExact2x2(a,n1,c,n2){
+    const m1=a+c,nTot=n1+n2,xMin=Math.max(0,m1-n2),xMax=Math.min(n1,m1);
+    if(xMax-xMin>50000)return {pTwo:null,pOne:null};
+    const denom=logChoose(nTot,m1),logObs=logChoose(n1,a)+logChoose(n2,m1-a)-denom,pObs=Math.exp(logObs);
+    let pTwo=0,pLeft=0,pRight=0;
+    for(let x=xMin;x<=xMax;x++){
+      const lp=logChoose(n1,x)+logChoose(n2,m1-x)-denom,px=Math.exp(lp);
+      if(lp<=logObs+1e-9||px<=pObs+1e-12)pTwo+=px;
+      if(x<=a)pLeft+=px;
+      if(x>=a)pRight+=px;
+    }
+    return {pTwo:Math.min(1,pTwo),pOne:Math.min(1,pLeft,pRight)};
+  }
+  function chi22x2(a,b,c,d){
+    const n1=a+b,n2=c+d,m1=a+c,m0=b+d,nTot=n1+n2,denom=n1*n2*m1*m0;
+    if(!denom)return {pearsonChi2:0,pearsonP:1,yatesChi2:0,yatesP:1};
+    const diff=Math.abs(a*d-b*c),pChi2=(nTot*diff*diff)/denom,yDiff=Math.max(0,diff-0.5*nTot),yChi2=(nTot*yDiff*yDiff)/denom;
+    return {pearsonChi2:pChi2,pearsonP:gammaincc(0.5,pChi2/2),yatesChi2:yChi2,yatesP:gammaincc(0.5,yChi2/2)};
+  }
+  function orRatios2x2(a,b,c,d){
+    const zero=[a,b,c,d].some(v=>v===0);
+    const [ah,bh,ch,dh]=zero?[a+0.5,b+0.5,c+0.5,d+0.5]:[a,b,c,d];
+    const orVal=(ah*dh)/(bh*ch),orCands=[orVal,1/orVal];
+    if(b*c>0){const rawOr=(a*d)/(b*c);orCands.push(rawOr);if(rawOr>0)orCands.push(1/rawOr);}
+    return {orVal,orCands};
+  }
+  function rrRatios2x2(a,b,c,d){
+    const n1=a+b,n2=c+d;
+    const rrVal=(a===0||c===0)?((a+0.5)/(n1+1))/((c+0.5)/(n2+1)):(a/n1)/(c/n2);
+    const rrCands=[rrVal,1/rrVal];
+    if(a>0&&c>0){const rawRr=(a/n1)/(c/n2);rrCands.push(rawRr,1/rawRr);}
+    else if(a===0&&c>0)rrCands.push(0);
+    return {rrVal,rrCands};
+  }
+  function ratios2x2(a,b,c,d){
+    return {...orRatios2x2(a,b,c,d),...rrRatios2x2(a,b,c,d)};
+  }
+  function norm2x2Kind(rawKind){
+    if(rawKind===null||rawKind===undefined)return {kind:null,adjusted:false};
+    const k=String(rawKind).toUpperCase().replace(/[^A-Z]/g,'');
+    if(k==='AOR'||k==='ARR'||k.includes('ADJ'))return {kind:k,adjusted:true};
+    if(k==='OR'||k==='ODDSRATIO')return {kind:'OR',adjusted:false};
+    if(k==='RR'||k==='RISKRATIO'||k==='RELATIVERISK')return {kind:'RR',adjusted:false};
+    return {kind:k||null,adjusted:true};
+  }
+  function match2x2P(repP,op,pDec,cands){
+    const tol=pDec<=2?0.01:0.5*Math.pow(10,-pDec);
+    return cands.some(p=>{
+      if(p===null||p===undefined)return false;
+      if(op==='=')return Math.abs(p-repP)<=tol+1e-12;
+      if(op==='<')return p<repP+1e-12;
+      if(op==='<=')return p<=repP+1e-12;
+      if(op==='>')return p>repP-1e-12;
+      return p>=repP-1e-12;
+    });
+  }
+  function norm2x2Args(e1OrObj,t1,e2,t2,opts){
+    if(e1OrObj&&typeof e1OrObj==='object'&&!Array.isArray(e1OrObj))return e1OrObj;
+    return {events1:e1OrObj,total1:t1,events2:e2,total2:t2,...(opts||{})};
+  }
+  function validate2x2Counts(a,n1,c,n2){
+    for(const v of [a,n1,c,n2])if(!Number.isInteger(v))throw new Error('Invalid 2x2 counts');
+    if(n1<1||n2<1||a<0||a>n1||c<0||c>n2)throw new Error('Invalid 2x2 range');
+  }
+  function eval2x2Est(cfg,kind,adjusted,rat,issues){
+    const rawEst=cfg.reportedEst??cfg.reported_est;
+    if(rawEst===null||rawEst===undefined||adjusted||(kind!=='OR'&&kind!=='RR'))return null;
+    const repEst=safeFloat(rawEst),eDec=cfg.estDecimals??cfg.est_decimals??countDecimals(rawEst);
+    const eps=0.5*Math.pow(10,-Math.max(0,eDec))+1e-9;
+    const ok=(kind==='OR'?rat.orCands:rat.rrCands).some(v=>Math.abs(repEst-v)<=eps);
+    if(!ok)issues.push(kind.toLowerCase()+'_mismatch');
+    return ok;
+  }
+  function eval2x2P(cfg,fisher,chi,issues){
+    const rawP=cfg.reportedP??cfg.reported_p;
+    if(rawP===null||rawP===undefined)return null;
+    const repP=safeFloat(rawP),opRaw=normText(cfg.pOp??cfg.p_op??'=').trim()||'=';
+    const op=opRaw==='=='?'=':opRaw,pDec=cfg.pDecimals??cfg.p_decimals??countDecimals(rawP);
+    const cands=[fisher.pTwo,chi.pearsonP,chi.yatesP];
+    if(cfg.oneTailed??cfg.one_tailed)cands.push(fisher.pOne,0.5*chi.pearsonP,0.5*chi.yatesP);
+    const ok=match2x2P(repP,op,pDec,cands);
+    if(!ok)issues.push('p_mismatch');
+    return ok;
+  }
+  function checkTwoByTwo(e1OrObj,t1,e2,t2,opts){
+    const cfg=norm2x2Args(e1OrObj,t1,e2,t2,opts);
+    const a=cfg.events1,n1=cfg.total1,c=cfg.events2,n2=cfg.total2;
+    validate2x2Counts(a,n1,c,n2);
+    const fisher=fisherExact2x2(a,n1,c,n2),chi=chi22x2(a,n1-a,c,n2-c),rat=ratios2x2(a,n1-a,c,n2-c);
+    const {kind,adjusted}=norm2x2Kind(cfg.reportedKind??cfg.reported_kind),issues=[];
+    const estOk=eval2x2Est(cfg,kind,adjusted,rat,issues),pOk=eval2x2P(cfg,fisher,chi,issues);
+    return {consistent:!issues.length,estConsistent:estOk,pConsistent:pOk,issues,events1:a,total1:n1,events2:c,total2:n2,or:rat.orVal,rr:rat.rrVal,fisherP:fisher.pTwo,fisherOneSidedP:fisher.pOne,pearsonChi2:chi.pearsonChi2,pearsonP:chi.pearsonP,yatesChi2:chi.yatesChi2,yatesP:chi.yatesP,adjustedExempt:adjusted};
+  }
+
+  function normKmEntry(entry,idx){
+    if(Array.isArray(entry))return {arm:'Arm '+(idx+1),counts:entry};
+    const arm=String(entry?.arm||entry?.label||entry?.name||('Arm '+(idx+1)));
+    const counts=Array.isArray(entry?.counts)?entry.counts:(Array.isArray(entry?.values)?entry.values:[]);
+    return {arm,counts};
+  }
+  function normKmRows(seriesRows){
+    if(seriesRows&&!Array.isArray(seriesRows)&&typeof seriesRows==='object'){
+      return Object.entries(seriesRows).map(([arm,counts])=>({arm,counts:Array.isArray(counts)?counts:[]}));
+    }
+    if(!Array.isArray(seriesRows))throw new Error('Invalid KM seriesRows');
+    if(seriesRows.length&&seriesRows.every(v=>typeof v==='number'))return [{arm:'Arm 1',counts:seriesRows}];
+    return seriesRows.map(normKmEntry);
+  }
+  function kmBaselineFor(arm,idx,baselineTotals,numRows){
+    if(baselineTotals===null||baselineTotals===undefined)return null;
+    if(typeof baselineTotals==='number'&&numRows===1)return baselineTotals;
+    if(Array.isArray(baselineTotals))return baselineTotals[idx]??null;
+    return typeof baselineTotals==='object'?(baselineTotals[arm]??null):null;
+  }
+  function checkKmArm(row,base,violations){
+    const counts=row.counts.map(Number);
+    if(counts.some(v=>!Number.isFinite(v)||v<0))throw new Error('Invalid KM count');
+    if(base!==null&&counts.length&&counts[0]>base)violations.push({arm:row.arm,kind:'exceeds_baseline',index:0,prev:base,value:counts[0],baseline:base});
+    for(let t=1;t<counts.length;t++)if(counts[t]>counts[t-1])violations.push({arm:row.arm,kind:'non_monotonic',index:t,prev:counts[t-1],value:counts[t],baseline:base});
+  }
+  function checkKmAtRisk(seriesRows,opts={}){
+    const ctx=String(opts?.contextText??opts?.context_text??'');
+    if(KM_SKIP_RE.test(ctx))return {consistent:true,skipped:true,skipReason:'delayed_entry_or_time_varying',violations:[]};
+    const rows=normKmRows(seriesRows),baseTotals=opts?.baselineTotals??opts?.baseline_totals??null,violations=[];
+    rows.forEach((row,idx)=>checkKmArm(row,kmBaselineFor(row.arm,idx,baseTotals,rows.length),violations));
+    return {consistent:!violations.length,skipped:false,violations};
+  }
+
+  function extractBoundsFromText(txt){
+    for(const re of BOUNDS_RES){
+      const m=re.exec(txt);
+      if(m){const lo=safeFloat(m[1]),hi=safeFloat(m[2]);if(lo!==null&&hi!==null&&lo<hi)return [lo,hi];}
+    }
+    return null;
+  }
+  function findSpritePairs(s){
+    const pats=[
+      /(?:mean|M)\s*(?:\(\s*SD\s*\))?\s*=\s*([-−]?\d+(?:\.\d+)?)\s*(?:,\s*SD\s*=\s*|\(\s*SD\s*[:=]?\s*)(\d+(?:\.\d+)?)/gi,
+      /([-−]?\d+\.\d+)\s*\(\s*SD\s*[:=]?\s*(\d+(?:\.\d+)?)\s*\)/gi,
+      /(?:(?:mean|M)\s*(?:=|:)?\s*)?([-−]?\d+(?:\.\d+)?)\s*(?:±|\+\/-|\+\-)\s*(\d+(?:\.\d+)?)/gi
+    ];
+    const out=[];
+    for(const re of pats){
+      re.lastIndex=0;let m;
+      while((m=re.exec(s))!==null){
+        if(!NON_SD_RE.test(s.slice(Math.max(0,m.index-20),Math.min(s.length,m.index+m[0].length+20))))out.push(m);
+      }
+    }
+    return out;
+  }
+  function nearestN(s,pos){
+    N_EQ_RE.lastIndex=0;let m,best=null,bestDist=Infinity;
+    while((m=N_EQ_RE.exec(s))!==null){
+      const n=Number(m[1]),d=Math.min(Math.abs(m.index-pos),Math.abs(m.index+m[0].length-pos));
+      if(n>=2&&d<bestDist){best=n;bestDist=d;}
+    }
+    return best;
+  }
+  function scanSpriteSentence(s,segId,pageIndex,out){
+    const b=extractBoundsFromText(s);if(!b)return;
+    const isInt=INT_SCALE_CUE_RE.test(s)||!CONT_UNIT_RE.test(s);
+    for(const m of findSpritePairs(s)){
+      const nVal=nearestN(s,m.index);if(!nVal)continue;
+      try{
+        const res=checkSprite(m[1],m[2],nVal,b[0],b[1],{meanDecimals:countDecimals(m[1]),sdDecimals:countDecimals(m[2]),integerScale:isInt});
+        if(!res.consistent)out.push({category:'D1',kind:'sprite_bounds_mismatch',pageIndex,segmentId:segId,excerpt:s.slice(0,180),reported:{mean:res.mean,sd:res.sd,n:nVal,bounds:b},computed:{reason:res.reason,sdBounds:res.sdBounds},detail:'SPRITE 범위 불일치('+res.reason+'): mean='+m[1]+', SD='+m[2]+' (n='+nVal+', ['+b[0]+', '+b[1]+'])'});
+      }catch{}
+    }
+  }
+  function scanSprite(norm,segId,pageIndex){
+    const out=[];
+    for(const raw of norm.split(/(?<=[.!?])\s+|\n+/)){const s=raw.trim();if(s)scanSpriteSentence(s,segId,pageIndex,out);}
+    return out;
+  }
+  function extract2x2Pair(s){
+    const mv=TWO_BY_TWO_VS_RE.exec(s);
+    if(mv){
+      const a1=Number(mv[1]),n1=Number(mv[2]),a2=Number(mv[3]),n2=Number(mv[4]);
+      if(n1>=2&&n2>=2&&a1<=n1&&a2<=n2)return [a1,n1,a2,n2];
+    }
+    FRAC_RE.lastIndex=0;const fr=[];let m;
+    while((m=FRAC_RE.exec(s))!==null){const a=Number(m[1]),n=Number(m[2]);if(n>=2&&a<=n)fr.push([a,n]);}
+    return fr.length===2?[fr[0][0],fr[0][1],fr[1][0],fr[1][1]]:null;
+  }
+  function is2x2MultiExempt(s,res,mp){
+    if(!mp||!MULTI_TEST_RE.test(s)||res.issues.length!==1||res.issues[0]!=='p_mismatch')return false;
+    const minP=Math.min(...[res.fisherP,res.pearsonP,res.yatesP].filter(v=>v!==null));
+    return safeFloat(mp[2])>=minP-1e-6;
+  }
+  function build2x2Signal(s,pair,mr,mp,res,segId,pageIndex){
+    const fisherP=res.fisherP===null?null:Number(res.fisherP.toPrecision(5));
+    return {
+      category:'D1',kind:'two_by_two_mismatch',pageIndex,segmentId:segId,excerpt:s.slice(0,180),
+      reported:{a1:pair[0],n1:pair[1],a2:pair[2],n2:pair[3],kind:mr?mr[1]:null,est:mr?mr[2]:null,p:mp?mp[2]:null},
+      computed:{or:Number(res.or.toFixed(4)),rr:Number(res.rr.toFixed(4)),fisherP,issues:res.issues},
+      detail:'2x2 교차검증 불일치('+res.issues.join(', ')+'): '+pair[0]+'/'+pair[1]+' vs '+pair[2]+'/'+pair[3]
+    };
+  }
+  function scan2x2Sentence(s,segId,pageIndex){
+    if(ADJ_2X2_RE.test(s))return null;
+    const pair=extract2x2Pair(s);if(!pair)return null;
+    const mr=TWO_BY_TWO_RATIO_RE.exec(s),mp=INLINE_P_RE.exec(s);
+    if(!mr&&!mp)return null;
+    try{
+      const opts={oneTailed:ONE_TAILED_RE.test(s)};
+      if(mr){opts.reportedKind=mr[1];opts.reportedEst=mr[2];opts.estDecimals=countDecimals(mr[2]);}
+      if(mp){opts.reportedP=mp[2];opts.pOp=mp[1];opts.pDecimals=countDecimals(mp[2]);}
+      const res=checkTwoByTwo(pair[0],pair[1],pair[2],pair[3],opts);
+      if(res.consistent||is2x2MultiExempt(s,res,mp))return null;
+      return build2x2Signal(s,pair,mr,mp,res,segId,pageIndex);
+    }catch{return null;}
+  }
+  function scanTwoByTwo(norm,segId,pageIndex){
+    const out=[];
+    for(const raw of norm.split(/(?<=[.!?])\s+|\n+/)){
+      const s=raw.trim();if(!s)continue;
+      const sig=scan2x2Sentence(s,segId,pageIndex);if(sig)out.push(sig);
+    }
+    return out;
+  }
+  function parseKmLine(line){
+    const cleaned=String(line||'').trim().replace(/^(?:number|no\.?|patients?|subjects?)\s+at\s+risk\s*[:\-]?\s*|위험군\s*수\s*[:\-]?\s*/i,'');
+    if(!cleaned)return null;
+    const tokens=cleaned.replace(/[|\t]/g,' ').split(/\s+/).map(t=>t.replace(/[,;]+$/,'')).filter(Boolean);
+    const nums=[];let idx=tokens.length-1;
+    while(idx>=0&&KM_INT_RE.test(tokens[idx])){nums.push(Number(tokens[idx].replace(/,/g,'')));idx--;}
+    if(nums.length<2)return null;
+    nums.reverse();
+    const label=tokens.slice(0,idx+1).join(' ').replace(/^[\s:;-]+|[\s:;-]+$/g,'')||'Arm';
+    return (KM_TIME_AXIS_RE.test(label)||nums[0]<2)?null:{arm:label,counts:nums,excerpt:line.trim()};
+  }
+  function collectKmBlockRows(lines,start){
+    const rows=[],inline=parseKmLine(lines[start]);
+    if(inline)rows.push(inline);
+    for(let j=start+1;j<Math.min(lines.length,start+10);j++){
+      const ln=lines[j].trim();
+      if(!ln){if(rows.length)break;continue;}
+      if(KM_STOP_RE.test(ln))break;
+      const p=parseKmLine(ln);if(p)rows.push(p);
+    }
+    return rows;
+  }
+  function scanKmAtRisk(norm,segId,pageIndex){
+    const lines=norm.split(/\r?\n/),out=[];
+    for(let i=0;i<lines.length;i++){
+      if(!KM_HEADER_RE.test(lines[i]))continue;
+      const rows=collectKmBlockRows(lines,i);if(!rows.length)continue;
+      const ctx=lines.slice(Math.max(0,i-3),Math.min(lines.length,i+12)).join(' ');
+      const res=checkKmAtRisk(rows,{contextText:ctx});
+      for(const v of res.violations){
+        const matchRow=rows.find(r=>r.arm===v.arm);
+        out.push({category:'D1',kind:'km_at_risk_non_monotonic',pageIndex,segmentId:segId,excerpt:(matchRow?.excerpt||v.arm).slice(0,180),reported:{arm:v.arm,prev:v.prev,value:v.value,index:v.index},computed:v,detail:'KM No. at risk 증가('+v.arm+'): '+v.prev+' -> '+v.value});
+      }
+    }
+    return out;
+  }
+
   function cleanIdentifier(raw){
     let s=String(raw||'').trim().replace(/[.,;\]"']+$/,'');
     while(s.endsWith(')')&&(s.match(/\)/g)||[]).length>(s.match(/\(/g)||[]).length)s=s.slice(0,-1).replace(/[.,;\]"']+$/,'');
@@ -296,7 +643,7 @@
     list.forEach((seg,idx)=>{
       if(!seg||typeof seg.text!=='string')return;
       const norm=normText(seg.text),segId=seg.id||('s'+idx),pageIndex=pageIndexOf(seg,idx);
-      signals.push(...scanStatPvalues(norm,segId,pageIndex),...scanPercentages(norm,segId,pageIndex),...scanCiBounds(norm,segId,pageIndex));
+      signals.push(...scanStatPvalues(norm,segId,pageIndex),...scanPercentages(norm,segId,pageIndex),...scanCiBounds(norm,segId,pageIndex),...scanSprite(norm,segId,pageIndex),...scanTwoByTwo(norm,segId,pageIndex),...scanKmAtRisk(norm,segId,pageIndex));
     });
     const bib=scanBibliography(list);
     signals.push(...bib.signals);
@@ -541,6 +888,9 @@
     setActiveReport,
     getActiveReport,
     assertNoRedKeys,
-    statPvalue
+    statPvalue,
+    checkSprite,
+    checkTwoByTwo,
+    checkKmAtRisk
   };
 });

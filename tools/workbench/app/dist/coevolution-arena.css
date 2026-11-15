@@ -10,9 +10,11 @@
 .coevolution-arena .arena-card{padding:14px;border:1px solid var(--line);border-radius:var(--radius);background:var(--paper);min-width:0}
 .coevolution-arena .arena-card h3,.coevolution-arena .arena-card h4{margin:0 0 8px;font-size:14px}
 .coevolution-arena .arena-card p{margin:4px 0;font-size:13px;line-height:1.55}
-.coevolution-arena .arena-table-wrap{overflow:auto;max-width:100%;margin:14px 0}
+.coevolution-arena .arena-table-wrap{overflow-x:auto;max-width:100%;margin:14px 0}
 .coevolution-arena .arena-table{border-collapse:collapse;width:100%;font-size:13px;font-variant-numeric:tabular-nums}
 .coevolution-arena .arena-table th,.coevolution-arena .arena-table td{padding:10px 12px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+.coevolution-arena .arena-card .arena-table-wrap{margin:10px 0 0}
+.coevolution-arena .arena-card .arena-table th,.coevolution-arena .arena-card .arena-table td{padding:7px 8px;font-size:12px}
 .coevolution-arena .arena-condition-list{display:grid;gap:10px;margin:12px 0}
 .coevolution-arena .arena-condition-row{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:10px 12px;border:1px solid var(--line);border-radius:var(--radius);background:var(--paper);min-width:0}
 .coevolution-arena .arena-condition-row select{width:auto;min-width:0;max-width:100%;min-height:38px;padding:6px 10px}

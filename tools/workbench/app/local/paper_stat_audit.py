@@ -6,7 +6,10 @@ from paper_stat_math import (
     check_ci_bounds,
     check_count_percentage,
     check_grim,
+    check_km_at_risk,
+    check_sprite,
     check_stat_pvalue,
+    check_two_by_two,
     count_decimals,
 )
 
@@ -52,6 +55,38 @@ _CAPTION_START_RE = re.compile(r"^\s*(?:Table|Figure|Fig\.?)\s+\d+[A-Za-z]?\s*[:
 _INLINE_PCT_RE = re.compile(r"(?<![\d.])(\d+(?:\.\d+)?)\s*%")
 _INLINE_P_RE = re.compile(r"\b[pP]\s*(=|<|<=|>|>=|≤|≥)\s*(\d*\.?\d+(?:[eE][-−+]?\d+)?)")
 _RATIO_KINDS = frozenset({"OR", "AOR", "RR", "ARR", "HR", "AHR", "IRR"})
+_SPRITE_PM_RE = re.compile(r"(?:(?:mean|M)\s*(?:=|:)?\s*)?(?P<mean>[-−]?\d+(?:\.\d+)?)\s*(?:±|\+/-|\+\-)\s*(?P<sd>\d+(?:\.\d+)?)", re.I)
+_SPRITE_EQ_RE = re.compile(r"(?:mean|M)\s*(?:\(\s*SD\s*\))?\s*=\s*(?P<mean>[-−]?\d+(?:\.\d+)?)\s*(?:,\s*SD\s*=\s*|\(\s*SD\s*[:=]?\s*)(?P<sd>\d+(?:\.\d+)?)", re.I)
+_SPRITE_PAREN_RE = re.compile(r"(?P<mean>[-−]?\d+\.\d+)\s*\(\s*SD\s*[:=]?\s*(?P<sd>\d+(?:\.\d+)?)\s*\)", re.I)
+_BOUNDS_UNIT_GUARD = r"(?!\s*(?:items?|questions?|patients?|subjects?|months?|years?|weeks?|days?|%|mg|kg|cm)\b)"
+_SPRITE_BOUNDS_RES = (
+    re.compile(rf"\b(?:Likert(?:\s+scale)?|scale|scored?|rated|rating|points?)\s*(?:of|from|:|=|\()?\s*(?P<lo>\d+(?:\.\d+)?)\s*(?:-|–|—|to|~)\s*(?P<hi>\d+(?:\.\d+)?){_BOUNDS_UNIT_GUARD}", re.I),
+    re.compile(rf"(?P<lo>\d+(?:\.\d+)?)\s*(?:-|–|—|to|~)\s*(?P<hi>\d+(?:\.\d+)?)\s*(?:[- ]?point\s+)?(?:Likert|scale|score|rating)\b", re.I),
+    re.compile(rf"\brange\s*(?:of|from|:|=)?\s*(?P<lo>\d+(?:\.\d+)?)\s*(?:-|–|—|to|~)\s*(?P<hi>\d+(?:\.\d+)?){_BOUNDS_UNIT_GUARD}", re.I),
+    re.compile(r"\bmin(?:imum)?\s*(?:=|:)?\s*(?P<lo>\d+(?:\.\d+)?)\s*[,;/]\s*max(?:imum)?\s*(?:=|:)?\s*(?P<hi>\d+(?:\.\d+)?)", re.I),
+)
+_NON_SD_RE = re.compile(r"\b(?:SE|SEM|S\.E\.M?|standard\s+error|CI|IQR|median)\b", re.I)
+_INT_SCALE_CUE_RE = re.compile(r"\b(?:Likert|point\s+scale|scored?)\b", re.I)
+_FRAC_RE = re.compile(r"(?<![\d.])(?P<a>\d{1,6})\s*/\s*(?P<n>\d{1,6})(?![\d./])")
+_TWO_BY_TWO_VS_RE = re.compile(
+    r"(?<![\d.])(?P<a1>\d{1,6})\s*/\s*(?P<n1>\d{1,6})(?:[^.\n]{0,45}?)\b(?:vs\.?|versus|compared\s+(?:with|to))\b"
+    r"(?:[^.\n]{0,45}?)(?P<a2>\d{1,6})\s*/\s*(?P<n2>\d{1,6})(?![\d./])",
+    re.I,
+)
+_TWO_BY_TWO_RATIO_RE = re.compile(r"\b(?P<kind>a?OR|a?RR|odds\s+ratio|risk\s+ratio|relative\s+risk)\s*(?:=|:|of)?\s*(?P<est>\d+(?:\.\d+)?)", re.I)
+_ADJ_2X2_RE = re.compile(
+    r"\b(?:aOR|aRR|adjusted|multivariable|multivariate|logistic\s+regression|cox|propensity|weighted|iptw|"
+    r"matched\s+analysis|mantel[- ]?haenszel|stratified|mcnemar|paired|cluster|mixed[- ]?effects?|gee)\b|보정|다변량",
+    re.I,
+)
+_ONE_TAILED_RE = re.compile(r"\b(?:one[- ]?(?:tailed|sided)|단측)\b", re.I)
+_COUNT_ROW_CUE_RE = re.compile(r"(?:\bn\s*\(\s*%\s*\)|%|events?|cases?|deaths?|mortality|incidence|responders?|outcomes?|positive|yes|no\.?\s*of)", re.I)
+_CONT_ROW_CUE_RE = re.compile(r"\b(?:age|years?|mean|median|sd|iqr|bmi|score|weight|height|bp|mmhg|mg|kg|cm|duration|days|months)\b", re.I)
+_KM_HEADER_RE = re.compile(r"(?:number|no\.?|patients?|subjects?)\s+at\s+risk|위험군\s*수", re.I)
+_KM_TIME_AXIS_RE = re.compile(r"\b(?:time|months?|years?|weeks?|days?|follow[- ]?up|hours?)\b|개월|시간|주차", re.I)
+_KM_STOP_RE = re.compile(r"^\s*(?:Table|Figure|Fig\.?|Results|Discussion|Methods|Introduction|References|Conclusion|Appendix)\b", re.I)
+_KM_SKIP_CTX_RE = re.compile(r"(?:left[- ]?truncat|delayed[- ]?entry|time[- ]?varying|지연\s*진입|시간\s*의존)", re.I)
+_KM_INT_TOKEN_RE = re.compile(r"^\d{1,6}(?:,\d{3})*$")
 _MULT_TEST_RE = re.compile(
     r"(?:"
     r"\b(?:bonferroni|fdr|benjamini|hochberg|holm|tukey|dunnett|fwer)\b"
@@ -262,6 +297,230 @@ def _scan_ci_expressions(text, page_index, item_id=None):
     return signals
 
 
+def _extract_scale_bounds(text):
+    for pat in _SPRITE_BOUNDS_RES:
+        m = pat.search(text)
+        if m:
+            lo, hi = _safe_float(m.group("lo")), _safe_float(m.group("hi"))
+            if lo is not None and hi is not None and lo < hi:
+                return lo, hi
+    return None, None
+
+
+def _sprite_matches(norm):
+    found = []
+    for pat in (_SPRITE_EQ_RE, _SPRITE_PAREN_RE, _SPRITE_PM_RE):
+        for m in pat.finditer(norm):
+            if _NON_SD_RE.search(norm[max(0, m.start() - 20):min(len(norm), m.end() + 20)]):
+                continue
+            if pat is _SPRITE_PM_RE and "." not in m.group("mean") and "." not in m.group("sd") and not re.search(r"\b(?:mean|M|SD)\b", norm[max(0, m.start() - 18):m.start()], re.I):
+                continue
+            found.append(m)
+    return found
+
+
+def _nearest_n(n_matches, pos):
+    if not n_matches:
+        return None
+    best = min(n_matches, key=lambda m: min(abs(m.start() - pos), abs(m.end() - pos)))
+    val = int(best.group("n"))
+    return val if val >= 2 else None
+
+
+def _eval_sprite_candidate(mean_s, sd_s, n_val, lo, hi, integer_scale, page_index, item_id, excerpt):
+    try:
+        res = check_sprite(
+            mean_s, sd_s, n_val, lo, hi,
+            mean_decimals=count_decimals(mean_s),
+            sd_decimals=count_decimals(sd_s),
+            integer_scale=integer_scale,
+        )
+    except ValueError:
+        return None
+    if res["consistent"]:
+        return None
+    return _signal(
+        "sprite_bounds_mismatch", page_index, item_id, excerpt,
+        {"mean": res["mean"], "sd": res["sd"], "n": n_val, "bounds": [lo, hi]},
+        {"reason": res["reason"], "sdBounds": res["sdBounds"]},
+        f"SPRITE: mean={mean_s}, SD={sd_s} (n={n_val}) infeasible on [{lo:g}, {hi:g}] ({res['reason']})",
+    )
+
+
+def _scan_sprite(text, page_index, item_id=None, header_context="", default_n=None):
+    norm = _norm_text(text)
+    signals = []
+    for sentence in re.split(r"(?<=[.!?])\s+|\n+", norm):
+        s_clean = sentence.strip()
+        if not s_clean:
+            continue
+        ctx = f"{header_context} {s_clean}".strip()
+        lo, hi = _extract_scale_bounds(ctx)
+        if lo is None:
+            continue
+        n_matches = list(_N_EQ_RE.finditer(s_clean))
+        is_int = bool(_INT_SCALE_CUE_RE.search(ctx)) or not bool(_CONT_UNIT_RE.search(ctx))
+        for m in _sprite_matches(s_clean):
+            n_val = _nearest_n(n_matches, m.start()) or default_n
+            if not n_val or n_val < 2:
+                continue
+            sig = _eval_sprite_candidate(
+                m.group("mean"), m.group("sd"), n_val, lo, hi, is_int, page_index, item_id, s_clean[:180],
+            )
+            if sig:
+                signals.append(sig)
+    return signals
+
+
+def _extract_2x2_pair(sentence):
+    m_vs = _TWO_BY_TWO_VS_RE.search(sentence)
+    if m_vs:
+        a1, n1 = int(m_vs.group("a1")), int(m_vs.group("n1"))
+        a2, n2 = int(m_vs.group("a2")), int(m_vs.group("n2"))
+        if n1 >= 2 and n2 >= 2 and 0 <= a1 <= n1 and 0 <= a2 <= n2:
+            return (a1, n1, a2, n2, m_vs.start(), m_vs.end())
+    fracs = []
+    for m in _FRAC_RE.finditer(sentence):
+        a, n = int(m.group("a")), int(m.group("n"))
+        if n >= 2 and 0 <= a <= n:
+            fracs.append((a, n, m.start(), m.end()))
+    if len(fracs) == 2:
+        return (fracs[0][0], fracs[0][1], fracs[1][0], fracs[1][1], fracs[0][2], fracs[1][3])
+    return None
+
+
+def _extract_2x2_claims(sentence, window):
+    is_adj = bool(_ADJ_2X2_RE.search(window))
+    m_rat = _TWO_BY_TWO_RATIO_RE.search(sentence)
+    rep_kind, rep_est, est_dec = None, None, 2
+    if m_rat and not is_adj:
+        rep_kind = m_rat.group("kind")
+        rep_est = m_rat.group("est")
+        est_dec = count_decimals(rep_est)
+    m_p = _INLINE_P_RE.search(sentence)
+    rep_p, p_op, p_dec = None, "=", 3
+    if m_p and not is_adj:
+        p_op, rep_p = m_p.group(1), m_p.group(2)
+        p_dec = count_decimals(rep_p)
+    return rep_kind, rep_est, est_dec, rep_p, p_op, p_dec
+
+
+def _check_2x2_with_exemptions(a1, n1, a2, n2, claims, window, page_index, item_id, excerpt):
+    rep_kind, rep_est, est_dec, rep_p, p_op, p_dec = claims
+    if rep_est is None and rep_p is None:
+        return None
+    one_tailed = bool(_ONE_TAILED_RE.search(window))
+    try:
+        res = check_two_by_two(
+            a1, n1, a2, n2,
+            reported_kind=rep_kind, reported_est=rep_est, est_decimals=est_dec,
+            reported_p=rep_p, p_op=p_op, p_decimals=p_dec, one_tailed=one_tailed,
+        )
+    except ValueError:
+        return None
+    if res["consistent"]:
+        return None
+    if res["issues"] == ["p_mismatch"] and has_multiple_testing_adjustment(window) and rep_p is not None:
+        cands = [p for p in (res["fisherP"], res["pearsonP"], res["yatesP"]) if p is not None]
+        rep_p_f = _safe_float(rep_p)
+        if rep_p_f is not None and cands and rep_p_f >= min(cands) - 1e-6:
+            return None
+    return _signal(
+        "two_by_two_mismatch", page_index, item_id, excerpt,
+        {"a1": a1, "n1": n1, "a2": a2, "n2": n2, "kind": rep_kind, "est": rep_est, "p": rep_p, "pOp": p_op},
+        {"or": round(res["or"], 4), "rr": round(res["rr"], 4),
+         "fisherP": round(res["fisherP"], 6) if res["fisherP"] is not None else None,
+         "pearsonP": round(res["pearsonP"], 6), "issues": res["issues"]},
+        f"2x2 ({a1}/{n1} vs {a2}/{n2}): {', '.join(res['issues'])} (crude OR={res['or']:.2f}, Fisher p={res['fisherP']:.4g})"
+        if res["fisherP"] is not None else f"2x2 ({a1}/{n1} vs {a2}/{n2}): {', '.join(res['issues'])}",
+    )
+
+
+def _scan_two_by_two(text, page_index, item_id=None, header_context=""):
+    norm = _norm_text(text)
+    signals = []
+    for sentence in re.split(r"(?<=[.!?])\s+|\n+", norm):
+        s_clean = sentence.strip()
+        if not s_clean:
+            continue
+        pair = _extract_2x2_pair(s_clean)
+        if not pair:
+            continue
+        a1, n1, a2, n2, _st, _en = pair
+        window = f"{header_context} {s_clean}".strip()
+        claims = _extract_2x2_claims(s_clean, window)
+        sig = _check_2x2_with_exemptions(a1, n1, a2, n2, claims, window, page_index, item_id, s_clean[:180])
+        if sig:
+            signals.append(sig)
+    return signals
+
+
+def _parse_km_line(line):
+    cleaned = re.sub(r"^(?:number|no\.?|patients?|subjects?)\s+at\s+risk\s*[:\-]?\s*|위험군\s*수\s*[:\-]?\s*", "", line.strip(), flags=re.I)
+    if not cleaned:
+        return None
+    tokens = [t.rstrip(",;") for t in cleaned.replace("|", " ").replace("\t", " ").split() if t.rstrip(",;")]
+    nums = []
+    idx = len(tokens) - 1
+    while idx >= 0 and _KM_INT_TOKEN_RE.match(tokens[idx]):
+        nums.append(int(tokens[idx].replace(",", "")))
+        idx -= 1
+    if len(nums) < 2:
+        return None
+    nums.reverse()
+    label = " ".join(tokens[:idx + 1]).strip(" :;-") or "Arm"
+    if _KM_TIME_AXIS_RE.search(label) or nums[0] < 2:
+        return None
+    return label, nums
+
+
+def _collect_km_blocks(norm):
+    lines = norm.splitlines()
+    blocks = []
+    i = 0
+    while i < len(lines):
+        if _KM_HEADER_RE.search(lines[i]):
+            ctx = " ".join(lines[max(0, i - 3):min(len(lines), i + 12)])
+            rows = []
+            inline = _parse_km_line(lines[i])
+            if inline:
+                rows.append((inline[0], inline[1], lines[i].strip()))
+            for j in range(i + 1, min(len(lines), i + 10)):
+                ln = lines[j].strip()
+                if not ln:
+                    if rows:
+                        break
+                    continue
+                if _KM_STOP_RE.match(ln):
+                    break
+                parsed = _parse_km_line(ln)
+                if parsed:
+                    rows.append((parsed[0], parsed[1], ln))
+            if rows:
+                blocks.append((rows, ctx))
+        i += 1
+    return blocks
+
+
+def _scan_km_at_risk(text, page_index, item_id=None):
+    norm = _norm_text(text)
+    signals = []
+    for rows, ctx in _collect_km_blocks(norm):
+        series = [{"arm": arm, "counts": nums} for arm, nums, _ln in rows]
+        res = check_km_at_risk(series, context_text=ctx)
+        if res["consistent"]:
+            continue
+        for v in res["violations"]:
+            excerpt = next((ln for arm, _n, ln in rows if arm == v["arm"]), v["arm"])
+            signals.append(_signal(
+                "km_at_risk_non_monotonic", page_index, item_id, excerpt[:180],
+                {"arm": v["arm"], "prev": v["prev"], "value": v["value"], "index": v["index"]},
+                v,
+                f"KM No. at risk ({v['arm']}) increased from {v['prev']} to {v['value']} at timepoint {v['index'] + 1}",
+            ))
+    return signals
+
+
 def _table_grid(item):
     table = item.get("table")
     cells = table.get("cells") if isinstance(table, dict) else None
@@ -399,23 +658,188 @@ def _check_table_col_sums(grid, max_r, max_c, header_rows, page_index, item_id):
     return signals
 
 
+_CELL_PM_RE = re.compile(r"^\s*(?P<mean>[-−]?\d+(?:\.\d+)?)\s*(?:±|\+/-|\+\-)\s*(?P<sd>\d+(?:\.\d+)?)\s*$")
+_CELL_PAREN_SD_RE = re.compile(r"^\s*(?P<mean>[-−]?\d+(?:\.\d+)?)\s*\(\s*(?:SD\s*[:=]?\s*)?(?P<sd>\d+(?:\.\d+)?)\s*\)\s*$", re.I)
+_CELL_FRAC_ONLY_RE = re.compile(r"^\s*(?P<a>\d{1,6})\s*/\s*(?P<n>\d{1,6})(?:\s*\([^)]*\))?\s*$")
+_P_CELL_RE = re.compile(r"^\s*(?:[pP]\s*)?(?P<op>=|<|<=|>|>=|≤|≥)?\s*(?P<p>\d*\.?\d+(?:[eE][-−+]?\d+)?)\s*$")
+_EST_CELL_RE = re.compile(r"^\s*(?P<est>\d+(?:\.\d+)?)")
+
+
+def _check_table_sprite_cell(text, header_ctx, n_val, page_index, item_id):
+    norm = _norm_text(text).strip()
+    lo, hi = _extract_scale_bounds(header_ctx)
+    if lo is None or _NON_SD_RE.search(header_ctx):
+        return None
+    m = _CELL_PM_RE.match(norm)
+    if not m and "SD" in header_ctx.upper():
+        m = _CELL_PAREN_SD_RE.match(norm)
+    if not m:
+        return None
+    is_int = bool(_INT_SCALE_CUE_RE.search(header_ctx)) or not bool(_CONT_UNIT_RE.search(header_ctx))
+    return _eval_sprite_candidate(
+        m.group("mean"), m.group("sd"), n_val, lo, hi, is_int, page_index, item_id, f"{header_ctx}: {norm}"[:180],
+    )
+
+
+def _col_header(grid, header_rows, c):
+    return " ".join(grid.get((hr, c), "") for hr in sorted(header_rows)).strip()
+
+
+def _extract_cell_event_count(txt, total, row_ctx, col_ctx):
+    norm = _norm_text(txt).strip()
+    m_pct = _CELL_PCT_RE.match(norm)
+    if m_pct:
+        cnt = int(m_pct.group("count"))
+        return (cnt, True) if cnt <= total else (None, False)
+    m_frac = _CELL_FRAC_ONLY_RE.match(norm)
+    if m_frac:
+        cnt, denom = int(m_frac.group("a")), int(m_frac.group("n"))
+        return (cnt, True) if denom == total and cnt <= total else (None, False)
+    val, dec = _parse_plain_number(norm)
+    if val is not None and dec == 0 and 0 <= val <= total:
+        cue_txt = f"{row_ctx} {col_ctx}"
+        if _COUNT_ROW_CUE_RE.search(cue_txt) and not _CONT_ROW_CUE_RE.search(cue_txt):
+            return int(val), False
+    return None, False
+
+
+def _find_2x2_table_cols(grid, max_c, header_rows, col_n):
+    arms = [c for c in sorted(col_n) if col_n[c] >= 2 and not _TOTAL_LABEL_RE.match(_col_header(grid, header_rows, c))]
+    if len(arms) != 2:
+        return None
+    p_col, ratio_col, ratio_kind = None, None, None
+    for c in range(max_c):
+        if c in arms:
+            continue
+        hdr = _col_header(grid, header_rows, c)
+        if p_col is None and re.search(r"\bp(?:[- ]?value)?\b", hdr, re.I) and not has_multiple_testing_adjustment(hdr):
+            p_col = c
+        elif ratio_col is None:
+            m_k = re.search(r"\b(a?OR|a?RR)\b", hdr, re.I)
+            if m_k and not _ADJ_2X2_RE.search(hdr):
+                ratio_col, ratio_kind = c, m_k.group(1)
+    return arms[0], arms[1], p_col, ratio_col, ratio_kind
+
+
+def _parse_p_cell(text):
+    m = _P_CELL_RE.match(_norm_text(text))
+    if not m:
+        return None, "=", 3
+    p_str = m.group("p")
+    val = _safe_float(p_str)
+    if val is None or not 0.0 <= val <= 1.0:
+        return None, "=", 3
+    return p_str, (m.group("op") or "="), count_decimals(p_str)
+
+
+def _audit_table_2x2_row(grid, r, c1, c2, p_col, ratio_col, ratio_kind, header_rows, col_n, ctx_base, page_index, item_id):
+    row_lbl = grid.get((r, 0), "").strip()
+    if _TOTAL_LABEL_RE.match(row_lbl) or _CONT_ROW_CUE_RE.search(row_lbl) or _ADJ_2X2_RE.search(row_lbl):
+        return None
+    n1, n2 = col_n[c1], col_n[c2]
+    a1, exp1 = _extract_cell_event_count(grid.get((r, c1), ""), n1, row_lbl, _col_header(grid, header_rows, c1))
+    a2, exp2 = _extract_cell_event_count(grid.get((r, c2), ""), n2, row_lbl, _col_header(grid, header_rows, c2))
+    if a1 is None or a2 is None or not (exp1 or exp2 or _COUNT_ROW_CUE_RE.search(row_lbl)):
+        return None
+    rep_p, p_op, p_dec = _parse_p_cell(grid.get((r, p_col), "")) if p_col is not None else (None, "=", 3)
+    rep_est, est_dec = None, 2
+    if ratio_col is not None:
+        m_e = _EST_CELL_RE.match(_norm_text(grid.get((r, ratio_col), "")))
+        if m_e:
+            rep_est, est_dec = m_e.group("est"), count_decimals(m_e.group("est"))
+    claims = (ratio_kind if rep_est else None, rep_est, est_dec, rep_p, p_op, p_dec)
+    excerpt = f"{row_lbl}: {a1}/{n1} vs {a2}/{n2}"
+    return _check_2x2_with_exemptions(a1, n1, a2, n2, claims, f"{ctx_base} {row_lbl}", page_index, item_id, excerpt[:180])
+
+
+def _check_table_two_by_two(grid, max_r, max_c, header_rows, col_n, caption, page_index, item_id):
+    cols = _find_2x2_table_cols(grid, max_c, header_rows, col_n)
+    if not cols:
+        return []
+    c1, c2, p_col, ratio_col, ratio_kind = cols
+    if p_col is None and ratio_col is None:
+        return []
+    all_hdr = " ".join(_col_header(grid, header_rows, c) for c in range(max_c))
+    ctx_base = f"{caption} {all_hdr}"
+    if _ADJ_2X2_RE.search(ctx_base):
+        return []
+    signals = []
+    for r in range(max_r):
+        if r in header_rows:
+            continue
+        sig = _audit_table_2x2_row(grid, r, c1, c2, p_col, ratio_col, ratio_kind, header_rows, col_n, ctx_base, page_index, item_id)
+        if sig:
+            signals.append(sig)
+    return signals
+
+
+def _km_table_row_counts(grid, r, max_c):
+    nums = []
+    for c in range(1, max_c):
+        cell = _norm_text(grid.get((r, c), "")).strip()
+        if not cell:
+            continue
+        if not _KM_INT_TOKEN_RE.match(cell):
+            return None
+        nums.append(int(cell.replace(",", "")))
+    return nums if len(nums) >= 2 and nums[0] >= 2 else None
+
+
+def _check_table_km_at_risk(grid, max_r, max_c, header_rows, caption, page_index, item_id):
+    all_text = f"{caption} " + " ".join(grid.values())
+    if not _KM_HEADER_RE.search(all_text):
+        return []
+    rows = []
+    for r in range(max_r):
+        if r in header_rows:
+            continue
+        lbl = grid.get((r, 0), "").strip() or f"Row {r}"
+        if _KM_TIME_AXIS_RE.search(lbl) or _KM_HEADER_RE.search(lbl):
+            continue
+        nums = _km_table_row_counts(grid, r, max_c)
+        if nums:
+            rows.append({"arm": lbl, "counts": nums})
+    res = check_km_at_risk(rows, context_text=all_text) if rows else {"consistent": True}
+    if res["consistent"]:
+        return []
+    return [
+        _signal(
+            "km_at_risk_non_monotonic", page_index, item_id,
+            f"{v['arm']}: {v['prev']} -> {v['value']}"[:180],
+            {"arm": v["arm"], "prev": v["prev"], "value": v["value"], "index": v["index"]},
+            v,
+            f"KM table No. at risk ({v['arm']}) increased from {v['prev']} to {v['value']} at timepoint {v['index'] + 1}",
+        )
+        for v in res["violations"]
+    ]
+
+
 def _audit_table_item(item, page_index, item_id):
     grid, max_r, max_c, header_rows = _table_grid(item)
     if not grid:
         return []
+    caption = str(item.get("caption") or "")
     col_n = _column_totals(grid, max_r, max_c, header_rows)
     signals = _check_table_percentages(grid, max_r, max_c, header_rows, col_n, page_index, item_id)
     signals.extend(_check_table_row_sums(grid, max_r, max_c, header_rows, page_index, item_id))
     signals.extend(_check_table_col_sums(grid, max_r, max_c, header_rows, page_index, item_id))
+    signals.extend(_check_table_two_by_two(grid, max_r, max_c, header_rows, col_n, caption, page_index, item_id))
+    signals.extend(_check_table_km_at_risk(grid, max_r, max_c, header_rows, caption, page_index, item_id))
     for (r, c), text in grid.items():
         if r in header_rows or not text.strip():
             continue
         col_hdr = " ".join(grid.get((hr, c), "") for hr in header_rows)
         row_hdr = grid.get((r, 0), "")
-        header_context = f"{col_hdr} {row_hdr}".strip()
+        header_context = f"{caption} {col_hdr} {row_hdr}".strip()
         context_text = f"{header_context} {text}"
         signals.extend(_scan_stat_pvalues(text, page_index, item_id=item_id, header_context=header_context))
         signals.extend(_scan_ci_expressions(context_text if "CI" in context_text.upper() else text, page_index, item_id=item_id))
+        signals.extend(_scan_two_by_two(text, page_index, item_id=item_id, header_context=header_context))
+        signals.extend(_scan_sprite(text, page_index, item_id=item_id, header_context=header_context, default_n=col_n.get(c)))
+        if c in col_n:
+            sprite_sig = _check_table_sprite_cell(text, header_context, col_n[c], page_index, item_id)
+            if sprite_sig:
+                signals.append(sprite_sig)
     return signals
 
 
@@ -666,6 +1090,9 @@ def audit_loaded_paper(paper_id, file_hash, summary, items, *, max_signals=30, s
         signals.extend(_scan_count_percentages(text, page_index))
         signals.extend(_scan_grim(text, page_index))
         signals.extend(_scan_ci_expressions(text, page_index))
+        signals.extend(_scan_sprite(text, page_index))
+        signals.extend(_scan_two_by_two(text, page_index))
+        signals.extend(_scan_km_at_risk(text, page_index))
     for item in items:
         if item.get("type") == "table":
             signals.extend(_audit_table_item(item, item.get("pageIndex", 0), item.get("id")))

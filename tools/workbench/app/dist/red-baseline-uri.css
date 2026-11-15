@@ -1,0 +1,146 @@
+/* RED Pre-Injection Baseline Flaw Guard & Lossless PDF /URI Mutator UI. */
+.red-baseline-uri-panel {
+  box-sizing: border-box;
+  background: var(--paper, #fff);
+  border: 1px solid var(--line, #d9dde0);
+  border-radius: var(--radius, 10px);
+  padding: 18px 20px;
+  margin: 16px 0;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.red-baseline-uri-panel * {
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.red-baseline-uri-title {
+  margin: 0 0 8px;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--ink, #111315);
+}
+
+.red-baseline-guard-summary {
+  margin: 6px 0 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink, #111315);
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.red-baseline-guard-details,
+.red-uri-details {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line, #d9dde0);
+}
+
+.red-baseline-guard-details summary,
+.red-uri-details summary {
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 13px;
+  white-space: normal;
+}
+
+.red-baseline-guard-list {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0 0;
+  display: grid;
+  gap: 8px;
+}
+
+.red-baseline-guard-item {
+  border: 1px solid var(--line, #d9dde0);
+  border-radius: 6px;
+  padding: 8px 10px;
+  background: var(--surface, #f3f4f4);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.red-baseline-overlap-badge {
+  display: inline-block;
+  margin: 8px 0 0;
+  padding: 4px 10px;
+  border-radius: 4px;
+  background: var(--yellow, #ffcc00);
+  color: var(--ink, #111315);
+  border: 1px solid var(--ink, #111315);
+  font-size: 12px;
+  font-weight: 700;
+  white-space: normal;
+  max-width: 100%;
+}
+
+.red-uri-list {
+  display: grid;
+  gap: 10px;
+  margin: 10px 0;
+}
+
+.red-uri-row {
+  border: 1px solid var(--line, #d9dde0);
+  border-radius: 6px;
+  padding: 10px 12px;
+  background: var(--surface, #f3f4f4);
+  display: grid;
+  gap: 6px;
+}
+
+.red-uri-current {
+  margin: 0;
+  font-size: 12px;
+  color: var(--ink, #111315);
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  white-space: normal;
+}
+
+.red-uri-input,
+.red-uri-rationale {
+  width: 100%;
+  border: 1px solid #8c949b;
+  border-radius: 4px;
+  background: #fff;
+  padding: 8px 10px;
+  font-size: 13px;
+  color: var(--ink, #111315);
+}
+
+.red-uri-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+  max-width: 100%;
+}
+
+.red-uri-actions button {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  white-space: normal;
+  text-align: center;
+}
+
+@media (max-width: 700px) {
+  .red-baseline-uri-panel {
+    padding: 14px;
+  }
+
+  .red-uri-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .red-uri-actions button {
+    width: 100%;
+  }
+}

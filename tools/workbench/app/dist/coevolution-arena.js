@@ -590,7 +590,31 @@
     return rules;
   }
 
-  function buildBlueBrief(scoreboard){
+  function hasLowAlpha(agreement){
+    const candidates=[
+      agreement?.nominal?.alpha,
+      agreement?.ordinal?.alpha,
+      agreement?.humanReviews?.nominal?.alpha,
+      agreement?.blueRuns?.ordinal?.alpha
+    ];
+    return candidates.some(a=>typeof a==='number'&&Number.isFinite(a)&&a<0.667);
+  }
+
+  function appendAcademicBriefGuidance(rules,role,agreement,selectivePrediction){
+    if(hasLowAlpha(agreement)){
+      rules.push(role==='red'
+        ?'다중 판정 일치도 저하(Krippendorff α < 0.667): 판정자 간 해석이 갈리는 모호한 후보 대신 명백히 검증 가능한 단일·교차 결함 근거를 확보하세요.'
+        :'다중 판정 일치도 저하(Krippendorff α < 0.667): 판정 기준(근거 인용·수치 오차 허용 범위·확인필요 경계)을 재정렬하고 경계 사례의 검증 절차를 구체화하세요.');
+    }
+    const gain=selectivePrediction?.abstentionGain;
+    if(typeof gain==='number'&&Number.isFinite(gain)&&gain<0){
+      rules.push(role==='red'
+        ?'확인필요(Abstention) 이득 음수(Abstention Gain < 0): BLUE가 확실한 결함까지 유보로 돌리는 유형을 파악하되 정답 힌트 없이 다중 표면 교차 불일치를 강화하세요.'
+        :'확인필요(Abstention) 이득 음수(Abstention Gain < 0): 유보 기준이 실제 오탐을 걸러내지 못하고 있으므로 확정(아님) 임계치와 확인필요 분류 기준을 보정하세요.');
+    }
+  }
+
+  function buildBlueBrief(scoreboard,agreement,selectivePrediction){
     const r=scoreboard?.redRecall||emptyRecallBucket();
     const byFamily=r.byFamily||emptyFamilyMap();
     const s=scoreboard?.bluePrecisionDual?.strict||emptyStrictPrecision();
@@ -602,6 +626,7 @@
     if(holdoutFp>0)rules.push('Holdout 대조군 순수 오탐 '+holdoutFp+'건: 정상 논문의 표준 통계 보정·요약 문장을 결함으로 오인하지 않도록 반증 확인 절차를 강화하세요.');
     if(s.preExisting>0)rules.push('원본 기존 오류 '+s.preExisting+'건 분리: 출판본 자체의 기존 불일치는 순수 오탐과 구분해 별도 근거와 함께 보고하세요.');
     if(inc.zeroDropRecovered>0)rules.push('Zero-Drop 복구 '+inc.zeroDropRecovered+'건 보존: 신뢰도 경계 지적을 즉시 탈락시키지 말고 확인필요(uncertain) 등급으로 유지하세요.');
+    appendAcademicBriefGuidance(rules,'blue',agreement,selectivePrediction);
     if(!rules.length)rules.push('현재 기록된 미탐·순수 오탐은 0건입니다. 본문·표·차트·인용·등록부 교차 검증과 확인필요 분리 원칙을 유지하세요.');
     return {
       role:'blue',
@@ -612,7 +637,7 @@
     };
   }
 
-  function buildRedBrief(scoreboard){
+  function buildRedBrief(scoreboard,agreement,selectivePrediction){
     const r=scoreboard?.redRecall||emptyRecallBucket();
     const byFamily=r.byFamily||emptyFamilyMap();
     const s=scoreboard?.bluePrecisionDual?.strict||emptyStrictPrecision();
@@ -628,6 +653,7 @@
     if(detectedOnly.length)rules.push('기탐지 유형 고도화('+detectedOnly.join(', ')+'): L1 → L2 → L3 → L4 단계로 교차 섹션(본문↔표·차트·참고문헌) 연동을 강화하고 단순 어휘 치환은 피하세요.');
     if(missedFamilies.length)rules.push('미탐 취약 축 유지('+missedFamilies.join(', ')+'): 현재 BLUE 맹점이 확인된 결함 축을 다중 표면 결합 테스트로 확장하세요.');
     if(s.goldError>0)rules.push('정답표 오류 '+s.goldError+'건 재검토: 원문과 양립 가능하거나 모호한 후보는 정답지 v2 개정 시 제외·정교화하세요.');
+    appendAcademicBriefGuidance(rules,'red',agreement,selectivePrediction);
     if(!rules.length)rules.push('다음 라운드에서는 L1 → L2 → L3 → L4 순으로 본문-표-차트-등록부 교차 일관성 스트레스 테스트를 설계하세요. 정답 힌트나 과장 단서는 남기지 마세요.');
     return {
       role:'red',
@@ -638,8 +664,8 @@
     };
   }
 
-  function buildCoevolutionBrief({role,scoreboard}={}){
-    return role==='red'?buildRedBrief(scoreboard):buildBlueBrief(scoreboard);
+  function buildCoevolutionBrief({role,scoreboard,agreement,selectivePrediction}={}){
+    return role==='red'?buildRedBrief(scoreboard,agreement,selectivePrediction):buildBlueBrief(scoreboard,agreement,selectivePrediction);
   }
 
   function loadConditions(storage){
@@ -806,10 +832,514 @@
     return banner;
   }
 
-  function renderBriefsSection(doc,sb,statusEl){
+  const ORDINAL_SCALES=Object.freeze([
+    ['맞음','확인필요','아님'],
+    ['undetected','uncertain','detected'],
+    ['missed','uncertain','detected']
+  ]);
+
+  const VERDICT_TO_ORDINAL_LABEL=Object.freeze({
+    supported:'아님',
+    'pre-existing':'아님',
+    detected:'아님',
+    unsupported:'맞음',
+    missed:'맞음',
+    'spin-boundary':'확인필요',
+    'gold-error':'확인필요',
+    mixed:'확인필요',
+    uncertain:'확인필요'
+  });
+
+  const CORRECT_SELECTIVE_VERDICTS=new Set(['supported','pre-existing','gold-error','true','correct','tp']);
+  const INCORRECT_SELECTIVE_VERDICTS=new Set(['unsupported','false','pure_fp','purefp','fp','incorrect']);
+
+  function round4(val){
+    const n=Number(val.toFixed(4));
+    return n===0?0:n;
+  }
+
+  function round6(val){
+    const n=Number(val.toFixed(6));
+    return n===0?0:n;
+  }
+
+  function normalizeRating(val){
+    if(val===null||val===undefined)return null;
+    if(typeof val==='number'&&!Number.isFinite(val))return null;
+    const s=String(val).trim();
+    if(!s||s.toLowerCase()==='pending')return null;
+    return s;
+  }
+
+  function extractPairableUnits(units){
+    if(!Array.isArray(units))return [];
+    const out=[];
+    for(const entry of units){
+      const raw=Array.isArray(entry)?entry:(Array.isArray(entry?.ratings)?entry.ratings:null);
+      if(!raw)continue;
+      const cleaned=raw.map(normalizeRating).filter(v=>v!==null);
+      if(cleaned.length>=2)out.push(cleaned);
+    }
+    return out;
+  }
+
+  function isNumericCategories(cats){
+    return cats.length>0&&cats.every(c=>/^-?\d+(?:\.\d+)?$/.test(c));
+  }
+
+  function matchOrdinalScale(observedSet){
+    for(const scale of ORDINAL_SCALES){
+      if([...observedSet].every(c=>scale.includes(c)))return scale;
+    }
+    return null;
+  }
+
+  function resolveCategoryOrder(pairable,level,explicitOrder){
+    const observed=new Set();
+    for(const u of pairable)for(const v of u)observed.add(v);
+    if(Array.isArray(explicitOrder)&&explicitOrder.length){
+      const norm=explicitOrder.map(normalizeRating).filter(Boolean);
+      const base=norm.filter(c=>observed.has(c));
+      const extras=[...observed].filter(c=>!base.includes(c)).sort();
+      return [...base,...extras];
+    }
+    if(level==='ordinal'){
+      const matched=matchOrdinalScale(observed);
+      if(matched)return matched.filter(c=>observed.has(c));
+    }
+    const list=[...observed];
+    if(isNumericCategories(list))return list.sort((a,b)=>Number(a)-Number(b));
+    return list.sort();
+  }
+
+  function buildCoincidenceMatrix(pairable,categories){
+    const idx=new Map(categories.map((c,i)=>[c,i]));
+    const r=categories.length;
+    const matrix=Array.from({length:r},()=>new Array(r).fill(0));
+    const marginals=new Array(r).fill(0);
+    let totalPairs=0;
+    for(const u of pairable){
+      const m=u.length;
+      const counts=new Array(r).fill(0);
+      for(const v of u)counts[idx.get(v)]++;
+      for(let i=0;i<r;i++){
+        if(!counts[i])continue;
+        marginals[i]+=counts[i];
+        totalPairs+=counts[i];
+        for(let j=0;j<r;j++){
+          if(!counts[j])continue;
+          matrix[i][j]+=(counts[i]*(counts[j]-(i===j?1:0)))/(m-1);
+        }
+      }
+    }
+    return {matrix,marginals,totalPairs};
+  }
+
+  function ordinalDeltaSq(marginals,i,j){
+    const lo=Math.min(i,j),hi=Math.max(i,j);
+    let sum=0;
+    for(let g=lo;g<=hi;g++)sum+=marginals[g];
+    const diff=sum-(marginals[i]+marginals[j])/2;
+    return diff*diff;
+  }
+
+  function computeDisagreements(matrix,marginals,totalPairs,level){
+    const r=marginals.length;
+    let doSum=0,deSum=0;
+    for(let i=0;i<r;i++){
+      for(let j=i+1;j<r;j++){
+        const d2=level==='ordinal'?ordinalDeltaSq(marginals,i,j):1;
+        doSum+=2*matrix[i][j]*d2;
+        deSum+=2*marginals[i]*marginals[j]*d2;
+      }
+    }
+    return {
+      observed:doSum/totalPairs,
+      expected:deSum/(totalPairs*(totalPairs-1))
+    };
+  }
+
+  function alphaInterpretationBand(alpha){
+    if(alpha>=0.8)return '신뢰 가능 (≥0.80)';
+    if(alpha>=0.667)return '잠정 합의 (0.67–0.80)';
+    return '판정 기준 재정렬 필요 (<0.67)';
+  }
+
+  function computeKrippendorffAlpha(units,options={}){
+    const level=options?.level==='ordinal'?'ordinal':'nominal';
+    const pairable=extractPairableUnits(units);
+    if(!pairable.length){
+      return {
+        status:'insufficient_pairs',level,alpha:null,
+        observedDisagreement:null,expectedDisagreement:null,
+        pairableUnits:0,totalPairs:0,categories:[],
+        band:'비교 가능한 복수 판정 부족'
+      };
+    }
+    const categories=resolveCategoryOrder(pairable,level,options?.categories||options?.order);
+    const {matrix,marginals,totalPairs}=buildCoincidenceMatrix(pairable,categories);
+    const {observed,expected}=computeDisagreements(matrix,marginals,totalPairs,level);
+    if(expected===0){
+      return {
+        status:'unanimous',level,alpha:1,
+        observedDisagreement:0,expectedDisagreement:0,
+        pairableUnits:pairable.length,totalPairs,categories,
+        band:'신뢰 가능 (≥0.80)'
+      };
+    }
+    const alpha=round4(1-observed/expected);
+    return {
+      status:'ok',level,alpha,
+      observedDisagreement:round6(observed),
+      expectedDisagreement:round6(expected),
+      pairableUnits:pairable.length,totalPairs,categories,
+      band:alphaInterpretationBand(alpha)
+    };
+  }
+
+  function latestReviewsByRunAndReviewer(runs,reviews){
+    const rootMap=new Map((runs||[]).filter(Boolean).map(r=>[r.id,r.snapshotOf||r.id]));
+    const map=new Map();
+    for(const rev of reviews||[]){
+      if(!rev||!rev.runId)continue;
+      const rootId=rootMap.get(rev.runId)||rev.runId;
+      const reviewer=(rev.reviewer||'').trim()||rev.id||'anonymous';
+      map.set(rootId+'::'+reviewer,rev);
+    }
+    return [...map.values()];
+  }
+
+  function collectFindingUnits(runById,reviewsList,useOrdinal){
+    const grouped=new Map();
+    for(const rev of reviewsList){
+      const run=runById.get(rev.runId);
+      const fileHash=run?.fileHash||rev.fileHash||rev.runId;
+      const findings=run?.response?.findings||[];
+      for(const fa of rev.findingAssessments||[]){
+        const f=findings.find(x=>x.id===fa.id);
+        const targetKey=fileHash+'::'+(f?normalizeFindingKey(f):fa.id);
+        const val=useOrdinal?(VERDICT_TO_ORDINAL_LABEL[fa?.verdict]||null):fa?.verdict;
+        const list=grouped.get(targetKey)||[];
+        list.push(val);
+        grouped.set(targetKey,list);
+      }
+    }
+    return [...grouped.entries()].map(([unitId,ratings])=>({unitId,ratings}));
+  }
+
+  function collectPatchUnits(runById,reviewsList,useOrdinal){
+    const grouped=new Map();
+    for(const rev of reviewsList){
+      const comp=rev.comparison;
+      if(!comp?.assessments)continue;
+      const run=runById.get(rev.runId);
+      const fileHash=comp.outputFileHash||run?.fileHash||rev.runId;
+      for(let i=0;i<comp.assessments.length;i++){
+        const a=comp.assessments[i],p=comp.selected?.[i];
+        const key=fileHash+'::patch::'+(p?.id||a?.id||i);
+        const val=useOrdinal?(VERDICT_TO_ORDINAL_LABEL[a?.verdict]||null):a?.verdict;
+        const list=grouped.get(key)||[];
+        list.push(val);
+        grouped.set(key,list);
+      }
+    }
+    return [...grouped.entries()].map(([unitId,ratings])=>({unitId,ratings}));
+  }
+
+  function blueFindingOrdinalLabel(finding){
+    if(typeof finding?.label==='string'&&['아님','확인필요','맞음'].includes(finding.label))return finding.label;
+    if(finding?.zeroDropRecovered||finding?.recoveredByZeroDrop||finding?.origin==='zero-drop')return '확인필요';
+    if(finding?.uncertainty==='high'||finding?.verdict==='uncertain'||finding?.status==='abstain')return '확인필요';
+    return '아님';
+  }
+
+  function blueRunAnchorMap(run){
+    const map=new Map();
+    for(const f of run.response?.findings||[]){
+      const key=normalizeFindingKey(f);
+      const next=blueFindingOrdinalLabel(f);
+      if(!map.has(key)||next==='아님')map.set(key,next);
+    }
+    return map;
+  }
+
+  function collectBlueFileUnits(fileHash,fileRuns){
+    const anchors=new Set();
+    const maps=fileRuns.map(r=>{
+      const m=blueRunAnchorMap(r);
+      for(const k of m.keys())anchors.add(k);
+      return {run:r,map:m};
+    });
+    if(!anchors.size){
+      return [{
+        unitId:fileHash+'::__document__',
+        ratings:fileRuns.map(r=>r.response?.status==='ok'?'맞음':(r.response?.status==='abstain'?'확인필요':null))
+      }];
+    }
+    return [...anchors].map(anchor=>({
+      unitId:fileHash+'::'+anchor,
+      ratings:maps.map(({run,map})=>{
+        if(map.has(anchor))return map.get(anchor);
+        if(run.response?.status==='ok')return '맞음';
+        return run.response?.status==='abstain'?'확인필요':null;
+      })
+    }));
+  }
+
+  function collectBlueRunUnits(runs){
+    const byFile=new Map();
+    for(const r of runs||[]){
+      if(!r||r.snapshotOf||r.role!=='blue'||!r.fileHash)continue;
+      const list=byFile.get(r.fileHash)||[];
+      list.push(r);
+      byFile.set(r.fileHash,list);
+    }
+    const units=[];
+    for(const [fileHash,list] of byFile.entries()){
+      if(list.length<2)continue;
+      units.push(...collectBlueFileUnits(fileHash,list));
+    }
+    return units;
+  }
+
+  function pickPrimaryAgreement(humanRes,blueRes,preferBlue){
+    const first=preferBlue?blueRes:humanRes;
+    const second=preferBlue?humanRes:blueRes;
+    if(first.status!=='insufficient_pairs')return first;
+    return second;
+  }
+
+  function computeLedgerAgreement(runs=[],reviews=[]){
+    const runById=new Map((runs||[]).filter(Boolean).map(r=>[r.id,r]));
+    const latestReviews=latestReviewsByRunAndReviewer(runs,reviews);
+    const findingUnitsNom=collectFindingUnits(runById,latestReviews,false);
+    const patchUnitsNom=collectPatchUnits(runById,latestReviews,false);
+    const humanNomFindings=computeKrippendorffAlpha(findingUnitsNom,{level:'nominal'});
+    const humanNom=humanNomFindings.status!=='insufficient_pairs'?humanNomFindings:computeKrippendorffAlpha(patchUnitsNom,{level:'nominal'});
+    const humanOrdUnits=[...collectFindingUnits(runById,latestReviews,true),...collectPatchUnits(runById,latestReviews,true)];
+    const humanOrd=computeKrippendorffAlpha(humanOrdUnits,{level:'ordinal',categories:['맞음','확인필요','아님']});
+    const blueUnits=collectBlueRunUnits(runs);
+    const blueNom=computeKrippendorffAlpha(blueUnits,{level:'nominal'});
+    const blueOrd=computeKrippendorffAlpha(blueUnits,{level:'ordinal',categories:['맞음','확인필요','아님']});
+    return {
+      nominal:pickPrimaryAgreement(humanNom,blueNom,false),
+      ordinal:pickPrimaryAgreement(humanOrd,blueOrd,true),
+      humanReviews:{nominal:humanNom,ordinal:humanOrd,unitCount:findingUnitsNom.length+patchUnitsNom.length},
+      blueRuns:{nominal:blueNom,ordinal:blueOrd,unitCount:blueUnits.length}
+    };
+  }
+
+  function resolveItemTier(item){
+    const t=Number(item?.tier);
+    if(t===1||t===2||t===3)return t;
+    const isZd=Boolean(item?.zeroDropRecovered||item?.recoveredByZeroDrop||item?.origin==='zero-drop'||item?.status==='zero-drop-recovered');
+    if(isZd)return 3;
+    const lbl=item?.verdictLabel||item?.label;
+    const isDeferred=lbl==='확인필요'||item?.uncertainty==='high'||item?.verdict==='uncertain'||item?.verdict==='needs-verification'||item?.deferred===true||item?.abstained===true;
+    return isDeferred?2:1;
+  }
+
+  function resolveItemCorrectness(item){
+    if(typeof item?.isCorrect==='boolean')return item.isCorrect;
+    if(typeof item?.is_correct==='boolean')return item.is_correct;
+    const raw=String(item?.h1Verdict||item?.verdict||item?.goldLabel||'').trim().toLowerCase();
+    if(CORRECT_SELECTIVE_VERDICTS.has(raw))return true;
+    if(INCORRECT_SELECTIVE_VERDICTS.has(raw))return false;
+    return null;
+  }
+
+  function extractMatchedFindingIds(latest){
+    const matched=new Set();
+    for(const a of latest?.comparison?.assessments||[]){
+      if(a?.verdict!=='detected'&&a?.verdict!=='uncertain')continue;
+      for(const fid of a.quoteOverlapFindingIds||[])matched.add(fid);
+    }
+    return matched;
+  }
+
+  function collectRunSelectiveItems(run,latest,out){
+    const assessments=latest?.findingAssessments||[];
+    const matchedIds=extractMatchedFindingIds(latest);
+    for(const f of run.response?.findings||[]){
+      const v=assessments.find(a=>a.id===f.id)?.verdict||'pending';
+      const resolved=resolveItemCorrectness({verdict:v});
+      const isCorrect=resolved!==null?resolved:(matchedIds.has(f.id)?true:null);
+      if(isCorrect!==null)out.push({tier:resolveItemTier(f),isCorrect});
+    }
+  }
+
+  function collectExternalSelectiveItems(externalResponses,out){
+    for(const ext of externalResponses||[]){
+      const role=ext?.snapshot?.role||ext?.role;
+      if(role!=='blue')continue;
+      for(const item of ext?.snapshot?.items||[]){
+        const isCorrect=resolveItemCorrectness(item);
+        if(isCorrect!==null)out.push({tier:resolveItemTier(item),isCorrect});
+      }
+    }
+  }
+
+  function extractLedgerSelectiveItems({runs=[],reviews=[],externalResponses=[]}={}){
+    const latestByRun=buildLatestReviewMap(runs,reviews);
+    const out=[];
+    for(const run of runs){
+      if(run&&!run.snapshotOf&&run.role==='blue')collectRunSelectiveItems(run,latestByRun.get(run.id),out);
+    }
+    collectExternalSelectiveItems(externalResponses,out);
+    return out;
+  }
+
+  function normalizeSelectiveItems(items){
+    if(items&&!Array.isArray(items)&&typeof items==='object')return extractLedgerSelectiveItems(items);
+    if(!Array.isArray(items))return [];
+    const out=[];
+    for(const item of items){
+      const isCorrect=resolveItemCorrectness(item);
+      if(isCorrect===null)continue;
+      out.push({tier:resolveItemTier(item),isCorrect});
+    }
+    return out;
+  }
+
+  function buildStagePoint(stage,count,correctCount,total){
+    const coverage=round4(count/total);
+    if(!count)return {stage,count:0,coverage,accuracy:null,risk:null};
+    const acc=correctCount/count;
+    return {stage,count,coverage,accuracy:round4(acc),risk:round4(1-acc)};
+  }
+
+  function computeTrapezoidalAurc(curve){
+    const pts=curve.filter(p=>p.risk!==null&&p.count>0);
+    if(!pts.length)return null;
+    let area=pts[0].coverage*pts[0].risk;
+    for(let i=1;i<pts.length;i++){
+      const dc=pts[i].coverage-pts[i-1].coverage;
+      if(dc>0)area+=dc*(pts[i-1].risk+pts[i].risk)/2;
+    }
+    return round4(area);
+  }
+
+  function computeSelectivePrediction(items){
+    const clean=normalizeSelectiveItems(items);
+    if(!clean.length){
+      return {
+        status:'insufficient_data',totalEvaluated:0,committedCount:0,abstainedCount:0,
+        abstentionRate:null,coverageAtCommitted:null,selectiveAccuracy:null,selectiveRisk:null,
+        fullCoverageAccuracy:null,fullCoverageRisk:null,abstentionGain:null,aurc:null,
+        riskCoverageCurve:[]
+      };
+    }
+    const counts={1:0,2:0,3:0},correct={1:0,2:0,3:0};
+    for(const item of clean){
+      counts[item.tier]++;
+      if(item.isCorrect)correct[item.tier]++;
+    }
+    const n1=counts[1],n2=counts[2],n3=counts[3];
+    const c1=correct[1],c2=correct[2],c3=correct[3];
+    const total=n1+n2+n3,abstained=n2+n3;
+    const fullAcc=(c1+c2+c3)/total;
+    const selAcc=n1>0?c1/n1:null;
+    const curve=[
+      buildStagePoint('확정(아님)만 채택',n1,c1,total),
+      buildStagePoint('수동 확인필요 포함',n1+n2,c1+c2,total),
+      buildStagePoint('Zero-Drop 복원 포함 전체',total,c1+c2+c3,total)
+    ];
+    return {
+      status:'ok',totalEvaluated:total,committedCount:n1,abstainedCount:abstained,
+      abstentionRate:round4(abstained/total),
+      coverageAtCommitted:round4(n1/total),
+      selectiveAccuracy:selAcc!==null?round4(selAcc):null,
+      selectiveRisk:selAcc!==null?round4(1-selAcc):null,
+      fullCoverageAccuracy:round4(fullAcc),
+      fullCoverageRisk:round4(1-fullAcc),
+      abstentionGain:selAcc!==null?round4(selAcc-fullAcc):null,
+      aurc:computeTrapezoidalAurc(curve),
+      riskCoverageCurve:curve
+    };
+  }
+
+  function formatAlphaMetric(res){
+    return res&&typeof res.alpha==='number'?res.alpha.toFixed(4)+' ('+res.pairableUnits+'건)':'대기 중';
+  }
+
+  function formatPercentMetric(val){
+    return typeof val==='number'?(val*100).toFixed(1)+'%':'—';
+  }
+
+  function formatGainMetric(val){
+    if(typeof val!=='number')return '—';
+    const pct=(val*100).toFixed(2);
+    return (val>=0?'+':'')+pct+'%p';
+  }
+
+  function renderAgreementCard(doc,agreement){
+    const card=el(doc,'article',undefined,'arena-card');
+    card.id='arena-agreement-card';
+    card.append(el(doc,'h4','다중 판정 일치도 · Krippendorff\'s α'));
+    const nom=agreement?.nominal,ord=agreement?.ordinal;
+    const ready=(nom&&nom.status!=='insufficient_pairs')||(ord&&ord.status!=='insufficient_pairs');
+    if(!ready){
+      card.append(el(doc,'p','비교 가능한 복수 검수/반복 실행 대기 중','muted'));
+      return card;
+    }
+    const band=ord?.status!=='insufficient_pairs'?ord.band:nom.band;
+    const units=(nom?.pairableUnits||0)+(ord?.pairableUnits||0);
+    card.append(
+      el(doc,'p','Nominal α: '+formatAlphaMetric(nom)+' · Ordinal α: '+formatAlphaMetric(ord)),
+      el(doc,'p','합의 수준: '+band+' · 비교 단위 '+Math.max(nom?.pairableUnits||0,ord?.pairableUnits||0)+'건 (총 '+units+' 쌍)'),
+      el(doc,'p','H1 검수 α: '+formatAlphaMetric(agreement?.humanReviews?.nominal)+' · BLUE 반복실행 Ordinal α: '+formatAlphaMetric(agreement?.blueRuns?.ordinal),'muted')
+    );
+    return card;
+  }
+
+  function renderSelectiveTable(doc,curve){
+    const wrap=el(doc,'div',undefined,'arena-table-wrap');
+    const table=el(doc,'table',undefined,'arena-table');
+    const head=el(doc,'thead'),hr=el(doc,'tr');
+    for(const h of ['단계','건수','Coverage','정밀도(Acc)','위험(Risk)']){hr.append(el(doc,'th',h));}
+    head.append(hr);table.append(head);
+    const body=el(doc,'tbody');
+    for(const pt of curve){
+      const tr=el(doc,'tr');
+      tr.append(
+        el(doc,'td',pt.stage),
+        el(doc,'td',String(pt.count)),
+        el(doc,'td',formatPercentMetric(pt.coverage)),
+        el(doc,'td',formatPercentMetric(pt.accuracy)),
+        el(doc,'td',formatPercentMetric(pt.risk))
+      );
+      body.append(tr);
+    }
+    table.append(body);wrap.append(table);return wrap;
+  }
+
+  function renderSelectiveCard(doc,selective){
+    const card=el(doc,'article',undefined,'arena-card');
+    card.id='arena-selective-card';
+    card.append(el(doc,'h4','유보(확인필요) 선택적 예측 · Risk-Coverage'));
+    if(!selective||selective.status!=='ok'){
+      card.append(el(doc,'p','검수 완료된 BLUE 지적 데이터가 쌓이면 유보율(Abstention)과 AURC가 계산됩니다.','muted'));
+      return card;
+    }
+    card.append(
+      el(doc,'p','유보율(Abstention): '+formatPercentMetric(selective.abstentionRate)+' ('+selective.abstainedCount+'/'+selective.totalEvaluated+'건) · 확정 채택 정밀도(Selective Acc): '+formatPercentMetric(selective.selectiveAccuracy)),
+      el(doc,'p','전체 강제 채택 대비 정밀도 이득(Abstention Gain): '+formatGainMetric(selective.abstentionGain)+' · AURC: '+(typeof selective.aurc==='number'?selective.aurc.toFixed(4):'—')),
+      renderSelectiveTable(doc,selective.riskCoverageCurve||[])
+    );
+    return card;
+  }
+
+  function renderAcademicMetricsSection(doc,agreement,selective){
+    const grid=el(doc,'div',undefined,'arena-grid');
+    grid.id='arena-academic-metrics';
+    grid.append(renderAgreementCard(doc,agreement),renderSelectiveCard(doc,selective));
+    return grid;
+  }
+
+  function renderBriefsSection(doc,sb,statusEl,agreement,selective){
     const grid=el(doc,'div',undefined,'arena-grid');
     for(const role of ['blue','red']){
-      const brief=buildCoevolutionBrief({role,scoreboard:sb});
+      const brief=buildCoevolutionBrief({role,scoreboard:sb,agreement,selectivePrediction:selective});
       const card=el(doc,'article',undefined,'arena-card');
       card.append(el(doc,'h4',brief.title),el(doc,'pre',brief.instructionsText,'arena-brief-preview'));
       const btn=el(doc,'button',role==='blue'?'BLUE Harness 보강 초안 열기 (C1)':'RED Harness 고도화 초안 열기 (C1)','button secondary');
@@ -844,6 +1374,8 @@
     csvBtn.id='arena-export-csv';csvBtn.type='button';
     const jsonBtn=el(doc,'button','RED 정답지 JSON 저장','button secondary');
     jsonBtn.id='arena-export-red-json';jsonBtn.type='button';
+    const metricsBtn=el(doc,'button','학술 지표 JSON 저장','button secondary');
+    metricsBtn.id='arena-export-metrics-json';metricsBtn.type='button';
     csvBtn.addEventListener('click',()=>{
       const {data,conditions,meta,statusEl}=getState();
       const csv=exportBlueScoreCsv({...data,conditionOverrides:conditions,meta});
@@ -858,7 +1390,17 @@
       downloadBlob(doc,JSON.stringify(payload,null,2),'application/json','falsify-red-answer-key.json');
       statusEl.textContent='RED 정답지 JSON을 내보냈습니다 ('+payload.entries.length+'건 · '+payload.gold_version+').';
     });
-    actions.append(csvBtn,jsonBtn);
+    metricsBtn.addEventListener('click',()=>{
+      const {data,conditions,statusEl}=getState();
+      const scoreboard=computeDualScoreboard({...data,conditionOverrides:conditions});
+      const flips=computeRepeatRunFlips(data.runs,data.reviews);
+      const agreement=computeLedgerAgreement(data.runs,data.reviews);
+      const selectivePrediction=computeSelectivePrediction(data);
+      const payload={schema:'falsify.arena-academic-metrics.v1',scoreboard,flips,agreement,selectivePrediction};
+      downloadBlob(doc,JSON.stringify(payload,null,2),'application/json','falsify-arena-academic-metrics.json');
+      statusEl.textContent='학술 지표 JSON을 내보냈습니다.';
+    });
+    actions.append(csvBtn,jsonBtn,metricsBtn);
     return actions;
   }
 
@@ -879,6 +1421,8 @@
       conditions=loadConditions(root.localStorage);
       const sb=computeDualScoreboard({...latestData,conditionOverrides:conditions});
       const flips=computeRepeatRunFlips(latestData.runs,latestData.reviews);
+      const agreement=computeLedgerAgreement(latestData.runs,latestData.reviews);
+      const selective=computeSelectivePrediction(latestData);
       const bias=latestModelsForBias(latestData.runs);
       body.replaceChildren();
       if(bias.sameFamily){
@@ -887,11 +1431,12 @@
       body.append(
         renderScoreboardTable(doc,sb),
         renderBreakdownCards(doc,sb,flips),
+        renderAcademicMetricsSection(doc,agreement,selective),
         renderGoldV2Banner(doc,sb.goldV2Candidates),
         el(doc,'h3','실험 조건 태그 (P0 / P2 / Holdout)'),
         renderConditionTagger(doc,latestData.runs,conditions,(id,val)=>{conditions={...conditions,[id]:val};saveConditions(root.localStorage,conditions);refresh();}),
         el(doc,'h3','정답 미노출 상보 진화 지침 (C1 Harness 초안)'),
-        renderBriefsSection(doc,sb,statusEl)
+        renderBriefsSection(doc,sb,statusEl,agreement,selective)
       );
     }
 
@@ -931,6 +1476,9 @@
     computeDualScoreboard,
     detectModelFamilyBias,
     computeRepeatRunFlips,
+    computeKrippendorffAlpha,
+    computeLedgerAgreement,
+    computeSelectivePrediction,
     exportBlueScoreCsv,
     exportRedAnswerKeyJson,
     buildCoevolutionBrief,
