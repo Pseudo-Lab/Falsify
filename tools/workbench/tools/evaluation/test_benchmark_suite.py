@@ -1,12 +1,15 @@
 """Unittest suite for the synthetic benchmark corpus and regression gate."""
 from __future__ import annotations
 
+import importlib.util
 import json
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import types
 import unittest
+from unittest.mock import patch
 
 EVAL_DIR = Path(__file__).resolve().parent
 REPO_ROOT = EVAL_DIR.parents[1]
@@ -18,22 +21,42 @@ import benchmark_suite as bench  # noqa: E402
 CLI_PATH = EVAL_DIR / 'benchmark_suite.py'
 PY_CCN_PATH = REPO_ROOT / 'tools' / 'quality' / 'python-functions.py'
 
-LAYER0_CASES = (
+V1_LAYER0_CASES = (
     'gold-w1-d1-stat-pvalue',
     'gold-w2-d2-uri-hijack',
     'gold-w3-d6-supplement-mismatch',
     'gold-w4-d41-figure-duplicate',
 )
-SEMANTIC_CASES = (
+V1_SEMANTIC_CASES = (
     'gold-w5-d3-overclaim',
     'gold-w5-s1-direction-inversion',
 )
-HOLDOUT_CASES = (
+V2_GOLD_CASES = (
+    'gold-w3-d1-rawdata-row-mismatch',
+    'gold-w1-d1-consort-attrition',
+    'gold-w3-d6-code-onesided-leak',
+    'gold-w3-d6-coordinated-l3-stealth',
+)
+V1_HOLDOUT_CASES = (
     'holdout-benign-multivariable-aor',
     'holdout-benign-fdr-padj',
     'holdout-benign-left-truncated-km',
     'holdout-benign-consistent-trial',
 )
+V2_HOLDOUT_CASES = (
+    'holdout-benign-rawdata-na-exclusion',
+    'holdout-benign-consort-multiselect',
+    'holdout-benign-clean-twosided-code',
+    'holdout-benign-exploratory-secondary',
+)
+SENSOR_LAYER0_CASES = V1_LAYER0_CASES + ('gold-w3-d1-rawdata-row-mismatch',)
+HOOK_LAYER0_CASES = SENSOR_LAYER0_CASES + (
+    'gold-w1-d1-consort-attrition',
+    'gold-w3-d6-code-onesided-leak',
+)
+SEMANTIC_CASES = V1_SEMANTIC_CASES + ('gold-w3-d6-coordinated-l3-stealth',)
+CASE_IDS = V1_LAYER0_CASES + V1_SEMANTIC_CASES + V2_GOLD_CASES + V1_HOLDOUT_CASES + V2_HOLDOUT_CASES
+HOLDOUT_CASES = V1_HOLDOUT_CASES + V2_HOLDOUT_CASES
 
 
 def _semantic_runner(case):
@@ -63,6 +86,61 @@ def _naive_runner(case):
     }
 
 
+def _wave9_sensors_available() -> bool:
+    bench._ensure_local()
+    flow = importlib.util.find_spec('paper_flow_and_spin_triage')
+    code = importlib.util.find_spec('paper_code_audit')
+    return flow is not None and code is not None
+
+
+def _gold_excerpt(case_id) -> str:
+    cached = getattr(_gold_excerpt, 'cache', None)
+    if cached is None:
+        cached = {
+            case['caseId']: case['goldLedger']['defects'][0]['excerpt']
+            for case in bench.build_benchmark_corpus()
+            if case['goldLedger']['defects']
+        }
+        _gold_excerpt.cache = cached
+    return cached[case_id]
+
+
+def _flow_stub_audit(pages):
+    excerpt = _gold_excerpt('gold-w1-d1-consort-attrition')
+    blob = '\n'.join(str(page) for page in pages)
+    signals = []
+    if excerpt in blob:
+        signals.append({'id': 'flow-consort', 'family': 'D1', 'pageIndex': 0, 'excerpt': excerpt})
+    return {
+        'signals': signals,
+        'triageHints': [{
+            'id': 'hint-1',
+            'family': 'D1',
+            'pageIndex': 0,
+            'excerpt': 'triage hint should not score as a defect',
+            'decision': 'defect',
+        }],
+    }
+
+
+def _code_stub_audit(pages, supplements):
+    excerpt = _gold_excerpt('gold-w3-d6-code-onesided-leak')
+    blob = '\n'.join(str(page) for page in pages)
+    code = '\n'.join(str(item.get('text') or '') for item in supplements)
+    signals = []
+    if excerpt in blob and 'alternative="greater"' in code:
+        signals.append({'id': 'code-onesided', 'family': 'D6', 'pageIndex': 0, 'excerpt': excerpt})
+    return {'signals': signals}
+
+
+def _stub_modules():
+    flow = types.ModuleType('paper_flow_and_spin_triage')
+    flow.audit_flow_and_spin_triage = _flow_stub_audit
+    code = types.ModuleType('paper_code_audit')
+    code.audit_code_supplements = _code_stub_audit
+    return {'paper_flow_and_spin_triage': flow, 'paper_code_audit': code}
+
+
 def _report_shell(recall, pure_fp, aurc=0.0):
     return {
         'goldSummary': {'recall': recall, 'selective': {'aurc': aurc}},
@@ -71,14 +149,14 @@ def _report_shell(recall, pure_fp, aurc=0.0):
 
 
 class CorpusTests(unittest.TestCase):
-    def test_corpus_has_six_gold_and_four_holdout_cases(self):
+    def test_corpus_has_ten_gold_and_eight_holdout_cases(self):
         corpus = bench.build_benchmark_corpus()
         ids = [case['caseId'] for case in corpus]
-        self.assertEqual(ids, list(LAYER0_CASES + SEMANTIC_CASES + HOLDOUT_CASES))
+        self.assertEqual(ids, list(CASE_IDS))
         gold = [case for case in corpus if not case['isHoldout']]
         holdout = [case for case in corpus if case['isHoldout']]
-        self.assertEqual(len(gold), 6)
-        self.assertEqual(len(holdout), 4)
+        self.assertEqual(len(gold), 10)
+        self.assertEqual(len(holdout), 8)
         for case in gold:
             self.assertEqual(case['goldLedger']['schema'], bench.GOLD_SCHEMA)
             self.assertGreater(len(case['goldLedger']['defects']), 0)
@@ -91,11 +169,11 @@ class SensorBenchmarkTests(unittest.TestCase):
     def test_sensor_mode_layer0_recall_and_clean_holdout(self):
         report = bench.run_benchmark_suite(mode='sensor')
         self.assertEqual(report['schema'], bench.SCHEMA)
+        self.assertEqual(report['corpusVersion'], 'v2')
         gold = report['goldSummary']
         holdout = report['holdoutSummary']
-        self.assertEqual(gold['caseCount'], 6)
-        self.assertEqual(holdout['caseCount'], 4)
-        self.assertEqual(gold['layer0Recall'], 1.0)
+        self.assertEqual(gold['caseCount'], 10)
+        self.assertEqual(holdout['caseCount'], 8)
         self.assertEqual(gold['semanticRecall'], 0.0)
         self.assertEqual(holdout['totalPureFp'], 0)
         self.assertEqual(holdout['pureFpRatePerPaper'], 0.0)
@@ -105,7 +183,7 @@ class SensorBenchmarkTests(unittest.TestCase):
         self.assertIn('overallAccuracy', gold['selective'])
         self.assertEqual(gold['stealthYield'], 1.0)
         by_id = {row['caseId']: row for row in report['caseResults']}
-        for case_id in LAYER0_CASES:
+        for case_id in SENSOR_LAYER0_CASES:
             self.assertEqual(by_id[case_id]['fn'], 0)
             self.assertGreater(by_id[case_id]['tp'], 0)
         for case_id in SEMANTIC_CASES:
@@ -113,6 +191,47 @@ class SensorBenchmarkTests(unittest.TestCase):
             self.assertGreater(by_id[case_id]['fn'], 0)
         for case_id in HOLDOUT_CASES:
             self.assertEqual(by_id[case_id]['pureFp'], 0)
+
+    def test_rawdata_sentence_flags_summary_and_p_value(self):
+        bench._ensure_local()
+        import paper_raw_dataset_audit as audit
+
+        case = next(
+            item for item in bench.build_benchmark_corpus()
+            if item['caseId'] == 'gold-w3-d1-rawdata-row-mismatch'
+        )
+        pages = [
+            {'pageIndex': index, 'text': text}
+            for index, text in enumerate(bench._pdf_page_texts(case['blindPdfBytes']))
+        ]
+        audited = audit.audit_raw_datasets(pages, case['supplements'])
+        kinds = {signal['kind'] for signal in audited['signals']}
+        excerpt = case['goldLedger']['defects'][0]['excerpt']
+        self.assertIn('raw_dataset_summary_mismatch', kinds)
+        self.assertIn('raw_dataset_p_mismatch', kinds)
+        self.assertGreaterEqual(audited['signalCount'], 1)
+        self.assertTrue(all(signal['excerpt'] == excerpt for signal in audited['signals']))
+
+    def test_merged_wave9_sensors_lift_layer0_recall(self):
+        if not _wave9_sensors_available():
+            return
+        report = bench.run_benchmark_suite(mode='sensor')
+        self.assertEqual(report['goldSummary']['layer0Recall'], 1.0)
+        by_id = {row['caseId']: row for row in report['caseResults']}
+        for case_id in HOOK_LAYER0_CASES:
+            self.assertEqual(by_id[case_id]['fn'], 0)
+            self.assertGreater(by_id[case_id]['tp'], 0)
+
+    def test_dynamic_hooks_ignore_triage_hints(self):
+        with patch.dict(sys.modules, _stub_modules()):
+            report = bench.run_benchmark_suite(mode='sensor')
+        gold = report['goldSummary']
+        self.assertEqual(gold['layer0Recall'], 1.0)
+        self.assertEqual(report['holdoutSummary']['totalPureFp'], 0)
+        self.assertEqual(gold['selective']['tier1Precision'], 1.0)
+        by_id = {row['caseId']: row for row in report['caseResults']}
+        for case_id in HOOK_LAYER0_CASES:
+            self.assertEqual(by_id[case_id]['fn'], 0)
 
 
 class AgentRunnerTests(unittest.TestCase):

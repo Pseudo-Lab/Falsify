@@ -1,5 +1,6 @@
 """Supplement bundle loading and opt-in P2 external oracle payloads for paper_mcp."""
 import hashlib
+import inspect
 import io
 import json
 from pathlib import Path
@@ -7,6 +8,7 @@ import xml.etree.ElementTree as ET
 import zipfile
 
 import paper_blue_sensor
+import paper_code_audit
 from paper_clinical_trials import (
     COMPARISON_FRAMING,
     compare_paper_with_registry,
@@ -316,6 +318,8 @@ def _compact_sensor_digest(res):
     }
     if res.get("figureForensics") is not None:
         digest["figureForensics"] = res["figureForensics"]
+    if res.get("flowAndSpinTriage") is not None:
+        digest["flowAndSpinTriage"] = res["flowAndSpinTriage"]
     return digest
 
 
@@ -364,6 +368,33 @@ def _read_table_items(store, paper_id):
     return tables
 
 
+def _bundle_name(item):
+    for key in ("name", "fileName", "filename"):
+        value = item.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip().lower()
+    return ""
+
+
+def _tabular_name(item):
+    name = _bundle_name(item)
+    return name.endswith(".csv") or name.endswith(".tsv")
+
+
+def _code_bundle_items(bundle, supplement_id):
+    items = _filter_bundle(bundle, supplement_id)
+    if supplement_id is None:
+        return items
+    selected = {id(item) for item in items}
+    extras = []
+    for item in list(bundle or []):
+        if id(item) in selected or not isinstance(item, dict):
+            continue
+        if _tabular_name(item):
+            extras.append(item)
+    return items + extras
+
+
 def _filter_bundle(bundle, supplement_id):
     items = list(bundle or [])
     if supplement_id is None:
@@ -406,19 +437,49 @@ def recompute_raw_supplement_payload(store, paper_id, file_hash, bundle, supplem
     return out
 
 
-def run_blue_sensor_payload(store, paper_id, file_hash, max_signals=50, digest_only=False, include_figure_forensics=False):
+def _sensor_call(file_hash, max_signals, store, include_figure_forensics, include_flow_triage):
+    kwargs = {
+        "file_hash": file_hash,
+        "max_signals": max_signals,
+        "include_external_oracle": False,
+        "store": store,
+        "include_figure_forensics": include_figure_forensics,
+    }
+    accepted = inspect.signature(paper_blue_sensor.run_blue_sensor).parameters
+    if "include_flow_triage" in accepted:
+        kwargs["include_flow_triage"] = include_flow_triage
+    return kwargs
+
+
+def audit_code_supplements_payload(store, paper_id, file_hash, bundle, supplement_id=None, max_signals=30):
+    """Audit static code supplements against the bound PDF. Never executes supplement code."""
+    if type(max_signals) is not int or not 1 <= max_signals <= MAX_SIGNALS_LIMIT:
+        raise ValueError("limit")
+    items = _code_bundle_items(bundle, supplement_id)
+    bound_id, actual_hash, summary, raw = _require_bound_pdf(paper_id, store)
+    require_summary(summary, paper_id=bound_id, file_hash=file_hash)
+    page_items = _read_pdf_page_items(raw, MAX_PDF_SUPP_PAGES)
+    out = paper_code_audit.audit_code_supplements(page_items, items, max_signals=max_signals)
+    out["paperId"] = bound_id
+    out["fileHash"] = actual_hash
+    _assert_no_red_keys(out)
+    return out
+
+
+def run_blue_sensor_payload(
+    store, paper_id, file_hash, max_signals=50, digest_only=False,
+    include_figure_forensics=False, include_flow_triage=False,
+):
     """Run offline Layer 0 BLUE PDF forensic sensor and optionally compact to digestOnly."""
     if type(digest_only) is not bool:
         raise ValueError("digest_only")
     if type(include_figure_forensics) is not bool:
         raise ValueError("include_figure_forensics")
+    if type(include_flow_triage) is not bool:
+        raise ValueError("include_flow_triage")
     res = paper_blue_sensor.run_blue_sensor(
         paper_id,
-        file_hash=file_hash,
-        max_signals=max_signals,
-        include_external_oracle=False,
-        store=store,
-        include_figure_forensics=include_figure_forensics,
+        **_sensor_call(file_hash, max_signals, store, include_figure_forensics, include_flow_triage),
     )
     return _compact_sensor_digest(res) if digest_only else res
 

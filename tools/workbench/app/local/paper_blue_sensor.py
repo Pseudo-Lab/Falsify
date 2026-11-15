@@ -44,6 +44,7 @@ from paper_external_grounding import (
     verify_bibliography,
 )
 from paper_figure_forensics import audit_figure_forensics
+from paper_flow_and_spin_triage import audit_flow_and_spin_triage
 from paper_registry_identifiers import (
     audit_identifiers_offline,
     verify_identifiers_online,
@@ -896,6 +897,68 @@ def _figure_forensics(paper_id, actual_hash, max_signals, store):
     return signals, summary
 
 
+def _validate_sensor_args(max_signals, include_external_oracle, include_figure_forensics, include_flow_triage):
+    if isinstance(max_signals, bool) or type(max_signals) is not int or not 1 <= max_signals <= 100:
+        raise ValueError("limit")
+    if type(include_external_oracle) is not bool:
+        raise ValueError("include_external_oracle")
+    if type(include_figure_forensics) is not bool:
+        raise ValueError("include_figure_forensics")
+    if type(include_flow_triage) is not bool:
+        raise ValueError("include_flow_triage")
+
+
+def _read_bound_tables(store, paper_id):
+    items, offset = [], 0
+    for _ in range(64):
+        page = store.list_items(paper_id, kind="table", offset=offset, limit=50)
+        batch = page.get("items") or []
+        for meta in batch:
+            if isinstance(meta, dict) and meta.get("id"):
+                items.append(store.read_item(paper_id, meta["id"]))
+        nxt = page.get("nextOffset")
+        if nxt is None or not batch or type(nxt) is not int or nxt <= offset:
+            break
+        offset = nxt
+    return items
+
+
+def _bound_flow_tables(store, paper_id):
+    if store is None or not hasattr(store, "list_items") or not hasattr(store, "read_item"):
+        return []
+    try:
+        return _read_bound_tables(store, paper_id)
+    except Exception:
+        return []
+
+
+def _flow_signal_from_triage(sig):
+    return _signal(
+        sig["family"], sig["kind"], sig.get("subtype") or sig["kind"],
+        sig.get("pageIndex", 0), sig.get("excerpt", ""), sig.get("detail", ""),
+        sig.get("reported"), sig.get("computed"), item_id=sig.get("itemId"),
+    )
+
+
+def _flow_triage_pack(page_texts, max_signals, store, paper_id):
+    triage_res = audit_flow_and_spin_triage(
+        page_texts, table_items=_bound_flow_tables(store, paper_id), max_signals=max_signals,
+    )
+    flow_sigs = [_flow_signal_from_triage(sig) for sig in triage_res.get("signals", [])]
+    summary = {
+        "enabled": True,
+        "signalCount": triage_res["signalCount"],
+        "hintCount": triage_res["hintCount"],
+        "triageHints": triage_res["triageHints"],
+    }
+    return flow_sigs, summary
+
+
+def _attach_named(result, key, summary):
+    if summary is not None:
+        result[key] = summary
+
+
 def run_blue_sensor(
     paper_id,
     file_hash=None,
@@ -907,14 +970,12 @@ def run_blue_sensor(
     trial_transport=None,
     identifier_transport=None,
     include_figure_forensics=False,
+    include_flow_triage=False,
 ):
     """Run BLUE Layer 0 offline PDF forensic sensor (and opt-in P2 oracle pack)."""
-    if isinstance(max_signals, bool) or type(max_signals) is not int or not 1 <= max_signals <= 100:
-        raise ValueError("limit")
-    if type(include_external_oracle) is not bool:
-        raise ValueError("include_external_oracle")
-    if type(include_figure_forensics) is not bool:
-        raise ValueError("include_figure_forensics")
+    _validate_sensor_args(
+        max_signals, include_external_oracle, include_figure_forensics, include_flow_triage,
+    )
     store = _default_store() if store is None else store
     paper_id, actual_hash, summary, raw = _require_bound_pdf(paper_id, store)
     require_summary(summary, paper_id=paper_id, file_hash=file_hash)
@@ -946,9 +1007,13 @@ def run_blue_sensor(
         _figure_forensics(paper_id, actual_hash, max_signals, store)
         if include_figure_forensics else ([], None)
     )
+    flow_sigs, flow_summary = (
+        _flow_triage_pack(page_texts, max_signals, store, paper_id)
+        if include_flow_triage else ([], None)
+    )
     all_signals = (
         link_sigs + shared_sigs + dup_sigs + cite_sigs + mal_sigs
-        + id_offline_sigs + acro_sigs + oracle_sigs + d1_sigs + fig_sigs
+        + id_offline_sigs + acro_sigs + oracle_sigs + d1_sigs + fig_sigs + flow_sigs
     )
     capped, truncated = _dedupe_and_number(all_signals, max_signals)
     result = {
@@ -970,7 +1035,7 @@ def run_blue_sensor(
         },
         "oraclePack": oracle_pack,
     }
-    if fig_summary is not None:
-        result["figureForensics"] = fig_summary
+    _attach_named(result, "figureForensics", fig_summary)
+    _attach_named(result, "flowAndSpinTriage", flow_summary)
     _assert_no_red_keys(result)
     return result

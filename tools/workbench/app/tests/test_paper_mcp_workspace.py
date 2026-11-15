@@ -32,7 +32,11 @@ ORIGINAL_TOOLS = {
     "status", "list_items", "read_item", "render_region", "read_page_text",
     "search_text", "list_references", "audit_statistics", "run_blue_sensor", "audit_figures",
 }
-WORKSPACE_TOOLS = {"list_papers", "select_paper"}
+WORKSPACE_TOOLS = {
+    "list_papers", "select_paper", "triage_workspace",
+    "list_supplements", "read_supplement", "audit_supplements", "recompute_raw_supplement",
+    "audit_code_supplements",
+}
 DRIVE = re.compile(r"[A-Za-z]:[\\/]")
 SECRET = "SECRET_ANSWER_KEY_BYTES"
 
@@ -51,6 +55,23 @@ def make_pdf(*page_texts):
 
 def tool_map(server):
     return server._tool_manager._tools
+
+
+@contextlib.contextmanager
+def track_masked_reads():
+    """Fail if a masked file or a file inside a masked directory is read."""
+    original = Path.read_bytes
+
+    def tracking(self, *args, **kwargs):
+        if paper_mcp_workspace.is_masked_name(self.name) or paper_mcp_workspace.is_masked_name(self.parent.name):
+            raise AssertionError("masked path read: " + self.name)
+        return original(self, *args, **kwargs)
+
+    Path.read_bytes = tracking
+    try:
+        yield
+    finally:
+        Path.read_bytes = original
 
 
 def link_directory(target, link):
@@ -228,6 +249,12 @@ class ScanTests(unittest.TestCase):
         selected = tools["select_paper"].fn("ws-0000000000000000")
         self.assertTrue(selected.isError)
         self.assertEqual(selected.structuredContent["error"], "paper_evidence_unknown_id")
+        early = tools["list_supplements"].fn("anything")
+        self.assertTrue(early.isError)
+        self.assertEqual(early.structuredContent, {"error": "workspace_no_selection"})
+        rejected = tools["triage_workspace"].fn(0)
+        self.assertTrue(rejected.isError)
+        self.assertEqual(rejected.structuredContent["error"], "limit")
 
 
 class StdioWorkspaceTests(unittest.TestCase):
@@ -406,6 +433,220 @@ class CliTests(unittest.TestCase):
         text = stdout.getvalue()
         self.assertIn("--pdf", text)
         self.assertIn("--workspace", text)
+
+
+class SupplementPairingTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+
+    def write(self, name, payload):
+        path = self.root / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(payload)
+        return path
+
+    def test_pairs_same_directory_and_companion_files_only(self):
+        self.write("alpha.pdf", make_pdf("ALPHA"))
+        self.write("alpha_cohort.csv", b"patient_id\n1\n")
+        self.write("ALPHA_NOTE.CSV", b"note\n1\n")
+        self.write("alpha-analysis.py", b"print(1)\n")
+        self.write("notes.txt", b"plain notes")
+        self.write("alpha_extra.pdf", make_pdf("OTHER"))
+        self.write("beta.pdf", make_pdf("BETA"))
+        self.write("alpha/zeta.csv", b"id\n1\n")
+        self.write("alpha_supplements/note.md", b"note")
+        self.write("alpha-supplements/mid.txt", b"mid")
+        scanned = paper_mcp_workspace.scan_workspace(self.root)
+        text = json.dumps(scanned)
+        self.assertIsNone(DRIVE.search(text), text)
+        self.assertNotIn(str(self.root), text)
+        by_name = {item["name"]: item for item in scanned["papers"]}
+        paired = by_name["alpha.pdf"]["pairedSupplementNames"]
+        self.assertEqual(by_name["alpha.pdf"]["pairedSupplementCount"], len(paired))
+        self.assertEqual(paired, ["alpha-analysis.py", "alpha_cohort.csv", "ALPHA_NOTE.CSV", "mid.txt", "note.md", "zeta.csv"])
+        self.assertNotIn("notes.txt", paired)
+        self.assertNotIn("alpha_extra.pdf", paired)
+        self.assertNotIn("pairedSupplementCount", by_name["beta.pdf"])
+        self.assertNotIn("reason", by_name["alpha.pdf"])
+
+    def test_masked_and_forbidden_supplements_are_skipped(self):
+        secret = SECRET.encode()
+        self.write("alpha.pdf", make_pdf("ALPHA"))
+        self.write("alpha_ok.csv", b"a,b\n1,2\n")
+        self.write("alpha_gold_ledger.json", secret)
+        self.write("alpha_meta.json", json.dumps({"gold": SECRET}).encode())
+        self.write("solution/alpha.csv", secret)
+        self.write("notes.txt", b"plain notes")
+        self.write("alpha/gold.csv", secret)
+        self.write("alpha/ok.csv", b"id\n1\n")
+        with track_masked_reads():
+            scanned = paper_mcp_workspace.scan_workspace(self.root)
+        text = json.dumps(scanned)
+        self.assertNotIn(SECRET, text)
+        self.assertIsNone(DRIVE.search(text), text)
+        self.assertNotIn(str(self.root), text)
+        plain = next(item for item in scanned["papers"] if item["name"] == "alpha.pdf")
+        self.assertEqual(plain["pairedSupplementNames"], ["alpha_ok.csv", "ok.csv"])
+        self.assertTrue(all(item["masked"] for item in scanned["papers"] if "gold" in item["name"]))
+
+    def test_pairing_stops_at_twelve_files(self):
+        self.write("alpha.pdf", make_pdf("ALPHA"))
+        for index in range(13):
+            self.write(f"alpha_{index:02d}.csv", f"a\n{index}\n".encode())
+        plain = next(item for item in paper_mcp_workspace.scan_workspace(self.root)["papers"] if item["name"] == "alpha.pdf")
+        self.assertEqual(plain["pairedSupplementCount"], 12)
+        self.assertNotIn("alpha_12.csv", plain["pairedSupplementNames"])
+        self.assertIn("alpha_00.csv", plain["pairedSupplementNames"])
+
+    def test_companion_directory_links_outside_the_root_are_not_paired(self):
+        outside = Path(self.tmp.name + "-outside")
+        outside.mkdir()
+        self.addCleanup(lambda: __import__("shutil").rmtree(outside, ignore_errors=True))
+        (outside / "secret.csv").write_bytes(SECRET.encode())
+        self.write("alpha.pdf", make_pdf("ALPHA"))
+        if not link_directory(outside, self.root / "alpha_supplements"):
+            self.skipTest("this host cannot create a directory link to test the escape guard")
+        read_names = []
+        original = Path.read_bytes
+
+        def tracking(self, *args, **kwargs):
+            read_names.append(self.name)
+            return original(self, *args, **kwargs)
+
+        Path.read_bytes = tracking
+        try:
+            scanned = paper_mcp_workspace.scan_workspace(self.root)
+        finally:
+            Path.read_bytes = original
+        text = json.dumps(scanned)
+        self.assertNotIn(SECRET, text)
+        self.assertNotIn("secret.csv", text)
+        self.assertNotIn("secret.csv", read_names)
+        plain = next(item for item in scanned["papers"] if item["name"] == "alpha.pdf")
+        self.assertNotIn("pairedSupplementCount", plain)
+
+    def test_session_supplements_dedupe_and_cap(self):
+        first = {"name": "a.csv", "sha256": "a" * 64, "supplementId": "supp-9", "text": "one"}
+        same = {"name": "a.csv", "sha256": "a" * 64, "supplementId": "supp-1", "text": "one"}
+        second = {"name": "b.csv", "sha256": "b" * 64, "supplementId": "supp-1", "text": "two"}
+        extras = [{"name": f"n{index}.csv", "sha256": f"{index:064x}", "supplementId": "supp-1", "text": "x"} for index in range(13)]
+        session = paper_mcp_workspace.WorkspaceSession(ExplodingStore(), self.root, startup_supplements=(first,))
+        session.paired_supplements = (same, second)
+        merged = session.supplements
+        self.assertEqual([item["name"] for item in merged], ["a.csv", "b.csv"])
+        self.assertEqual([item["supplementId"] for item in merged], ["supp-1", "supp-2"])
+        self.assertFalse(session.store.called)
+        capped = paper_mcp_workspace.WorkspaceSession(ExplodingStore(), self.root, startup_supplements=tuple(extras))
+        self.assertEqual(len(capped.supplements), 12)
+        self.assertEqual(capped.supplements[-1]["supplementId"], "supp-12")
+
+    def test_triage_rejects_invalid_limits_before_opening_files(self):
+        with self.assertRaises(ValueError) as limit:
+            paper_mcp_workspace.triage_workspace(self.root, max_signals_per_paper=True)
+        self.assertEqual(str(limit.exception), "limit")
+        with self.assertRaises(ValueError) as high:
+            paper_mcp_workspace.triage_workspace(self.root, max_signals_per_paper=101)
+        self.assertEqual(str(high.exception), "limit")
+        with self.assertRaises(ValueError) as flag:
+            paper_mcp_workspace.triage_workspace(self.root, include_figure_forensics=1)
+        self.assertEqual(str(flag.exception), "include_figure_forensics")
+        with self.assertRaises(ValueError) as raw:
+            paper_mcp_workspace.triage_workspace(self.root, recompute_raw="yes")
+        self.assertEqual(str(raw.exception), "recompute_raw")
+        with self.assertRaises(ValueError) as papers:
+            paper_mcp_workspace.triage_workspace(self.root, max_papers=0)
+        self.assertEqual(str(papers.exception), "workspace_invalid")
+
+
+class SelectionSwitchTests(unittest.TestCase):
+    def test_select_paper_switches_supplements_and_recompute(self):
+        import paper_evidence
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "alpha.pdf").write_bytes(make_pdf("ALPHA cohort"))
+            (root / "alpha_cohort.csv").write_bytes(b"patient_id,value\n1,2\n3,4\n")
+            (root / "beta.pdf").write_bytes(make_pdf("BETA only"))
+            (root / "notes.txt").write_bytes(b"plain notes")
+            session = paper_mcp_workspace.WorkspaceSession(paper_evidence.EvidenceStore(max_documents=4), root)
+            tools = tool_map(paper_mcp.build_workspace_server(session))
+            listed = tools["list_papers"].fn()
+            self.assertFalse(listed.isError)
+            payload = json.dumps(listed.structuredContent)
+            self.assertIsNone(DRIVE.search(payload), payload)
+            self.assertNotIn(str(root), payload)
+            by_name = {item["name"]: item for item in listed.structuredContent["papers"]}
+            self.assertEqual(by_name["alpha.pdf"]["pairedSupplementNames"], ["alpha_cohort.csv"])
+            self.assertNotIn("pairedSupplementCount", by_name["beta.pdf"])
+            early = tools["recompute_raw_supplement"].fn("anything")
+            self.assertEqual(early.structuredContent, {"error": "workspace_no_selection"})
+
+            selected = tools["select_paper"].fn(by_name["alpha.pdf"]["paperId"])
+            self.assertFalse(selected.isError, selected.structuredContent)
+            self.assertEqual(set(selected.structuredContent), {"paperId", "fileHash", "name", "pageCount"})
+            alpha_id = selected.structuredContent["paperId"]
+            supplements = tools["list_supplements"].fn(alpha_id)
+            self.assertFalse(supplements.isError, supplements.structuredContent)
+            self.assertEqual([item["name"] for item in supplements.structuredContent["supplements"]], ["alpha_cohort.csv"])
+            recomputed = tools["recompute_raw_supplement"].fn(alpha_id)
+            self.assertFalse(recomputed.isError, recomputed.structuredContent)
+            self.assertNotIn(str(root), json.dumps(recomputed.structuredContent))
+
+            moved = tools["select_paper"].fn(by_name["beta.pdf"]["paperId"])
+            self.assertFalse(moved.isError, moved.structuredContent)
+            beta_id = moved.structuredContent["paperId"]
+            beta_list = tools["list_supplements"].fn(beta_id)
+            self.assertFalse(beta_list.isError, beta_list.structuredContent)
+            self.assertEqual(beta_list.structuredContent["supplementCount"], 0)
+            beta_raw = tools["recompute_raw_supplement"].fn(beta_id)
+            self.assertFalse(beta_raw.isError, beta_raw.structuredContent)
+            beta_text = json.dumps(beta_raw.structuredContent)
+            self.assertNotIn("alpha_cohort.csv", beta_text)
+            self.assertNotIn(str(root), beta_text)
+
+            restored = tools["select_paper"].fn(by_name["alpha.pdf"]["paperId"])
+            self.assertFalse(restored.isError)
+            back = tools["list_supplements"].fn(restored.structuredContent["paperId"])
+            self.assertEqual([item["name"] for item in back.structuredContent["supplements"]], ["alpha_cohort.csv"])
+
+
+class TriageTests(unittest.TestCase):
+    def test_triage_ranks_defective_pdf_above_clean_pdf(self):
+        import paper_evidence
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "bad.pdf").write_bytes(make_pdf(
+                "Cohort N = 240 patients. Table S1 reports AUC = 0.94. See Table S4."))
+            (root / "bad_Table_S1.csv").write_bytes(b"Model,AUC\nMain,0.81\n")
+            (root / "clean.pdf").write_bytes(make_pdf("The apparatus was calibrated before use."))
+            (root / "answer_key.pdf").write_bytes(make_pdf("ANSWER KEY CONTENT"))
+            (root / "bad_gold_ledger.json").write_bytes(json.dumps({"secret": SECRET}).encode())
+            (root / "bad_meta.json").write_bytes(json.dumps({"gold": SECRET}).encode())
+            (root / "notes.txt").write_bytes(b"plain notes do not pair")
+            with track_masked_reads():
+                result = paper_mcp_workspace.triage_workspace(
+                    root, max_signals_per_paper=25, include_figure_forensics=False, recompute_raw=True,
+                    store=paper_evidence.EvidenceStore(max_documents=4))
+            text = json.dumps(result)
+            self.assertEqual(result["schema"], paper_mcp_workspace.TRIAGE_SCHEMA)
+            self.assertEqual(result["paperCount"], 4)
+            self.assertEqual(result["maskedCount"], 2)
+            self.assertIsNone(DRIVE.search(text), text)
+            self.assertNotIn(str(root), text)
+            self.assertNotIn(SECRET, text)
+            self.assertNotIn("answer_key.pdf", text)
+            self.assertNotIn("bad_gold_ledger.json", text)
+            self.assertNotIn("bad_meta.json", text)
+            self.assertNotIn("notes.txt", text)
+            ranked = {item["name"]: item for item in result["rankedPapers"]}
+            self.assertEqual(set(ranked), {"bad.pdf", "clean.pdf"})
+            self.assertGreater(ranked["bad.pdf"]["totalSignals"], ranked["clean.pdf"]["totalSignals"], result)
+            self.assertGreater(ranked["bad.pdf"]["priorityScore"], ranked["clean.pdf"]["priorityScore"])
+            self.assertEqual(ranked["bad.pdf"]["pairedSupplementCount"], 1)
+            self.assertEqual(ranked["clean.pdf"]["pairedSupplementCount"], 0)
+            self.assertEqual(result["rankedPapers"][0]["name"], "bad.pdf")
+            self.assertIn("D1", ranked["bad.pdf"]["byFamily"])
 
 
 class SourceContractTests(unittest.TestCase):

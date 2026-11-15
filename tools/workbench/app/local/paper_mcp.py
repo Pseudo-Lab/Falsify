@@ -166,6 +166,22 @@ def _image_result(payload):
     return _ok({k: v for k, v in payload.items() if k != "data"}, (data, mime))
 
 
+def _invoke_blue_sensor(store, paper_id, file_hash, max_signals, digest_only, include_figure_forensics, include_flow_triage):
+    import inspect
+    from paper_mcp_bundle import run_blue_sensor_payload
+    params = inspect.signature(run_blue_sensor_payload).parameters
+    kwargs = {
+        "max_signals": max_signals,
+        "digest_only": digest_only,
+        "include_figure_forensics": include_figure_forensics,
+    }
+    if "include_flow_triage" in params:
+        kwargs["include_flow_triage"] = include_flow_triage
+    elif type(include_flow_triage) is not bool:
+        raise ValueError("include_flow_triage")
+    return run_blue_sensor_payload(store, paper_id, file_hash, **kwargs)
+
+
 def _register_core_tools(server, store, binding):
     @server.tool(annotations=_READONLY)
     def status(paperId: str) -> CallToolResult:
@@ -220,10 +236,9 @@ def _register_core_tools(server, store, binding):
         return result if isinstance(result, CallToolResult) else _ok(result)
 
     @server.tool(annotations=_READONLY)
-    def run_blue_sensor(paperId: str, maxSignals: int = 50, digestOnly: bool = False, includeFigureForensics: bool = False) -> CallToolResult:
+    def run_blue_sensor(paperId: str, maxSignals: int = 50, digestOnly: bool = False, includeFigureForensics: bool = False, includeFlowTriage: bool = False) -> CallToolResult:
         """Run deterministic Layer 0 offline PDF forensic sensor checks on the startup PDF. Read-only."""
-        from paper_mcp_bundle import run_blue_sensor_payload
-        result = _guard_bound(binding, paperId, lambda: run_blue_sensor_payload(store, paperId, binding.file_hash, max_signals=maxSignals, digest_only=digestOnly, include_figure_forensics=includeFigureForensics))
+        result = _guard_bound(binding, paperId, lambda: _invoke_blue_sensor(store, paperId, binding.file_hash, maxSignals, digestOnly, includeFigureForensics, includeFlowTriage))
         return result if isinstance(result, CallToolResult) else _ok(result)
 
     @server.tool(annotations=_READONLY)
@@ -293,8 +308,16 @@ def _register_analysis_tools(server, store, binding):
         return result if isinstance(result, CallToolResult) else _ok(result)
 
 
+def _active_supplements(binding, supplements):
+    active = getattr(binding, "supplements", None)
+    if active is None:
+        return supplements
+    return active
+
+
 def _register_supplement_tools(server, store, binding, supplements):
     from paper_mcp_bundle import (
+        audit_code_supplements_payload,
         audit_supplements_payload,
         list_supplements_payload,
         read_supplement_payload,
@@ -303,26 +326,32 @@ def _register_supplement_tools(server, store, binding, supplements):
 
     @server.tool(annotations=_READONLY)
     def list_supplements(paperId: str) -> CallToolResult:
-        """List compact metadata for startup-attached supplement files. Read-only."""
-        result = _guard_bound(binding, paperId, lambda: list_supplements_payload(paperId, binding.file_hash, supplements))
+        """Read-only list of compact metadata for attached supplement files."""
+        result = _guard_bound(binding, paperId, lambda: list_supplements_payload(paperId, binding.file_hash, _active_supplements(binding, supplements)))
         return result if isinstance(result, CallToolResult) else _ok(result)
 
     @server.tool(annotations=_READONLY)
     def read_supplement(paperId: str, supplementId: str, offset: int = 0, limit: int = 8000) -> CallToolResult:
-        """Read a paginated text slice from one startup-attached supplement file. Read-only."""
-        result = _guard_bound(binding, paperId, lambda: read_supplement_payload(paperId, binding.file_hash, supplements, supplementId, offset=offset, limit=limit))
+        """Read-only paginated text slice from one attached supplement file."""
+        result = _guard_bound(binding, paperId, lambda: read_supplement_payload(paperId, binding.file_hash, _active_supplements(binding, supplements), supplementId, offset=offset, limit=limit))
         return result if isinstance(result, CallToolResult) else _ok(result)
 
     @server.tool(annotations=_READONLY)
     def audit_supplements(paperId: str, maxSignals: int = 50) -> CallToolResult:
-        """Run deterministic cross-document checks across the startup PDF and attached supplements. Read-only."""
-        result = _guard_bound(binding, paperId, lambda: audit_supplements_payload(store, paperId, binding.file_hash, supplements, max_signals=maxSignals))
+        """Read-only deterministic cross-document checks across the selected PDF and attached supplements."""
+        result = _guard_bound(binding, paperId, lambda: audit_supplements_payload(store, paperId, binding.file_hash, _active_supplements(binding, supplements), max_signals=maxSignals))
         return result if isinstance(result, CallToolResult) else _ok(result)
 
     @server.tool(annotations=_READONLY)
     def recompute_raw_supplement(paperId: str, supplementId: str | None = None, maxSignals: int = 50) -> CallToolResult:
-        """Recompute row-level statistics from one attached supplement against the startup PDF. Read-only."""
-        result = _guard_bound(binding, paperId, lambda: recompute_raw_supplement_payload(store, paperId, binding.file_hash, supplements, supplement_id=supplementId, max_signals=maxSignals))
+        """Read-only recomputation of row-level statistics from one attached supplement against the selected PDF."""
+        result = _guard_bound(binding, paperId, lambda: recompute_raw_supplement_payload(store, paperId, binding.file_hash, _active_supplements(binding, supplements), supplement_id=supplementId, max_signals=maxSignals))
+        return result if isinstance(result, CallToolResult) else _ok(result)
+
+    @server.tool(annotations=_READONLY)
+    def audit_code_supplements(paperId: str, supplementId: str | None = None, maxSignals: int = 30) -> CallToolResult:
+        """Read-only static AST and regex audit of attached analysis scripts against the selected PDF."""
+        result = _guard_bound(binding, paperId, lambda: audit_code_supplements_payload(store, paperId, binding.file_hash, _active_supplements(binding, supplements), supplement_id=supplementId, max_signals=maxSignals))
         return result if isinstance(result, CallToolResult) else _ok(result)
 
 
@@ -366,8 +395,10 @@ def build_workspace_server(session, enable_analysis=False, supplements=None, ena
     """FastMCP stdio app bound to one workspace scan. The selection is resolved per call."""
     from paper_mcp_workspace import register_workspace_tools
 
+    session.startup_supplements = tuple(supplements or ())
     server = FastMCP(name=SERVER_NAME, instructions=WORKSPACE_INSTRUCTIONS, log_level="ERROR")
-    _compose(server, session.store, session, enable_analysis, supplements, enable_oracle)
+    _compose(server, session.store, session, enable_analysis, None, enable_oracle)
+    _register_supplement_tools(server, session.store, session, supplements)
     return register_workspace_tools(server, session)
 
 

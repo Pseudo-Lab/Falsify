@@ -32,6 +32,8 @@ from paper_text_span_mutator import (
 )
 
 SCHEMA = "falsify.blue-report-validation.v1"
+REPAIR_PACK_SCHEMA = "falsify.blue-repair-pack.v1"
+MAX_REPAIR_PACK_BYTES = 16384
 _LEDGER_SCHEMAS = frozenset({
     "falsify.red-gold-ledger.v1",
     "falsify.coordinated-red-record.v1",
@@ -77,6 +79,31 @@ _VERDICT_ALIASES = {
 _WS_RE = re.compile(r"\s+")
 _FAMILY_SPLIT_RE = re.compile(r"[\s:/(]")
 _SOFT_HYPHEN = "\u00ad"
+_TYPO_REPL = {
+    "\ufb00": "ff", "\ufb01": "fi", "\ufb02": "fl", "\ufb03": "ffi",
+    "\ufb04": "ffl", "\ufb05": "st", "\ufb06": "st",
+    "\u2212": "-", "\u2010": "-", "\u2011": "-", "\u2012": "-",
+    "\u2013": "-", "\u2014": "-", "\u2015": "-",
+    "\u2018": "'", "\u2019": "'", "\u201b": "'", "\u2032": "'",
+    "\u201c": '"', "\u201d": '"', "\u201f": '"', "\u2033": '"',
+    "\u00b5": "\u03bc", "\u00d7": "x", "\u2264": "<=", "\u2265": ">=", "\u2260": "!=",
+    "\u00a0": " ", "\u2009": " ", "\u200a": " ", "\u202f": " ",
+    "\u200b": "", "\ufeff": "", "\u00ad": "",
+}
+_WRAP_HYPHENS = frozenset("-\u2010\u2011\u2012\u2013\u2014\u2015\u2212")
+_REPAIR_ACTIONS = (
+    "replace_quote_with_verbatim_substring",
+    "downgrade_verdictLabel_to_확인필요",
+)
+_REPAIR_PROMPT = (
+    "For each missing quote, copy an exact substring from nearestCandidates "
+    'or contextWindow into quote, or set verdictLabel to "확인필요".'
+)
+_LIGATURE_FLAGS = (
+    pymupdf.TEXT_MEDIABOX_CLIP
+    | pymupdf.TEXT_PRESERVE_LIGATURES
+    | pymupdf.TEXT_PRESERVE_WHITESPACE
+)
 
 
 class BlueReportError(ValueError):
@@ -153,15 +180,56 @@ def _norm_quote(value) -> str:
     return collapse_ws(value).lower()
 
 
-def quote_overlaps12(first, second) -> bool:
-    """True when two normalized quotes share a >=12 character verbatim window."""
-    left, right = _norm_quote(first), _norm_quote(second)
+def _expand_mapped(value) -> tuple[str, list[int]]:
+    """Replace typographic characters and record each output char's source index."""
+    chars, origins = [], []
+    for idx, ch in enumerate(str(value or "")):
+        piece = _TYPO_REPL.get(ch, ch).lower()
+        chars.append(piece)
+        origins.extend([idx] * len(piece))
+    return "".join(chars), origins
+
+
+def _collapse_mapped(text: str, origins: list[int]) -> tuple[str, list[int]]:
+    """Collapse whitespace the way collapse_ws does, keeping source indexes."""
+    out, mapped = [], []
+    pending = False
+    pending_at = 0
+    for idx, ch in enumerate(text):
+        if ch.isspace():
+            pending = True
+            pending_at = idx
+            continue
+        if pending and out:
+            out.append(" ")
+            mapped.append(origins[pending_at])
+        pending = False
+        out.append(ch)
+        mapped.append(origins[idx])
+    return "".join(out), mapped
+
+
+def fold_typographic(value) -> str:
+    """Fold ligatures, dashes, quotes, and math symbols, then collapse and lowercase."""
+    text, _origins = _collapse_mapped(*_expand_mapped(value))
+    return text
+
+
+def _windows_overlap(left: str, right: str) -> bool:
+    """True when two strings share a >=12 character verbatim window."""
     if len(left) < 12 or len(right) < 12:
         return False
     if left in right or right in left:
         return True
     shorter, longer = (left, right) if len(left) <= len(right) else (right, left)
     return any(shorter[pos:pos + 12] in longer for pos in range(0, len(shorter) - 11))
+
+
+def quote_overlaps12(first, second) -> bool:
+    """True when two quotes share a >=12 character window, after typographic folding."""
+    if _windows_overlap(_norm_quote(first), _norm_quote(second)):
+        return True
+    return _windows_overlap(fold_typographic(first), fold_typographic(second))
 
 
 def _page_number(obj) -> int | None:
@@ -289,33 +357,118 @@ def reconcile_candidate_ledger(candidate_ledger, findings) -> dict:
 # ------------------------------------------------------------------ PDF text model
 
 
-def _join_lines(lines: list[dict]) -> tuple[str, list[tuple[int, int]]]:
-    """Join ordered page lines into one searchable string plus per-line offsets.
+def _ends_wrap_hyphen(text: str) -> bool:
+    return bool(text) and text[-1] in _WRAP_HYPHENS
 
-    A line ending with a hyphen followed by a lowercase continuation is treated as a
-    soft-hyphen line break: the hyphen is dropped and no space is inserted.
+
+def _soft_wrap_flags(texts: list[str]) -> list[bool]:
+    """Mark line-end hyphens whose next lowercase fragment continues the word."""
+    flags = [False] * len(texts)
+    nxt = ""
+    for idx in range(len(texts) - 1, -1, -1):
+        text = texts[idx]
+        if text and nxt and _ends_wrap_hyphen(text) and nxt[:1].islower():
+            flags[idx] = True
+        if text:
+            nxt = text
+    return flags
+
+
+def _join_lines(lines: list[dict]) -> tuple[str, list[tuple[int, int]], str, list[int], tuple[int, ...]]:
+    """Join lines, dropping a soft line-wrap hyphen in the primary text.
+
+    The primary string keeps today's exact-match behavior (``random-`` / ``ized``
+    becomes ``randomized``). The preserved string keeps that hyphen so
+    ``self-`` / ``reported`` still matches ``self-reported``. Preserved-to-primary
+    indexes let a preserved hit report a bbox on the primary line spans.
     """
     texts = [collapse_ws(line.get("text")) for line in lines]
-    glues = []
-    for idx, text in enumerate(texts):
-        if idx == 0 or not text:
-            glues.append("")
-        elif texts[idx - 1].endswith("-") and text[:1].islower():
-            texts[idx - 1] = texts[idx - 1][:-1]
-            glues.append("")
-        else:
-            glues.append(" ")
-    spans, pieces, cursor = [], [], 0
-    for glue, text in zip(glues, texts):
+    flags = _soft_wrap_flags(texts)
+    primary, preserved, origins, wraps, spans = [], [], [], [], []
+    cursor = 0
+    seen = False
+    prev_soft = False
+    for text, soft in zip(texts, flags):
         if not text:
             spans.append((cursor, cursor))
             continue
-        cursor += len(glue)
-        pieces.append(glue)
-        pieces.append(text)
-        spans.append((cursor, cursor + len(text)))
-        cursor += len(text)
-    return "".join(pieces), spans
+        if seen and not prev_soft:
+            primary.append(" ")
+            preserved.append(" ")
+            origins.append(cursor)
+            cursor += 1
+        body = text[:-1] if soft else text
+        start = cursor
+        primary.append(body)
+        preserved.append(text)
+        for _ch in body:
+            origins.append(cursor)
+            cursor += 1
+        if soft:
+            wraps.append(len(origins))
+            origins.append(cursor)
+        spans.append((start, cursor))
+        seen = True
+        prev_soft = soft
+    return "".join(primary), spans, "".join(preserved), origins, tuple(wraps)
+
+
+def _index_fields(text: str, preserved: str, origins: list[int], wraps: tuple[int, ...]) -> dict:
+    folded, fold_origins = _collapse_mapped(*_expand_mapped(text))
+    same = preserved == text
+    if same:
+        pres_folded, pres_fold_origins = folded, fold_origins
+    else:
+        pres_folded, pres_fold_origins = _collapse_mapped(*_expand_mapped(preserved))
+    return {
+        "text": text,
+        "foldedText": folded,
+        "foldedOrigins": fold_origins,
+        "preservedText": preserved,
+        "preservedOrigins": origins,
+        "preservedFoldedText": pres_folded,
+        "preservedFoldedOrigins": pres_fold_origins,
+        "preservedWraps": wraps,
+        "preservedSame": same,
+    }
+
+
+def _preserved_line_texts(page) -> list[str]:
+    """Re-read lines with ligatures and special spaces kept intact."""
+    data = page.get_text("dict", flags=_LIGATURE_FLAGS) or {}
+    texts = []
+    for block in data.get("blocks") or []:
+        if block.get("type") != 0:
+            continue
+        for line in block.get("lines") or []:
+            raw = "".join(span.get("text") or "" for span in line.get("spans") or [])
+            stripped = raw.strip()
+            if stripped:
+                texts.append(stripped)
+    return texts
+
+
+def _lines_compatible(extracted: str, preserved: str) -> bool:
+    return fold_typographic(extracted) == fold_typographic(preserved)
+
+
+def _restore_preserved_text(page, lines: list[dict]) -> None:
+    """Put ligatures and special spaces back onto extractor lines when alignment holds."""
+    preserved = _preserved_line_texts(page)
+    if len(preserved) != len(lines):
+        return
+    for line, raw in zip(lines, preserved):
+        if not _lines_compatible(str(line.get("text") or ""), raw):
+            return
+    for line, raw in zip(lines, preserved):
+        line["text"] = raw
+
+
+def _page_record(page, idx: int) -> dict:
+    lines = _extract_page_lines(page, idx)
+    _restore_preserved_text(page, lines)
+    text, spans, preserved, origins, wraps = _join_lines(lines)
+    return {"pageIndex": idx, "lines": lines, "spans": spans, **_index_fields(text, preserved, origins, wraps)}
 
 
 def _page_records(pdf_bytes: bytes) -> list[dict]:
@@ -325,9 +478,7 @@ def _page_records(pdf_bytes: bytes) -> list[dict]:
             _fail("invalid_pdf", "PDF is password protected and cannot be text-extracted.",
                   recovery_hint="Provide an unlocked PDF.")
         for idx in range(min(doc.page_count, MAX_SCAN_PAGES)):
-            lines = _extract_page_lines(doc[idx], idx)
-            text, spans = _join_lines(lines)
-            records.append({"pageIndex": idx, "lines": lines, "spans": spans, "text": text})
+            records.append(_page_record(doc[idx], idx))
     return records
 
 
@@ -337,19 +488,90 @@ def _scoped_pages(pages: list[dict], page_index: int | None) -> list[dict]:
     return pages
 
 
-def _locate_quote(pages: list[dict], quote: str, page_index: int | None) -> dict | None:
-    """Locate a quote inside its declared page (when given) or across all pages."""
-    needle = collapse_ws(quote)
+def _quote_hit(status: str, mode: str, page: dict, start: int, end: int) -> dict:
+    return {"status": status, "matchMode": mode, "page": page, "span": (start, end)}
+
+
+def _mapped_span(origins: list[int], pos: int, length: int) -> tuple[int, int] | None:
+    last = pos + length - 1
+    if pos < 0 or last >= len(origins):
+        return None
+    start, end = origins[pos], origins[last] + 1
+    if end < start:
+        return None
+    return start, end
+
+
+def _primary_from_preserved(page: dict, pos: int, length: int) -> tuple[int, int] | None:
+    mapped = _mapped_span(page.get("preservedFoldedOrigins") or [], pos, length)
+    if mapped is None:
+        return None
+    pres_start, pres_end = mapped
+    origins = page.get("preservedOrigins") or []
+    if pres_start >= len(origins):
+        return None
+    last = min(pres_end, len(origins)) - 1
+    if last < pres_start:
+        return None
+    start = origins[pres_start]
+    end = origins[last] if last in (page.get("preservedWraps") or ()) else origins[last] + 1
+    if end < start:
+        return None
+    return start, end
+
+
+def _locate_exact(pages: list[dict], needle: str) -> dict | None:
     low = needle.lower()
-    for page in _scoped_pages(pages, page_index):
+    for page in pages:
         pos = page["text"].find(needle)
         if pos >= 0:
-            return {"status": "exact", "page": page, "span": (pos, pos + len(needle))}
-    for page in _scoped_pages(pages, page_index):
+            return _quote_hit("exact", "exact", page, pos, pos + len(needle))
+    for page in pages:
         pos = page["text"].lower().find(low)
         if pos >= 0:
-            return {"status": "normalized", "page": page, "span": (pos, pos + len(low))}
+            return _quote_hit("normalized", "case_folded", page, pos, pos + len(low))
     return None
+
+
+def _hit_folded(page: dict, needle: str, text_key: str, direct: bool) -> dict | None:
+    pos = (page.get(text_key) or "").find(needle)
+    if pos < 0:
+        return None
+    if direct:
+        span = _mapped_span(page.get("foldedOrigins") or [], pos, len(needle))
+    else:
+        span = _primary_from_preserved(page, pos, len(needle))
+    if not span:
+        return None
+    return _quote_hit("normalized", "typographic_folded", page, span[0], span[1])
+
+
+def _locate_folded(pages: list[dict], quote: str) -> dict | None:
+    folded = fold_typographic(quote)
+    if not folded:
+        return None
+    for page in pages:
+        hit = _hit_folded(page, folded, "foldedText", True)
+        if hit:
+            return hit
+    for page in pages:
+        if page.get("preservedSame"):
+            continue
+        hit = _hit_folded(page, folded, "preservedFoldedText", False)
+        if hit:
+            return hit
+    return None
+
+
+def _locate_quote(pages: list[dict], quote: str, page_index: int | None) -> dict | None:
+    """Locate a quote inside its declared page (when given) or across all pages.
+
+    Exact whitespace-collapsed text wins, then case folding, then typographic and
+    line-wrap hyphen folding. Folded hits keep a span in the primary page text.
+    """
+    needle = collapse_ws(quote)
+    scoped = _scoped_pages(pages, page_index)
+    return _locate_exact(scoped, needle) or _locate_folded(scoped, needle)
 
 
 def _span_bbox(page: dict, span: tuple[int, int]) -> list[float] | None:
@@ -490,9 +712,9 @@ def _lines_for_text(text: str, name: str, ext: str) -> list[dict]:
     ]
 
 
-def _search_blob(lines: list[dict]) -> tuple[str, list, list]:
-    text, spans = _join_lines(lines)
-    pieces, extra_spans, cursor = [], [], len(text)
+def _append_search_alts(text: str, preserved: str, origins: list[int], lines: list[dict]):
+    """Append delimiter-insensitive CSV/TSV alternates onto both search strings."""
+    pieces, extra, cursor = [], [], len(text)
     for idx, line in enumerate(lines):
         for alt in line.get("alts") or []:
             collapsed = collapse_ws(alt)
@@ -502,8 +724,16 @@ def _search_blob(lines: list[dict]) -> tuple[str, list, list]:
             start = cursor + 1
             cursor += len(piece)
             pieces.append(piece)
-            extra_spans.append((start, cursor, idx))
-    return text + "".join(pieces), spans, extra_spans
+            extra.append((start, cursor, idx))
+    suffix = "".join(pieces)
+    base = len(text)
+    return text + suffix, preserved + suffix, origins + [base + offset for offset in range(len(suffix))], extra
+
+
+def _search_blob(lines: list[dict]):
+    text, spans, preserved, origins, wraps = _join_lines(lines)
+    text, preserved, origins, extra = _append_search_alts(text, preserved, origins, lines)
+    return text, spans, extra, preserved, origins, wraps
 
 
 def _docx_text(raw: bytes) -> str:
@@ -570,14 +800,14 @@ def _records_for_entry(entry: dict, idx: int) -> list[dict]:
     records = []
     for page_index, text in _texts_for_entry(entry):
         lines = _lines_for_text(text, name, ext)
-        blob, spans, extra = _search_blob(lines)
+        blob, spans, extra, preserved, origins, wraps = _search_blob(lines)
         records.append({
             "supplementName": name,
             "pageIndex": page_index,
             "lines": lines,
             "spans": spans,
             "extraSpans": extra,
-            "text": blob,
+            **_index_fields(blob, preserved, origins, wraps),
         })
     return records
 
@@ -672,6 +902,7 @@ def _locate_in_records(records: list[dict], quote: str) -> dict | None:
     return {
         "kind": "supplement",
         "status": located["status"],
+        "matchMode": located.get("matchMode"),
         "pageIndex": page.get("pageIndex"),
         "supplementName": page.get("supplementName"),
         "lineNumber": (line or {}).get("lineNumber") or 1,
@@ -684,6 +915,7 @@ def _wrap_pdf(located: dict | None) -> dict | None:
     return {
         "kind": "pdf",
         "status": located["status"],
+        "matchMode": located.get("matchMode"),
         "page": located["page"],
         "span": located["span"],
     }
@@ -723,6 +955,7 @@ def _found_quote_record(finding: dict, index: int, quote: str, located: dict) ->
         "findingId": finding_id(finding, index),
         "quote": quote,
         "status": located["status"],
+        "matchMode": located.get("matchMode"),
         "nearestCandidates": [],
     }
     if located["kind"] == "supplement":
@@ -1120,10 +1353,240 @@ def _emit_csv(csv_path, reconciled, paper_identifier, defaults, warnings) -> dic
     return write_csv(csv_path, built["rows"])
 
 
+def _require_repair_flag(include_repair_pack) -> None:
+    if type(include_repair_pack) is not bool:
+        _fail("invalid_arguments", "include_repair_pack must be a boolean.")
+
+
+def _pack_bytes(pack: dict) -> int:
+    return len(json.dumps(pack, ensure_ascii=False).encode("utf-8"))
+
+
+def _quote_rows(result) -> list[dict]:
+    if not isinstance(result, dict):
+        return []
+    check = result.get("quoteCheck")
+    if not isinstance(check, dict):
+        return []
+    quotes = check.get("quotes")
+    if not isinstance(quotes, list):
+        return []
+    return [row for row in quotes if isinstance(row, dict) and row.get("status") == "missing"]
+
+
+def _recovered_ids(result) -> list[str]:
+    if not isinstance(result, dict):
+        return []
+    zero = result.get("zeroDrop")
+    if not isinstance(zero, dict):
+        return []
+    ids = zero.get("recoveredFindingIds")
+    if not isinstance(ids, list):
+        return []
+    return [str(item) for item in ids if item is not None]
+
+
+def _safe_findings(report) -> list[dict]:
+    try:
+        rows = report_findings(report)
+    except BlueReportError:
+        return []
+    return [item for item in rows if isinstance(item, dict)]
+
+
+def _safe_ledger(report) -> list[dict]:
+    if not isinstance(report, dict):
+        return []
+    try:
+        rows = ledger_entries(report.get("candidateLedger"))
+    except BlueReportError:
+        return []
+    return [item for item in rows if isinstance(item, dict)]
+
+
+def _remember_finding(index: dict, ident, finding: dict) -> None:
+    if ident and ident not in index and isinstance(finding, dict):
+        index[ident] = finding
+
+
+def _repair_finding_index(report) -> dict:
+    index: dict = {}
+    for idx, finding in enumerate(_safe_findings(report)):
+        _remember_finding(index, finding_id(finding, idx), finding)
+    for idx, entry in enumerate(_safe_ledger(report)):
+        ident = entry.get("candidateId") or entry.get("id") or f"ZD-{idx + 1}"
+        _remember_finding(index, str(ident), entry)
+    return index
+
+
+def _candidate_shape(raw: dict) -> dict:
+    return {
+        "pageIndex": raw.get("pageIndex"),
+        "bbox": raw.get("bbox"),
+        "supplementName": raw.get("supplementName"),
+        "lineNumber": raw.get("lineNumber"),
+        "text": raw.get("text") or "",
+    }
+
+
+def _limit_candidates(raw, limit: int) -> list[dict]:
+    if not isinstance(raw, list):
+        return []
+    shaped = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        shaped.append(_candidate_shape(item))
+        if len(shaped) >= limit:
+            break
+    return shaped
+
+
+def _repair_lines(pdf_bytes, supplements) -> list[dict]:
+    lines: list[dict] = []
+    if isinstance(pdf_bytes, (bytes, bytearray)) and bytes(pdf_bytes).startswith(b"%PDF-"):
+        for page in _page_records(bytes(pdf_bytes)):
+            lines.extend(page["lines"])
+    if supplements:
+        for record in _prepare_supplements(supplements):
+            lines.extend(record.get("lines") or [])
+    return lines
+
+
+def _same_line(line: dict, top: dict) -> bool:
+    if (line.get("text") or "") != (top.get("text") or ""):
+        return False
+    if top.get("supplementName"):
+        return (
+            line.get("supplementName") == top.get("supplementName")
+            and line.get("lineNumber") == top.get("lineNumber")
+        )
+    return line.get("pageIndex") == top.get("pageIndex")
+
+
+def _find_line_index(lines: list[dict], top: dict) -> int | None:
+    for idx, line in enumerate(lines):
+        if _same_line(line, top):
+            return idx
+    return None
+
+
+def _context_for(lines: list[dict], top: dict | None) -> list[dict]:
+    if not top or not lines:
+        return []
+    idx = _find_line_index(lines, top)
+    if idx is None:
+        return [_candidate_shape(top)]
+    start = max(0, idx - 1)
+    return [_candidate_shape(line) for line in lines[start:idx + 2]]
+
+
+def _verdict_of(finding) -> str:
+    if not isinstance(finding, dict):
+        return "확인필요"
+    verdict = finding.get("verdictLabel")
+    if isinstance(verdict, str) and verdict.strip():
+        return verdict
+    return "확인필요"
+
+
+def _repair_item(row: dict, findings: dict, lines: list[dict], limit: int) -> dict:
+    ident = str(row.get("findingId") or "")
+    finding = findings.get(ident) or {}
+    candidates = _limit_candidates(row.get("nearestCandidates"), limit)
+    top = candidates[0] if candidates else None
+    return {
+        "findingId": ident,
+        "declaredPageIndex": declared_page_index(finding) if finding else None,
+        "verdictLabel": _verdict_of(finding),
+        "rejectedQuote": row.get("quote") or "",
+        "nearestCandidates": candidates,
+        "contextWindow": _context_for(lines, top),
+        "allowedActions": list(_REPAIR_ACTIONS),
+    }
+
+
+def _repair_items(result, report, pdf_bytes, supplements, limit: int) -> list[dict]:
+    findings = _repair_finding_index(report)
+    lines = _repair_lines(pdf_bytes, supplements)
+    return [_repair_item(row, findings, lines, limit) for row in _quote_rows(result)]
+
+
+def _shrink_prompt(pack: dict, max_bytes: int) -> None:
+    snippet = pack.get("promptSnippet") or ""
+    while snippet and _pack_bytes(pack) > max_bytes:
+        snippet = snippet[: max(0, len(snippet) // 2)]
+        pack["promptSnippet"] = snippet
+    if _pack_bytes(pack) > max_bytes:
+        pack["promptSnippet"] = ""
+
+
+def _clear_context(pack: dict, max_bytes: int) -> None:
+    for item in reversed(pack["items"]):
+        if _pack_bytes(pack) <= max_bytes:
+            return
+        item["contextWindow"] = []
+
+
+def _drop_items(pack: dict, max_bytes: int) -> None:
+    items = pack["items"]
+    while items and _pack_bytes(pack) > max_bytes:
+        items.pop()
+    if _pack_bytes(pack) <= max_bytes:
+        return
+    pack["promptSnippet"] = ""
+    pack["recoveredFindingIds"] = []
+    while items and _pack_bytes(pack) > max_bytes:
+        items.pop()
+
+
+def _fit_pack(pack: dict, max_bytes: int) -> dict:
+    if _pack_bytes(pack) <= max_bytes:
+        pack["truncated"] = False
+        return pack
+    pack["truncated"] = True
+    _shrink_prompt(pack, max_bytes)
+    if _pack_bytes(pack) <= max_bytes:
+        return pack
+    _clear_context(pack, max_bytes)
+    if _pack_bytes(pack) <= max_bytes:
+        return pack
+    _drop_items(pack, max_bytes)
+    return pack
+
+
+def _reject_pack_leaks(pack: dict) -> dict:
+    leaks = forbidden_keys(pack)
+    if leaks:
+        _fail(
+            "forbidden_red_key",
+            f"Repair pack contains forbidden RED key(s): {', '.join(leaks[:5])}",
+            exit_code=3,
+            recovery_hint="Remove RED/gold ledger fields before building a BLUE repair pack.",
+            extra={"leaks": leaks[:10]},
+        )
+    return pack
+
+
+def build_blue_repair_pack(validation_result: dict, report, *, pdf_bytes: bytes | None = None,
+                           supplements=None, max_candidates: int = 3,
+                           max_bytes: int = MAX_REPAIR_PACK_BYTES) -> dict:
+    """Build a bounded one-turn repair packet for missing BLUE quotes."""
+    pack = {
+        "schema": REPAIR_PACK_SCHEMA,
+        "truncated": False,
+        "recoveredFindingIds": _recovered_ids(validation_result),
+        "items": _repair_items(validation_result, report, pdf_bytes, supplements, max_candidates),
+        "promptSnippet": _REPAIR_PROMPT,
+    }
+    return _reject_pack_leaks(_fit_pack(pack, max_bytes))
+
+
 def validate_blue_report(pdf_bytes, report, *, ledger=None, supplements=None, csv_path=None,
                          max_candidates: int = 5, paper_id: str | None = None,
-                         file_hash: str | None = None) -> dict:
+                         file_hash: str | None = None, include_repair_pack: bool = False) -> dict:
     """Validate a BLUE report against a PDF and optional supplements."""
+    _require_repair_flag(include_repair_pack)
     raw = _require_pdf_bytes(pdf_bytes)
     _require_max_candidates(max_candidates)
     findings = report_findings(report)
@@ -1144,7 +1607,7 @@ def validate_blue_report(pdf_bytes, report, *, ledger=None, supplements=None, cs
         csv_result = _emit_csv(
             csv_path, reconciled, paper_identifier, _csv_defaults(report), warnings
         )
-    return {
+    result = {
         "schema": SCHEMA,
         "ok": checks["missingCount"] == 0,
         "paperId": paper_identifier,
@@ -1160,3 +1623,8 @@ def validate_blue_report(pdf_bytes, report, *, ledger=None, supplements=None, cs
         "csv": csv_result,
         "warnings": warnings,
     }
+    if include_repair_pack:
+        result["repairPack"] = build_blue_repair_pack(
+            result, report, pdf_bytes=raw, supplements=supplements,
+        )
+    return result

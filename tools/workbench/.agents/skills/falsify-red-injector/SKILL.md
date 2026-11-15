@@ -81,7 +81,26 @@ python app/local/falsify_cli.py red apply --pdf SOURCE.pdf --ops OPS.json --out-
 
 `--min-difficulty` is one of `L1`, `L2`, `L3`, `L4`. The command keeps an operation only when its cross-inference distance is at least that tier. If every operation is below the floor, the process exits `3` with `difficulty_below_minimum` and does not write the blind PDF.
 
-## 7. Autonomous RED runner
+## 7. RED plan
+
+`plan_coordinated_mutation` on `app/local/paper_red_mcp.py` is the read-only RED plan step. It calls `plan_coordinated_mutations` in `app/local/paper_red_planner.py` (`falsify.red-mutation-plan.v1`) and returns detectability-checked bundles for `L1`..`L4`. Default target is `L3`. L3 bundles coordinate prose `text-span` edits with `table-cell` and/or `supplement-edit` and leave another surface as the anchor. The tool does not write a PDF.
+
+## 8. Autonomous RED runner
+
+`app/examples/adversarial_red_v02/runner.py` plans with `plan_coordinated_mutations` before it falls back to single-operation candidates. It writes the blind PDF, the gold ledger, optional `--out-audit`, and blind supplement copies under `--out-supplement-dir` without modifying the source files.
+
+```bash
+python app/examples/adversarial_red_v02/runner.py \
+  --pdf SOURCE.pdf \
+  --out-pdf BLIND.pdf \
+  --out-gold GOLD.json \
+  --out-audit AUDIT.json \
+  --supplement TABLE.csv \
+  --out-supplement-dir BLIND_SUPP \
+  --target-difficulty L3
+```
+
+Stdin `falsify.red-invocation.v1` (the `arena_duel.py` contract) accepts `sourcePdf`, `outPdf`, `outGold`, `outSupplementsDir`, `minDifficulty`, and `supplementNames` loaded from `./supplements/<name>`. Stdout includes `blindPdfBase64`, `blindSupplements`, and `goldLedger`. `python app/examples/adversarial_red_v02/build_profile.py` prints the `falsify.harness.v1` profile `shinick-adversarial-red-v02`.
 
 `app/examples/adversarial_red_v01/runner.py` runs baseline guard, surface discovery, a deterministic planner (optional `planner_fn`), detectability plus stealth retries, and the blind bundle with a sealed gold ledger.
 

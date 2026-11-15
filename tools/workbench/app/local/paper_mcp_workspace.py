@@ -19,10 +19,12 @@ from mcp.types import CallToolResult
 import paper_mcp
 
 SCHEMA = "falsify.mcp-workspace.v1"
+TRIAGE_SCHEMA = "falsify.mcp-workspace-triage.v1"
 MAX_WORKSPACE_PAPERS = 32
 MAX_SCAN_DEPTH = 2
 MASKED_REASON = "answer_key_name"
 MASK_NAME_PARTS = ("gold", "ledger", "answer", "answerkey", "solution", "red-plan", "whythard")
+_PRIORITY_WEIGHTS = {"D1": 5, "D2": 4, "D6": 4, "D4-1": 3}
 _CHUNK = 1 << 20
 
 
@@ -97,6 +99,181 @@ def _entry_for(resolved_root, path):
     return entry, resolved
 
 
+def _supplement_extensions():
+    cached = getattr(_supplement_extensions, "cached", None)
+    if cached is None:
+        from paper_mcp_bundle import TEXT_EXTENSIONS
+        cached = TEXT_EXTENSIONS | frozenset({".docx"})
+        _supplement_extensions.cached = cached
+    return cached
+
+
+def _is_link(path):
+    try:
+        if path.is_symlink():
+            return True
+        junction = getattr(path, "is_junction", None)
+        return bool(callable(junction) and junction())
+    except OSError:
+        return True
+
+
+def _resolved_inside(resolved_root, path):
+    try:
+        resolved = path.resolve()
+        if not resolved.is_relative_to(resolved_root):
+            return None
+    except (OSError, ValueError):
+        return None
+    return resolved
+
+
+def _masked_relative(resolved_root, path):
+    resolved = _resolved_inside(resolved_root, path)
+    if resolved is None:
+        return True
+    try:
+        parts = resolved.relative_to(resolved_root).parts
+    except ValueError:
+        return True
+    return any(is_masked_name(part) for part in parts)
+
+
+def _rejected_candidate(resolved_root, path):
+    if _is_link(path) or is_masked_name(path.name) or is_masked_name(path.parent.name):
+        return True
+    return _masked_relative(resolved_root, path)
+
+
+def _safe_file(resolved_root, path):
+    if _rejected_candidate(resolved_root, path):
+        return None
+    resolved = _resolved_inside(resolved_root, path)
+    if resolved is None or not resolved.is_file() or _is_link(resolved):
+        return None
+    return resolved
+
+
+def _safe_dir(resolved_root, path):
+    if _is_link(path) or is_masked_name(path.name):
+        return None
+    resolved = _resolved_inside(resolved_root, path)
+    if resolved is None or not resolved.is_dir() or _is_link(resolved):
+        return None
+    if _masked_relative(resolved_root, resolved):
+        return None
+    return resolved
+
+
+def _name_pairs(filename, stem):
+    suffix = Path(filename).suffix.lower()
+    if suffix not in _supplement_extensions() or is_masked_name(filename):
+        return False
+    lowered = filename.lower()
+    stem_l = stem.lower()
+    if lowered == f"{stem_l}{suffix}":
+        return True
+    return lowered.startswith(f"{stem_l}_") or lowered.startswith(f"{stem_l}-")
+
+
+def _same_dir_candidates(resolved_root, pdf_path):
+    found = []
+    stem = pdf_path.stem
+    for path in _child_paths(pdf_path.parent):
+        if not _name_pairs(path.name, stem):
+            continue
+        safe = _safe_file(resolved_root, path)
+        if safe is None or safe == pdf_path:
+            continue
+        found.append(safe)
+    return found
+
+
+def _companion_files(resolved_root, folder):
+    found = []
+    allowed = _supplement_extensions()
+    for path in _child_paths(folder):
+        if Path(path.name).suffix.lower() not in allowed:
+            continue
+        safe = _safe_file(resolved_root, path)
+        if safe is not None:
+            found.append(safe)
+    return found
+
+
+def _companion_candidates(resolved_root, pdf_path):
+    stem = pdf_path.stem.lower()
+    wanted = {stem, f"{stem}_supplements", f"{stem}-supplements"}
+    found = []
+    for path in _child_paths(pdf_path.parent):
+        if path.name.lower() not in wanted:
+            continue
+        folder = _safe_dir(resolved_root, path)
+        if folder is None:
+            continue
+        found.extend(_companion_files(resolved_root, folder))
+    return found
+
+
+def _probe_supplement_size(path, loader):
+    if is_masked_name(path.name) or is_masked_name(path.parent.name):
+        return None
+    try:
+        loaded = loader([path])
+    except ValueError:
+        return None
+    if len(loaded) != 1 or not isinstance(loaded[0], dict):
+        return None
+    size = loaded[0].get("byteLength")
+    if type(size) is not int or size <= 0:
+        return None
+    return size
+
+
+def _reload_accepted(accepted, loader):
+    if not accepted:
+        return []
+    try:
+        loaded = loader(accepted)
+    except ValueError:
+        return []
+    if len(loaded) != len(accepted):
+        return []
+    return list(accepted)
+
+
+def _load_accepted(candidates):
+    from paper_mcp_bundle import MAX_BUNDLE_BYTES, MAX_SUPPLEMENTS, load_selected_supplements
+    ordered = sorted(set(candidates), key=lambda item: (item.name.lower(), item.as_posix().lower()))
+    accepted, running = [], 0
+    for path in ordered:
+        if len(accepted) >= MAX_SUPPLEMENTS:
+            break
+        size = _probe_supplement_size(path, load_selected_supplements)
+        if size is None or running + size > MAX_BUNDLE_BYTES:
+            continue
+        accepted.append(path)
+        running += size
+    return _reload_accepted(accepted, load_selected_supplements)
+
+
+def _paired_supplement_paths(resolved_root, pdf_path):
+    candidates = _same_dir_candidates(resolved_root, pdf_path)
+    candidates.extend(_companion_candidates(resolved_root, pdf_path))
+    return _load_accepted(candidates)
+
+
+def _remember_pairs(resolved_root, entry, resolved, paired_map):
+    if entry["masked"]:
+        return
+    matches = _paired_supplement_paths(resolved_root, resolved)
+    paired_map[entry["paperId"]] = tuple(matches)
+    if not matches:
+        return
+    entry["pairedSupplementCount"] = len(matches)
+    entry["pairedSupplementNames"] = [item.name for item in matches]
+
+
 def _scan(root, max_papers):
     """Internal scan: the public summary plus the resolved path behind each id."""
     if type(max_papers) is not int or not 1 <= max_papers <= MAX_WORKSPACE_PAPERS:
@@ -108,7 +285,7 @@ def _scan(root, max_papers):
         resolved_root = base.resolve()
     except OSError:
         raise ValueError("workspace_invalid") from None
-    papers, paths, seen, truncated = [], {}, set(), False
+    papers, paths, paired, seen, truncated = [], {}, {}, set(), False
     for path in _walk(resolved_root, MAX_SCAN_DEPTH):
         found = _entry_for(resolved_root, path)
         if found is None:
@@ -122,6 +299,7 @@ def _scan(root, max_papers):
         seen.add(entry["paperId"])
         papers.append(entry)
         paths[entry["paperId"]] = resolved
+        _remember_pairs(resolved_root, entry, resolved, paired)
     papers.sort(key=lambda item: (item["name"].lower(), item["paperId"]))
     summary = {
         "schema": SCHEMA,
@@ -130,7 +308,7 @@ def _scan(root, max_papers):
         "truncated": truncated,
         "papers": papers,
     }
-    return summary, paths
+    return summary, paths, paired
 
 
 def scan_workspace(root, *, max_papers=MAX_WORKSPACE_PAPERS):
@@ -141,7 +319,7 @@ def scan_workspace(root, *, max_papers=MAX_WORKSPACE_PAPERS):
 class WorkspaceSession:
     """Read-only state for one workspace process: store, root, selection, masked ids."""
 
-    def __init__(self, store, root, *, max_papers=MAX_WORKSPACE_PAPERS):
+    def __init__(self, store, root, *, max_papers=MAX_WORKSPACE_PAPERS, startup_supplements=()):
         if type(max_papers) is not int or not 1 <= max_papers <= MAX_WORKSPACE_PAPERS:
             raise ValueError("workspace_invalid")
         try:
@@ -154,6 +332,8 @@ class WorkspaceSession:
         self.max_papers = max_papers
         self.current = None
         self.masked = frozenset()
+        self.startup_supplements = tuple(startup_supplements or ())
+        self.paired_supplements = ()
 
     @property
     def paper_id(self):
@@ -173,12 +353,17 @@ class WorkspaceSession:
             raise ValueError("paper_evidence_failed")
         self.current = (paper_id, file_hash)
 
+    @property
+    def supplements(self):
+        from paper_mcp_bundle import MAX_SUPPLEMENTS
+        return _merge_supplements(self.startup_supplements, self.paired_supplements, MAX_SUPPLEMENTS)
+
 
 def open_in_workspace(session, paper_id):
     """Select one scanned workspace PDF and prepare it read-only."""
     if type(paper_id) is not str or not 1 <= len(paper_id) <= 160:
         raise ValueError("paper_evidence_id_invalid")
-    summary, paths = _scan(session.root, session.max_papers)
+    summary, paths, paired = _scan(session.root, session.max_papers)
     session.remember_scan(summary)
     entry = next((item for item in summary["papers"] if item["paperId"] == paper_id), None)
     if entry is None:
@@ -187,11 +372,172 @@ def open_in_workspace(session, paper_id):
         raise ValueError("workspace_file_masked")
     opened = paper_mcp.open_selected(session.store, paths[paper_id])
     session.select(opened["paperId"], opened["fileHash"])
+    session.paired_supplements = tuple(_load_paired_bundle(paired.get(paper_id, ())))
     return {
         "paperId": opened["paperId"],
         "fileHash": opened["fileHash"],
         "name": entry["name"],
         "pageCount": opened["pageCount"],
+    }
+
+
+def _load_paired_bundle(paths):
+    from paper_mcp_bundle import load_selected_supplements
+    if not paths:
+        return []
+    try:
+        return list(load_selected_supplements(list(paths)))
+    except ValueError:
+        return []
+
+
+def _merge_supplements(startup, paired, limit):
+    merged, seen = [], set()
+    for item in tuple(startup or ()) + tuple(paired or ()):
+        if not isinstance(item, dict):
+            continue
+        key = (item.get("sha256"), item.get("name"))
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append(dict(item))
+        if len(merged) >= limit:
+            break
+    for index, item in enumerate(merged):
+        item["supplementId"] = f"supp-{index + 1}"
+    return tuple(merged)
+
+
+def _validate_triage_limits(max_signals, include_figure_forensics, recompute_raw):
+    if type(max_signals) is not int or not 1 <= max_signals <= 100:
+        raise ValueError("limit")
+    if type(include_figure_forensics) is not bool:
+        raise ValueError("include_figure_forensics")
+    if type(recompute_raw) is not bool:
+        raise ValueError("recompute_raw")
+
+
+def _triage_store(store, max_papers):
+    if store is not None:
+        return store
+    from paper_evidence import EvidenceStore
+    return EvidenceStore(max_documents=max_papers)
+
+
+def _signals_of(payload):
+    if not isinstance(payload, dict):
+        return []
+    signals = payload.get("signals")
+    if not isinstance(signals, list):
+        return []
+    return [item for item in signals if isinstance(item, dict)]
+
+
+def _extend_signals(signals, action):
+    try:
+        signals.extend(_signals_of(action()))
+    except ValueError:
+        return
+
+
+def _extend_code_audit(signals, bundle_mod, store, opened, bundle, max_signals):
+    audit_code = getattr(bundle_mod, "audit_code_supplements_payload", None)
+    if not callable(audit_code):
+        return
+    _extend_signals(signals, lambda: audit_code(
+        store, opened["paperId"], opened["fileHash"], bundle, max_signals=max_signals))
+
+
+def _paper_signals(store, opened, bundle, max_signals, include_figure_forensics, recompute_raw):
+    import paper_mcp_bundle as bundle_mod
+    signals = _signals_of(bundle_mod.run_blue_sensor_payload(
+        store, opened["paperId"], opened["fileHash"], max_signals=max_signals,
+        digest_only=True, include_figure_forensics=include_figure_forensics))
+    if not bundle:
+        return signals
+    _extend_signals(signals, lambda: bundle_mod.audit_supplements_payload(
+        store, opened["paperId"], opened["fileHash"], bundle, max_signals=max_signals))
+    if recompute_raw:
+        _extend_signals(signals, lambda: bundle_mod.recompute_raw_supplement_payload(
+            store, opened["paperId"], opened["fileHash"], bundle, max_signals=max_signals))
+    _extend_code_audit(signals, bundle_mod, store, opened, bundle, max_signals)
+    return signals
+
+
+def _family_counts(signals):
+    counts = {}
+    for item in signals:
+        family = item.get("family")
+        if type(family) is not str or not family:
+            family = "unknown"
+        counts[family] = counts.get(family, 0) + 1
+    return counts
+
+
+def _priority_score(by_family):
+    total = 0
+    for family, count in by_family.items():
+        total += count * _PRIORITY_WEIGHTS.get(family, 1)
+    return total
+
+
+def _blank_rank(entry):
+    count = entry.get("pairedSupplementCount")
+    return {
+        "paperId": entry["paperId"],
+        "name": entry["name"],
+        "totalSignals": 0,
+        "byFamily": {},
+        "pairedSupplementCount": count if type(count) is int else 0,
+        "priorityScore": 0,
+    }
+
+
+def _rank_paper(store, path, entry, paired_paths, max_signals, include_figure_forensics, recompute_raw):
+    if path is None:
+        return _blank_rank(entry)
+    try:
+        opened = paper_mcp.open_selected(store, path)
+        bundle = _load_paired_bundle(paired_paths)
+        signals = _paper_signals(
+            store, opened, bundle, max_signals, include_figure_forensics, recompute_raw)
+    except ValueError:
+        return _blank_rank(entry)
+    by_family = _family_counts(signals)
+    return {
+        "paperId": opened["paperId"],
+        "name": entry["name"],
+        "totalSignals": len(signals),
+        "byFamily": by_family,
+        "pairedSupplementCount": len(bundle),
+        "priorityScore": _priority_score(by_family),
+    }
+
+
+def _rank_key(item):
+    return (item["totalSignals"], item["priorityScore"], item["name"])
+
+
+def triage_workspace(root, *, max_papers=MAX_WORKSPACE_PAPERS, max_signals_per_paper=25,
+                     include_figure_forensics=False, recompute_raw=True, store=None):
+    """Rank unmasked workspace PDFs. The result never contains a filesystem path."""
+    _validate_triage_limits(max_signals_per_paper, include_figure_forensics, recompute_raw)
+    summary, paths, paired = _scan(root, max_papers)
+    active = _triage_store(store, max_papers)
+    ranked = []
+    for entry in summary["papers"]:
+        if entry["masked"]:
+            continue
+        ranked.append(_rank_paper(
+            active, paths.get(entry["paperId"]), entry, paired.get(entry["paperId"], ()),
+            max_signals_per_paper, include_figure_forensics, recompute_raw))
+    ranked.sort(key=_rank_key, reverse=True)
+    return {
+        "schema": TRIAGE_SCHEMA,
+        "paperCount": summary["paperCount"],
+        "maskedCount": summary["maskedCount"],
+        "truncated": summary["truncated"],
+        "rankedPapers": ranked,
     }
 
 
@@ -208,7 +554,7 @@ def load_workspace_supplements(paths):
 
 
 def register_workspace_tools(server, session):
-    """Register the two workspace-only read-only tools on a workspace server."""
+    """Register workspace list, selection, and batch triage tools."""
 
     @server.tool(annotations=paper_mcp._READONLY)
     def list_papers() -> CallToolResult:
@@ -231,5 +577,19 @@ def register_workspace_tools(server, session):
             return paper_mcp._error(paper_mcp._fixed(exc))
         except Exception:
             return paper_mcp._error("paper_evidence_failed")
+
+    @server.tool(name="triage_workspace", annotations=paper_mcp._READONLY)
+    def triage_workspace_tool(maxSignalsPerPaper: int = 25, includeFigureForensics: bool = False,
+                              recomputeRaw: bool = True) -> CallToolResult:
+        """Read-only batch ranking of unmasked workspace PDFs. No filesystem path is returned."""
+        try:
+            payload = triage_workspace(
+                session.root, max_papers=session.max_papers, max_signals_per_paper=maxSignalsPerPaper,
+                include_figure_forensics=includeFigureForensics, recompute_raw=recomputeRaw, store=session.store)
+        except ValueError as exc:
+            return paper_mcp._error(paper_mcp._fixed(exc))
+        except Exception:
+            return paper_mcp._error("paper_evidence_failed")
+        return paper_mcp._ok(payload)
 
     return server

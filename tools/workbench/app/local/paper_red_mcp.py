@@ -286,7 +286,7 @@ def _normalize_single_op(op, idx, store, paper_id, file_hash, service):
         return _normalize_uri_op(op, op_id)
     if kind == 'text-span':
         return _normalize_text_span_op(op, op_id)
-    if kind == 'supplement-edit':
+    if kind in ('supplement-edit', 'supplement-text'):
         return _normalize_supplement_op(op, op_id)
     raise ValueError('visual_operation_invalid')
 
@@ -969,7 +969,8 @@ def build_server(store, paper_id, file_hash, service=None, supplements=None):
         'Inspect targets with list_red_targets, list_text_spans, list_pdf_links, and list_red_supplements; '
         'prepare chart scenes with prepare_chart_scene, preview with preview_coordinated_edits, '
         'export blind PDFs with export_coordinated_edits, or self-audit with audit_candidate_pdf. '
-        'Plan exposure with simulate_red_detectability and trace_claim_propagation before exporting.\nSelected PDF: '
+        'RED plan with plan_coordinated_mutation, then score exposure with '
+        'simulate_red_detectability and trace_claim_propagation before exporting.\nSelected PDF: '
         + json.dumps({'paperId': paper_id, 'fileHash': file_hash})
     )
     server = FastMCP(name=SERVER_NAME, instructions=instructions, log_level='ERROR')
@@ -1081,6 +1082,30 @@ def build_server(store, paper_id, file_hash, service=None, supplements=None):
             paperId,
             lambda: trace(paperId, query, file_hash=file_hash, store=store, supplements=loaded_supplements),
         )
+
+    @server.tool(annotations=_READONLY)
+    async def plan_coordinated_mutation(
+        paperId: str,
+        targetDifficulty: str = 'L3',
+        maxBundles: int = 5,
+        claimQuery: str | None = None,
+    ) -> CallToolResult:
+        """Read-only synthesis of detectability-verified coordinated multi-surface RED operation bundles."""
+        from paper_red_planner import plan_coordinated_mutations
+
+        return await _cancellable_thread(lambda _cancelled: call(
+            paperId,
+            lambda: plan_coordinated_mutations(
+                paperId,
+                file_hash=file_hash,
+                store=store,
+                supplements=loaded_supplements,
+                service=service,
+                target_difficulty=targetDifficulty,
+                max_bundles=maxBundles,
+                claim_query=claimQuery,
+            ),
+        ))
 
     @server.tool(annotations=_READONLY)
     async def audit_candidate_pdf(paperId: str, candidatePdfBase64: str, modifiedRegions: list[dict] | None = None) -> CallToolResult:

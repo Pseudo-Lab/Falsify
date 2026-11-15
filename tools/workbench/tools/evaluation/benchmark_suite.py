@@ -27,6 +27,72 @@ _FIG_EXCERPT = 'p1-1 [72.0, 122.0, 200.0, 218.0] vs p1-2 [300.0, 122.0, 428.0, 2
 _D3_LINE = 'This study demonstrates that Drug Z causally halves mortality compared with standard care.'
 _S1_LINE = 'Treatment reduced the error rate relative to Control.'
 _CLEAN_DOI = 'doi:10.1000/clean-2025'
+_RAW_ROW_SENTENCE = (
+    'In the biomarker cohort, Treatment mean outcome was 25.0 ± 2.0 '
+    'compared with Control mean outcome 10.0 ± 2.0 (p = 0.0001).'
+)
+_CONSORT_SENTENCE = (
+    'A total of 200 patients were randomized (100 Treatment, 100 Control); '
+    '28 discontinued prior to follow-up, and 185 completed the primary endpoint analysis.'
+)
+_CODE_PROSE = (
+    'All hypothesis tests were two-sided with alpha = 0.05, and feature standardization '
+    'was fit strictly on the training split after train-test partitioning.'
+)
+_L3_SENTENCE = (
+    'Participants aged 65 years or older were strictly excluded from enrollment '
+    'across all study sites (N = 12 enrolled).'
+)
+_BENIGN_N_SENTENCE = (
+    'We enrolled N = 12 participants; 10 eligible participants were included '
+    'in the primary analysis after 2 pre-specified exclusions.'
+)
+_BENIGN_MEAN_SENTENCE = 'Mean score among eligible participants was 20.0 ± 2.0.'
+_BENIGN_FLOW_SENTENCE = (
+    'Of 150 screened patients, 30 were excluded before randomization and 120 were randomized '
+    '(60 Treatment, 60 Control); 12 discontinued and 108 were analyzed.'
+)
+_BENIGN_COMORB_SENTENCE = (
+    'Baseline comorbidities (non-mutually exclusive, patients could have multiple conditions): '
+    'Hypertension 74 (61.7%), Diabetes 52 (43.3%), Dyslipidemia 68 (56.7%).'
+)
+_CLEAN_CODE_PROSE = (
+    'All hypothesis tests were two-sided with alpha = 0.05; feature scaling used '
+    'StandardScaler fit on X_train after train_test_split.'
+)
+_EXPLORATORY_SENTENCE = (
+    'In this retrospective observational cohort (n = 48), biomarker elevation was '
+    'associated with hospitalization (unadjusted p = 0.08); this exploratory finding '
+    'is hypothesis-generating and does not establish causality.'
+)
+_ELIGIBILITY_NOTE = (
+    'Enrolled subjects P10, P11, and P12 were aged 68, 71, and 74 years at baseline enrollment.\n'
+)
+_ONESIDED_CODE = '\n'.join((
+    'import pandas as pd',
+    'from scipy.stats import ttest_ind',
+    'from sklearn.model_selection import train_test_split',
+    'from sklearn.preprocessing import StandardScaler',
+    '',
+    'df = pd.read_csv("cohort.csv")',
+    'X = StandardScaler().fit_transform(df[["age", "biomarker"]])',
+    'X_train, X_test, y_train, y_test = train_test_split(X, df["outcome"], test_size=0.2, random_state=42)',
+    'stat, pval = ttest_ind(df[df["arm"] == "T"]["biomarker"], df[df["arm"] == "C"]["biomarker"], alternative="greater")',
+    '',
+))
+_CLEAN_CODE = '\n'.join((
+    'from scipy.stats import ttest_ind',
+    'from sklearn.model_selection import train_test_split',
+    'from sklearn.preprocessing import StandardScaler',
+    '',
+    'X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)',
+    'scaler = StandardScaler()',
+    'X_train_scaled = scaler.fit_transform(X_train)',
+    'X_test_scaled = scaler.transform(X_test)',
+    'stat, pval = ttest_ind(group_t, group_c, alternative="two-sided")',
+    '',
+))
+CORPUS_VERSION = 'v2'
 
 
 def _repo_root() -> Path:
@@ -84,11 +150,18 @@ def _place_images(page, images) -> None:
         page.insert_image(pymupdf.Rect(*bbox), stream=blob)
 
 
+def _page_width(lines) -> float:
+    longest = max((len(str(line)) for line in lines), default=0)
+    if longest <= 100:
+        return 595
+    return float(80 + longest * 7)
+
+
 def _render_pdf(lines, link=None, images=None) -> bytes:
     import pymupdf
 
     doc = pymupdf.open()
-    page = doc.new_page(width=595, height=842)
+    page = doc.new_page(width=_page_width(lines), height=842)
     _write_lines(page, lines)
     _place_link(page, link)
     _place_images(page, images)
@@ -103,6 +176,10 @@ def _participant_csv(count: int, split: bool = False) -> str:
         arm = 'T' if split and index <= count // 2 else 'C' if split else 'A'
         rows.append(f'P{index},{arm}')
     return '\n'.join(rows)
+
+
+def _csv_table(header, rows) -> str:
+    return '\n'.join((header, *rows)) + '\n'
 
 
 def _defect(defect_id, world, family, difficulty, excerpt, *, stealth=False, label=None) -> dict:
@@ -215,6 +292,62 @@ def _case_direction() -> dict:
     )
 
 
+def _arm_outcome_rows(label, values, start) -> list:
+    return [f'P{start + offset},{label},{value}' for offset, value in enumerate(values)]
+
+
+def _case_rawdata_row_mismatch() -> dict:
+    values = (11, 12, 13, 11, 12, 13)
+    rows = _arm_outcome_rows('Treatment', values, 1)
+    rows.extend(_arm_outcome_rows('Control', values, 7))
+    supplements = [{'name': 'cohort.csv', 'text': _csv_table('participant_id,arm,outcome', rows)}]
+    return _pack(
+        'gold-w3-d1-rawdata-row-mismatch', 'W3', 'D1', 'L2', False,
+        ['Results', _RAW_ROW_SENTENCE],
+        [_defect('gold-w3-d1-rawdata-row', 'W3', 'D1', 'L2', _RAW_ROW_SENTENCE)],
+        supplements=supplements,
+    )
+
+
+def _case_consort_attrition() -> dict:
+    return _pack(
+        'gold-w1-d1-consort-attrition', 'W1', 'D1', 'L2', False,
+        ['Participant Flow', _CONSORT_SENTENCE],
+        [_defect('gold-w1-d1-consort', 'W1', 'D1', 'L2', _CONSORT_SENTENCE)],
+    )
+
+
+def _case_code_onesided_leak() -> dict:
+    supplements = [{'name': 'analysis.py', 'text': _ONESIDED_CODE}]
+    return _pack(
+        'gold-w3-d6-code-onesided-leak', 'W3', 'D6', 'L2', False,
+        ['Statistical Analysis', _CODE_PROSE],
+        [_defect('gold-w3-d6-code-tail', 'W3', 'D6', 'L2', _CODE_PROSE)],
+        supplements=supplements,
+    )
+
+
+def _l3_participant_rows() -> list:
+    rows = []
+    for index in range(1, 13):
+        arm = 'T' if index % 2 else 'C'
+        rows.append(f'P{index},{arm},S{(index % 3) + 1}')
+    return rows
+
+
+def _case_coordinated_l3() -> dict:
+    supplements = [
+        {'name': 'participants.csv', 'text': _csv_table('participant_id,group,site', _l3_participant_rows())},
+        {'name': 'eligibility_notes.md', 'text': _ELIGIBILITY_NOTE},
+    ]
+    return _pack(
+        'gold-w3-d6-coordinated-l3-stealth', 'W3', 'D6', 'L3', False,
+        ['Eligibility Criteria', _L3_SENTENCE],
+        [_defect('gold-w3-d6-l3-elig', 'W3', 'D6', 'L3', _L3_SENTENCE, stealth=True)],
+        supplements=supplements,
+    )
+
+
 def _holdout(case_id, lines, supplements=None, link=None) -> dict:
     return _pack(case_id, 'W1', 'BENIGN', 'L1', True, lines, [], supplements=supplements, link=link)
 
@@ -248,6 +381,42 @@ def _case_holdout_km() -> dict:
     return _holdout('holdout-benign-left-truncated-km', lines)
 
 
+def _eligible_score_rows() -> list:
+    scores = (17, 17, 23, 23, 20, 20, 20, 20, 20, 20)
+    rows = [f'P{index},1,{score}' for index, score in enumerate(scores, start=1)]
+    rows.extend(('P11,0,1', 'P12,0,99'))
+    return rows
+
+
+def _case_holdout_rawdata_exclusion() -> dict:
+    supplements = [{'name': 'cohort.csv', 'text': _csv_table('participant_id,eligible,score', _eligible_score_rows())}]
+    return _holdout(
+        'holdout-benign-rawdata-na-exclusion',
+        ['Methods', _BENIGN_N_SENTENCE, _BENIGN_MEAN_SENTENCE],
+        supplements,
+    )
+
+
+def _case_holdout_consort_multiselect() -> dict:
+    return _holdout(
+        'holdout-benign-consort-multiselect',
+        ['Participant Flow and Baseline Comorbidities', _BENIGN_FLOW_SENTENCE, _BENIGN_COMORB_SENTENCE],
+    )
+
+
+def _case_holdout_clean_code() -> dict:
+    supplements = [{'name': 'analysis.py', 'text': _CLEAN_CODE}]
+    return _holdout(
+        'holdout-benign-clean-twosided-code',
+        ['Statistical Analysis', _CLEAN_CODE_PROSE],
+        supplements,
+    )
+
+
+def _case_holdout_exploratory() -> dict:
+    return _holdout('holdout-benign-exploratory-secondary', ['Discussion', _EXPLORATORY_SENTENCE])
+
+
 def _case_holdout_clean() -> dict:
     lines = [
         'Methods',
@@ -267,7 +436,7 @@ def _case_holdout_clean() -> dict:
 
 
 def build_benchmark_corpus() -> list[dict]:
-    """Return the 6 gold cases and 4 benign-trap holdout cases."""
+    """Return the 10 gold cases and 8 benign-trap holdout cases."""
     return [
         _case_stat(),
         _case_uri(),
@@ -275,10 +444,18 @@ def build_benchmark_corpus() -> list[dict]:
         _case_figure(),
         _case_overclaim(),
         _case_direction(),
+        _case_rawdata_row_mismatch(),
+        _case_consort_attrition(),
+        _case_code_onesided_leak(),
+        _case_coordinated_l3(),
         _case_holdout_aor(),
         _case_holdout_fdr(),
         _case_holdout_km(),
         _case_holdout_clean(),
+        _case_holdout_rawdata_exclusion(),
+        _case_holdout_consort_multiselect(),
+        _case_holdout_clean_code(),
+        _case_holdout_exploratory(),
     ]
 
 
@@ -334,8 +511,18 @@ def _supplement_signals(case) -> list:
     return list(report.get('signals') or [])
 
 
+def _page_dicts(pages) -> list:
+    wrapped = []
+    for index, item in enumerate(pages):
+        if isinstance(item, str):
+            wrapped.append({'pageIndex': index, 'text': item})
+        else:
+            wrapped.append(item)
+    return wrapped
+
+
 def _invoke_raw_audit(audit, case):
-    pages = _pdf_page_texts(case['blindPdfBytes'])
+    pages = _page_dicts(_pdf_page_texts(case['blindPdfBytes']))
     supplements = case['supplements']
     try:
         return audit(pages, supplements)
@@ -362,6 +549,66 @@ def _raw_dataset_signals(case) -> list:
     if not callable(audit):
         return []
     return _signals_from_report(_invoke_raw_audit(audit, case))
+
+
+def _load_callable(module_name, fn_name):
+    try:
+        module = importlib.import_module(module_name)
+    except ImportError:
+        return None
+    audit = getattr(module, fn_name, None)
+    return audit if callable(audit) else None
+
+
+def _listed_signals(report) -> list:
+    if not isinstance(report, dict):
+        return []
+    signals = report.get('signals')
+    return list(signals) if isinstance(signals, list) else []
+
+
+def _flow_triage_signals(case) -> list:
+    audit = _load_callable('paper_flow_and_spin_triage', 'audit_flow_and_spin_triage')
+    if audit is None:
+        return []
+    return _listed_signals(audit(_pdf_page_texts(case['blindPdfBytes'])))
+
+
+def _code_audit_signals(case) -> list:
+    audit = _load_callable('paper_code_audit', 'audit_code_supplements')
+    if audit is None:
+        return []
+    payloads = [_supplement_payload(item) for item in case['supplements']]
+    return _listed_signals(audit(_pdf_page_texts(case['blindPdfBytes']), payloads))
+
+
+def _norm_excerpt(signal) -> str:
+    return ' '.join(str(signal.get('excerpt') or signal.get('quote') or '').split()).lower()
+
+
+def _excerpt_overlaps(left, right) -> bool:
+    if not left or not right:
+        return False
+    if left == right:
+        return True
+    shorter, longer = (left, right) if len(left) <= len(right) else (right, left)
+    return len(shorter) >= 24 and shorter in longer
+
+
+def _merge_signals(signals, extra) -> list:
+    """Append hook signals that do not repeat a layer-0 excerpt already kept."""
+    merged = list(signals)
+    keys = [_norm_excerpt(item) for item in merged if isinstance(item, dict)]
+    for item in extra:
+        if not isinstance(item, dict):
+            continue
+        key = _norm_excerpt(item)
+        if any(_excerpt_overlaps(key, prev) for prev in keys):
+            continue
+        merged.append(item)
+        if key:
+            keys.append(key)
+    return merged
 
 
 def _signal_finding(signal, index) -> dict:
@@ -395,7 +642,9 @@ def _sensor_run(case) -> dict:
     _ensure_local()
     signals = _sensor_signals(case)
     signals.extend(_supplement_signals(case))
-    signals.extend(_raw_dataset_signals(case))
+    signals = _merge_signals(signals, _raw_dataset_signals(case))
+    signals = _merge_signals(signals, _flow_triage_signals(case))
+    signals = _merge_signals(signals, _code_audit_signals(case))
     return _signals_to_run(signals, case['caseId'])
 
 
@@ -667,6 +916,7 @@ def _build_report(mode, cases, summaries, baseline, max_recall_drop, allow_fp) -
     gold_pairs, hold_pairs = _split_cases(cases, summaries)
     report = {
         'schema': SCHEMA,
+        'corpusVersion': CORPUS_VERSION,
         'mode': mode,
         'caseCount': len(cases),
         'goldSummary': _gold_summary(gold_pairs),

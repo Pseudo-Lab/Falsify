@@ -505,6 +505,28 @@ def _resolve_stealth_pass(raw: dict) -> bool | None:
     return None
 
 
+def _first_supplement_name(raw: dict, *, include_name: bool = False) -> str | None:
+    keys = (
+        ('supplementName', 'supplementFile', 'supplement', 'name')
+        if include_name else
+        ('supplementName', 'supplementFile', 'supplement')
+    )
+    for key in keys:
+        val = _norm_space(raw.get(key))
+        if val:
+            return val
+    return None
+
+
+def _sensor_bundle_signals(doc: dict) -> list:
+    items = list(doc['sensor'].get('signals') or [])
+    for key in ('supplementAudit', 'rawDatasetAudit', 'codeAudit'):
+        sub = doc.get(key)
+        if isinstance(sub, dict):
+            items.extend(sub.get('signals') or [])
+    return items
+
+
 def _normalize_gold_item(raw: dict, idx: int) -> dict:
     defect_id = str(raw.get('defectId') or raw.get('id') or f'gold-{idx + 1}')
     page_idx = raw.get('pageIndex')
@@ -522,7 +544,7 @@ def _normalize_gold_item(raw: dict, idx: int) -> dict:
         'pageIndex': page_idx,
         'bbox': _normalize_bbox(raw.get('bbox')),
         'itemId': _norm_space(raw.get('itemId')) or None,
-        'supplementName': _norm_space(raw.get('supplementName')) or None,
+        'supplementName': _first_supplement_name(raw, include_name=True),
         'before': _norm_space(raw.get('before')),
         'after': _norm_space(raw.get('after')),
         'texts': texts,
@@ -579,10 +601,7 @@ def _extract_run_findings_raw(run: dict) -> list:
     if isinstance(run.get('signals'), list):
         return run['signals']
     if isinstance(run.get('sensor'), dict):
-        items = list(run['sensor'].get('signals') or [])
-        if isinstance(run.get('supplementAudit'), dict):
-            items.extend(run['supplementAudit'].get('signals') or [])
-        return items
+        return _sensor_bundle_signals(run)
     return []
 
 
@@ -599,7 +618,7 @@ def _normalize_finding(raw: dict, idx: int) -> dict:
         'pageIndex': page_idx,
         'bbox': _normalize_bbox(raw.get('bbox')),
         'itemId': _norm_space(raw.get('itemId')) or None,
-        'supplementName': _norm_space(raw.get('supplementName')) or None,
+        'supplementName': _first_supplement_name(raw),
         'quote': texts[0] if texts else '',
         'texts': texts,
         'family': str(raw.get('family') or '').strip().upper() or None,
@@ -632,8 +651,9 @@ def _extract_baseline_items(baseline_signals) -> list:
     for key in ('signals', 'findings'):
         if isinstance(baseline_signals.get(key), list):
             return baseline_signals[key]
-    sensor = baseline_signals.get('sensor')
-    return list(sensor.get('signals') or []) if isinstance(sensor, dict) else []
+    if isinstance(baseline_signals.get('sensor'), dict):
+        return _sensor_bundle_signals(baseline_signals)
+    return []
 
 
 def _normalize_baseline_signals(baseline_signals) -> list[dict]:
@@ -650,7 +670,7 @@ def _normalize_baseline_signals(baseline_signals) -> list[dict]:
             'pageIndex': page_idx,
             'bbox': _normalize_bbox(sig.get('bbox')),
             'itemId': _norm_space(sig.get('itemId')) or None,
-            'supplementName': _norm_space(sig.get('supplementName')) or None,
+            'supplementName': _first_supplement_name(sig),
             'texts': texts,
         })
     return out
