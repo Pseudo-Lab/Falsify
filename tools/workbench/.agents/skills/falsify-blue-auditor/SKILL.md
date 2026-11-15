@@ -17,6 +17,8 @@ python app/local/falsify_cli.py blue scan --pdf CANDIDATE.pdf [--supplement SUPP
 ```
 
 - Invokes `app/local/paper_blue_sensor.py` (`run_blue_sensor` with `include_external_oracle` when `--oracle` is enabled) and `app/local/paper_supplement_audit.py` (`audit_paper_with_supplements`) across `.csv`, `.tsv`, `.json`, `.md`, `.txt`, `.log`, `.py`, `.r`, `.sql`, `.pdf`, and `.docx` supplements.
+- Read-only MCP tools `audit_figures` (placed-panel and chart-claim forensics) and `recompute_raw_supplement` (row-level CSV/TSV/JSON recomputation of N, mean/SD, median/IQR, and unadjusted two-group p) sit on `app/local/paper_mcp.py`. Adjusted, multivariable, and multiplicity-corrected p-values are not raw-data defects.
+- Portable bundle `app/examples/evidence_blue_v038/` (`shinick-blue-evidence-triage-v038`) extends v0.3.7. It records `rawDatasetAudit` / `rawDatasetSignals` and a post-model quote plus Zero-Drop gate in `audit['reportValidation']`: at most one quote-repair turn, then any still-ungrounded `defect`/`아님` quote is downgraded to `확인필요`.
 - Rejects any JSON supplement containing forbidden RED keys (`before`, `after`, `patch`, `gold`, `why_hard`, `candidateRationales`, `plan`) with exit code `3`.
 - `--digest-only` strips bulky raw link/widget lists and caps excerpts (< 12 KB) so triage fits cleanly in an agent context window.
 - When running interactively over stdio MCP, launch `app/local/paper_mcp.py`:

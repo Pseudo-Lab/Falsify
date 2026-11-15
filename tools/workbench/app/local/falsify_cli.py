@@ -1,15 +1,20 @@
 """Unified headless agent JSON CLI for falsify RED/BLUE workflows.
 
 Usage:
-    python app/local/falsify_cli.py blue scan --pdf PATH [--supplement PATH ...] [--oracle] [--max-signals 50] [--digest-only] [--out JSON_PATH]
-    python app/local/falsify_cli.py blue validate --pdf BLIND_PDF --report BLUE_REPORT [--ledger CANDIDATES_JSON] [--csv OUT_CSV] [--out JSON_PATH]
+    python app/local/falsify_cli.py blue scan --pdf PATH [--supplement PATH ...] [--oracle] [--figure-forensics] [--recompute-raw] [--max-signals 50] [--digest-only] [--out JSON_PATH]
+    python app/local/falsify_cli.py blue validate --pdf BLIND_PDF --report BLUE_REPORT [--supplement PATH ...] [--ledger CANDIDATES_JSON] [--csv OUT_CSV] [--out JSON_PATH]
     python app/local/falsify_cli.py red targets --pdf PATH [--page N] [--query TEXT] [--include-baseline]
-    python app/local/falsify_cli.py red apply --pdf PATH --ops OPS_JSON_OR_PATH --out-pdf BLIND_PDF [--out-gold GOLD_JSON] [--require-clean-stealth]
+    python app/local/falsify_cli.py red simulate --pdf PATH --ops OPS_JSON_OR_PATH [--supplement PATH ...] [--max-signals 50] [--out JSON_PATH]
+    python app/local/falsify_cli.py red trace --pdf PATH --claim TEXT [--supplement PATH ...] [--max-occurrences 40] [--out JSON_PATH]
+    python app/local/falsify_cli.py red apply --pdf PATH --ops OPS_JSON_OR_PATH --out-pdf BLIND_PDF [--out-gold GOLD_JSON] [--supplement PATH ...] [--min-difficulty L1|L2|L3|L4] [--require-clean-stealth]
     python app/local/falsify_cli.py blind verify --pdf BLIND_PDF [--source-pdf SRC_PDF] [--supplement PATH ...]
     python app/local/falsify_cli.py arena score --gold GOLD_JSON --blue BLUE_JSON [--blue BLUE_JSON ...] [--baseline BASELINE_JSON] [--out OUT_JSON]
     python app/local/falsify_cli.py arena run-round --pdf BLIND_PDF --agent-cmd EXE [--agent-arg VALUE ...] [--source-pdf SRC_PDF] [--supplement PATH ...] [--gold GOLD_JSON] [--baseline BASELINE_JSON] [--agent-timeout 180] [--runs 1] [--out OUT_JSON]
     python app/local/falsify_cli.py arena distill --round ROUND_JSON [--gold GOLD_JSON] [--max-rules 40] [--out PATCH_JSON]
-    python app/local/falsify_cli.py mcp-config --pdf PATH [--workspace DIR] [--analysis] [--oracle] [--supplement PATH ...] [--format json]
+    python app/local/falsify_cli.py arena duel --source-pdf SRC_PDF --red-cmd EXE [--red-arg VALUE ...] --blue-cmd EXE [--blue-arg VALUE ...] [--supplement PATH ...] [--holdout-pdf PDF ...] [--min-difficulty L1|L2|L3|L4] [--runs 1] [--agent-timeout 180] [--max-rules 40] [--no-validate-quotes] [--out OUT_JSON]
+    python app/local/falsify_cli.py arena apply-patch --harness HARNESS_JSON --patch PATCH_JSON [--role blue|red] [--max-generations 3] [--baseline-holdout-fp N] [--candidate-holdout-fp N] [--max-instructions-chars 12000] [--out OUT_JSON]
+    python app/local/falsify_cli.py arena benchmark [--mode sensor|agent] [--agent-cmd EXE] [--agent-arg VALUE ...] [--case CASE_ID ...] [--baseline-report REPORT_JSON] [--max-recall-drop 0.0] [--allow-holdout-fp-increase] [--out OUT_JSON]
+    python app/local/falsify_cli.py mcp-config (--pdf PATH | --workspace DIR) [--role blue|red|both] [--analysis] [--oracle] [--supplement PATH ...] [--format json]
 """
 from __future__ import annotations
 
@@ -46,6 +51,7 @@ from paper_evidence import EvidenceStore  # noqa: E402
 from paper_evidence_text import _open_pdf  # noqa: E402
 import paper_mcp  # noqa: E402
 from paper_mcp import open_selected  # noqa: E402
+import paper_red_detectability  # noqa: E402
 import paper_red_mcp  # noqa: E402
 from paper_stealth_audit import (  # noqa: E402
     BLINDNESS_META_PATTERNS,
@@ -63,6 +69,8 @@ from paper_uri_mutator import _HINT_TOKENS  # noqa: E402
 SCHEMA = "falsify.agent-cli.v1"
 MCP_CONFIG_SCHEMA = "falsify.mcp-config.v1"
 MCP_SERVER_KEY = "falsify-paper-evidence"
+RED_MCP_SERVER_KEY = "falsify-paper-red"
+_DIFFICULTY_RANK = {"L1": 1, "L2": 2, "L3": 3, "L4": 4}
 MCP_REGISTERS = ("claude", "codex", "gemini")
 MCP_WORKSPACE_WARNING = "workspace flag requires the w7-c2-mcp-workspace merge"
 GOLD_LEDGER_SCHEMA = "falsify.red-gold-ledger.v1"
@@ -323,6 +331,9 @@ def _fit_digest_budget(payload: dict) -> dict:
             sa["signals"] = sa.get("signals", [])[:sig_cap]
             sa["citedItems"] = sa.get("citedItems", [])[:10]
             sa["presentItems"] = sa.get("presentItems", [])[:10]
+        raw_audit = payload.get("rawDatasetAudit")
+        if isinstance(raw_audit, dict) and isinstance(raw_audit.get("signals"), list):
+            raw_audit["signals"] = raw_audit["signals"][:sig_cap]
     if len(json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")) >= DIGEST_MAX_BYTES:
         payload["sensor"].pop("oraclePack", None)
         payload["sensor"].pop("identifiers", None)
@@ -338,6 +349,14 @@ def _compact_blue_payload(payload: dict) -> dict:
         sa["citedItems"] = list(sa.get("citedItems") or [])[:20]
         sa["presentItems"] = list(sa.get("presentItems") or [])[:20]
         out["supplementAudit"] = sa
+    raw_audit = out.get("rawDatasetAudit")
+    if isinstance(raw_audit, dict):
+        trimmed = dict(raw_audit)
+        trimmed["signals"] = [
+            _trim_signal(item) if isinstance(item, dict) else item
+            for item in (raw_audit.get("signals") or [])
+        ]
+        out["rawDatasetAudit"] = trimmed
     return _fit_digest_budget(out)
 
 
@@ -375,6 +394,56 @@ def _visual_page_text(page) -> str:
     return "\n".join(lines)
 
 
+def _scan_page_items(store: EvidenceStore, pid: str, fhash: str) -> list[dict]:
+    raw = store.source_bytes(pid, fhash)
+    with _open_pdf(raw) as doc:
+        return [
+            {"id": f"p{idx}", "pageIndex": idx, "text": _visual_page_text(doc[idx])}
+            for idx in range(min(doc.page_count, 80))
+        ]
+
+
+def _audit_supplements(page_items: list[dict], supp_entries: list[dict]):
+    try:
+        return audit_paper_with_supplements(page_items, supp_entries)
+    except ValueError as exc:
+        if "forbidden_red_key" in str(exc):
+            raise _CliError("forbidden_red_key", str(exc), exit_code=3) from None
+        raise _CliError("supplement_audit_failed", str(exc), exit_code=2) from None
+
+
+def _run_raw_dataset_audit(page_items: list[dict], supp_entries: list[dict], max_signals: int):
+    try:
+        module = importlib.import_module("paper_raw_dataset_audit")
+    except ImportError:
+        raise _CliError(
+            "raw_dataset_audit_unavailable",
+            "app/local/paper_raw_dataset_audit.py is not installed.",
+            exit_code=2,
+            recovery_hint="Install app/local/paper_raw_dataset_audit.py or omit --recompute-raw.",
+        ) from None
+    try:
+        return module.audit_raw_datasets(page_items, supp_entries, max_signals=max_signals)
+    except ValueError as exc:
+        if "forbidden_red_key" in str(exc):
+            raise _CliError("forbidden_red_key", str(exc), exit_code=3) from None
+        raise
+
+
+def _scan_attached_audits(store, pid, fhash, args, deadline):
+    supp_paths = _flatten_paths(args.supplement)
+    if not supp_paths:
+        return supp_paths, None, None
+    supp_entries = [_load_supplement_entry(p) for p in supp_paths]
+    _check_deadline(deadline)
+    page_items = _scan_page_items(store, pid, fhash)
+    supp_res = _audit_supplements(page_items, supp_entries)
+    raw_res = None
+    if getattr(args, "recompute_raw", False):
+        raw_res = _run_raw_dataset_audit(page_items, supp_entries, args.max_signals)
+    return supp_paths, supp_res, raw_res
+
+
 def _cmd_blue_scan(args, deadline: float | None = None) -> tuple[dict, int]:
     if args.max_signals < 1 or args.max_signals > 100:
         raise _CliError("invalid_arguments", "--max-signals must be between 1 and 100.", exit_code=2)
@@ -383,25 +452,11 @@ def _cmd_blue_scan(args, deadline: float | None = None) -> tuple[dict, int]:
     _check_deadline(deadline)
     sensor_res = run_blue_sensor(
         pid, file_hash=fhash, max_signals=args.max_signals,
-        include_external_oracle=bool(args.oracle), store=store,
+        include_external_oracle=bool(args.oracle),
+        include_figure_forensics=bool(getattr(args, "figure_forensics", False)),
+        store=store,
     )
-    supp_paths = _flatten_paths(args.supplement)
-    supp_res = None
-    if supp_paths:
-        supp_entries = [_load_supplement_entry(p) for p in supp_paths]
-        _check_deadline(deadline)
-        raw = store.source_bytes(pid, fhash)
-        with _open_pdf(raw) as doc:
-            page_items = [
-                {"id": f"p{idx}", "pageIndex": idx, "text": _visual_page_text(doc[idx])}
-                for idx in range(min(doc.page_count, 80))
-            ]
-        try:
-            supp_res = audit_paper_with_supplements(page_items, supp_entries)
-        except ValueError as exc:
-            if "forbidden_red_key" in str(exc):
-                raise _CliError("forbidden_red_key", str(exc), exit_code=3) from None
-            raise _CliError("supplement_audit_failed", str(exc), exit_code=2) from None
+    supp_paths, supp_res, raw_res = _scan_attached_audits(store, pid, fhash, args, deadline)
     payload = {
         "schema": SCHEMA,
         "ok": True,
@@ -412,6 +467,8 @@ def _cmd_blue_scan(args, deadline: float | None = None) -> tuple[dict, int]:
         "sensor": sensor_res,
         "supplementAudit": supp_res,
     }
+    if raw_res is not None:
+        payload["rawDatasetAudit"] = raw_res
     if args.digest_only:
         payload = _compact_blue_payload(payload)
     if args.out:
@@ -439,12 +496,15 @@ def _cmd_blue_validate(args, deadline: float | None = None) -> tuple[dict, int]:
     pid, fhash = summary["paperId"], summary["fileHash"]
     report = _read_json_file(args.report, label="--report")
     ledger = _read_json_file(args.ledger, label="--ledger") if args.ledger else None
-    protected = [args.pdf, args.report, *([args.ledger] if args.ledger else [])]
+    supp_paths = _flatten_paths(getattr(args, "supplement", None))
+    supp_entries = [_load_supplement_entry(p) for p in supp_paths]
+    protected = [args.pdf, args.report, *supp_paths, *([args.ledger] if args.ledger else [])]
     _guard_output_paths([args.csv, args.out], protected)
     _check_deadline(deadline)
     result = validate_blue_report(
         store.source_bytes(pid, fhash), report,
-        ledger=ledger, csv_path=args.csv, paper_id=pid, file_hash=fhash,
+        ledger=ledger, supplements=supp_entries or None, csv_path=args.csv,
+        paper_id=pid, file_hash=fhash,
     )
     _check_deadline(deadline)
     missing = result["quoteCheck"]["missingCount"]
@@ -464,7 +524,11 @@ def _cmd_blue_validate(args, deadline: float | None = None) -> tuple[dict, int]:
         payload = {
             **payload,
             "error": "quote_not_found",
-            "message": f"{missing} quote(s) missing from the PDF after Zero-Drop restoration.",
+            "message": (
+                f"{missing} quote(s) missing from the PDF or attached supplements after Zero-Drop restoration."
+                if supp_paths else
+                f"{missing} quote(s) missing from the PDF after Zero-Drop restoration."
+            ),
             "recoveryHint": (
                 "Re-read each quoted page, copy the verbatim string into quote/excerpt, "
                 "or abstain with verdictLabel 확인필요."
@@ -512,7 +576,9 @@ def _paper_mcp_accepts_workspace() -> bool:
 
 
 def _mcp_config_argv(args) -> list[str]:
-    argv = [str(_paper_mcp_script()), "--pdf", str(_require_readable_file(args.pdf, "--pdf"))]
+    argv = [str(_paper_mcp_script())]
+    if args.pdf:
+        argv.extend(["--pdf", str(_require_readable_file(args.pdf, "--pdf"))])
     if args.analysis:
         argv.append("--analysis")
     for supp in _flatten_paths(args.supplement):
@@ -529,14 +595,14 @@ def _shell_quote(value: str) -> str:
     return f'"{text}"' if any(ch in text for ch in ' \t"') else text
 
 
-def _mcp_usage(command: str, args: list[str]) -> dict:
+def _mcp_usage(command: str, args: list[str], server_key: str = MCP_SERVER_KEY) -> dict:
     invocation = " ".join(_shell_quote(part) for part in [command, *args])
     codex_args = ", ".join(json.dumps(str(part), ensure_ascii=False) for part in args)
-    gemini = {"mcpServers": {MCP_SERVER_KEY: {"command": command, "args": args}}}
+    gemini = {"mcpServers": {server_key: {"command": command, "args": args}}}
     return {
-        "claude": f"claude mcp add {MCP_SERVER_KEY} -- {invocation}",
+        "claude": f"claude mcp add {server_key} -- {invocation}",
         "codex": (
-            f"[mcp_servers.{MCP_SERVER_KEY}]\n"
+            f"[mcp_servers.{server_key}]\n"
             f"command = {json.dumps(command, ensure_ascii=False)}\n"
             f"args = [{codex_args}]"
         ),
@@ -544,20 +610,93 @@ def _mcp_usage(command: str, args: list[str]) -> dict:
     }
 
 
+def _paper_red_script() -> Path:
+    script = _HERE.parent / "paper_red_mcp.py"
+    if not script.is_file():
+        raise _CliError(
+            "paper_red_mcp_missing",
+            f"paper_red_mcp.py not found next to the CLI: {script}",
+            exit_code=2,
+            recovery_hint="Run the CLI from a complete app/local installation.",
+        )
+    return script
+
+
+def _reject_mcp_selection(args) -> None:
+    has_pdf = bool(getattr(args, "pdf", None))
+    has_ws = bool(getattr(args, "workspace", None))
+    role = getattr(args, "role", None) or "blue"
+    if not has_pdf and not has_ws:
+        raise _CliError(
+            "invalid_arguments",
+            "Specify exactly one of --pdf or --workspace.",
+            exit_code=2,
+            recovery_hint="Pass --pdf for one paper or --workspace for a read-only PDF directory.",
+        )
+    if has_ws and not Path(args.workspace).expanduser().is_dir():
+        raise _CliError(
+            "file_not_found",
+            f"Workspace directory not found: {args.workspace}",
+            exit_code=2,
+            recovery_hint="Create the workspace directory or pass an existing folder.",
+        )
+    if role == "red" and has_ws:
+        raise _CliError(
+            "invalid_arguments",
+            "RED MCP server (paper_red_mcp.py) requires --pdf and does not support --workspace.",
+            exit_code=2,
+            recovery_hint="Pass --pdf alone with --role red.",
+        )
+
+
+def _usage_for_servers(command: str, servers: dict) -> dict:
+    if len(servers) == 1:
+        name, spec = next(iter(servers.items()))
+        return _mcp_usage(command, spec["args"], name)
+    blocks = [(name, _mcp_usage(command, spec["args"], name)) for name, spec in servers.items()]
+    gemini = {
+        "mcpServers": {
+            name: {"command": command, "args": spec["args"]} for name, spec in servers.items()
+        },
+    }
+    return {
+        "claude": "\n".join(block["claude"] for _name, block in blocks),
+        "codex": "\n\n".join(block["codex"] for _name, block in blocks),
+        "gemini": json.dumps(gemini, ensure_ascii=False, indent=2),
+    }
+
+
+def _mcp_servers(args, python_exe: str) -> tuple[dict, list[str]]:
+    role = getattr(args, "role", None) or "blue"
+    warnings: list[str] = []
+    servers: dict = {}
+    if role in ("blue", "both"):
+        servers[MCP_SERVER_KEY] = {"command": python_exe, "args": _mcp_config_argv(args)}
+        if args.workspace and not _paper_mcp_accepts_workspace():
+            warnings.append(MCP_WORKSPACE_WARNING)
+    if role == "both" and args.workspace and not args.pdf:
+        warnings.append("falsify-paper-red skipped because --workspace mode is read-only BLUE only")
+    if role in ("red", "both") and args.pdf:
+        pdf = str(_require_readable_file(args.pdf, "--pdf"))
+        servers[RED_MCP_SERVER_KEY] = {
+            "command": python_exe,
+            "args": [str(_paper_red_script()), "--pdf", pdf],
+        }
+    return servers, warnings
+
+
 def _cmd_mcp_config(args, deadline: float | None = None) -> tuple[dict, int]:
     _check_deadline(deadline)
+    _reject_mcp_selection(args)
     python_exe = sys.executable or "python"
-    server_args = _mcp_config_argv(args)
-    warnings = []
-    if args.workspace and not _paper_mcp_accepts_workspace():
-        warnings.append(MCP_WORKSPACE_WARNING)
+    servers, warnings = _mcp_servers(args, python_exe)
     payload = {
         "schema": MCP_CONFIG_SCHEMA,
         "ok": True,
         "command": "mcp-config",
-        "servers": {MCP_SERVER_KEY: {"command": python_exe, "args": server_args}},
+        "servers": servers,
         "registers": list(MCP_REGISTERS),
-        "usage": _mcp_usage(python_exe, server_args),
+        "usage": _usage_for_servers(python_exe, servers),
         "warnings": warnings,
     }
     return payload, 0
@@ -754,6 +893,124 @@ def _enrich_gold_changes(ops: list[dict], changes: list[dict], stealth: dict) ->
     return enriched
 
 
+def _supplements_for_detectability(entries: list[dict] | None):
+    if not entries:
+        return None
+    prepared = []
+    for entry in entries:
+        text = entry.get("text")
+        if not isinstance(text, str):
+            pages = entry.get("pages")
+            text = "\n".join(str(page) for page in pages) if isinstance(pages, list) else ""
+        prepared.append({**entry, "text": text})
+    return prepared
+
+
+def _load_optional_supplements(groups) -> tuple[list[str], list[dict] | None]:
+    paths = _flatten_paths(groups)
+    if not paths:
+        return paths, None
+    return paths, _supplements_for_detectability([_load_supplement_entry(path) for path in paths])
+
+
+def _detectability_operations(sim_res: dict) -> list:
+    operations = sim_res.get("operations")
+    if isinstance(operations, list):
+        return operations
+    results = sim_res.get("results")
+    return results if isinstance(results, list) else []
+
+
+def _operation_distance(op: dict) -> str:
+    for key in ("crossInferenceDistance", "difficulty", "distance"):
+        value = op.get(key)
+        if value in _DIFFICULTY_RANK:
+            return value
+    return ""
+
+
+def _below_minimum_ops(sim_res: dict, minimum: str) -> list[dict]:
+    floor = _DIFFICULTY_RANK[minimum]
+    failing = []
+    for op in _detectability_operations(sim_res):
+        rank = _DIFFICULTY_RANK.get(_operation_distance(op))
+        if rank is not None and rank < floor:
+            failing.append(op)
+    return failing
+
+
+def _simulate_for_gate(args, store, pid, fhash, resolved_ops, supp_entries):
+    minimum = getattr(args, "min_difficulty", None)
+    if not minimum:
+        return None
+    try:
+        sim_res = paper_red_detectability.simulate_red_detectability(
+            pid, resolved_ops, file_hash=fhash, store=store,
+            supplements=supp_entries, max_signals=50,
+        )
+    except ValueError as exc:
+        raise _CliError(
+            "red_apply_failed",
+            f"Detectability simulation failed: {exc}",
+            exit_code=2,
+            recovery_hint="Check operation ids, supplement text, and --min-difficulty.",
+        ) from None
+    failing = _below_minimum_ops(sim_res, minimum)
+    if failing:
+        raise _CliError(
+            "difficulty_below_minimum",
+            f"{len(failing)} operation(s) are below minimum difficulty {minimum}.",
+            exit_code=3,
+            recovery_hint="Raise the operation difficulty or lower --min-difficulty before writing the blind PDF.",
+            extra={"minDifficulty": minimum, "belowMinimum": failing, "detectability": sim_res},
+        )
+    return sim_res
+
+
+def _require_signal_limit(value: int, flag: str) -> None:
+    if type(value) is not int or not 1 <= value <= 100:
+        raise _CliError("invalid_arguments", f"{flag} must be between 1 and 100.", exit_code=2)
+
+
+def _cmd_red_simulate(args, deadline: float | None = None) -> tuple[dict, int]:
+    _require_signal_limit(args.max_signals, "--max-signals")
+    store, summary = _open_pdf_store(args.pdf)
+    pid, fhash = summary["paperId"], summary["fileHash"]
+    resolved_ops = _resolve_table_item_ids(store, pid, _load_ops_payload(args.ops))
+    supp_paths, supp_entries = _load_optional_supplements(args.supplement)
+    _check_deadline(deadline)
+    try:
+        res = paper_red_detectability.simulate_red_detectability(
+            pid, resolved_ops, file_hash=fhash, store=store,
+            supplements=supp_entries, max_signals=args.max_signals,
+        )
+    except ValueError as exc:
+        raise _CliError("red_simulate_failed", f"Detectability simulation failed: {exc}", exit_code=2) from None
+    payload = {"schema": SCHEMA, "ok": True, "command": "red simulate", "detectability": res}
+    if args.out:
+        _write_json_out(args.out, payload, [args.pdf, *supp_paths])
+    return payload, 0
+
+
+def _cmd_red_trace(args, deadline: float | None = None) -> tuple[dict, int]:
+    _require_signal_limit(args.max_occurrences, "--max-occurrences")
+    store, summary = _open_pdf_store(args.pdf)
+    pid, fhash = summary["paperId"], summary["fileHash"]
+    supp_paths, supp_entries = _load_optional_supplements(args.supplement)
+    _check_deadline(deadline)
+    try:
+        res = paper_red_detectability.trace_claim_propagation(
+            pid, args.claim, file_hash=fhash, store=store,
+            supplements=supp_entries, max_occurrences=args.max_occurrences,
+        )
+    except ValueError as exc:
+        raise _CliError("red_trace_failed", f"Claim trace failed: {exc}", exit_code=2) from None
+    payload = {"schema": SCHEMA, "ok": True, "command": "red trace", "propagation": res}
+    if args.out:
+        _write_json_out(args.out, payload, [args.pdf, *supp_paths])
+    return payload, 0
+
+
 def _cmd_red_apply(args, deadline: float | None = None) -> tuple[dict, int]:
     src_path, _ = _require_pdf_bytes(args.pdf)
     out_pdf = Path(args.out_pdf)
@@ -771,6 +1028,8 @@ def _cmd_red_apply(args, deadline: float | None = None) -> tuple[dict, int]:
     pid, fhash = summary["paperId"], summary["fileHash"]
     _check_deadline(deadline)
     resolved_ops = _resolve_table_item_ids(store, pid, ops)
+    _supp_paths, supp_entries = _load_optional_supplements(getattr(args, "supplement", None))
+    sim_res = _simulate_for_gate(args, store, pid, fhash, resolved_ops, supp_entries)
     text_ops = [op for op in resolved_ops if op.get("kind") == "text-span"]
     other_ops = [op for op in resolved_ops if op.get("kind") != "text-span"]
     try:
@@ -800,6 +1059,7 @@ def _cmd_red_apply(args, deadline: float | None = None) -> tuple[dict, int]:
     out_pdf.write_bytes(edited_bytes)
     out_sha = hashlib.sha256(edited_bytes).hexdigest()
     all_changes = _enrich_gold_changes(ops, list(vis_result.get("changes") or []) + text_changes, stealth)
+    ledger = None
     if args.out_gold:
         ledger = {
             "schema": GOLD_LEDGER_SCHEMA,
@@ -816,7 +1076,7 @@ def _cmd_red_apply(args, deadline: float | None = None) -> tuple[dict, int]:
         }
         Path(args.out_gold).parent.mkdir(parents=True, exist_ok=True)
         Path(args.out_gold).write_text(json.dumps(ledger, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    return {
+    payload = {
         "schema": SCHEMA,
         "ok": True,
         "command": "red apply",
@@ -828,7 +1088,12 @@ def _cmd_red_apply(args, deadline: float | None = None) -> tuple[dict, int]:
         "appliedCount": len(all_changes),
         "stealthAudit": stealth,
         "verification": vis_result.get("verification"),
-    }, 0
+    }
+    if sim_res is not None:
+        payload["detectability"] = sim_res
+        if ledger is not None:
+            payload["goldLedger"] = ledger
+    return payload, 0
 
 
 def _delegate_arena(fn_name: str, **kwargs):
@@ -1296,6 +1561,139 @@ def _cmd_arena_distill(args, deadline: float | None = None) -> tuple[dict, int]:
     return payload, 0
 
 
+def _arena_duel_module():
+    try:
+        return importlib.import_module("arena_duel")
+    except ImportError:
+        raise _CliError(
+            "arena_duel_unavailable",
+            "tools/evaluation/arena_duel.py is missing from this installation.",
+            exit_code=2,
+            recovery_hint="Run the CLI from a complete repository checkout.",
+        ) from None
+
+
+def _benchmark_suite_module():
+    try:
+        return importlib.import_module("benchmark_suite")
+    except ImportError:
+        raise _CliError(
+            "benchmark_suite_unavailable",
+            "tools/evaluation/benchmark_suite.py is missing from this installation.",
+            exit_code=2,
+            recovery_hint="Run the CLI from a complete repository checkout.",
+        ) from None
+
+
+def _arena_duel_cli_error(exc, label: str) -> _CliError:
+    code = str(getattr(exc, "code", "input_invalid"))
+    return _CliError(
+        code,
+        f"arena {label} rejected the request: {code}",
+        exit_code=getattr(exc, "exit_code", 2),
+        recovery_hint="Inspect agent commands, difficulty/blindness gates, generation cap, and holdout FP guard.",
+        extra=dict(getattr(exc, "extra", None) or {}),
+    )
+
+
+def _cmd_arena_duel(args, deadline: float | None = None) -> tuple[dict, int]:
+    module = _arena_duel_module()
+    _src_path, source_bytes = _require_pdf_bytes(args.source_pdf)
+    supp_paths = _flatten_paths(args.supplement)
+    holdout_paths = _flatten_paths(args.holdout_pdf)
+    red_argv = [args.red_cmd, *_flatten_paths(args.red_arg)]
+    blue_argv = [args.blue_cmd, *_flatten_paths(args.blue_arg)]
+    _check_deadline(deadline)
+    try:
+        duel = module.run_duel(
+            source_bytes,
+            red_argv=red_argv,
+            blue_argv=blue_argv,
+            supplements=_arena_round_supplements(supp_paths) or None,
+            holdout_pdfs=_arena_round_supplements(holdout_paths) or None,
+            min_difficulty=args.min_difficulty,
+            runs=args.runs,
+            timeout=args.agent_timeout,
+            validate_quotes=not bool(args.no_validate_quotes),
+            max_rules=args.max_rules,
+        )
+    except module.ArenaDuelError as exc:
+        raise _arena_duel_cli_error(exc, "duel") from None
+    _check_deadline(deadline)
+    payload = {"schema": SCHEMA, "ok": True, "command": "arena duel", "duel": duel}
+    protected = [args.source_pdf, *supp_paths, *holdout_paths]
+    if args.out:
+        _write_json_out(args.out, payload, protected)
+    return payload, 0
+
+
+def _cmd_arena_apply_patch(args, deadline: float | None = None) -> tuple[dict, int]:
+    module = _arena_duel_module()
+    harness_doc = _read_json_file(args.harness, label="--harness")
+    patch_doc = _read_json_file(args.patch, label="--patch")
+    _check_deadline(deadline)
+    try:
+        promotion = module.apply_harness_patch(
+            harness_doc,
+            patch_doc,
+            role=args.role,
+            max_generations=args.max_generations,
+            baseline_holdout_fp=args.baseline_holdout_fp,
+            candidate_holdout_fp=args.candidate_holdout_fp,
+            max_instructions_chars=args.max_instructions_chars,
+        )
+    except module.ArenaDuelError as exc:
+        raise _arena_duel_cli_error(exc, "apply-patch") from None
+    payload = {"schema": SCHEMA, "ok": True, "command": "arena apply-patch", "promotion": promotion}
+    if args.out:
+        _write_json_out(args.out, payload, [args.harness, args.patch])
+    return payload, 0
+
+
+def _benchmark_agent_argv(args) -> list[str] | None:
+    if args.mode != "agent":
+        return None
+    if not args.agent_cmd:
+        raise _CliError(
+            "invalid_arguments",
+            "--agent-cmd is required when --mode agent.",
+            exit_code=2,
+            recovery_hint="Pass --agent-cmd EXE or use --mode sensor.",
+        )
+    return [args.agent_cmd, *_flatten_paths(args.agent_arg)]
+
+
+def _cmd_arena_benchmark(args, deadline: float | None = None) -> tuple[dict, int]:
+    module = _benchmark_suite_module()
+    agent_argv = _benchmark_agent_argv(args)
+    baseline = _read_json_file(args.baseline_report, label="--baseline-report") if args.baseline_report else None
+    case_ids = _flatten_paths(args.case) or None
+    _check_deadline(deadline)
+    try:
+        report = module.run_benchmark_suite(
+            mode=args.mode,
+            case_ids=case_ids,
+            agent_argv=agent_argv,
+            baseline_report=baseline,
+            max_recall_drop=args.max_recall_drop,
+            allow_holdout_fp_increase=bool(args.allow_holdout_fp_increase),
+        )
+    except ValueError as exc:
+        raise _CliError("invalid_arguments", f"Invalid benchmark arguments: {exc}", exit_code=2) from None
+    _check_deadline(deadline)
+    comparison = report.get("comparison")
+    regressed = isinstance(comparison, dict) and comparison.get("passed") is False
+    payload = {"schema": SCHEMA, "ok": not regressed, "command": "arena benchmark", "benchmark": report}
+    if regressed:
+        payload["error"] = "benchmark_regression_detected"
+        payload["message"] = "Benchmark comparison failed recall or holdout pure-FP gate."
+        payload["recoveryHint"] = "Inspect benchmark.comparison.regressions before promoting changes."
+    protected = [args.baseline_report] if args.baseline_report else []
+    if args.out:
+        _write_json_out(args.out, payload, protected)
+    return payload, (3 if regressed else 0)
+
+
 def _add_blue_parser(subparsers, parent):
     blue = subparsers.add_parser("blue", parents=[parent], help="BLUE verification commands")
     blue_sub = blue.add_subparsers(dest="action", parser_class=_JsonArgumentParser)
@@ -1303,6 +1701,8 @@ def _add_blue_parser(subparsers, parent):
     scan.add_argument("--pdf", required=True)
     scan.add_argument("--supplement", action="append", nargs="+")
     scan.add_argument("--oracle", action="store_true")
+    scan.add_argument("--figure-forensics", action="store_true")
+    scan.add_argument("--recompute-raw", action="store_true")
     scan.add_argument("--max-signals", type=int, default=50)
     scan.add_argument("--digest-only", action="store_true")
     scan.add_argument("--out")
@@ -1312,6 +1712,7 @@ def _add_blue_parser(subparsers, parent):
     )
     validate.add_argument("--pdf", required=True)
     validate.add_argument("--report", required=True)
+    validate.add_argument("--supplement", action="append", nargs="+")
     validate.add_argument("--ledger")
     validate.add_argument("--csv")
     validate.add_argument("--out")
@@ -1325,11 +1726,25 @@ def _add_red_parser(subparsers, parent):
     targets.add_argument("--page", type=int)
     targets.add_argument("--query")
     targets.add_argument("--include-baseline", action="store_true")
+    simulate = red_sub.add_parser("simulate", parents=[parent], help="Simulate Layer 0 detectability without writing a PDF")
+    simulate.add_argument("--pdf", required=True)
+    simulate.add_argument("--ops", required=True)
+    simulate.add_argument("--supplement", action="append", nargs="+")
+    simulate.add_argument("--max-signals", type=int, default=50)
+    simulate.add_argument("--out")
+    trace = red_sub.add_parser("trace", parents=[parent], help="Trace one claim across paper and supplement surfaces")
+    trace.add_argument("--pdf", required=True)
+    trace.add_argument("--claim", required=True)
+    trace.add_argument("--supplement", action="append", nargs="+")
+    trace.add_argument("--max-occurrences", type=int, default=40)
+    trace.add_argument("--out")
     apply_cmd = red_sub.add_parser("apply", parents=[parent], help="Apply coordinated RED edits to a blind PDF")
     apply_cmd.add_argument("--pdf", required=True)
     apply_cmd.add_argument("--ops", required=True)
     apply_cmd.add_argument("--out-pdf", required=True)
     apply_cmd.add_argument("--out-gold")
+    apply_cmd.add_argument("--supplement", action="append", nargs="+")
+    apply_cmd.add_argument("--min-difficulty", choices=["L1", "L2", "L3", "L4"], default=None)
     apply_cmd.add_argument("--require-clean-stealth", action="store_true")
 
 
@@ -1373,6 +1788,53 @@ def _add_blind_and_arena_parsers(subparsers, parent):
     distill.add_argument("--gold")
     distill.add_argument("--max-rules", type=int, default=40)
     distill.add_argument("--out")
+    _add_arena_evolution_parsers(arena_sub, parent)
+
+
+def _add_arena_evolution_parsers(arena_sub, parent):
+    duel = arena_sub.add_parser(
+        "duel", parents=[parent],
+        help="Run an isolated RED vs BLUE duel, quote gate, holdout check, and rule distillation",
+    )
+    duel.add_argument("--source-pdf", required=True)
+    duel.add_argument("--red-cmd", required=True)
+    duel.add_argument("--red-arg", action="append", nargs="+")
+    duel.add_argument("--blue-cmd", required=True)
+    duel.add_argument("--blue-arg", action="append", nargs="+")
+    duel.add_argument("--supplement", action="append", nargs="+")
+    duel.add_argument("--holdout-pdf", action="append", nargs="+")
+    duel.add_argument("--min-difficulty", choices=["L1", "L2", "L3", "L4"], default=None)
+    duel.add_argument("--runs", type=int, default=1)
+    duel.add_argument("--agent-timeout", type=int, default=180)
+    duel.add_argument("--max-rules", type=int, default=40)
+    duel.add_argument("--no-validate-quotes", action="store_true")
+    duel.add_argument("--out")
+
+    apply_patch = arena_sub.add_parser(
+        "apply-patch", parents=[parent],
+        help="Promote a scrubbed harness patch under generation cap and holdout rollback guard",
+    )
+    apply_patch.add_argument("--harness", required=True)
+    apply_patch.add_argument("--patch", required=True)
+    apply_patch.add_argument("--role", choices=["blue", "red"], default=None)
+    apply_patch.add_argument("--max-generations", type=int, default=3)
+    apply_patch.add_argument("--baseline-holdout-fp", type=int, default=None)
+    apply_patch.add_argument("--candidate-holdout-fp", type=int, default=None)
+    apply_patch.add_argument("--max-instructions-chars", type=int, default=12000)
+    apply_patch.add_argument("--out")
+
+    bench = arena_sub.add_parser(
+        "benchmark", parents=[parent],
+        help="Run the 10-case deterministic RED/BLUE + Holdout regression benchmark suite",
+    )
+    bench.add_argument("--mode", choices=["sensor", "agent"], default="sensor")
+    bench.add_argument("--agent-cmd")
+    bench.add_argument("--agent-arg", action="append", nargs="+")
+    bench.add_argument("--case", action="append", nargs="+")
+    bench.add_argument("--baseline-report")
+    bench.add_argument("--max-recall-drop", type=float, default=0.0)
+    bench.add_argument("--allow-holdout-fp-increase", action="store_true")
+    bench.add_argument("--out")
 
 
 def _build_parser() -> _JsonArgumentParser:
@@ -1388,8 +1850,9 @@ def _build_parser() -> _JsonArgumentParser:
         "mcp-config", parents=[shared],
         help="Print a stdio MCP client configuration for app/local/paper_mcp.py",
     )
-    mcp_config.add_argument("--pdf", required=True)
+    mcp_config.add_argument("--pdf", required=False, default=None)
     mcp_config.add_argument("--workspace")
+    mcp_config.add_argument("--role", choices=["blue", "red", "both"], default="blue")
     mcp_config.add_argument("--analysis", action="store_true")
     mcp_config.add_argument("--oracle", action="store_true")
     mcp_config.add_argument("--supplement", action="append", nargs="+")
@@ -1401,11 +1864,16 @@ _DISPATCH = {
     ("blue", "scan"): _cmd_blue_scan,
     ("blue", "validate"): _cmd_blue_validate,
     ("red", "targets"): _cmd_red_targets,
+    ("red", "simulate"): _cmd_red_simulate,
+    ("red", "trace"): _cmd_red_trace,
     ("red", "apply"): _cmd_red_apply,
     ("blind", "verify"): _cmd_blind_verify,
     ("arena", "score"): _cmd_arena_score,
     ("arena", "run-round"): _cmd_arena_run_round,
     ("arena", "distill"): _cmd_arena_distill,
+    ("arena", "duel"): _cmd_arena_duel,
+    ("arena", "apply-patch"): _cmd_arena_apply_patch,
+    ("arena", "benchmark"): _cmd_arena_benchmark,
     ("mcp-config", None): _cmd_mcp_config,
 }
 
@@ -1418,8 +1886,9 @@ def main(argv: list[str] | None = None) -> int:
         if handler is None:
             raise _CliError(
                 "invalid_arguments",
-                "Specify one of: blue scan, blue validate, red targets, red apply, "
-                "blind verify, arena score, arena run-round, arena distill, mcp-config.",
+                "Specify one of: blue scan, blue validate, red targets, red simulate, red trace, "
+                "red apply, blind verify, arena score, arena run-round, arena distill, "
+                "arena duel, arena apply-patch, arena benchmark, mcp-config.",
                 exit_code=2,
                 recovery_hint="Run with --help to view command groups and actions.",
             )

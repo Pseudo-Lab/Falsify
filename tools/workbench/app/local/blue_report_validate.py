@@ -15,8 +15,11 @@ from __future__ import annotations
 import csv
 import hashlib
 import io
+import json
 import math
 import re
+import zipfile
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import pymupdf
@@ -29,6 +32,10 @@ from paper_text_span_mutator import (
 )
 
 SCHEMA = "falsify.blue-report-validation.v1"
+_LEDGER_SCHEMAS = frozenset({
+    "falsify.red-gold-ledger.v1",
+    "falsify.coordinated-red-record.v1",
+})
 CSV_COLUMNS = (
     "paper_id", "team", "judge_type", "model", "iteration",
     "location", "defect_type", "label", "evidence", "time_sec", "tokens", "is_holdout",
@@ -378,30 +385,407 @@ def _nearest_candidates(pages: list[dict], quote: str, page_index: int | None,
     ]
 
 
-def check_finding_quote(finding: dict, index: int, pages: list[dict],
-                        max_candidates: int) -> dict | None:
-    """Verify one finding quote exists verbatim; None when the finding carries no quote."""
-    quote = finding_quote(finding)
-    if len(collapse_ws(quote)) < MIN_QUOTE_CHARS:
+def _parse_json_text(text: str):
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
         return None
-    page_index = declared_page_index(finding)
-    located = _locate_quote(pages, quote, page_index)
-    if located:
-        return {
-            "findingId": finding_id(finding, index),
-            "quote": quote,
-            "status": located["status"],
-            "pageIndex": located["page"]["pageIndex"],
-            "bbox": _span_bbox(located["page"], located["span"]),
-            "nearestCandidates": [],
+
+
+def _collect_json_leaks(value, prefix: str, found: list[str]) -> None:
+    """Record forbidden RED keys and sealed ledger schemas inside a JSON value."""
+    if isinstance(value, dict):
+        schema = value.get("schema")
+        if schema in _LEDGER_SCHEMAS:
+            marker = f"schema={schema}"
+            found.append(f"{prefix}.{marker}" if prefix else marker)
+        for key, child in value.items():
+            path = f"{prefix}.{key}" if prefix else str(key)
+            if key in _FORBIDDEN_RED_KEYS:
+                found.append(path)
+            _collect_json_leaks(child, path, found)
+        return
+    if isinstance(value, list):
+        for idx, item in enumerate(value):
+            _collect_json_leaks(item, f"{prefix}[{idx}]", found)
+
+
+def _entry_is_red_document(entry: dict) -> bool:
+    if entry.get("schema") in _LEDGER_SCHEMAS:
+        return True
+    return any(key in _FORBIDDEN_RED_KEYS for key in entry)
+
+
+def _append_text_payload(payloads: list, name: str, text) -> None:
+    if isinstance(text, (dict, list)):
+        payloads.append(text)
+        return
+    if isinstance(text, str) and name.lower().endswith(".json"):
+        parsed = _parse_json_text(text)
+        if parsed is not None:
+            payloads.append(parsed)
+
+
+def _append_bytes_payload(payloads: list, name: str, raw) -> None:
+    if not isinstance(raw, (bytes, bytearray)) or not name.lower().endswith(".json"):
+        return
+    parsed = _parse_json_text(bytes(raw).decode("utf-8-sig", errors="replace"))
+    if parsed is not None:
+        payloads.append(parsed)
+
+
+def _supplement_payloads(entry: dict) -> list:
+    name = str(entry.get("name") or entry.get("filename") or "")
+    payloads: list = []
+    _append_text_payload(payloads, name, entry.get("text"))
+    _append_bytes_payload(payloads, name, entry.get("bytes"))
+    if _entry_is_red_document(entry):
+        payloads.append(entry)
+    return payloads
+
+
+def _guard_supplement_leaks(entries: list[dict]) -> None:
+    leaks: list[str] = []
+    for entry in entries:
+        label = str(entry.get("name") or entry.get("filename") or "supplement")
+        for payload in _supplement_payloads(entry):
+            _collect_json_leaks(payload, label, leaks)
+    if leaks:
+        _fail(
+            "forbidden_red_key",
+            f"Supplement contains forbidden RED key(s): {', '.join(leaks[:5])}",
+            exit_code=3,
+            recovery_hint="Remove RED/gold ledger fields from supplements before BLUE validation.",
+            extra={"leaks": leaks[:10]},
+        )
+
+
+def _row_alts(raw: str, ext: str) -> list[str]:
+    """Space-joined CSV/TSV cells so a quote can use spaces or tabs instead of the delimiter."""
+    if ext not in {".csv", ".tsv"}:
+        return []
+    delimiter = "\t" if ext == ".tsv" else ","
+    try:
+        cells = next(csv.reader([raw], delimiter=delimiter))
+    except (csv.Error, StopIteration):
+        return []
+    joined = collapse_ws(" ".join(cells))
+    if not joined or joined == collapse_ws(raw):
+        return []
+    return [joined]
+
+
+def _lines_for_text(text: str, name: str, ext: str) -> list[dict]:
+    rows = text.splitlines() or ([text] if text else [])
+    return [
+        {
+            "text": row,
+            "lineNumber": number,
+            "supplementName": name,
+            "bbox": None,
+            "pageIndex": None,
+            "alts": _row_alts(row, ext),
         }
+        for number, row in enumerate(rows, start=1)
+    ]
+
+
+def _search_blob(lines: list[dict]) -> tuple[str, list, list]:
+    text, spans = _join_lines(lines)
+    pieces, extra_spans, cursor = [], [], len(text)
+    for idx, line in enumerate(lines):
+        for alt in line.get("alts") or []:
+            collapsed = collapse_ws(alt)
+            if not collapsed or collapsed == collapse_ws(line.get("text")):
+                continue
+            piece = " " + collapsed
+            start = cursor + 1
+            cursor += len(piece)
+            pieces.append(piece)
+            extra_spans.append((start, cursor, idx))
+    return text + "".join(pieces), spans, extra_spans
+
+
+def _docx_text(raw: bytes) -> str:
+    try:
+        with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+            xml = archive.read("word/document.xml")
+    except (KeyError, zipfile.BadZipFile):
+        return raw.decode("utf-8-sig", errors="replace")
+    try:
+        root = ET.fromstring(xml)
+    except ET.ParseError:
+        return raw.decode("utf-8-sig", errors="replace")
+    texts = [elem.text for elem in root.iter() if elem.tag.endswith("}t") and elem.text]
+    return "\n".join(texts)
+
+
+def _pdf_page_texts(raw: bytes) -> list[tuple[int, str]]:
+    try:
+        with pymupdf.open(stream=raw, filetype="pdf") as doc:
+            limit = min(doc.page_count, MAX_SCAN_PAGES)
+            return [(idx, doc[idx].get_text("text") or "") for idx in range(limit)]
+    except Exception as exc:
+        _fail("invalid_pdf", f"Supplement PDF could not be read: {exc}", exit_code=2,
+              recovery_hint="Provide a readable supplement PDF or pre-extracted page text.")
+
+
+def _page_pairs(pages: list) -> list[tuple[int | None, str]]:
+    pairs = []
+    for idx, item in enumerate(pages):
+        if isinstance(item, str):
+            pairs.append((idx, item))
+        elif isinstance(item, dict) and isinstance(item.get("text"), str):
+            page_index = item.get("pageIndex")
+            pairs.append((page_index if isinstance(page_index, int) else idx, item["text"]))
+    return pairs
+
+
+def _texts_from_bytes(raw: bytes, name: str) -> list[tuple[int | None, str]]:
+    if raw.startswith(b"%PDF-"):
+        return _pdf_page_texts(raw)
+    if name.lower().endswith(".docx") or raw[:2] == b"PK":
+        return [(None, _docx_text(raw))]
+    return [(None, raw.decode("utf-8-sig", errors="replace"))]
+
+
+def _texts_for_entry(entry: dict) -> list[tuple[int | None, str]]:
+    pages = entry.get("pages")
+    if isinstance(pages, list):
+        return _page_pairs(pages)
+    text = entry.get("text")
+    if isinstance(text, str):
+        return [(None, text)]
+    if isinstance(text, (dict, list)):
+        return [(None, json.dumps(text, ensure_ascii=False))]
+    raw = entry.get("bytes")
+    if isinstance(raw, (bytes, bytearray)):
+        return _texts_from_bytes(bytes(raw), str(entry.get("name") or entry.get("filename") or ""))
+    return [(None, "")]
+
+
+def _records_for_entry(entry: dict, idx: int) -> list[dict]:
+    name = str(entry.get("name") or entry.get("filename") or f"supplement-{idx + 1}")
+    ext = Path(name).suffix.lower()
+    records = []
+    for page_index, text in _texts_for_entry(entry):
+        lines = _lines_for_text(text, name, ext)
+        blob, spans, extra = _search_blob(lines)
+        records.append({
+            "supplementName": name,
+            "pageIndex": page_index,
+            "lines": lines,
+            "spans": spans,
+            "extraSpans": extra,
+            "text": blob,
+        })
+    return records
+
+
+def _prepare_supplements(supplements) -> list[dict]:
+    if not supplements:
+        return []
+    if not isinstance(supplements, list):
+        _fail("invalid_arguments", "supplements must be a list of supplement objects.",
+              exit_code=2, recovery_hint="Pass supplements=[{'name', 'text'|'pages'|'bytes'}, ...].")
+    entries = []
+    for idx, entry in enumerate(supplements):
+        if not isinstance(entry, dict):
+            _fail("invalid_arguments", f"Supplement #{idx + 1} must be an object.", exit_code=2,
+                  recovery_hint="Each supplement needs name plus text, pages, or bytes.")
+        entries.append(entry)
+    _guard_supplement_leaks(entries)
+    records: list[dict] = []
+    for idx, entry in enumerate(entries):
+        records.extend(_records_for_entry(entry, idx))
+    return records
+
+
+def _line_for_span(page: dict, span: tuple[int, int]) -> dict | None:
+    start = span[0]
+    for line, (lo, hi) in zip(page.get("lines") or [], page.get("spans") or []):
+        if lo <= start < hi or (hi == lo and start == lo):
+            return line
+    for lo, hi, idx in page.get("extraSpans") or []:
+        if lo <= start < hi and 0 <= idx < len(page.get("lines") or []):
+            return page["lines"][idx]
+    lines = page.get("lines") or []
+    return lines[-1] if lines else None
+
+
+def _name_matches(wanted: str, record: dict) -> bool:
+    target = Path(str(wanted or "")).name.lower()
+    current = Path(str(record.get("supplementName") or "")).name.lower()
+    return bool(target) and target == current
+
+
+def _explicit_supplement_name(finding: dict) -> str:
+    value = finding.get("supplementName")
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return ""
+
+
+def _label_mentions(label: str, name: str) -> bool:
+    lowered = label.lower()
+    current = name.lower()
+    stem = Path(name).name.lower()
+    if current and current in lowered:
+        return True
+    return bool(stem) and stem in lowered
+
+
+def _preferred_supplement_name(finding: dict, records: list[dict]) -> str:
+    """Filename hint used only to order supplement search after the PDF miss."""
+    file_name = finding.get("supplementFile")
+    if isinstance(file_name, str) and file_name.strip():
+        return file_name.strip()
+    label = collapse_ws(finding.get("locationLabel"))
+    if not label:
+        return ""
+    for record in records:
+        name = str(record.get("supplementName") or "")
+        if _label_mentions(label, name):
+            return name
+    if "supp-" not in label.lower():
+        return ""
+    for record in records:
+        if "supp-" in str(record.get("supplementName") or "").lower():
+            return str(record["supplementName"])
+    return ""
+
+
+def _order_records(records: list[dict], preferred: str) -> list[dict]:
+    if not preferred:
+        return list(records)
+    first = [rec for rec in records if _name_matches(preferred, rec)]
+    rest = [rec for rec in records if not _name_matches(preferred, rec)]
+    return first + rest
+
+
+def _locate_in_records(records: list[dict], quote: str) -> dict | None:
+    located = _locate_quote(records, quote, None)
+    if not located:
+        return None
+    page = located["page"]
+    line = _line_for_span(page, located["span"])
+    return {
+        "kind": "supplement",
+        "status": located["status"],
+        "pageIndex": page.get("pageIndex"),
+        "supplementName": page.get("supplementName"),
+        "lineNumber": (line or {}).get("lineNumber") or 1,
+    }
+
+
+def _wrap_pdf(located: dict | None) -> dict | None:
+    if not located:
+        return None
+    return {
+        "kind": "pdf",
+        "status": located["status"],
+        "page": located["page"],
+        "span": located["span"],
+    }
+
+
+def _locate_named_first(name: str, quote: str, pages: list[dict], page_index: int | None,
+                        records: list[dict]) -> dict | None:
+    preferred = [rec for rec in records if _name_matches(name, rec)]
+    others = [rec for rec in records if not _name_matches(name, rec)]
+    hit = _locate_in_records(preferred, quote)
+    if hit:
+        return hit
+    pdf_hit = _wrap_pdf(_locate_quote(pages, quote, page_index))
+    if pdf_hit:
+        return pdf_hit
+    return _locate_in_records(others, quote)
+
+
+def _locate_finding_quote(finding: dict, quote: str, pages: list[dict],
+                          supplement_records) -> dict | None:
+    records = supplement_records or []
+    page_index = declared_page_index(finding)
+    named = _explicit_supplement_name(finding)
+    if named and records:
+        return _locate_named_first(named, quote, pages, page_index, records)
+    pdf_hit = _wrap_pdf(_locate_quote(pages, quote, page_index))
+    if pdf_hit:
+        return pdf_hit
+    if not records:
+        return None
+    preferred = _preferred_supplement_name(finding, records)
+    return _locate_in_records(_order_records(records, preferred), quote)
+
+
+def _found_quote_record(finding: dict, index: int, quote: str, located: dict) -> dict:
+    base = {
+        "findingId": finding_id(finding, index),
+        "quote": quote,
+        "status": located["status"],
+        "nearestCandidates": [],
+    }
+    if located["kind"] == "supplement":
+        return {
+            **base,
+            "pageIndex": located.get("pageIndex"),
+            "bbox": None,
+            "source": "supplement",
+            "supplementName": located.get("supplementName"),
+            "lineNumber": located.get("lineNumber"),
+        }
+    return {
+        **base,
+        "pageIndex": located["page"]["pageIndex"],
+        "bbox": _span_bbox(located["page"], located["span"]),
+    }
+
+
+def _format_candidate(line: dict) -> dict:
+    if line.get("supplementName"):
+        return {
+            "text": line.get("text") or "",
+            "pageIndex": None,
+            "bbox": None,
+            "supplementName": line["supplementName"],
+            "lineNumber": line.get("lineNumber"),
+        }
+    return {
+        "pageIndex": line.get("pageIndex"),
+        "bbox": line.get("bbox"),
+        "text": line.get("text") or "",
+    }
+
+
+def _ranked_candidates(lines: list[dict], quote: str, limit: int) -> list[dict]:
+    needle = collapse_ws(quote)
+    ranked = sorted(
+        lines,
+        key=lambda line: _line_similarity(needle, line.get("text") or ""),
+        reverse=True,
+    )
+    return [_format_candidate(line) for line in ranked[:limit]]
+
+
+def _missing_candidates(pages, records, quote, page_index, limit) -> list[dict]:
+    if records is None:
+        return _nearest_candidates(pages, quote, page_index, limit)
+    lines = [line for page in _scoped_pages(pages, page_index) for line in page["lines"]]
+    for record in records:
+        lines.extend(record.get("lines") or [])
+    return _ranked_candidates(lines, quote, limit)
+
+
+def _missing_quote_record(finding, index, quote, pages, records, max_candidates) -> dict:
     return {
         "findingId": finding_id(finding, index),
         "quote": quote,
         "status": "missing",
         "pageIndex": None,
         "bbox": None,
-        "nearestCandidates": _nearest_candidates(pages, quote, page_index, max_candidates),
+        "nearestCandidates": _missing_candidates(
+            pages, records, quote, declared_page_index(finding), max_candidates,
+        ),
         "recoveryHint": (
             "Quote not found in the PDF text. Re-read the cited page, paste the verbatim "
             "string, or abstain with verdictLabel 확인필요."
@@ -409,10 +793,23 @@ def check_finding_quote(finding: dict, index: int, pages: list[dict],
     }
 
 
-def _quote_check(findings: list[dict], pages: list[dict], max_candidates: int) -> dict:
+def check_finding_quote(finding: dict, index: int, pages: list[dict],
+                        max_candidates: int, supplement_records=None) -> dict | None:
+    """Verify one finding quote exists verbatim; None when the finding carries no quote."""
+    quote = finding_quote(finding)
+    if len(collapse_ws(quote)) < MIN_QUOTE_CHARS:
+        return None
+    located = _locate_finding_quote(finding, quote, pages, supplement_records)
+    if located:
+        return _found_quote_record(finding, index, quote, located)
+    return _missing_quote_record(finding, index, quote, pages, supplement_records, max_candidates)
+
+
+def _quote_check(findings: list[dict], pages: list[dict], max_candidates: int,
+                 supplement_records=None) -> dict:
     quotes, unquoted = [], 0
     for idx, finding in enumerate(findings):
-        record = check_finding_quote(finding, idx, pages, max_candidates)
+        record = check_finding_quote(finding, idx, pages, max_candidates, supplement_records)
         if record is None:
             unquoted += 1
         else:
@@ -723,19 +1120,21 @@ def _emit_csv(csv_path, reconciled, paper_identifier, defaults, warnings) -> dic
     return write_csv(csv_path, built["rows"])
 
 
-def validate_blue_report(pdf_bytes, report, *, ledger=None, csv_path=None,
+def validate_blue_report(pdf_bytes, report, *, ledger=None, supplements=None, csv_path=None,
                          max_candidates: int = 5, paper_id: str | None = None,
                          file_hash: str | None = None) -> dict:
-    """Validate a BLUE report against a PDF: quote gate, Zero-Drop restoration, CSV rows."""
+    """Validate a BLUE report against a PDF and optional supplements."""
     raw = _require_pdf_bytes(pdf_bytes)
     _require_max_candidates(max_candidates)
     findings = report_findings(report)
     validate_findings(findings)
     entries = _resolve_ledger_entries(ledger, report)
     _guard_red_leaks(report, entries)
+    supplement_records = None if supplements is None else _prepare_supplements(supplements)
     reconciled = reconcile_candidate_ledger(entries, findings)
     checks = _quote_check(
-        reconciled["findings"] + reconciled["resolvedOk"], _page_records(raw), max_candidates
+        reconciled["findings"] + reconciled["resolvedOk"], _page_records(raw), max_candidates,
+        supplement_records,
     )
     digest = file_hash or hashlib.sha256(raw).hexdigest()
     paper_identifier = paper_id or _report_paper_id(report, f"paper-{digest[:12]}")

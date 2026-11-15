@@ -15,3 +15,4 @@ app/.openai/
 
 # Generated, machine-specific harness profiles stay on each user PC.
 app/examples/evidence_blue*/profile.json
+app/examples/adversarial_red*/profile.json

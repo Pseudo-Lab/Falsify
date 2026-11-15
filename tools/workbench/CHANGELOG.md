@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.0-alpha.69
+
+- Add row-level raw dataset statistical recomputation auditor (`app/local/paper_raw_dataset_audit.py`, `falsify.raw-dataset-audit.v1`) recomputing `N`, non-missing `n`, group-by `mean ± SD`, `median [IQR]`, `k/n (%)`, Welch/Student `t`-test and 2×2 Fisher/chi-square `p` from `.csv/.tsv/.json` supplements (exempting adjusted `aOR`/`aRR`/`aHR` and multiplicity-corrected `FDR`/`Bonferroni` `p_adj`), wired into `paper_mcp.py` (`recompute_raw_supplement`) and `falsify_cli.py blue scan --recompute-raw`.
+- Expose `paper_figure_forensics.audit_figure_forensics` on `paper_mcp.py` (`audit_figures` + `run_blue_sensor(..., includeFigureForensics=...)`) and `falsify_cli.py blue scan --figure-forensics`, and add portable `BLUE Evidence v0.3.8` (`app/examples/evidence_blue_v038`) combining raw-dataset triage with post-model Zero-Drop restoration and a 1-turn quote-repair / ungrounded-quote downgrade gate without modifying frozen `v031`–`v037` bundles.
+- Expose `paper_red_detectability.py` on `falsify_cli.py` (`red simulate`, `red trace`), enforce `--min-difficulty L1|L2|L3|L4` pre-export gating on `red apply` (exiting `3` with `difficulty_below_minimum` without writing `--out-pdf`), and add portable autonomous `RED Injector v0.1` (`app/examples/adversarial_red_v01`) emitting a stealth-verified blind bundle plus a sealed `falsify.red-gold-ledger.v1` ledger.
+- Upgrade `blue_report_validate.py` and `falsify_cli.py blue validate` with repeatable `--supplement PATH` quote verification across `.csv/.tsv/.json/.md/.txt/.log/.py/.r/.sql/.pdf/.docx` (with supplement `nearestCandidates` and exit `3` on forbidden RED keys), and upgrade `falsify_cli.py mcp-config` with standalone `--workspace DIR` and `--role blue|red|both`.
+- Add unattended RED-vs-BLUE duel orchestrator and generation-capped (`max_generations <= 3`) harness patch applier with Holdout Rollback Guard (`tools/evaluation/arena_duel.py`, `falsify arena duel`, `falsify arena apply-patch`), plus a 10-case deterministic synthetic regression benchmark suite (`tools/evaluation/benchmark_suite.py`, `falsify arena benchmark`: 6 Gold `W1–W5` cases + 4 Benign-Trap Holdout cases).
+
 ## 0.2.0-alpha.68
 
 - Add BLUE supplement-table arithmetic audit (`supplement_table_sum_mismatch`, `supplement_table_percentage_mismatch`) and a figure/panel forensic sensor (`app/local/paper_figure_forensics.py`, `falsify.figure-forensics.v1`) that detects dHash/aHash duplicate, horizontally mirrored, 180-degree rotated and centred-crop panel pairs plus chart printed-value vs prose mismatch candidates with bboxes; `paper_blue_sensor.run_blue_sensor` exposes it behind the opt-in `include_figure_forensics` flag.

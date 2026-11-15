@@ -1,6 +1,6 @@
 ---
 name: falsify-red-injector
-description: Autonomous RED adversarial test-generator protocol using app/local/paper_red_mcp.py, app/local/falsify_cli.py (red targets, red apply, blind verify), Baseline Guard, stealth enforcement, and strict blind/gold separation.
+description: Autonomous RED adversarial test-generator protocol using app/local/paper_red_mcp.py, app/local/falsify_cli.py (red targets, red apply, blind verify), Baseline Guard, pre-export detectability, difficulty gate, stealth enforcement, and strict blind/gold separation.
 license: AGPL-3.0-only
 ---
 
@@ -61,3 +61,32 @@ python app/local/falsify_cli.py blind verify --pdf BLIND.pdf --source-pdf SOURCE
 - Confirm exit code `0` (`"clean": true`, `"leaks": []`) across PDF metadata, XMP, pikepdf `DocInfo`, `/URI` annotations, visible text, and all attached supplements.
 - Keep `BLIND.pdf` (plus blind supplements) strictly separated from `GOLD_LEDGER.json` (`falsify.red-gold-ledger.v1`) so BLUE never sees `GOLD_LEDGER.json` or operation rationales.
 - Score completed BLUE runs against `GOLD_LEDGER.json` using `python app/local/falsify_cli.py arena score --gold GOLD_LEDGER.json --blue BLUE1.json --blue BLUE2.json` (`tools/evaluation/agreement_selective.py`).
+
+## 5. Pre-export detectability and propagation
+
+Before writing a blind PDF, score the plan with `simulate_red_detectability` and map a numeric or textual anchor with `trace_claim_propagation`. Both live in `app/local/paper_red_detectability.py`.
+
+```bash
+python app/local/falsify_cli.py red simulate --pdf SOURCE.pdf --ops OPS.json
+python app/local/falsify_cli.py red trace --pdf SOURCE.pdf --query "0.94"
+```
+
+Distances are `L1 < L2 < L3 < L4`. `D3` and `S1` have no Layer 0 detector and land on `L4`. A supplement or other non-prose edit that fires no static signal lands on `L3`.
+
+## 6. Difficulty gate
+
+```bash
+python app/local/falsify_cli.py red apply --pdf SOURCE.pdf --ops OPS.json --out-pdf BLIND.pdf --out-gold GOLD.json --min-difficulty L3
+```
+
+`--min-difficulty` is one of `L1`, `L2`, `L3`, `L4`. The command keeps an operation only when its cross-inference distance is at least that tier. If every operation is below the floor, the process exits `3` with `difficulty_below_minimum` and does not write the blind PDF.
+
+## 7. Autonomous RED runner
+
+`app/examples/adversarial_red_v01/runner.py` runs baseline guard, surface discovery, a deterministic planner (optional `planner_fn`), detectability plus stealth retries, and the blind bundle with a sealed gold ledger.
+
+```bash
+python app/examples/adversarial_red_v01/runner.py --pdf SOURCE.pdf --out-pdf BLIND.pdf --out-gold GOLD.json --target-difficulty L3
+```
+
+Omit `--pdf` to read `falsify.harness-invocation.v1` or `falsify.red-invocation.v1` from stdin (`pdfPath` or `pdfBase64`, `outPdfPath`, `outGoldPath`, `targetDifficulty`, `redBrief`, `settings`). A missed difficulty or a failed stealth audit exits `3` (`difficulty_target_unmet`, `stealth_audit_failed`). The runner refuses to overwrite the source PDF. `python app/examples/adversarial_red_v01/build_profile.py` prints the `falsify.harness.v1` RED profile.

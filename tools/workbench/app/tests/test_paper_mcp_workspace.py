@@ -30,7 +30,7 @@ LOCAL = Path(__file__).resolve().parents[1] / "local"
 CHILD = "import sys\nsys.path[:0] = [sys.argv[1], sys.argv[2]]\nimport paper_mcp\nraise SystemExit(paper_mcp.main(sys.argv[3:]))\n"
 ORIGINAL_TOOLS = {
     "status", "list_items", "read_item", "render_region", "read_page_text",
-    "search_text", "list_references", "audit_statistics", "run_blue_sensor",
+    "search_text", "list_references", "audit_statistics", "run_blue_sensor", "audit_figures",
 }
 WORKSPACE_TOOLS = {"list_papers", "select_paper"}
 DRIVE = re.compile(r"[A-Za-z]:[\\/]")

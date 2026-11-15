@@ -30,6 +30,8 @@ from paper_registry_identifiers import (
     extract_scientific_identifiers,
     verify_identifiers_online,
 )
+from paper_figure_forensics import audit_figure_forensics
+from paper_raw_dataset_audit import audit_raw_datasets
 from paper_supplement_audit import audit_paper_with_supplements, infer_supplement_kind
 
 MAX_SUPPLEMENTS = 12
@@ -291,7 +293,7 @@ def _compact_sensor_digest(res):
         by_family[fam] = by_family.get(fam, 0) + 1
     uri_links = res.get("uriLinks") or {}
     acro_form = res.get("acroForm") or {}
-    return {
+    digest = {
         "schema": res.get("schema"),
         "paperId": res.get("paperId"),
         "fileHash": res.get("fileHash"),
@@ -312,18 +314,111 @@ def _compact_sensor_digest(res):
         "signals": signals,
         "bibliography": res.get("bibliography"),
     }
+    if res.get("figureForensics") is not None:
+        digest["figureForensics"] = res["figureForensics"]
+    return digest
 
 
-def run_blue_sensor_payload(store, paper_id, file_hash, max_signals=50, digest_only=False):
+def _table_listing(store, paper_id):
+    if not hasattr(store, "list_items"):
+        return []
+    try:
+        listing = store.list_items(paper_id, kind="table")
+    except TypeError:
+        return _table_listing_fallback(store, paper_id)
+    except Exception:
+        return []
+    if isinstance(listing, dict):
+        return list(listing.get("items") or [])
+    if isinstance(listing, list):
+        return listing
+    return []
+
+
+def _table_listing_fallback(store, paper_id):
+    try:
+        listing = store.list_items(paper_id)
+    except Exception:
+        return []
+    if isinstance(listing, dict):
+        return list(listing.get("items") or [])
+    return list(listing) if isinstance(listing, list) else []
+
+
+def _read_table_item(store, paper_id, item):
+    item_id = item.get("id") or item.get("itemId")
+    if not item_id or not hasattr(store, "read_item"):
+        return item
+    try:
+        full = store.read_item(paper_id, item_id)
+    except Exception:
+        return item
+    return full if isinstance(full, dict) else item
+
+
+def _read_table_items(store, paper_id):
+    tables = []
+    for item in _table_listing(store, paper_id):
+        if isinstance(item, dict) and item.get("type") in (None, "table"):
+            tables.append(_read_table_item(store, paper_id, item))
+    return tables
+
+
+def _filter_bundle(bundle, supplement_id):
+    items = list(bundle or [])
+    if supplement_id is None:
+        return items
+    if type(supplement_id) is not str or not supplement_id:
+        raise ValueError("paper_evidence_unknown_id")
+    matched = [item for item in items if item.get("supplementId") == supplement_id]
+    if not matched:
+        raise ValueError("paper_evidence_unknown_id")
+    return matched
+
+
+def audit_figures_payload(store, paper_id, file_hash, max_signals=30, dpi=96, max_figures=24):
+    """Run read-only figure-panel forensics for the bound PDF."""
+    out = audit_figure_forensics(
+        paper_id,
+        file_hash=file_hash,
+        max_signals=max_signals,
+        dpi=dpi,
+        max_figures=max_figures,
+        store=store,
+    )
+    _assert_no_red_keys(out)
+    return out
+
+
+def recompute_raw_supplement_payload(store, paper_id, file_hash, bundle, supplement_id=None, max_signals=50):
+    """Recompute row-level supplement statistics against bound PDF pages and tables."""
+    if type(max_signals) is not int or not 1 <= max_signals <= MAX_SIGNALS_LIMIT:
+        raise ValueError("limit")
+    items = _filter_bundle(bundle, supplement_id)
+    bound_id, actual_hash, summary, raw = _require_bound_pdf(paper_id, store)
+    require_summary(summary, paper_id=bound_id, file_hash=file_hash)
+    page_items = _read_pdf_page_items(raw, MAX_PDF_SUPP_PAGES)
+    table_items = _read_table_items(store, bound_id)
+    out = audit_raw_datasets(page_items, items, table_items=table_items, max_signals=max_signals)
+    out["paperId"] = bound_id
+    out["fileHash"] = actual_hash
+    _assert_no_red_keys(out)
+    return out
+
+
+def run_blue_sensor_payload(store, paper_id, file_hash, max_signals=50, digest_only=False, include_figure_forensics=False):
     """Run offline Layer 0 BLUE PDF forensic sensor and optionally compact to digestOnly."""
     if type(digest_only) is not bool:
         raise ValueError("digest_only")
+    if type(include_figure_forensics) is not bool:
+        raise ValueError("include_figure_forensics")
     res = paper_blue_sensor.run_blue_sensor(
         paper_id,
         file_hash=file_hash,
         max_signals=max_signals,
         include_external_oracle=False,
         store=store,
+        include_figure_forensics=include_figure_forensics,
     )
     return _compact_sensor_digest(res) if digest_only else res
 

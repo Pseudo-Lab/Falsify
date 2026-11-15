@@ -220,10 +220,17 @@ def _register_core_tools(server, store, binding):
         return result if isinstance(result, CallToolResult) else _ok(result)
 
     @server.tool(annotations=_READONLY)
-    def run_blue_sensor(paperId: str, maxSignals: int = 50, digestOnly: bool = False) -> CallToolResult:
+    def run_blue_sensor(paperId: str, maxSignals: int = 50, digestOnly: bool = False, includeFigureForensics: bool = False) -> CallToolResult:
         """Run deterministic Layer 0 offline PDF forensic sensor checks on the startup PDF. Read-only."""
         from paper_mcp_bundle import run_blue_sensor_payload
-        result = _guard_bound(binding, paperId, lambda: run_blue_sensor_payload(store, paperId, binding.file_hash, max_signals=maxSignals, digest_only=digestOnly))
+        result = _guard_bound(binding, paperId, lambda: run_blue_sensor_payload(store, paperId, binding.file_hash, max_signals=maxSignals, digest_only=digestOnly, include_figure_forensics=includeFigureForensics))
+        return result if isinstance(result, CallToolResult) else _ok(result)
+
+    @server.tool(annotations=_READONLY)
+    def audit_figures(paperId: str, maxSignals: int = 30, dpi: int = 96, maxFigures: int = 24) -> CallToolResult:
+        """Audit placed figure panels and chart claims on the startup PDF. Read-only."""
+        from paper_mcp_bundle import audit_figures_payload
+        result = _guard_bound(binding, paperId, lambda: audit_figures_payload(store, paperId, binding.file_hash, max_signals=maxSignals, dpi=dpi, max_figures=maxFigures))
         return result if isinstance(result, CallToolResult) else _ok(result)
 
 
@@ -291,6 +298,7 @@ def _register_supplement_tools(server, store, binding, supplements):
         audit_supplements_payload,
         list_supplements_payload,
         read_supplement_payload,
+        recompute_raw_supplement_payload,
     )
 
     @server.tool(annotations=_READONLY)
@@ -309,6 +317,12 @@ def _register_supplement_tools(server, store, binding, supplements):
     def audit_supplements(paperId: str, maxSignals: int = 50) -> CallToolResult:
         """Run deterministic cross-document checks across the startup PDF and attached supplements. Read-only."""
         result = _guard_bound(binding, paperId, lambda: audit_supplements_payload(store, paperId, binding.file_hash, supplements, max_signals=maxSignals))
+        return result if isinstance(result, CallToolResult) else _ok(result)
+
+    @server.tool(annotations=_READONLY)
+    def recompute_raw_supplement(paperId: str, supplementId: str | None = None, maxSignals: int = 50) -> CallToolResult:
+        """Recompute row-level statistics from one attached supplement against the startup PDF. Read-only."""
+        result = _guard_bound(binding, paperId, lambda: recompute_raw_supplement_payload(store, paperId, binding.file_hash, supplements, supplement_id=supplementId, max_signals=maxSignals))
         return result if isinstance(result, CallToolResult) else _ok(result)
 
 
