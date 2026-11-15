@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.0-alpha.61
+
+- Add deterministic BLUE statistical & arithmetic pre-audit (`paper_stat_math.py`, `paper_stat_audit.py`, read-only MCP `audit_statistics`) checking exact `z`/`t(df)`/`χ²(df)`/`F(df1,df2)`-to-`p` consistency, `n/N (%)` ratios, GRIM integer granularity, `CI` containment/log-symmetry, and 3-way prose-table-figure value reconciliation.
+- Enable multi-chunk BLUE on-demand reread of omitted structured tables/figures (`evitem:<itemId>`), raise verified `visualEvidence` PNG cap to 6 across Codex, Claude Code (`stream-json`), and opt-in `stdio`/`wrapper` harnesses, and add Two-Stage Auto-Crop Visual Reread (`autoVisualReread`).
+- Upgrade built-in RED with span-occurrence (`occurrence`) targeting for repeated literals, `paperEvidence`-bound multi-modal `table-cell`/`chart-point` candidates, PDF forensic/stealth self-audit (`paper_stealth_audit.py`), and Coordinated RED MCP (`paper_red_mcp.py`) while keeping exported PDFs strictly blind.
+- Add full-bibliography Crossref/Europe PMC ghost/Chimera DOI verification + citing-sentence abstract grounding (`paper_external_grounding.py`), `ClinicalTrials.gov` v2 registry primary-outcome/enrollment comparison (`paper_clinical_trials.py`), and portable BLUE `v0.3.6` (`app/examples/evidence_blue_v036`) without altering frozen `v031`–`v035` bundles.
+
 ## 0.2.0-alpha.60
 
 - Fix cross-platform Linux CI provenance verification test execution (`[process.execPath, fakeEmcc]`) for the `0.2.0-alpha.59` Wave 1 + Wave 2 release so `Publish workbench` completes and deploys GitHub Pages cleanly.

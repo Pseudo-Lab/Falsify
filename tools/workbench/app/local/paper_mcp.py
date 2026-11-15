@@ -178,6 +178,13 @@ def build_server(store, paper_id, file_hash, enable_analysis=False):
         result = _guard(paper_id, file_hash, paperId, lambda: _list_references(paperId, offset=offset, limit=limit, store=store))
         return result if isinstance(result, CallToolResult) else _ok(result)
 
+    @server.tool(annotations=_READONLY)
+    def audit_statistics(paperId: str, maxSignals: int = 30) -> CallToolResult:
+        """Run deterministic arithmetic, p-value, CI, and cross-modal pre-checks on the startup PDF. Read-only."""
+        from paper_stat_audit import audit_paper_statistics as _audit_paper_statistics
+        result = _guard(paper_id, file_hash, paperId, lambda: _audit_paper_statistics(paperId, file_hash, max_signals=maxSignals, store=store))
+        return result if isinstance(result, CallToolResult) else _ok(result)
+
     if enable_analysis:
         from paper_enrichment import analyze
 

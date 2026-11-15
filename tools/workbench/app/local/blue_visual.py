@@ -10,6 +10,7 @@ from pathlib import Path
 
 HEX = re.compile(r'^[0-9a-f]{64}$')
 KEYS = {'fileHash', 'sourceHash', 'page', 'bbox', 'rotation', 'width', 'height', 'mime', 'sha256', 'base64'}
+MAX_VISUAL_IMAGES = 6
 
 def _png_channels(chunks, data, width, height):
     if chunks or data[:8] != struct.pack('>II', width, height) or data[8] != 8 or data[9] not in (2, 6) or data[10:] != b'\x00\x00\x00': raise ValueError()
@@ -86,15 +87,14 @@ def validate_visual(data):
     if data.get('visualConsent') is not True: raise ValueError('visual_consent_required')
     file_hash = data.get('fileHash')
     if not isinstance(file_hash, str) or not HEX.fullmatch(file_hash): raise ValueError('visual_file_hash_invalid')
-    if not isinstance(items, list) or not 1 <= len(items) <= 2: raise ValueError('visual_count_limit')
+    if not isinstance(items, list) or not 1 <= len(items) <= MAX_VISUAL_IMAGES: raise ValueError('visual_count_limit')
     decoded = []
     for item in items:
         raw = _validate_visual_item(item, data, file_hash)
         decoded.append(raw)
     return decoded
 
-def infer_visual(engine, prompt, schema, images):
-    """Inject exact files into the existing Codex transport; private dir always cleaned."""
+def _infer_visual_codex(engine, prompt, schema, images):
     with tempfile.TemporaryDirectory(prefix='falsify-blue-images-') as directory:
         paths = []
         for i, raw in enumerate(images):
@@ -109,3 +109,26 @@ def infer_visual(engine, prompt, schema, images):
         engine.transport = with_images
         try: return engine.infer(prompt, schema)
         finally: engine.transport = transport
+
+def _infer_visual_harness(engine, prompt, schema, images):
+    with tempfile.TemporaryDirectory(prefix='falsify-blue-images-') as directory:
+        paths = []
+        for i, raw in enumerate(images):
+            p = Path(directory) / f'image-{i+1}.png'; p.write_bytes(raw); paths.append(str(p))
+        harness = getattr(engine, 'harness', None)
+        if not isinstance(harness, dict):
+            return engine.infer(prompt, schema)
+        original_settings = harness.get('settings')
+        harness['settings'] = {**(original_settings if isinstance(original_settings, dict) else {}), '_visualImagePaths': paths}
+        try: return engine.infer(prompt, schema)
+        finally:
+            if original_settings is None: harness.pop('settings', None)
+            else: harness['settings'] = original_settings
+
+def infer_visual(engine, prompt, schema, images):
+    """Delegate native visual engines, inject Codex --image args, or pass temp PNG paths to opted-in harnesses."""
+    if hasattr(engine, 'infer_visual') and callable(engine.infer_visual):
+        return engine.infer_visual(prompt, schema, images)
+    if hasattr(engine, 'transport'):
+        return _infer_visual_codex(engine, prompt, schema, images)
+    return _infer_visual_harness(engine, prompt, schema, images)

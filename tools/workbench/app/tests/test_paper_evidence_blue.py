@@ -232,6 +232,52 @@ class ContextTests(unittest.TestCase):
         self.assertNotIn("import mcp", source)
         self.assertNotIn("blue_service", source)
 
+    def test_guidance_includes_audit_statistics(self):
+        self.assertIn("audit_statistics", blue.MCP_TOOL_GUIDANCE)
+
+    def test_figure_chart_metadata_is_provenance_tagged_and_separated(self):
+        fig = {
+            "id": "fig-chart",
+            "type": "figure",
+            "pageIndex": 0,
+            "bbox": [10, 20, 300, 200],
+            "caption": "Figure 2. Survival curve",
+            "provenance": "pymupdf-image",
+            "printedValues": [{"value": 1.24, "lowerCi": 0.98, "upperCi": 1.56, "source": "pdf-text"}],
+            "ciBounds": {"lower": 0.98, "upper": 1.56},
+            "zeroSeriesWarning": True,
+            "chart": {"status": "partial", "series": [{"id": "s1", "points": [{"x": 1, "y": 1.24, "origin": "digitized"}]}]},
+        }
+        store = EvidenceDouble([fig])
+        result = blue.context_for_review(store.paper_id, store.file_hash, store=store)
+        text = result["text"]
+        self.assertIn("printedValues:", text)
+        self.assertIn("ciBounds:", text)
+        self.assertIn("chartWarnings:", text)
+        self.assertIn("digitizedChart:", text)
+        self.assertIn('"source":"pdf-text"', text)
+        self.assertIn('"origin":"digitized"', text)
+
+    def test_context_for_review_appends_bounded_stat_audit_footer(self):
+        t = table("table-1", [
+            cell("Metric", header=True, row=0, column=0), cell("Value", header=True, row=0, column=1),
+            cell("Rate", header=False, row=1, column=0), cell("24/120 (25.0%)", header=False, row=1, column=1),
+        ])
+        store = EvidenceDouble([t])
+        # Inject native text mismatch via table sum mismatch so EvidenceDouble needs no source_bytes
+        t_sum = table("table-sum", [
+            cell("Item", header=True, row=0, column=0), cell("N", header=True, row=0, column=1),
+            cell("A", header=False, row=1, column=0), cell("10", header=False, row=1, column=1),
+            cell("B", header=False, row=2, column=0), cell("15", header=False, row=2, column=1),
+            cell("Total", header=False, row=3, column=0), cell("99", header=False, row=3, column=1),
+        ])
+        store2 = EvidenceDouble([t_sum])
+        result = blue.context_for_review(store2.paper_id, store2.file_hash, store=store2, max_chars=24000)
+        text, coverage = self.consistent(result, 24000)
+        self.assertIn("Deterministic stat pre-check signals", text)
+        self.assertEqual(coverage["statAuditSignals"], 1)
+        self.assertEqual([c for c in store2.calls if c[0] == "list"], [("list", store2.paper_id, 0, 50)])
+
 
 if __name__ == "__main__":
     unittest.main()

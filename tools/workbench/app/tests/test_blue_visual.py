@@ -30,17 +30,51 @@ class VisualTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'visual_reference_invalid'):self.run_request(request())
         self.assertTrue(all(not Path(p).exists() for p in json.loads(self.log.read_text())['paths']))
     def test_rejections_before_provider(self):
-        for mutate in [lambda d:d.update(visualConsent=False),lambda d:d.update(fileHash='c'*64),lambda d:d['visualEvidence'][0].update(sha256='b'*64),lambda d:d['visualEvidence'][0].update(width=4097),lambda d:d.update(visualEvidence=d['visualEvidence']*3)]:
+        for mutate in [lambda d:d.update(visualConsent=False),lambda d:d.update(fileHash='c'*64),lambda d:d['visualEvidence'][0].update(sha256='b'*64),lambda d:d['visualEvidence'][0].update(width=4097),lambda d:d.update(visualEvidence=d['visualEvidence']*7)]:
             d=request();mutate(d)
             with self.assertRaises(ValueError):self.run_request(d)
         self.assertFalse(self.log.exists())
+    def test_up_to_six_images_accepted(self):
+        for count in (3, 6):
+            d = request()
+            d['visualEvidence'] = [dict(d['visualEvidence'][0]) for _ in range(count)]
+            decoded = validate_visual(d)
+            self.assertEqual(len(decoded), count)
+            self.assertTrue(all(img == PNG for img in decoded))
     def test_truncated_png_rejected_before_provider(self):
         d=request(); raw=PNG[:29]; d['visualEvidence'][0].update(base64=base64.b64encode(raw).decode(),sha256=hashlib.sha256(raw).hexdigest())
         with self.assertRaisesRegex(ValueError, 'visual_png_invalid'): self.run_request(d)
         self.assertFalse(self.log.exists())
     def test_unsupported_before_provider(self):
         from harness import default
-        d=request();d['harness']={**default('blue'),'adapter':{'type':'claude'}}
-        with self.assertRaisesRegex(ValueError,'visual_provider_unsupported'):self.run_request(d)
+        for adapter in [
+            {'type': 'http', 'url': 'https://example.com/hook'},
+            {'type': 'stdio', 'executable': sys.executable, 'args': []},
+        ]:
+            d = request()
+            d['harness'] = {**default('blue'), 'adapter': adapter}
+            d['executionConsent'] = True
+            with self.assertRaisesRegex(ValueError, 'visual_provider_unsupported'):
+                self.run_request(d)
         self.assertFalse(self.log.exists())
+    def test_claude_and_opted_in_stdio_supported(self):
+        from harness import default
+        class FakeVisualBackend:
+            def __init__(self, **kwargs):
+                self.seen = []
+            def infer_visual(self, prompt, schema, images):
+                self.seen.append((schema, len(images)))
+                ref = request()['visualEvidence'][0]
+                return {'status': 'ok', 'response': {'status': 'ok', 'findings': [], 'visualObservations': [
+                    {'id': 'v1', 'sha256': ref['sha256'], 'page': ref['page'], 'bbox': ref['bbox'],
+                     'observation': 'Synthetic figure.', 'uncertainty': 'Unverified.'}]}}
+        d = request()
+        d['harness'] = {**default('blue'), 'adapter': {'type': 'claude'}}
+        res = blue.run_review(d, lambda _: None, threading.Event(), FakeCodex, FakeVisualBackend)
+        self.assertEqual(res['visualObservations'][0]['id'], 'v1')
+        d2 = request()
+        d2['harness'] = {**default('blue'), 'adapter': {'type': 'stdio', 'executable': sys.executable, 'args': []},
+                         'settings': {'supportsVisualEvidence': True}}
+        d2['executionConsent'] = True
+        self.assertEqual(blue.validate_request(d2)[1], 1)
 if __name__=='__main__':unittest.main()

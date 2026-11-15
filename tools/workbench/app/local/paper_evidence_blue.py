@@ -15,7 +15,7 @@ _CODE = re.compile(r"[a-z0-9_]{1,80}\Z")
 _DELIVERY = "delivery: text for an existing text-only review; not a model tool call; no image bytes in this text"
 MCP_TOOL_GUIDANCE = (
     "mcpTools (when MCP is active): status, list_items, read_item, render_region, "
-    "read_page_text, search_text, list_references"
+    "read_page_text, search_text, list_references, audit_statistics"
 )
 _CURVE_KEYS = ('id', 'name', 'color', 'requestedColor', 'effectiveColor', 'axisBinding', 'traceAmbiguous', 'pointKind')
 
@@ -183,6 +183,38 @@ def _format_table(item, lines, complete):
     return complete
 
 
+def _format_figure_chart_meta(item, lines):
+    chart = item.get("chart") if isinstance(item.get("chart"), dict) else None
+    printed_vals = item.get("printedValues") if "printedValues" in item else (chart.get("printedValues") if chart else None)
+    if printed_vals not in (None, []):
+        lines.append("printedValues: " + json.dumps(printed_vals, ensure_ascii=False, separators=(",", ":")))
+    ci_bounds = item.get("ciBounds") if "ciBounds" in item else (chart.get("ciBounds") if chart else None)
+    if ci_bounds not in (None, []):
+        lines.append("ciBounds: " + json.dumps(ci_bounds, ensure_ascii=False, separators=(",", ":")))
+    warnings = _collect_figure_warnings(item, chart)
+    if warnings:
+        lines.append("chartWarnings: " + json.dumps(warnings, ensure_ascii=False, separators=(",", ":")))
+    if isinstance(item.get("digitized"), (dict, list)):
+        lines.append("digitized: " + json.dumps(item["digitized"], ensure_ascii=False, separators=(",", ":")))
+    if chart:
+        skip = {"printedValues", "ciBounds", "warnings", "zeroSeriesWarning", "issues"}
+        digitized_part = {k: v for k, v in chart.items() if k not in skip}
+        if digitized_part:
+            lines.append("digitizedChart: " + json.dumps(digitized_part, ensure_ascii=False, separators=(",", ":")))
+
+
+def _collect_figure_warnings(item, chart):
+    warnings = {}
+    for src, prefix in ((item, ""), (chart, "chart.")):
+        if not isinstance(src, dict):
+            continue
+        for key in ("warnings", "zeroSeriesWarning", "issues"):
+            val = src.get(key)
+            if val not in (None, [], False, ""):
+                warnings[f"{prefix}{key}"] = val
+    return warnings
+
+
 def _format_block(paper_id, item, kind, index=0):
     item_id = item["id"]
     page, bbox = item.get("pageIndex"), item.get("bbox")
@@ -198,8 +230,10 @@ def _format_block(paper_id, item, kind, index=0):
             "caption: " + json.dumps(caption, ensure_ascii=False),
             "provenance: " + json.dumps(provenance, ensure_ascii=False),
         ]
-        if kind == "figure" and "classification" in item:
-            lines.append("classification: " + json.dumps(classification, ensure_ascii=False))
+        if kind == "figure":
+            if "classification" in item:
+                lines.append("classification: " + json.dumps(classification, ensure_ascii=False))
+            _format_figure_chart_meta(item, lines)
         if kind == "table":
             complete = _format_table(item, lines, complete)
         elif kind != "figure":
@@ -214,7 +248,7 @@ def _format_block(paper_id, item, kind, index=0):
                   page_index=page, caption=caption, classification=classification, index=index)
 
 
-def _load_block(store, paper_id, file_hash, meta, index=0):
+def _load_block(store, paper_id, file_hash, meta, index=0, loaded_items=None):
     item_id, kind = meta["id"], meta["type"] if meta["type"] in ("table", "figure") else "other"
     classification = meta.get("classification") if kind == "figure" and meta.get("classification") in ("decorative", "scientific") else "scientific"
     try:
@@ -228,6 +262,8 @@ def _load_block(store, paper_id, file_hash, meta, index=0):
         raise ValueError("paper_evidence_summary_invalid")
     if "fileHash" in item and item.get("fileHash") != file_hash:
         raise ValueError("paper_evidence_hash_mismatch")
+    if loaded_items is not None:
+        loaded_items.append(item)
     return _format_block(paper_id, item, kind, index=index)
 
 
@@ -461,7 +497,46 @@ def _validate_context_request(paper_id, file_hash, max_chars):
         raise ValueError("paper_evidence_budget_invalid")
 
 
-def context_for_review(paper_id, file_hash, store=None, max_chars=MAX_CONTEXT_CHARS):
+def _stat_audit_footer(signals, budget):
+    if not signals or budget <= 72:
+        return ""
+    header = "Deterministic stat pre-check signals (verify context before citing):"
+    if len(header) > budget:
+        return ""
+    lines, used = [header], len(header)
+    for sig in signals:
+        detail = str(sig.get("detail") or "").strip()
+        if len(detail) > 140:
+            detail = detail[:137] + "..."
+        line = (
+            f"- {sig.get('id')} kind={sig.get('kind')} pageIndex={sig.get('pageIndex')} "
+            f"itemId={json.dumps(sig.get('itemId'), ensure_ascii=False)}: {detail}"
+        )
+        if used + 1 + len(line) > budget:
+            break
+        lines.append(line)
+        used += 1 + len(line)
+    return "\n".join(lines) if len(lines) > 1 else ""
+
+
+def _attach_stat_audit(packed, paper_id, file_hash, summary, loaded_items, store, max_chars):
+    if max_chars <= 0:
+        return
+    from paper_stat_audit import audit_loaded_paper
+    audit = audit_loaded_paper(paper_id, file_hash, summary, loaded_items, max_signals=30, store=store)
+    signals = audit.get("signals") or []
+    if not signals:
+        return
+    packed["coverage"]["statAuditSignals"] = len(signals)
+    room = max_chars - len(packed["text"]) - 1
+    budget = min(2400, max_chars // 8, room)
+    footer = _stat_audit_footer(signals, budget)
+    if footer:
+        packed["text"] = packed["text"] + "\n" + footer
+        packed["coverage"]["charCount"] = len(packed["text"])
+
+
+def context_for_review(paper_id, file_hash, store=None, max_chars=MAX_CONTEXT_CHARS, include_stat_audit=True):
     """Return bounded raw table cells and figure captions for one prepared PDF.
 
     Hash mismatch and an unknown paper id are rejected. truncationCount counts
@@ -478,7 +553,8 @@ def context_for_review(paper_id, file_hash, store=None, max_chars=MAX_CONTEXT_CH
         _fixed(exc)
     require_summary(summary, paper_id=paper_id, file_hash=file_hash)
     metas, unlisted, capped = _collect(store, paper_id, file_hash)
-    blocks = [_load_block(store, paper_id, file_hash, meta, index=i) for i, meta in enumerate(metas)]
+    loaded_items = []
+    blocks = [_load_block(store, paper_id, file_hash, meta, index=i, loaded_items=loaded_items) for i, meta in enumerate(metas)]
     analyses = _append_analyses(store, paper_id, file_hash, blocks)
     facts = _coverage_facts(summary, metas, blocks, unlisted, capped)
     packed = _try_pack(summary, blocks, facts, max_chars, True)
@@ -490,4 +566,6 @@ def context_for_review(paper_id, file_hash, store=None, max_chars=MAX_CONTEXT_CH
         omitted = set(packed['coverage']['omittedIds'])
         packed['coverage']['analyses'] = {'available':len(analyses), 'included':[x for x in analyses if x['analysisId'] not in omitted],
                                          'omitted':[x['analysisId'] for x in analyses if x['analysisId'] in omitted]}
+    if include_stat_audit:
+        _attach_stat_audit(packed, paper_id, file_hash, summary, loaded_items, store, max_chars)
     return packed

@@ -51,4 +51,33 @@ class BlueTests(unittest.TestCase):
         f['quote']='Invented'
         with self.assertRaises(ValueError): blue.validate_findings({'status':'ok','findings':[f]},self.request()['segments'])
 
+    def test_external_literature_providers_supported(self):
+        import harness
+        for providers in (['crossref', 'europepmc'], ['crossref', 'europepmc', 'clinicaltrials']):
+            d = self.request()
+            d['executionConsent'] = True
+            d['harness'] = {**harness.default('blue'),
+                            'adapter': {'type': 'stdio', 'executable': sys.executable,
+                                        'args': ['-c', 'import json,sys; sys.stdin.read(); print(json.dumps({"status":"ok","findings":[]}))']},
+                            'settings': {'scope': 'document-plus-external-literature',
+                                         'externalLookup': {'enabled': True, 'providers': providers}}}
+            res = blue.run_review(d, lambda _: None, threading.Event(), Fake)
+            self.assertEqual(res['coverage']['externalLiterature']['providers'], providers)
+
+    def test_auto_visual_reread_validation(self):
+        import harness
+        f = 'a' * 64
+        for bad in [
+            {**self.request(), 'autoVisualReread': 'yes'},
+            {**self.request(), 'autoVisualReread': True},
+            {**self.request(), 'autoVisualReread': True, 'visualConsent': False,
+             'fileHash': f, 'paperEvidence': {'paperId': 'p1', 'fileHash': f}, 'paperEvidenceConsent': True},
+            {**self.request(), 'autoVisualReread': True, 'visualConsent': True,
+             'fileHash': f, 'paperEvidence': {'paperId': 'p1', 'fileHash': f}, 'paperEvidenceConsent': True,
+             'executionConsent': True,
+             'harness': {**harness.default('blue'), 'adapter': {'type': 'http', 'url': 'https://example.com/hook'}}},
+        ]:
+            with self.assertRaises(ValueError):
+                blue.validate_request(bad)
+
 if __name__=='__main__': unittest.main()

@@ -6,6 +6,7 @@ mode: bare mode disables OAuth subscription auth) and no session persistence, in
 disposable directory. Only the validated structured output, token usage and fixed
 labels are returned; raw events and authentication diagnostics are never kept.
 """
+import base64
 import json
 import os
 from pathlib import Path
@@ -151,6 +152,37 @@ def _validate_claude_init(event):
         raise ValueError("mcp_observed")
 
 
+_FIXED_ERROR_CODES = frozenset({
+    "prompt_limit", "schema_limit", "output_limit", "subscription_login_required",
+    "api_auth_observed", "mcp_observed", "incomplete_response", "protocol_violation",
+    "response_not_object", "duplicate_json_key", "nonfinite_response", "visual_images_invalid",
+})
+
+
+def _validate_visual_images(images):
+    if type(images) is not list or not 1 <= len(images) <= 6:
+        raise ValueError("visual_images_invalid")
+    for raw in images:
+        if type(raw) is not bytes or not raw.startswith(b"\x89PNG\r\n\x1a\n"):
+            raise ValueError("visual_images_invalid")
+
+
+def _visual_stream_stdin(prompt, images):
+    content = [
+        {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": base64.b64encode(raw).decode("ascii")}}
+        for raw in images
+    ]
+    content.append({"type": "text", "text": "Return only the requested JSON as structured output. Do not use tools.\n" + prompt})
+    return json.dumps({"type": "user", "message": {"role": "user", "content": content}}, separators=(",", ":")) + "\n"
+
+
+def _error_code(error):
+    # Never copy exception text, CLI logs, credentials or prompt content.
+    if isinstance(error, ValueError) and str(error) in _FIXED_ERROR_CODES:
+        return str(error)
+    return type(error).__name__
+
+
 class ClaudeBackend:
     def __init__(self, max_calls=3, timeout_seconds=90, max_prompt_chars=30000,
                  *, transport=None, executable=None, model=None, effort=None):
@@ -186,48 +218,77 @@ class ClaudeBackend:
                              "--tools", "", "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
                              "--setting-sources", "", "--safe-mode", "--no-session-persistence"]
 
+    def _empty_result(self):
+        return {"status": "error", "response": None, "usage": {}, "elapsed_seconds": 0.,
+                "provider": "claude", "model": self.model, "effort": self.effort, "error_code": None,
+                "observed_tool_calls": 0, "observed_event_types": [], "observed_models": []}
+
+    def _prepare_infer(self, prompt, schema, result):
+        if type(prompt) is not str or not 1 <= len(prompt) <= self.max_prompt_chars:
+            raise ValueError("prompt_limit")
+        encoded = json.dumps(schema, allow_nan=False, separators=(",", ":"))
+        if type(schema) is not dict or len(encoded.encode()) > MAX_SCHEMA_BYTES:
+            raise ValueError("schema_limit")
+        from jsonschema import Draft202012Validator
+        Draft202012Validator.check_schema(schema)
+        with self._lock:
+            if self.calls >= self.max_calls:
+                result.update(status="budget_exhausted", error_code="call_budget")
+                return None
+            self.calls += 1
+        return encoded, Draft202012Validator
+
+    def _execute_cli(self, command, stdin_text, schema, result, validator, start):
+        executable = self.executable or discover_claude()
+        env = clean_environment()
+        with tempfile.TemporaryDirectory(prefix="falsify-claude-") as directory:
+            status = self.transport(executable + ["auth", "status", "--json"], cwd=directory, env=env,
+                                    stdin="", timeout_seconds=min(10, self.timeout_seconds),
+                                    max_output_bytes=8192)
+            if status["returncode"] or not subscription_ok(status.get("stdout", "")):
+                raise ValueError("subscription_login_required")
+            run = self.transport(command(executable), cwd=directory, env=env, stdin=stdin_text,
+                                 timeout_seconds=max(.001, self.timeout_seconds - (time.monotonic() - start)),
+                                 max_output_bytes=MAX_OUTPUT_BYTES)
+            if len(run.get("stdout", "").encode()) > MAX_OUTPUT_BYTES:
+                raise ValueError("output_limit")
+            self._interpret(run, schema, result, validator)
+
     def infer(self, prompt, schema):
         start = time.monotonic()
-        result = {"status": "error", "response": None, "usage": {}, "elapsed_seconds": 0.,
-                  "provider": "claude", "model": self.model, "effort": self.effort, "error_code": None,
-                  "observed_tool_calls": 0, "observed_event_types": [], "observed_models": []}
+        result = self._empty_result()
         try:
-            if type(prompt) is not str or not 1 <= len(prompt) <= self.max_prompt_chars:
-                raise ValueError("prompt_limit")
-            encoded = json.dumps(schema, allow_nan=False, separators=(",", ":"))
-            if type(schema) is not dict or len(encoded.encode()) > MAX_SCHEMA_BYTES:
-                raise ValueError("schema_limit")
-            from jsonschema import Draft202012Validator
-            Draft202012Validator.check_schema(schema)
-            with self._lock:
-                if self.calls >= self.max_calls:
-                    result.update(status="budget_exhausted", error_code="call_budget")
-                    return result
-                self.calls += 1
-            executable = self.executable or discover_claude()
-            env = clean_environment()
-            with tempfile.TemporaryDirectory(prefix="falsify-claude-") as directory:
-                status = self.transport(executable + ["auth", "status", "--json"], cwd=directory, env=env,
-                                        stdin="", timeout_seconds=min(10, self.timeout_seconds),
-                                        max_output_bytes=8192)
-                if status["returncode"] or not subscription_ok(status.get("stdout", "")):
-                    raise ValueError("subscription_login_required")
-                run = self.transport(self.command(executable, encoded), cwd=directory, env=env,
-                                     stdin="Return only the requested JSON as structured output. Do not use tools.\n" + prompt,
-                                     timeout_seconds=max(.001, self.timeout_seconds-(time.monotonic()-start)),
-                                     max_output_bytes=MAX_OUTPUT_BYTES)
-                if len(run.get("stdout", "").encode()) > MAX_OUTPUT_BYTES:
-                    raise ValueError("output_limit")
-                self._interpret(run, schema, result, Draft202012Validator)
+            prepared = self._prepare_infer(prompt, schema, result)
+            if prepared is None:
+                return result
+            encoded, validator = prepared
+            stdin_text = "Return only the requested JSON as structured output. Do not use tools.\n" + prompt
+            self._execute_cli(lambda exe: self.command(exe, encoded), stdin_text, schema, result, validator, start)
         except (TimeoutError, subprocess.TimeoutExpired):
             result.update(status="timeout", error_code="timeout")
         except Exception as error:
-            # Never copy exception text, CLI logs, credentials or prompt content.
-            code = str(error) if isinstance(error, ValueError) and str(error) in {
-                "prompt_limit", "schema_limit", "output_limit", "subscription_login_required",
-                "api_auth_observed", "mcp_observed", "incomplete_response", "protocol_violation",
-                "response_not_object", "duplicate_json_key", "nonfinite_response"} else type(error).__name__
-            result.update(status="error", error_code=code)
+            result.update(status="error", error_code=_error_code(error))
+        finally:
+            result["elapsed_seconds"] = round(time.monotonic() - start, 4)
+        return result
+
+    def infer_visual(self, prompt, schema, images):
+        """Infer structured JSON with 1..6 PNG images via stream-json stdin; zero tools."""
+        start = time.monotonic()
+        result = self._empty_result()
+        try:
+            _validate_visual_images(images)
+            prepared = self._prepare_infer(prompt, schema, result)
+            if prepared is None:
+                return result
+            encoded, validator = prepared
+            stdin_text = _visual_stream_stdin(prompt, images)
+            self._execute_cli(lambda exe: self.command(exe, encoded) + ["--input-format", "stream-json"],
+                              stdin_text, schema, result, validator, start)
+        except (TimeoutError, subprocess.TimeoutExpired):
+            result.update(status="timeout", error_code="timeout")
+        except Exception as error:
+            result.update(status="error", error_code=_error_code(error))
         finally:
             result["elapsed_seconds"] = round(time.monotonic() - start, 4)
         return result

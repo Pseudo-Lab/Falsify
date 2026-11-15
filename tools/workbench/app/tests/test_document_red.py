@@ -148,4 +148,108 @@ class PdfTests(unittest.TestCase):
     def test_source_hash_required(self):
         with self.assertRaisesRegex(ValueError,'해시'):handle_export({'format':'PDF','file':base64.b64encode(self.raw).decode(),'fileHash':'fake','patches':[self.patch]})
 
+
+class RepeatedLiteralAndMultimodalTests(unittest.TestCase):
+    def test_duplicate_quote_still_rejected_without_occurrence(self):
+        text = 'Group A had p = 0.04 and Group B also had p = 0.04.'
+        c = {**CANDIDATE, 'before': 'p = 0.04', 'after': 'p = 0.40',
+             'evidence': [{'segmentId': 's0', 'quote': 'Group A had p = 0.04', 'relation': 'Source'}]}
+        with self.assertRaises(ValueError):
+            validate_candidates({'status': 'ok', 'candidates': [c]}, [{'id': 's0', 'label': 'p1', 'text': text}])
+
+    def test_occurrence_targeting_resolves_exact_span_and_normalizes(self):
+        text = 'Group A had p = 0.04 (n = 120) and Group B had p = 0.04 (n = 120).'
+        first_idx = text.index('p = 0.04')
+        second_idx = text.index('p = 0.04', first_idx + 1)
+        c = {**CANDIDATE, 'before': 'p = 0.04', 'after': 'p = 0.40', 'occurrence': 1,
+             'evidence': [{'segmentId': 's0', 'quote': 'Group B had p = 0.04', 'relation': 'Source'}]}
+        resp = {'status': 'ok', 'candidates': [c]}
+        validate_candidates(resp, [{'id': 's0', 'label': 'p1', 'text': text}])
+        self.assertEqual(c['occurrence'], 1)
+        self.assertEqual(c['span'], [second_idx, second_idx + len('p = 0.04')])
+
+        class OccBackend(MockBackend):
+            def infer(self, prompt, schema):
+                self.prompts.append(prompt)
+                cand = {**CANDIDATE, 'before': 'p = 0.04', 'after': 'p = 0.40', 'occurrence': 1,
+                        'evidence': [{'segmentId': 's0', 'quote': 'Group B had p = 0.04', 'relation': 'Source'}]}
+                return {'status': 'ok', 'response': {'status': 'ok', 'candidates': [cand]}}
+
+        OccBackend.prompts = []
+        data = {**request(text), 'allowOccurrenceTargeting': True}
+        res = run_review(data, lambda _: None, threading.Event(), OccBackend)
+        self.assertEqual(res['candidates'][0]['occurrence'], 1)
+        self.assertEqual(res['candidates'][0]['span'], [second_idx, second_idx + len('p = 0.04')])
+
+    def test_out_of_range_occurrence_rejected(self):
+        text = 'Group A had p = 0.04 and Group B had p = 0.04.'
+        c = {**CANDIDATE, 'before': 'p = 0.04', 'after': 'p = 0.40', 'occurrence': 2,
+             'evidence': [{'segmentId': 's0', 'quote': 'Group A had p = 0.04', 'relation': 'Source'}]}
+        with self.assertRaises(ValueError):
+            validate_candidates({'status': 'ok', 'candidates': [c]}, [{'id': 's0', 'label': 'p1', 'text': text}])
+
+    def test_paper_evidence_multimodal_prompt_and_visual_edit_validation(self):
+        from unittest.mock import patch
+        from paper_evidence import EvidenceStore
+        from test_paper_evidence import sample_pdf
+        raw = sample_pdf()
+        fhash = hashlib.sha256(raw).hexdigest()
+        store = EvidenceStore()
+        summary = store.prepare(raw, fhash)
+        pid = summary['paperId']
+        table_item = store.list_items(pid, kind='table')['items'][0]
+        full_table = store.read_item(pid, table_item['id'])
+        target_cell = next(cell for cell in full_table['table']['cells'] if cell['text'] == '1')
+        fig_item = store.list_items(pid, kind='figure')['items'][0]
+
+        class MultimodalBackend(MockBackend):
+            def infer(self, prompt, schema):
+                self.prompts.append(prompt)
+                return {
+                    'status': 'ok',
+                    'response': {
+                        'status': 'ok',
+                        'candidates': [CANDIDATE],
+                        'visualEdits': [
+                            {'kind': 'table-cell', 'itemId': table_item['id'], 'row': target_cell['row'],
+                             'column': target_cell['column'], 'before': '1', 'after': '9', 'rationale': 'Sync table'},
+                            {'kind': 'chart-point', 'itemId': fig_item['id'], 'seriesId': 's1', 'pointIndex': 0,
+                             'beforeY': 1.0, 'afterY': 9.0, 'rationale': 'Sync figure'},
+                        ],
+                    },
+                }
+
+        MultimodalBackend.prompts = []
+        req = {**request(), 'fileHash': fhash, 'paperEvidence': {'paperId': pid, 'fileHash': fhash},
+               'paperEvidenceConsent': True}
+        with patch('paper_evidence.default_store', store):
+            res = run_review(req, lambda _: None, threading.Event(), MultimodalBackend)
+        self.assertIn('SOURCE_PDF_STRUCTURED_EVIDENCE_V1', MultimodalBackend.prompts[0])
+        self.assertEqual(len(res['visualEdits']), 2)
+
+        # Invalid cell before text must fail closed
+        class BadVisualBackend(MockBackend):
+            def infer(self, prompt, schema):
+                return {
+                    'status': 'ok',
+                    'response': {
+                        'status': 'ok',
+                        'candidates': [CANDIDATE],
+                        'visualEdits': [
+                            {'kind': 'table-cell', 'itemId': table_item['id'], 'row': target_cell['row'],
+                             'column': target_cell['column'], 'before': 'WRONG', 'after': '9', 'rationale': 'Bad'},
+                        ],
+                    },
+                }
+
+        with patch('paper_evidence.default_store', store):
+            with self.assertRaisesRegex(ValueError, 'visual_edit_before_mismatch'):
+                run_review(req, lambda _: None, threading.Event(), BadVisualBackend)
+
+        # Missing consent rejected before backend call
+        no_consent = {**req, 'paperEvidenceConsent': False}
+        with patch('paper_evidence.default_store', store):
+            with self.assertRaisesRegex(ValueError, 'paper_evidence_consent_required'):
+                validate_request(no_consent)
+
 if __name__=='__main__':unittest.main()

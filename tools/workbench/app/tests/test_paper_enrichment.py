@@ -31,7 +31,7 @@ import paper_mcp
 LOCAL = Path(__file__).resolve().parents[1] / 'local'
 OCR_BOX = [72, 100, 216, 244]
 CHART_BOX = [400, 500, 520, 640]
-BASE_TOOLS = {'status', 'list_items', 'read_item', 'render_region', 'read_page_text', 'search_text', 'list_references'}
+BASE_TOOLS = {'status', 'list_items', 'read_item', 'render_region', 'read_page_text', 'search_text', 'list_references', 'audit_statistics'}
 ANALYSIS_TOOLS = {'list_analyses', 'read_analysis', 'ocr_page', 'extract_chart', 'digitize_points'}
 HEAVY = ('torch', 'transformers', 'rapidocr', 'img2table', 'cv2', 'onnxruntime', 'paddle', 'paper_ocr', 'paper_chart')
 SENTINEL = 'SENTINEL_FILE_BYTES'

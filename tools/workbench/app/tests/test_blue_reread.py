@@ -194,4 +194,83 @@ class RereadTests(unittest.TestCase):
         self.assertLessEqual(rr['deliveredChars'], blue.MAX_CONTEXT); self.assertGreater(rr['deliveredChars'], 0)
         self.assertEqual(rr['selectedSegments'], [f's{k}' for k in range(8)])
 
+    def test_omitted_ids_reread_on_demand_and_guardrails(self):
+        import json
+        from unittest.mock import patch
+        fhash = 'ab' * 32
+        pid = 'paper-omitted-1'
+        items = {
+            f't{i}': {'id': f't{i}', 'type': 'table', 'pageIndex': i % 3, 'bbox': [10, 20, 200, 120],
+                      'caption': f'Table {i}', 'provenance': 'pymupdf',
+                      'footnotes': [f'Footnote {i}'], 'units': ['mg/dL'],
+                      'table': {'rows': 1, 'columns': 2, 'cells': [{'row': 0, 'column': 0, 'text': f'CELL_{i}'}]}}
+            for i in range(40)
+        }
+        class FakeStore:
+            def status(self, paper_id):
+                return {'schema': 'falsify.paper-evidence.v1', 'paperId': pid, 'fileHash': fhash,
+                        'status': 'ready', 'pageCount': 3, 'counts': {'tables': 40, 'figures': 0},
+                        'engine': 'pymupdf', 'limitations': [], 'expiresAt': '2026-12-01T00:00:00+00:00'}
+            def read_item(self, paper_id, item_id):
+                if paper_id != pid or item_id not in items:
+                    raise KeyError(item_id)
+                return dict(items[item_id])
+        omitted = [f't{i}' for i in range(40)]
+        structured = {'text': 'SOURCE_PDF_STRUCTURED_EVIDENCE_V1\nOmitted items exist',
+                      'coverage': {'paperId': pid, 'fileHash': fhash, 'omittedIds': omitted, 'truncated': True}}
+        data = paper()
+        data.update({'fileHash': fhash, 'paperEvidence': {'paperId': pid, 'fileHash': fhash}, 'paperEvidenceConsent': True})
+        plain_prompt, _, _, plain_payload, _ = blue._selection_prompt('POLICY ', [], paper(), None)
+        self.assertNotIn('omittedEvidenceRefs', plain_payload)
+        self.assertNotIn('omittedEvidenceRefs', plain_prompt)
+
+        def select(prompt):
+            self.assertIn('omittedEvidenceRefs', prompt)
+            payload = json.loads(prompt.split('Abstain', 1)[1]) if False else None
+            marker = '{"allChunkNotes":'
+            body = json.loads(prompt[prompt.rindex(marker):])
+            self.assertEqual(len(body['omittedEvidenceRefs']), 32)
+            self.assertEqual(body['omittedEvidenceRefs'][0]['refId'], 'evitem:t0')
+            return ok(targets=[{'segmentId': 's0', 'anchor': 'evitem:t0', 'reason': 'check omitted table 0'},
+                               {'segmentId': 's0', 'anchor': 'evitem:t1', 'reason': 'check omitted table 1'}])
+
+        def final(prompt):
+            self.assertIn('rereadEvidenceItems', prompt)
+            self.assertIn('CELL_0', prompt)
+            self.assertIn('Footnote 0', prompt)
+            self.assertLessEqual(len(prompt), blue.MAX_PROMPT)
+            return ok(findings=[])
+
+        Fake, log = fake(select, final)
+        with patch('paper_evidence_blue.context_for_review', return_value=structured), \
+             patch('paper_evidence.default_store', FakeStore()):
+            res = run(data, Fake)
+        self.assertEqual(res['status'], 'ok')
+        self.assertEqual(res['coverage']['paperEvidence']['selectedEvidenceItems'], ['t0', 't1'])
+        self.assertNotIn('selectedEvidenceItems', res)
+
+        # Undelivered evitem or >4 evitem selections rejected
+        for bad_targets in (
+            [{'segmentId': 's0', 'anchor': 'evitem:t39', 'reason': 'beyond 32 catalog'}],
+            [{'segmentId': 's0', 'anchor': f'evitem:t{k}', 'reason': 'too many'} for k in range(5)],
+        ):
+            FakeBad, log_bad = fake(lambda _, bt=bad_targets: ok(targets=bt), lambda _: ok(findings=[]))
+            with patch('paper_evidence_blue.context_for_review', return_value=structured), \
+                 patch('paper_evidence.default_store', FakeStore()):
+                with self.assertRaises(ValueError):
+                    run(data, FakeBad)
+            self.assertNotIn(blue.RESULT, schemas(log_bad))
+
+        # File hash mismatch in store during reread must reject
+        class BadHashStore(FakeStore):
+            def status(self, paper_id):
+                s = super().status(paper_id)
+                s['fileHash'] = 'cd' * 32
+                return s
+        FakeHash, _ = fake(select, final)
+        with patch('paper_evidence_blue.context_for_review', return_value=structured), \
+             patch('paper_evidence.default_store', BadHashStore()):
+            with self.assertRaisesRegex(ValueError, 'paper_evidence_hash_mismatch'):
+                run(data, FakeHash)
+
 if __name__ == '__main__': unittest.main()
