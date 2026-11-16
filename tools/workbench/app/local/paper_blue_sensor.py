@@ -46,6 +46,8 @@ from paper_external_grounding import (
 from paper_figure_forensics import audit_figure_forensics
 from paper_flow_and_spin_triage import audit_flow_and_spin_triage
 from paper_internal_consistency import audit_internal_consistency
+from paper_meta_and_table_audit import audit_meta_and_tables
+from paper_pdf_security_forensics import audit_pdf_security
 from paper_registry_identifiers import (
     audit_identifiers_offline,
     verify_identifiers_online,
@@ -898,20 +900,12 @@ def _figure_forensics(paper_id, actual_hash, max_signals, store):
     return signals, summary
 
 
-def _validate_sensor_args(
-    max_signals, include_external_oracle, include_figure_forensics, include_flow_triage,
-    include_internal_consistency,
-):
+def _validate_sensor_args(max_signals, bool_flags):
     if isinstance(max_signals, bool) or type(max_signals) is not int or not 1 <= max_signals <= 100:
         raise ValueError("limit")
-    if type(include_external_oracle) is not bool:
-        raise ValueError("include_external_oracle")
-    if type(include_figure_forensics) is not bool:
-        raise ValueError("include_figure_forensics")
-    if type(include_flow_triage) is not bool:
-        raise ValueError("include_flow_triage")
-    if type(include_internal_consistency) is not bool:
-        raise ValueError("include_internal_consistency")
+    for name, value in bool_flags:
+        if type(value) is not bool:
+            raise ValueError(name)
 
 
 def _read_bound_tables(store, paper_id):
@@ -977,6 +971,56 @@ def _internal_consistency_pack(page_texts, max_signals, store, paper_id):
     return ic_sigs, summary
 
 
+def _meta_and_tables_pack(page_texts, max_signals, store, paper_id):
+    mt_res = audit_meta_and_tables(
+        page_texts, table_items=_bound_flow_tables(store, paper_id), max_signals=max_signals,
+    )
+    mt_sigs = [_flow_signal_from_triage(sig) for sig in mt_res.get("signals", [])]
+    summary = {
+        "schema": mt_res.get("schema", "falsify.meta-and-table-audit.v1"),
+        "enabled": True,
+        "status": mt_res.get("status", "ok"),
+        "signalCount": mt_res["signalCount"],
+    }
+    return mt_sigs, summary
+
+
+def _pdf_security_pack(raw, max_signals):
+    sec_res = audit_pdf_security(raw, max_signals=max_signals)
+    sec_sigs = [_flow_signal_from_triage(sig) for sig in sec_res.get("signals", [])]
+    summary = {
+        "schema": sec_res.get("schema", "falsify.pdf-security-forensics.v1"),
+        "enabled": True,
+        "signalCount": sec_res["signalCount"],
+    }
+    return sec_sigs, summary
+
+
+def _collect_optional_packs(
+    paper_id, actual_hash, raw, page_texts, max_signals, store,
+    include_figure_forensics, include_flow_triage, include_internal_consistency,
+    include_meta_and_tables, include_pdf_security,
+):
+    extra_sigs = []
+    summaries = {}
+    if include_figure_forensics:
+        sigs, summaries["figureForensics"] = _figure_forensics(paper_id, actual_hash, max_signals, store)
+        extra_sigs.extend(sigs)
+    if include_flow_triage:
+        sigs, summaries["flowAndSpinTriage"] = _flow_triage_pack(page_texts, max_signals, store, paper_id)
+        extra_sigs.extend(sigs)
+    if include_internal_consistency:
+        sigs, summaries["internalConsistency"] = _internal_consistency_pack(page_texts, max_signals, store, paper_id)
+        extra_sigs.extend(sigs)
+    if include_meta_and_tables:
+        sigs, summaries["metaAndTables"] = _meta_and_tables_pack(page_texts, max_signals, store, paper_id)
+        extra_sigs.extend(sigs)
+    if include_pdf_security:
+        sigs, summaries["pdfSecurity"] = _pdf_security_pack(raw, max_signals)
+        extra_sigs.extend(sigs)
+    return extra_sigs, summaries
+
+
 def _attach_named(result, key, summary):
     if summary is not None:
         result[key] = summary
@@ -995,11 +1039,20 @@ def run_blue_sensor(
     include_figure_forensics=False,
     include_flow_triage=False,
     include_internal_consistency=False,
+    include_meta_and_tables=False,
+    include_pdf_security=False,
 ):
     """Run BLUE Layer 0 offline PDF forensic sensor (and opt-in P2 oracle pack)."""
     _validate_sensor_args(
-        max_signals, include_external_oracle, include_figure_forensics, include_flow_triage,
-        include_internal_consistency,
+        max_signals,
+        (
+            ("include_external_oracle", include_external_oracle),
+            ("include_figure_forensics", include_figure_forensics),
+            ("include_flow_triage", include_flow_triage),
+            ("include_internal_consistency", include_internal_consistency),
+            ("include_meta_and_tables", include_meta_and_tables),
+            ("include_pdf_security", include_pdf_security),
+        ),
     )
     store = _default_store() if store is None else store
     paper_id, actual_hash, summary, raw = _require_bound_pdf(paper_id, store)
@@ -1028,21 +1081,14 @@ def run_blue_sensor(
         )
         if include_external_oracle else ([], None)
     )
-    fig_sigs, fig_summary = (
-        _figure_forensics(paper_id, actual_hash, max_signals, store)
-        if include_figure_forensics else ([], None)
-    )
-    flow_sigs, flow_summary = (
-        _flow_triage_pack(page_texts, max_signals, store, paper_id)
-        if include_flow_triage else ([], None)
-    )
-    ic_sigs, ic_summary = (
-        _internal_consistency_pack(page_texts, max_signals, store, paper_id)
-        if include_internal_consistency else ([], None)
+    opt_sigs, opt_summaries = _collect_optional_packs(
+        paper_id, actual_hash, raw, page_texts, max_signals, store,
+        include_figure_forensics, include_flow_triage, include_internal_consistency,
+        include_meta_and_tables, include_pdf_security,
     )
     all_signals = (
         link_sigs + shared_sigs + dup_sigs + cite_sigs + mal_sigs
-        + id_offline_sigs + acro_sigs + oracle_sigs + d1_sigs + fig_sigs + flow_sigs + ic_sigs
+        + id_offline_sigs + acro_sigs + oracle_sigs + d1_sigs + opt_sigs
     )
     capped, truncated = _dedupe_and_number(all_signals, max_signals)
     result = {
@@ -1064,8 +1110,7 @@ def run_blue_sensor(
         },
         "oraclePack": oracle_pack,
     }
-    _attach_named(result, "figureForensics", fig_summary)
-    _attach_named(result, "flowAndSpinTriage", flow_summary)
-    _attach_named(result, "internalConsistency", ic_summary)
+    for key, pack_summary in opt_summaries.items():
+        _attach_named(result, key, pack_summary)
     _assert_no_red_keys(result)
     return result

@@ -117,3 +117,8 @@ Omit `--pdf` to read `falsify.harness-invocation.v1` or `falsify.red-invocation.
 `simulate_red_detectability` (`app/local/paper_red_detectability.py`, CLI `red simulate`) includes visual figure-forensics diffing for those `chart-shape` operations. A figure that still matches the untouched render is not a stealthy `L3` defect. Distances stay `L1 < L2 < L3 < L4`.
 
 `redBrief`-steered runs use `app/examples/adversarial_red_v03/`. The brief selects the claim and the target difficulty; the runner still plans with `plan_coordinated_mutation`, simulates detectability, and writes a blind PDF plus a sealed gold ledger. v0.1 and v0.2 remain available for older profiles. The brief must not be copied into the blind bundle.
+
+## 10. Wave 11 surgical `.xlsx` / `.ipynb` mutations, `L4` semantic templates, and `adversarial_red_v04`
+
+- **Workbook & Notebook Surgical Mutations (`xlsx-cell`, `ipynb-cell`)**: `app/local/paper_supplement_mutator.py` (wired into `paper_red_mcp.py`, `paper_red_planner.py`, and `falsify red apply --out-supplement-dir`) mutates `.xlsx` cell `<v>`/`<f>` values and `.ipynb` cell `source`/`output`/`execution_count` in memory while keeping untouched binary supplements byte-for-byte identical and returning self-healing `nearestCandidates` on mismatch.
+- **MCP `redBrief` & `L4` Semantic Planner (`adversarial_red_v04`)**: `plan_coordinated_mutation(..., redBrief=...)` on `paper_red_mcp.py` accepts answer-key-free arena `redBrief` hints, synthesizes `L4` semantic `D3`/`S1`/`D5` bundles verified to leave Layer 0 silent (`layer0Triggered == False`), and powers portable `app/examples/adversarial_red_v04/`.

@@ -431,10 +431,10 @@ class Wave9CliAndIntegrationTests(unittest.TestCase):
             code_bench, bench_res = _run_cli(["arena", "benchmark", "--mode", "sensor"])
             self.assertEqual(code_bench, 0)
             bench = bench_res["benchmark"]
-            self.assertEqual(bench["corpusVersion"], "v3")
-            self.assertEqual(bench["caseCount"], 24)
-            self.assertEqual(bench["goldSummary"]["caseCount"], 14)
-            self.assertEqual(bench["holdoutSummary"]["caseCount"], 10)
+            self.assertEqual(bench["corpusVersion"], "v4")
+            self.assertEqual(bench["caseCount"], 32)
+            self.assertEqual(bench["goldSummary"]["caseCount"], 18)
+            self.assertEqual(bench["holdoutSummary"]["caseCount"], 14)
             self.assertEqual(bench["goldSummary"]["layer0Recall"], 1.0)
             self.assertEqual(bench["holdoutSummary"]["totalPureFp"], 0)
 

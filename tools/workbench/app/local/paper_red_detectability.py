@@ -53,7 +53,7 @@ from paper_blue_sensor import run_blue_sensor
 from paper_evidence_text import list_references, read_page_text
 from paper_stat_audit import _audit_table_item, _collect_artifact_index, _table_grid
 from paper_supplement_audit import _extract_csv_metric_claims, _extract_metrics_from_text
-from paper_text_span_mutator import normalize_supplements
+from paper_supplement_mutator import normalize_red_supplements_extended
 from paper_uri_mutator import list_pdf_uri_links
 from paper_red_mcp import (
     _apply_operations,
@@ -80,9 +80,11 @@ _KIND_SURFACE = {
     'region-replace': 'figure',
     'uri-link': 'citation',
     'supplement-edit': 'supplement',
+    'xlsx-cell': 'supplement',
+    'ipynb-cell': 'supplement',
     'text-span': 'prose',
 }
-_FAMILY_SURFACE = {'D2': 'citation', 'D4': 'supplement', 'D4-1': 'supplement'}
+_FAMILY_SURFACE = {'D2': 'citation', 'D4': 'supplement', 'D4-1': 'supplement', 'D4-2': 'figure'}
 _TABLE_ARITHMETIC_KINDS = frozenset({'table_sum_mismatch', 'percentage_mismatch'})
 _VISUAL_KINDS = frozenset({'chart-shape', 'chart-redraw', 'region', 'region-replace'})
 _FIGURE_SIGNAL_KINDS = frozenset({
@@ -90,6 +92,8 @@ _FIGURE_SIGNAL_KINDS = frozenset({
     'mirrored_figure_panel',
     'rotated_figure_panel',
     'cropped_figure_panel',
+    'composite_subpanel_duplicate',
+    'axis_scale_distortion',
     'chart_printed_value_mismatch',
 })
 
@@ -532,7 +536,7 @@ def simulate_red_detectability(
     if not isinstance(operations, list):
         raise ValueError('visual_operation_invalid')
     ops = operations
-    normalized_supplements = normalize_supplements(supplements) if supplements else []
+    normalized_supplements = normalize_red_supplements_extended(supplements) if supplements else []
     _source, output_bytes, vis_result, _blind = _apply_operations(
         store,
         service or _default_service(),
@@ -786,7 +790,7 @@ def _supplement_claims(supplement):
 
 def _supplement_occurrences(supplements, needle, numeric):
     found = []
-    for supplement in normalize_supplements(supplements or []):
+    for supplement in normalize_red_supplements_extended(supplements or []):
         for claim in _supplement_claims(supplement):
             if not _claim_matches(claim, needle, numeric):
                 continue

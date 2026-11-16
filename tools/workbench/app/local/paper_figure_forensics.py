@@ -1,10 +1,11 @@
 """Read-only figure/panel forensic sensor for the BLUE Layer 0 offline path.
 
 Deterministic, network-free audit of figure panels placed in a prepared paper:
-duplicate / mirrored / rotated / cropped panel reuse plus chart printed-value
-versus prose claims. Perceptual hashes are computed from the rendered region
-pixels, so no new dependency is required (``numpy`` is used when present and a
-pure-Python fallback runs otherwise).
+duplicate / mirrored / rotated / cropped panel reuse, intra-figure sub-panel
+reuse, distorted chart axes, plus chart printed-value versus prose claims.
+Perceptual hashes are computed from the rendered region pixels, so no new
+dependency is required (``numpy`` is used when present and a pure-Python
+fallback runs otherwise).
 """
 import hashlib
 import math
@@ -48,6 +49,10 @@ _PAIR_SUBTYPES = {
     "rotated_figure_panel": "image-rotate",
     "cropped_figure_panel": "image-crop",
 }
+_KIND_FAMILY = {
+    "chart_printed_value_mismatch": "D1",
+    "axis_scale_distortion": "D4-2",
+}
 
 
 class _SkipPanel(Exception):
@@ -72,7 +77,7 @@ def _assert_no_red_keys(obj):
 
 def _signal(kind, page_index, excerpt, detail, reported, computed, subtype, item_id=None):
     sig = {
-        "family": "D1" if kind == "chart_printed_value_mismatch" else "D4-1",
+        "family": _KIND_FAMILY.get(kind, "D4-1"),
         "kind": kind,
         "subtype": subtype,
         "pageIndex": page_index,
@@ -569,6 +574,519 @@ def _dedupe_and_cap(signals, max_signals):
     return numbered, truncated
 
 
+class _PixView:
+    """Attribute view so cropped samples can reuse ``_grid_hashes``."""
+
+    def __init__(self, samples, width, height, ncomp):
+        self.samples = samples
+        self.width = width
+        self.height = height
+        self.n = ncomp
+
+
+def _grey(samples, width, ncomp, x, y):
+    off = (y * width + x) * ncomp
+    if ncomp >= 3:
+        return 0.299 * samples[off] + 0.587 * samples[off + 1] + 0.114 * samples[off + 2]
+    return float(samples[off])
+
+
+def _population_std(samples, width, height, ncomp):
+    count = width * height
+    if count <= 0 or ncomp <= 0:
+        return 0.0
+    total = 0.0
+    total_sq = 0.0
+    for y in range(height):
+        for x in range(width):
+            grey = _grey(samples, width, ncomp, x, y)
+            total += grey
+            total_sq += grey * grey
+    mean = total / count
+    variance = max(0.0, total_sq / count - mean * mean)
+    return math.sqrt(variance)
+
+
+def _line_stats(samples, width, height, ncomp, along):
+    """Per-column (``along='x'``) or per-row mean and population stddev."""
+    count = width if along == "x" else height
+    span = height if along == "x" else width
+    stats = []
+    for index in range(count):
+        total = 0.0
+        total_sq = 0.0
+        for step in range(span):
+            x, y = (index, step) if along == "x" else (step, index)
+            grey = _grey(samples, width, ncomp, x, y)
+            total += grey
+            total_sq += grey * grey
+        mean = total / span if span else 0.0
+        variance = max(0.0, total_sq / span - mean * mean) if span else 0.0
+        stats.append((mean, math.sqrt(variance)))
+    return stats
+
+
+def _gutter_mask(stats):
+    flags = [False] * len(stats)
+    start = None
+    padded = list(stats) + [(None, None)]
+    for index, (mean, std) in enumerate(padded):
+        gutter = std is not None and std < 3.0 and (mean >= 240.0 or mean <= 15.0)
+        if gutter and start is None:
+            start = index
+        if not gutter and start is not None:
+            if index - start >= 4:
+                flags[start:index] = [True] * (index - start)
+            start = None
+    return flags
+
+
+def _content_runs(flags):
+    runs, start = [], None
+    for index, gutter in enumerate(flags):
+        if gutter and start is not None:
+            runs.append((start, index))
+            start = None
+        elif not gutter and start is None:
+            start = index
+    if start is not None:
+        runs.append((start, len(flags)))
+    return runs
+
+
+def _boxes_for(runs, full, vertical):
+    boxes = []
+    for start, end in runs:
+        if vertical:
+            box = (start, 0, end, full)
+            wide, tall = end - start, full
+        else:
+            box = (0, start, full, end)
+            wide, tall = full, end - start
+        if wide >= 32 and tall >= 24:
+            boxes.append(box)
+    if 2 <= len(boxes) <= 6:
+        return boxes
+    return []
+
+
+def _split_boxes(samples, width, height, ncomp):
+    columns = _boxes_for(_content_runs(_gutter_mask(_line_stats(samples, width, height, ncomp, "x"))), height, True)
+    if columns:
+        return columns
+    return _boxes_for(_content_runs(_gutter_mask(_line_stats(samples, width, height, ncomp, "y"))), width, False)
+
+
+def _crop_samples(samples, width, ncomp, box):
+    x0, y0, x1, y1 = box
+    rows = []
+    row_bytes = (x1 - x0) * ncomp
+    for y in range(y0, y1):
+        start = (y * width + x0) * ncomp
+        rows.append(bytes(samples[start:start + row_bytes]))
+    return b"".join(rows), x1 - x0, y1 - y0
+
+
+def _textured(samples, width, height, ncomp, boxes):
+    kept = []
+    for box in boxes:
+        crop, crop_w, crop_h = _crop_samples(samples, width, ncomp, box)
+        if _population_std(crop, crop_w, crop_h, ncomp) < 12.0:
+            continue
+        kept.append((box, crop, crop_w, crop_h))
+    if 2 <= len(kept) <= 6:
+        return kept
+    return []
+
+
+def _subpanel_hashes(crop, crop_w, crop_h, ncomp):
+    return _grid_hashes(_PixView(crop, crop_w, crop_h, ncomp))
+
+
+def _hash_distance(left, right):
+    plain_d = _hamming(left["dhash"], right["dhash"])
+    plain_a = _hamming(left["ahash"], right["ahash"])
+    if plain_d <= NEAR_DUPLICATE_HAMMING and plain_a <= AHASH_CONFIRM_HAMMING:
+        return plain_d, False
+    mirror_d = min(_hamming(left["dhashH"], right["dhash"]), _hamming(left["dhash"], right["dhashH"]))
+    mirror_a = min(_hamming(left["ahashH"], right["ahash"]), _hamming(left["ahash"], right["ahashH"]))
+    if mirror_d <= NEAR_DUPLICATE_HAMMING and mirror_a <= AHASH_CONFIRM_HAMMING:
+        return mirror_d, True
+    return None
+
+
+def _page_box(panel_bbox, pix_w, pix_h, box):
+    x0, y0, x1, y1 = panel_bbox
+    scale_x = (x1 - x0) / pix_w if pix_w else 0.0
+    scale_y = (y1 - y0) / pix_h if pix_h else 0.0
+    return [
+        round(x0 + box[0] * scale_x, 3),
+        round(y0 + box[1] * scale_y, 3),
+        round(x0 + box[2] * scale_x, 3),
+        round(y0 + box[3] * scale_y, 3),
+    ]
+
+
+def _subpanel_signal(panel, left, right, distance, mirrored):
+    label = panel["label"]
+    return _signal(
+        "composite_subpanel_duplicate",
+        panel["pageIndex"],
+        f"{label} subpanels {left['page']} vs {right['page']}",
+        f"Sub-panels of {label} match within dHash hamming {distance}.",
+        {"panel": label, "bboxes": [left["page"], right["page"]], "mirrored": mirrored},
+        {
+            "bboxes": [left["page"], right["page"]],
+            "pixelBoxes": [list(left["pixel"]), list(right["pixel"])],
+            "hamming": int(distance),
+            "hashKind": "dhash",
+            "mirrored": mirrored,
+        },
+        "intra-figure-subpanel-reuse",
+    )
+
+
+def _hashed_subpanels(panel, textured, pix_w, pix_h, ncomp):
+    hashed = []
+    for box, crop, crop_w, crop_h in textured:
+        record = {"pixel": box, "page": _page_box(panel["bbox"], pix_w, pix_h, box)}
+        record.update(_subpanel_hashes(crop, crop_w, crop_h, ncomp))
+        hashed.append(record)
+    return hashed
+
+
+def _subpanel_pairs(panel, hashed):
+    signals = []
+    for left_index in range(len(hashed)):
+        for right_index in range(left_index + 1, len(hashed)):
+            relation = _hash_distance(hashed[left_index], hashed[right_index])
+            if relation is None:
+                continue
+            distance, mirrored = relation
+            signals.append(_subpanel_signal(panel, hashed[left_index], hashed[right_index], distance, mirrored))
+    return signals
+
+
+def _render_subpanel(doc, panel, dpi):
+    try:
+        return _render_panel(doc, panel["pageIndex"], panel["bbox"], max(int(dpi), 120))
+    except (_SkipPanel, Exception):
+        return None
+
+
+def _panel_subpanel_signals(doc, panel, dpi):
+    pix = _render_subpanel(doc, panel, dpi)
+    if pix is None or pix.width < 120 or pix.height < 50:
+        return []
+    boxes = _split_boxes(pix.samples, pix.width, pix.height, pix.n)
+    textured = _textured(pix.samples, pix.width, pix.height, pix.n, boxes)
+    if not textured:
+        return []
+    hashed = _hashed_subpanels(panel, textured, pix.width, pix.height, pix.n)
+    return _subpanel_pairs(panel, hashed)
+
+
+def _subpanel_signals(doc, panels, dpi):
+    signals = []
+    for panel in panels:
+        signals.extend(_panel_subpanel_signals(doc, panel, dpi))
+    return signals
+
+
+_TICK_RE = re.compile(r"^[+-]?(?:\d+(?:\.\d+)?|\.\d+)$")
+
+
+def _tick_value(text):
+    if _TICK_RE.fullmatch(text):
+        return float(text)
+    return None
+
+
+def _page_words(page):
+    try:
+        return page.get_text("words") or []
+    except Exception:
+        return []
+
+
+def _word_ticks(page):
+    ticks = []
+    for word in _page_words(page):
+        if not isinstance(word, (list, tuple)) or len(word) < 5:
+            continue
+        value = _tick_value(str(word[4]))
+        if value is None:
+            continue
+        x0, y0, x1, y1 = (float(word[0]), float(word[1]), float(word[2]), float(word[3]))
+        ticks.append({
+            "value": value,
+            "text": str(word[4]),
+            "bbox": (x0, y0, x1, y1),
+            "cx": (x0 + x1) / 2.0,
+            "cy": (y0 + y1) / 2.0,
+        })
+    return ticks
+
+
+def _clusters(ticks, key, tol):
+    groups, current, anchor = [], [], None
+    for tick in sorted(ticks, key=lambda item: item[key]):
+        if anchor is None or abs(tick[key] - anchor) <= tol:
+            current.append(tick)
+            if anchor is None:
+                anchor = tick[key]
+            continue
+        groups.append(current)
+        current, anchor = [tick], tick[key]
+    if current:
+        groups.append(current)
+    return groups
+
+
+def _ordered_sequence(ticks, axis):
+    key = "cx" if axis == "h" else "cy"
+    ordered, seq = sorted(ticks, key=lambda item: item[key]), []
+    for tick in ordered:
+        if seq and tick[key] - seq[-1][key] < 2.0:
+            continue
+        seq.append(tick)
+    return seq
+
+
+def _axis_gaps(seq, axis):
+    key = "cx" if axis == "h" else "cy"
+    return [seq[index + 1][key] - seq[index][key] for index in range(len(seq) - 1)]
+
+
+def _values_reverse(values):
+    diffs = [values[index + 1] - values[index] for index in range(len(values) - 1)]
+    return any(diff > 1e-9 for diff in diffs) and any(diff < -1e-9 for diff in diffs)
+
+
+def _consistent_ratios(values):
+    if any(value <= 0 for value in values):
+        return False
+    ratios = [values[index + 1] / values[index] for index in range(len(values) - 1)]
+    if not ratios or min(ratios) <= 0:
+        return False
+    return max(ratios) / min(ratios) <= 1.2
+
+
+def _equal_spacing(gaps):
+    if not gaps or any(gap <= 0.5 for gap in gaps):
+        return False
+    return max(gaps) / min(gaps) <= 1.25
+
+
+def _slope_ratio_exceeds(slopes):
+    for left, right in zip(slopes, slopes[1:]):
+        low, high = min(left, right), max(left, right)
+        if low > 0 and high / low > 2.5:
+            return True
+    return False
+
+
+def _slope_jump(values, gaps):
+    slopes = []
+    for gap, left, right in zip(gaps, values, values[1:]):
+        delta = abs(right - left)
+        if delta < 1e-9:
+            return False
+        slopes.append(gap / delta)
+    return _slope_ratio_exceeds(slopes)
+
+
+def _break_near(page, seq):
+    xs = [tick["bbox"][0] for tick in seq] + [tick["bbox"][2] for tick in seq]
+    ys = [tick["bbox"][1] for tick in seq] + [tick["bbox"][3] for tick in seq]
+    box = (min(xs) - 48.0, min(ys) - 36.0, max(xs) + 48.0, max(ys) + 36.0)
+    for word in _page_words(page):
+        if not isinstance(word, (list, tuple)) or len(word) < 5:
+            continue
+        text = str(word[4])
+        if "//" not in text and "≈" not in text:
+            continue
+        cx = (float(word[0]) + float(word[2])) / 2.0
+        cy = (float(word[1]) + float(word[3])) / 2.0
+        if box[0] <= cx <= box[2] and box[1] <= cy <= box[3]:
+            return True
+    return False
+
+
+def _distortion_reason(values, gaps, broken):
+    if _values_reverse(values):
+        return "nonmonotonic"
+    if broken or _consistent_ratios(values) or not _equal_spacing(gaps):
+        return None
+    if _slope_jump(values, gaps):
+        return "slope"
+    return None
+
+
+def _axis_signal(page_index, seq, axis, reason, values, extra):
+    excerpt = ", ".join(tick["text"] for tick in seq)
+    bboxes = [[round(value, 3) for value in tick["bbox"]] for tick in seq]
+    return _signal(
+        "axis_scale_distortion",
+        page_index,
+        excerpt,
+        f"Axis ticks {excerpt} are {reason.replace('-', ' ')}.",
+        {"values": values, "axis": axis, "reason": reason, "bboxes": bboxes},
+        {"values": values, "axis": axis, "reason": reason, "bboxes": bboxes, **extra},
+        "truncated-or-nonmonotonic-axis",
+    )
+
+
+def _sequence_signal(page, page_index, group, axis):
+    seq = _ordered_sequence(group, axis)
+    if len(seq) < 4:
+        return None
+    values = [tick["value"] for tick in seq]
+    gaps = _axis_gaps(seq, axis)
+    reason = _distortion_reason(values, gaps, _break_near(page, seq))
+    if reason is None:
+        return None
+    return _axis_signal(page_index, seq, axis, reason, values, {"gaps": [round(gap, 3) for gap in gaps]})
+
+
+def _tick_axis_signals(page, page_index, ticks):
+    signals = []
+    for axis, key, tol in (("h", "cy", 8.0), ("v", "cx", 12.0)):
+        for group in _clusters(ticks, key, tol):
+            signal = _sequence_signal(page, page_index, group, axis)
+            if signal is not None:
+                signals.append(signal)
+    return signals
+
+
+def _drawings(page):
+    try:
+        return page.get_drawings() or []
+    except Exception:
+        return []
+
+
+def _is_vertical_bar(rect, page_w, page_h):
+    width, height = rect.x1 - rect.x0, rect.y1 - rect.y0
+    if height < 12 or width < 2 or height < width * 1.15:
+        return False
+    return not (width > page_w * 0.85 and height > page_h * 0.85)
+
+
+def _vertical_bars(drawings, page):
+    bars = []
+    page_w, page_h = float(page.rect.width), float(page.rect.height)
+    for draw in drawings:
+        rect = draw.get("rect") if isinstance(draw, dict) else None
+        if rect is None or draw.get("fill") is None:
+            continue
+        if _is_vertical_bar(rect, page_w, page_h):
+            bars.append(rect)
+    return bars
+
+
+def _baseline_groups(bars):
+    groups = []
+    for rect in sorted(bars, key=lambda item: float(item.y1)):
+        if groups and abs(float(rect.y1) - float(groups[-1][0].y1)) <= 3.0:
+            groups[-1].append(rect)
+            continue
+        groups.append([rect])
+    return [group for group in groups if len(group) >= 2]
+
+
+def _near_baseline(tick, y_base):
+    return min(abs(tick["cy"] - y_base), abs(tick["bbox"][3] - y_base), abs(tick["bbox"][1] - y_base)) <= 12.0
+
+
+def _baseline_values(group, y_base):
+    if len(group) < 2:
+        return None
+    nearest = min(group, key=lambda tick: abs(tick["cy"] - y_base))
+    if not _near_baseline(nearest, y_base):
+        return None
+    values = [tick["value"] for tick in group]
+    if nearest["value"] > min(values) + 1e-9:
+        return None
+    return min(values), max(values), group
+
+
+def _matching_baseline(ticks, y_base):
+    for group in _clusters(ticks, "cx", 12.0):
+        found = _baseline_values(group, y_base)
+        if found is not None:
+            return found
+    return None
+
+
+def _truncated_signal(page_index, ticks, bars):
+    y_base = sum(float(bar.y1) for bar in bars) / len(bars)
+    found = _matching_baseline(ticks, y_base)
+    if found is None:
+        return None
+    v_min, v_max, group = found
+    if v_min <= 0 or v_max <= v_min or v_min / (v_max - v_min) < 1.5:
+        return None
+    ordered = _ordered_sequence(group, "v")
+    return _axis_signal(
+        page_index,
+        ordered or group,
+        "v",
+        "truncated-baseline",
+        [tick["value"] for tick in (ordered or group)],
+        {"vMin": v_min, "vMax": v_max, "yBase": round(y_base, 3), "barCount": len(bars)},
+    )
+
+
+def _baseline_signals(page_index, ticks, drawings, page):
+    signals = []
+    for bars in _baseline_groups(_vertical_bars(drawings, page)):
+        signal = _truncated_signal(page_index, ticks, bars)
+        if signal is not None:
+            signals.append(signal)
+    return signals
+
+
+def _image_boxes(page):
+    boxes = []
+    try:
+        infos = page.get_image_info() or []
+    except Exception:
+        return boxes
+    for info in infos:
+        bbox = info.get("bbox") if isinstance(info, dict) else None
+        if isinstance(bbox, (list, tuple)) and len(bbox) == 4:
+            boxes.append(bbox)
+    return boxes
+
+
+def _page_is_chart(page):
+    if _image_boxes(page):
+        return True
+    return bool(_vertical_bars(_drawings(page), page))
+
+
+def _page_axis_signals(page, page_index):
+    if not _page_is_chart(page):
+        return []
+    ticks = _word_ticks(page)
+    drawings = _drawings(page)
+    signals = _tick_axis_signals(page, page_index, ticks)
+    signals.extend(_baseline_signals(page_index, ticks, drawings, page))
+    return signals
+
+
+def _axis_signals(doc):
+    signals = []
+    for page_index in range(min(doc.page_count, MAX_FORENSIC_PAGES)):
+        signals.extend(_page_axis_signals(doc[page_index], page_index))
+    return signals
+
+
+def _layout_signals(doc, panels, dpi):
+    return _subpanel_signals(doc, panels, dpi) + _axis_signals(doc)
+
+
 def audit_figure_forensics(paper_id, file_hash=None, *, max_signals=30, dpi=96, max_figures=24, store=None):
     """Deterministically audit placed figure panels and chart printed values (offline, read-only)."""
     _validate_options(max_signals, dpi, max_figures)
@@ -579,8 +1097,9 @@ def audit_figure_forensics(paper_id, file_hash=None, *, max_signals=30, dpi=96, 
     with _open_pdf(raw) as doc:
         panels, skipped, panels_truncated = _enumerate_panels(doc, dpi, max_figures)
         pair_signals, pairs = _pair_checks(doc, panels, dpi)
+        layout_signals = _layout_signals(doc, panels, dpi)
     chart_signals = _chart_claim_signals_all(store, paper_id, actual_hash, max_figures)
-    numbered, signals_truncated = _dedupe_and_cap(pair_signals + chart_signals, max_signals)
+    numbered, signals_truncated = _dedupe_and_cap(pair_signals + layout_signals + chart_signals, max_signals)
     result = {
         "schema": SCHEMA,
         "paperId": paper_id,

@@ -26,6 +26,8 @@ _KIND_SURFACE = {
     'region-replace': 'figure',
     'uri-link': 'citation',
     'supplement-edit': 'supplement',
+    'xlsx-cell': 'supplement',
+    'ipynb-cell': 'supplement',
     'text-span': 'prose',
 }
 _SURFACE_ORDER = ('prose', 'table', 'figure', 'citation', 'supplement')
@@ -130,7 +132,7 @@ def _surfaces(ops):
 
 def _op_blob(op):
     parts = []
-    for key in ('before', 'after', 'beforeUri', 'afterUri', 'rationale'):
+    for key in ('before', 'after', 'beforeUri', 'afterUri', 'rationale', 'afterFormula'):
         value = op.get(key)
         if isinstance(value, str):
             parts.append(value)
@@ -431,9 +433,21 @@ def _line_edit(text, token, nudged):
     return before, after
 
 
+def _is_structured(rec):
+    if not isinstance(rec, dict):
+        return False
+    if rec.get('format') in ('xlsx', 'ipynb'):
+        return True
+    return str(rec.get('name') or '').lower().endswith(('.xlsx', '.ipynb'))
+
+
+def _plain_supplements(supplements):
+    return [rec for rec in supplements or [] if not _is_structured(rec)]
+
+
 def _supplement_for(supplements, token):
     ranked = sorted(
-        supplements,
+        _plain_supplements(supplements),
         key=lambda rec: (0 if str(rec.get('text') or '').count(token) >= 2 else 1, rec.get('name') or ''),
     )
     for rec in ranked:
@@ -557,7 +571,121 @@ def _synced_text(span, phrase, token, nudged, suffix):
     return _text_op(span, phrase, after, 'D1', 'W3', 'L3', suffix)
 
 
-def _l3_bundle(span, phrase, cell_info, supp, token, nudged, ids):
+def _token_in(text, token):
+    if not token or token not in str(text or ''):
+        return False
+    pattern = r'(?<![\d.])' + re.escape(str(token)) + r'(?![\d.])'
+    return re.search(pattern, str(text)) is not None
+
+
+def _join_parts(value):
+    if isinstance(value, list):
+        return ''.join(str(part) for part in value)
+    if isinstance(value, str):
+        return value
+    return ''
+
+
+def _xlsx_hit(rec, token):
+    for sheet in rec.get('sheets') or []:
+        for ref, text in (sheet.get('values') or {}).items():
+            shown = str(text)
+            if _token_in(shown, token):
+                return sheet.get('sheetName') or '', ref, shown
+    return None
+
+
+def _xlsx_op(rec, hit, token, nudged, suffix):
+    sheet, cell, shown = hit
+    after = shown.replace(token, nudged, 1)
+    if after == shown or _contains_hint(after):
+        return None
+    op = _stamp('xlsx', suffix, 'D1', 'W4', 'L3')
+    op.update({
+        'kind': 'xlsx-cell',
+        'supplementId': rec.get('supplementId'),
+        'name': rec.get('name'),
+        'sheet': sheet,
+        'cell': cell,
+        'before': shown,
+        'after': after,
+    })
+    return op
+
+
+def _output_blob(cell):
+    parts = []
+    for output in cell.get('outputs') or []:
+        if not isinstance(output, dict):
+            continue
+        if output.get('output_type') == 'stream':
+            parts.append(_join_parts(output.get('text')))
+        data = output.get('data')
+        if isinstance(data, dict):
+            parts.append(_join_parts(data.get('text/plain')))
+    return ''.join(parts)
+
+
+def _ipynb_hit(rec, token):
+    cells = (rec.get('notebook') or {}).get('cells') or []
+    for index, cell in enumerate(cells):
+        if not isinstance(cell, dict):
+            continue
+        source = _join_parts(cell.get('source'))
+        if _token_in(source, token):
+            return index, 'source', token
+        if _token_in(_output_blob(cell), token):
+            return index, 'output', token
+    return None
+
+
+def _ipynb_op(rec, hit, nudged, suffix):
+    index, target, before = hit
+    if _contains_hint(nudged):
+        return None
+    op = _stamp('ipynb', suffix, 'D1', 'W4', 'L3')
+    op.update({
+        'kind': 'ipynb-cell',
+        'supplementId': rec.get('supplementId'),
+        'name': rec.get('name'),
+        'cellIndex': index,
+        'target': target,
+        'before': before,
+        'after': nudged,
+    })
+    return op
+
+
+def _is_xlsx(rec):
+    if rec.get('format') == 'xlsx':
+        return True
+    return str(rec.get('name') or '').lower().endswith('.xlsx')
+
+
+def _structured_op(supplements, token, nudged, suffix):
+    for rec in supplements or []:
+        if not _is_structured(rec):
+            continue
+        if _is_xlsx(rec):
+            hit = _xlsx_hit(rec, token)
+            built = _xlsx_op(rec, hit, token, nudged, suffix) if hit is not None else None
+        else:
+            hit = _ipynb_hit(rec, token)
+            built = _ipynb_op(rec, hit, nudged, suffix) if hit is not None else None
+        if built is not None:
+            return built
+    return None
+
+
+def _attach_structured(ops, supplements, token, nudged, ids):
+    op = _structured_op(supplements, token, nudged, ids['n'])
+    if op is None:
+        return
+    ops.append(op)
+    ids['n'] += 1
+
+
+def _l3_bundle(span, phrase, cell_info, supp, token, nudged, ids, supplements=None):
     text_op = _synced_text(span, phrase, token, nudged, ids['n'])
     ids['n'] += 1
     if text_op is None:
@@ -572,9 +700,10 @@ def _l3_bundle(span, phrase, cell_info, supp, token, nudged, ids):
         if before is not None:
             ops.append(_supp_op(supp, before, after, ids['n']))
             ids['n'] += 1
+    _attach_structured(ops, supplements, token, nudged, ids)
     if len(ops) < 2 or len(_surfaces(ops)) < 2:
         return None
-    return ops[:3]
+    return ops[:4]
 
 
 def _numeric_token(token):
@@ -605,7 +734,9 @@ def _l3_bundles(discovered, traces, blocked, ids):
             continue
         cell_info = _safe_cell(discovered['tables'], str(token), blocked)
         supp = _supplement_for(discovered['supplements'], str(token))
-        bundle = _l3_bundle(span, phrase, cell_info, supp, str(token), nudged, ids)
+        bundle = _l3_bundle(
+            span, phrase, cell_info, supp, str(token), nudged, ids, discovered['supplements'],
+        )
         if bundle is not None:
             bundles.append(bundle)
         if len(bundles) >= 3:
@@ -627,6 +758,7 @@ def _bundle_key(ops):
             op.get('kind'), op.get('pageIndex'), op.get('before'), op.get('after'),
             op.get('itemId'), op.get('row'), op.get('column'), op.get('beforeUri'),
             op.get('supplementId'), op.get('name'), _plan_scene(op),
+            op.get('sheet'), op.get('cell'), op.get('cellIndex'), op.get('target'),
         ))
     return tuple(rows)
 
@@ -644,11 +776,59 @@ def _extend_unique(found, bundles):
     return found
 
 
+_L4_PATTERNS = (
+    ('correlated with', 'caused outcome', 'D3', 'W2', ('abstract', 'conclusion')),
+    ('associated with', 'causal effect', 'D3', 'W2', ('abstract', 'conclusion')),
+    ('higher error', 'lower error', 'S1', 'W3', ('abstract', 'conclusion', 'result')),
+    ('adverse events', 'helpful events', 'S1', 'W3', ('abstract', 'conclusion')),
+    ('secondary outcome', 'primary endpoint', 'D5', 'W2', ('conclusion',)),
+    ('secondary endpoint', 'primary endpoint', 'D5', 'W2', ('conclusion',)),
+)
+
+
+def _has_section(blob, names):
+    for name in names:
+        if name in blob:
+            return True
+    return False
+
+
+def _section_ok(spans, index, names):
+    start = max(0, index - 4)
+    blob = ' '.join((spans[i].get('text') or '') for i in range(start, index + 1)).lower()
+    return _has_section(blob, names)
+
+
+def _l4_semantic(spans, blocked, ids):
+    bundles = []
+    for index, span in enumerate(spans or []):
+        text = span.get('text') or ''
+        if _text_blocked(text, blocked):
+            continue
+        _add_semantic(bundles, spans, index, text, ids)
+        if len(bundles) >= 3:
+            break
+    return bundles
+
+
+def _add_semantic(bundles, spans, index, text, ids):
+    span = spans[index]
+    for before, after, family, world, sections in _L4_PATTERNS:
+        exact = _exact_phrase(text, before)
+        if exact is None or not _section_ok(spans, index, sections):
+            continue
+        if _contains_hint(after):
+            continue
+        bundles.append([_text_op(span, exact, after, family, world, 'L4', ids['n'])])
+        ids['n'] += 1
+        return
+
+
 def _candidate_groups(discovered, traces, blocked):
     ids = {'n': 1}
     return {
         'L3': _l3_bundles(discovered, traces, blocked, ids),
-        'L4': _l4_bundles(discovered['spans'], blocked, ids),
+        'L4': _l4_bundles(discovered['spans'], blocked, ids) + _l4_semantic(discovered['spans'], blocked, ids),
         'L2': _l2_table_bundles(discovered['tables'], blocked, ids),
         'L1': (
             _l1_uri_bundles(discovered['links'], blocked, ids)
@@ -1242,7 +1422,8 @@ def plan_coordinated_mutations(
     """Return detectability-verified coordinated mutation bundles for one bound PDF."""
     target = _require_difficulty(target_difficulty)
     limit = _require_limit(max_bundles)
-    loaded = normalize_supplements(supplements)
+    from paper_supplement_mutator import normalize_red_supplements_extended
+    loaded = normalize_red_supplements_extended(supplements)
     bound_store = _default_store() if store is None else store
     baseline = run_blue_sensor(
         paper_id, file_hash=file_hash, include_external_oracle=False, store=bound_store,

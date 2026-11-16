@@ -34,6 +34,8 @@ from paper_registry_identifiers import (
 )
 from paper_figure_forensics import audit_figure_forensics
 from paper_internal_consistency import audit_internal_consistency
+from paper_meta_and_table_audit import audit_meta_and_tables
+from paper_pdf_security_forensics import audit_pdf_security
 from paper_raw_dataset_audit import audit_raw_datasets
 from paper_supplement_audit import audit_paper_with_supplements, infer_supplement_kind
 from paper_tabular_notebook_loader import parse_ipynb_notebook, parse_xlsx_workbook
@@ -342,12 +344,9 @@ def _compact_sensor_digest(res):
         "signals": signals,
         "bibliography": res.get("bibliography"),
     }
-    if "internalConsistency" in res:
-        digest["internalConsistency"] = res["internalConsistency"]
-    if res.get("figureForensics") is not None:
-        digest["figureForensics"] = res["figureForensics"]
-    if res.get("flowAndSpinTriage") is not None:
-        digest["flowAndSpinTriage"] = res["flowAndSpinTriage"]
+    for opt_key in ("internalConsistency", "figureForensics", "flowAndSpinTriage", "metaAndTables", "pdfSecurity"):
+        if res.get(opt_key) is not None:
+            digest[opt_key] = res[opt_key]
     return digest
 
 
@@ -480,9 +479,37 @@ def recompute_raw_supplement_payload(store, paper_id, file_hash, bundle, supplem
     return out
 
 
+def audit_meta_and_tables_payload(store, paper_id, file_hash, max_signals=30):
+    """Run read-only PRISMA, meta-analysis, and cross-table N audit on the bound PDF."""
+    if type(max_signals) is not int or not 1 <= max_signals <= MAX_SIGNALS_LIMIT:
+        raise ValueError("limit")
+    bound_id, actual_hash, summary, raw = _require_bound_pdf(paper_id, store)
+    require_summary(summary, paper_id=bound_id, file_hash=file_hash)
+    page_items = _read_pdf_page_items(raw, MAX_PDF_SUPP_PAGES)
+    table_items = _read_table_items(store, bound_id)
+    out = audit_meta_and_tables(page_items, table_items=table_items, max_signals=max_signals)
+    out["paperId"] = bound_id
+    out["fileHash"] = actual_hash
+    _assert_no_red_keys(out)
+    return out
+
+
+def audit_pdf_security_payload(store, paper_id, file_hash, bundle=None, max_signals=30):
+    """Run read-only hidden-text and prompt-injection security audit on the bound PDF."""
+    if type(max_signals) is not int or not 1 <= max_signals <= MAX_SIGNALS_LIMIT:
+        raise ValueError("limit")
+    bound_id, actual_hash, summary, raw = _require_bound_pdf(paper_id, store)
+    require_summary(summary, paper_id=bound_id, file_hash=file_hash)
+    out = audit_pdf_security(raw, file_hash=actual_hash, supplements=list(bundle or []) or None, max_signals=max_signals)
+    out["paperId"] = bound_id
+    out["fileHash"] = actual_hash
+    _assert_no_red_keys(out)
+    return out
+
+
 def _sensor_call(
     file_hash, max_signals, store, include_figure_forensics, include_flow_triage,
-    include_internal_consistency=False,
+    include_internal_consistency=False, include_meta_and_tables=False, include_pdf_security=False,
 ):
     kwargs = {
         "file_hash": file_hash,
@@ -492,10 +519,15 @@ def _sensor_call(
         "include_figure_forensics": include_figure_forensics,
     }
     accepted = inspect.signature(paper_blue_sensor.run_blue_sensor).parameters
-    if "include_flow_triage" in accepted:
-        kwargs["include_flow_triage"] = include_flow_triage
-    if "include_internal_consistency" in accepted:
-        kwargs["include_internal_consistency"] = include_internal_consistency
+    optional_flags = (
+        ("include_flow_triage", include_flow_triage),
+        ("include_internal_consistency", include_internal_consistency),
+        ("include_meta_and_tables", include_meta_and_tables),
+        ("include_pdf_security", include_pdf_security),
+    )
+    for name, val in optional_flags:
+        if name in accepted:
+            kwargs[name] = val
     return kwargs
 
 
@@ -514,25 +546,32 @@ def audit_code_supplements_payload(store, paper_id, file_hash, bundle, supplemen
     return out
 
 
+def _require_sensor_bools(pairs):
+    for name, val in pairs:
+        if type(val) is not bool:
+            raise ValueError(name)
+
+
 def run_blue_sensor_payload(
     store, paper_id, file_hash, max_signals=50, digest_only=False,
     include_figure_forensics=False, include_flow_triage=False,
-    include_internal_consistency=False,
+    include_internal_consistency=False, include_meta_and_tables=False,
+    include_pdf_security=False,
 ):
     """Run offline Layer 0 BLUE PDF forensic sensor and optionally compact to digestOnly."""
-    if type(digest_only) is not bool:
-        raise ValueError("digest_only")
-    if type(include_figure_forensics) is not bool:
-        raise ValueError("include_figure_forensics")
-    if type(include_flow_triage) is not bool:
-        raise ValueError("include_flow_triage")
-    if type(include_internal_consistency) is not bool:
-        raise ValueError("include_internal_consistency")
+    _require_sensor_bools((
+        ("digest_only", digest_only),
+        ("include_figure_forensics", include_figure_forensics),
+        ("include_flow_triage", include_flow_triage),
+        ("include_internal_consistency", include_internal_consistency),
+        ("include_meta_and_tables", include_meta_and_tables),
+        ("include_pdf_security", include_pdf_security),
+    ))
     res = paper_blue_sensor.run_blue_sensor(
         paper_id,
         **_sensor_call(
             file_hash, max_signals, store, include_figure_forensics, include_flow_triage,
-            include_internal_consistency,
+            include_internal_consistency, include_meta_and_tables, include_pdf_security,
         ),
     )
     return _compact_sensor_digest(res) if digest_only else res

@@ -63,8 +63,14 @@ python app/local/falsify_cli.py arena evolve --source-pdf SOURCE.pdf --holdout-p
 
 ## 5. Synthetic regression gate
 
-`falsify arena benchmark` is the synthetic regression gate. Wave 10 uses the `v3` 24-case Gold + Benign-Trap Holdout corpus. Pass `--baseline` (benchmark CLI flag `--baseline-report`) to compare against a saved report. Recall drop or a holdout false-positive increase fails the gate; do not promote that harness.
+`falsify arena benchmark` is the synthetic regression gate. Wave 11 expands the `v3` 24-case suite to the `v4` 32-case Gold + Benign-Trap Holdout corpus (18 Gold + 14 Holdout). Pass `--baseline` (benchmark CLI flag `--baseline-report`) to compare against a saved report. Recall drop or a holdout false-positive increase fails the gate; do not promote that harness.
 
 ```bash
 python app/local/falsify_cli.py arena benchmark --mode sensor --baseline-report PREVIOUS.json --max-recall-drop 0.0 --out BENCH.json
 ```
+
+## 6. Multi-agent `N x M` tournaments, campaign `--resume`, and BLUE ensemble
+
+- **Round-robin Tournament (`falsify arena tournament`)**: `tools/evaluation/arena_tournament.py` (`falsify.arena-tournament.v1`) pits $N$ RED entries against $M$ BLUE entries across source and holdout PDFs, computing order-invariant Elo and Laplace-smoothed Bradley-Terry ratings, Pareto-optimal contenders, and `W1–W5 × L1–L4` recall matrices without leaking quotes or paths.
+- **Resumable & Budgeted Campaigns**: `falsify arena evolve --checkpoint-dir DIR --resume --max-total-seconds S` persists scrubbed per-generation checkpoints (`falsify.campaign-checkpoint.v1`) and stops cleanly (`stoppedReason: "budget_exhausted"`) when the wall-clock budget expires.
+- **Multi-BLUE Consensus (`falsify blue ensemble`)**: `tools/evaluation/blue_ensemble.py` merges $2..12$ blind BLUE reports, preserves split minority defect flags as `확인필요` (`split_ensemble_verdict`), and runs `finalize_blue_report` when `--pdf` is supplied.

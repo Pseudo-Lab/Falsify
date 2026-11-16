@@ -35,6 +35,7 @@ import sys
 import pymupdf
 from mcp.server.fastmcp import FastMCP
 from mcp.types import CallToolResult, TextContent, ToolAnnotations
+from pydantic.json_schema import SkipJsonSchema
 
 from paper_blue_sensor import run_blue_sensor
 from paper_chart_edit_service import ChartEditService, SCHEMA as CHART_SCHEMA, default_service
@@ -54,14 +55,16 @@ from paper_red_errors import (
     VALID_WORLDS,
 )
 from paper_stealth_audit import audit_pdf_stealth
+from paper_supplement_mutator import (
+    apply_extended_supplement_mutations,
+    load_red_supplements_extended,
+    normalize_red_supplements_extended,
+)
 from paper_text_span_mutator import (
     SpanMutationError,
     assert_blind_supplements,
     list_pdf_text_spans,
-    load_red_supplements,
     mutate_pdf_text_spans,
-    mutate_supplements,
-    normalize_supplements,
 )
 from paper_uri_mutator import list_pdf_uri_links, mutate_pdf_uri_links
 from paper_visual_edit import SCHEMA as VISUAL_SCHEMA, export_visual
@@ -241,6 +244,33 @@ def _normalize_text_span_op(op, op_id):
     return out
 
 
+def _copy_present(op, keys):
+    out = {}
+    for key in keys:
+        if op.get(key) is not None:
+            out[key] = op.get(key)
+    return out
+
+
+def _normalize_xlsx_op(op, op_id):
+    out = {'id': op_id, 'kind': 'xlsx-cell'}
+    out.update(_copy_present(op, (
+        'supplementId', 'name', 'sheet', 'cell', 'before', 'after', 'afterFormula',
+    )))
+    return out
+
+
+def _normalize_ipynb_op(op, op_id):
+    out = {
+        'id': op_id,
+        'kind': 'ipynb-cell',
+        'cellIndex': op.get('cellIndex'),
+        'target': op.get('target'),
+    }
+    out.update(_copy_present(op, ('supplementId', 'name', 'before', 'after')))
+    return out
+
+
 def _normalize_supplement_op(op, op_id):
     out = {
         'id': op_id,
@@ -288,6 +318,10 @@ def _normalize_single_op(op, idx, store, paper_id, file_hash, service):
         return _normalize_text_span_op(op, op_id)
     if kind in ('supplement-edit', 'supplement-text'):
         return _normalize_supplement_op(op, op_id)
+    if kind == 'xlsx-cell':
+        return _normalize_xlsx_op(op, op_id)
+    if kind == 'ipynb-cell':
+        return _normalize_ipynb_op(op, op_id)
     raise ValueError('visual_operation_invalid')
 
 
@@ -306,6 +340,13 @@ def _empty_vis_result(source_bytes, file_hash):
         'changes': [],
         'verification': {'status': 'passed', 'issues': [], 'checks': ['page-count'], 'scope': 'source-preservation'},
     }
+
+
+def _mark_supp_checks(vis_result, ops):
+    kinds = {op.get('kind') for op in ops}
+    for name in ('supplement-edit', 'xlsx-cell', 'ipynb-cell'):
+        if name in kinds:
+            _append_check(vis_result, name)
 
 
 def _append_check(vis_result, check_name):
@@ -342,7 +383,8 @@ def _apply_operations(store, service, paper_id, file_hash, operations, supplemen
     visual_ops = [op for op in normalized if op['kind'] in visual_kinds]
     text_ops = [op for op in normalized if op['kind'] == 'text-span']
     uri_ops = [op for op in normalized if op['kind'] == 'uri-link']
-    supp_ops = [op for op in normalized if op['kind'] == 'supplement-edit']
+    supp_kinds = {'supplement-edit', 'xlsx-cell', 'ipynb-cell'}
+    supp_ops = [op for op in normalized if op['kind'] in supp_kinds]
     if visual_ops:
         vis_req = {
             'schema': VISUAL_SCHEMA,
@@ -362,18 +404,17 @@ def _apply_operations(store, service, paper_id, file_hash, operations, supplemen
         edited_bytes, vis_result = _apply_uri_ops(edited_bytes, vis_result, uri_ops)
     blind_supplements = []
     if supplements or supp_ops:
-        supp_res = mutate_supplements(supplements or [], supp_ops)
+        supp_res = apply_extended_supplement_mutations(supplements or [], supp_ops)
         blind_supplements = supp_res['blindSupplements']
         vis_result['changes'].extend(supp_res['changes'])
-        if supp_ops:
-            _append_check(vis_result, 'supplement-edit')
+        _mark_supp_checks(vis_result, supp_ops)
     return source_bytes, edited_bytes, vis_result, blind_supplements
 
 
 def _modified_regions(vis_result):
     regions = []
     for change in vis_result.get('changes', []):
-        if change.get('kind') in ('uri-link', 'supplement-edit'):
+        if change.get('kind') in ('uri-link', 'supplement-edit', 'xlsx-cell', 'ipynb-cell'):
             continue
         if type(change.get('pageIndex')) is int and isinstance(change.get('bbox'), list) and len(change['bbox']) == 4:
             regions.append({'pageIndex': change['pageIndex'], 'bbox': change['bbox']})
@@ -483,7 +524,7 @@ def _detect_baseline_overlaps(operations, changes, baseline_report):
     changes_by_id = {ch['id']: ch for ch in changes if isinstance(ch, dict) and ch.get('id')}
     overlaps = []
     for idx, op in enumerate(operations):
-        if op.get('kind') == 'supplement-edit':
+        if op.get('kind') in ('supplement-edit', 'xlsx-cell', 'ipynb-cell'):
             continue
         op_id, op_page, op_item_id, op_texts = _op_match_fields(op, idx, changes_by_id)
         matched = [s for s in signals if _signal_matches_op(s, op_page, op_item_id, op_texts)]
@@ -959,10 +1000,45 @@ def _run_guarded(bound, file_hash, paper_id, action, context=None):
     return result
 
 
+_RED_BRIEF_FORBIDDEN = frozenset({
+    'before', 'after', 'gold', 'goldLedger', 'defects', 'changes',
+})
+
+
+def _brief_has_forbidden(value):
+    if isinstance(value, dict):
+        return _dict_has_forbidden(value)
+    if isinstance(value, list):
+        return _list_has_forbidden(value)
+    return False
+
+
+def _dict_has_forbidden(value):
+    for key, item in value.items():
+        if key in _RED_BRIEF_FORBIDDEN or _brief_has_forbidden(item):
+            return True
+    return False
+
+
+def _list_has_forbidden(value):
+    for item in value:
+        if _brief_has_forbidden(item):
+            return True
+    return False
+
+
+def _checked_brief(red_brief):
+    if red_brief is None:
+        return None
+    if not isinstance(red_brief, dict) or _brief_has_forbidden(red_brief):
+        raise ValueError('red_brief_forbidden_key')
+    return red_brief
+
+
 def build_server(store, paper_id, file_hash, service=None, supplements=None):
     """Build FastMCP coordinated RED server bound to one immutable source PDF and optional supplements."""
     service = service or ChartEditService(store)
-    loaded_supplements = normalize_supplements(supplements)
+    loaded_supplements = normalize_red_supplements_extended(supplements)
     baseline_cache = {'report': None}
     instructions = (
         'Coordinated RED editor for one selected PDF. Never mutates the input PDF or supplements on disk. '
@@ -1089,13 +1165,13 @@ def build_server(store, paper_id, file_hash, service=None, supplements=None):
         targetDifficulty: str = 'L3',
         maxBundles: int = 5,
         claimQuery: str | None = None,
+        redBrief: SkipJsonSchema[dict | None] = None,
     ) -> CallToolResult:
         """Read-only synthesis of detectability-verified coordinated multi-surface RED operation bundles."""
         from paper_red_planner import plan_coordinated_mutations
 
-        return await _cancellable_thread(lambda _cancelled: call(
-            paperId,
-            lambda: plan_coordinated_mutations(
+        def planned():
+            return plan_coordinated_mutations(
                 paperId,
                 file_hash=file_hash,
                 store=store,
@@ -1104,8 +1180,10 @@ def build_server(store, paper_id, file_hash, service=None, supplements=None):
                 target_difficulty=targetDifficulty,
                 max_bundles=maxBundles,
                 claim_query=claimQuery,
-            ),
-        ))
+                red_brief=_checked_brief(redBrief),
+            )
+
+        return await _cancellable_thread(lambda _cancelled: call(paperId, planned))
 
     @server.tool(annotations=_READONLY)
     async def audit_candidate_pdf(paperId: str, candidatePdfBase64: str, modifiedRegions: list[dict] | None = None) -> CallToolResult:
@@ -1123,13 +1201,13 @@ def main(argv=None) -> int:
     parser.add_argument('--pdf', required=True, help='Read only this PDF. Tools cannot open another file.')
     parser.add_argument(
         '--supplement', action='append', default=[], dest='supplements',
-        help='Optional UTF-8 supplement file (repeatable, max 12 files, never modified on disk).',
+        help='Optional text, xlsx, or ipynb supplement (repeatable, max 12 files, never modified on disk).',
     )
     args = parser.parse_args(argv)
     try:
         from paper_evidence import default_store
         summary = open_selected(default_store, args.pdf)
-        supplements = load_red_supplements(args.supplements)
+        supplements = load_red_supplements_extended(args.supplements)
     except ValueError as exc:
         print(str(exc), file=sys.stderr)
         return 2

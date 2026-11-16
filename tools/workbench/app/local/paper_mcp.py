@@ -173,6 +173,7 @@ def _reply(result):
 def _invoke_blue_sensor(
     store, paper_id, file_hash, max_signals, digest_only,
     include_figure_forensics, include_flow_triage, include_internal_consistency=False,
+    include_meta_and_tables=False, include_pdf_security=False,
 ):
     import inspect
     from paper_mcp_bundle import run_blue_sensor_payload
@@ -182,14 +183,17 @@ def _invoke_blue_sensor(
         "digest_only": digest_only,
         "include_figure_forensics": include_figure_forensics,
     }
-    if "include_flow_triage" in params:
-        kwargs["include_flow_triage"] = include_flow_triage
-    elif type(include_flow_triage) is not bool:
-        raise ValueError("include_flow_triage")
-    if "include_internal_consistency" in params:
-        kwargs["include_internal_consistency"] = include_internal_consistency
-    elif type(include_internal_consistency) is not bool:
-        raise ValueError("include_internal_consistency")
+    optional = (
+        ("include_flow_triage", include_flow_triage),
+        ("include_internal_consistency", include_internal_consistency),
+        ("include_meta_and_tables", include_meta_and_tables),
+        ("include_pdf_security", include_pdf_security),
+    )
+    for name, val in optional:
+        if name in params:
+            kwargs[name] = val
+        elif type(val) is not bool:
+            raise ValueError(name)
     return run_blue_sensor_payload(store, paper_id, file_hash, **kwargs)
 
 
@@ -243,12 +247,14 @@ def _register_core_tools(server, store, binding):
     def run_blue_sensor(
         paperId: str, maxSignals: int = 50, digestOnly: bool = False,
         includeFigureForensics: bool = False, includeFlowTriage: bool = False,
-        includeInternalConsistency: bool = False,
+        includeInternalConsistency: bool = False, includeMetaAndTables: bool = False,
+        includePdfSecurity: bool = False,
     ) -> CallToolResult:
         """Run deterministic Layer 0 offline PDF forensic sensor checks on the startup PDF. Read-only."""
         return _reply(_guard_bound(binding, paperId, lambda: _invoke_blue_sensor(
             store, paperId, binding.file_hash, maxSignals, digestOnly,
             includeFigureForensics, includeFlowTriage, includeInternalConsistency,
+            includeMetaAndTables, includePdfSecurity,
         )))
 
     @server.tool(annotations=_READONLY)
@@ -262,6 +268,18 @@ def _register_core_tools(server, store, binding):
         """Audit cross-section IMRaD sample-size, metric, and protocol consistency on the startup PDF. Read-only."""
         from paper_mcp_bundle import audit_internal_consistency_payload
         return _reply(_guard_bound(binding, paperId, lambda: audit_internal_consistency_payload(store, paperId, binding.file_hash, max_signals=maxSignals)))
+
+    @server.tool(annotations=_READONLY)
+    def audit_meta_and_tables(paperId: str, maxSignals: int = 30) -> CallToolResult:
+        """Audit PRISMA flow, meta-analysis arithmetic, and cross-table N consistency on the startup PDF. Read-only."""
+        from paper_mcp_bundle import audit_meta_and_tables_payload
+        return _reply(_guard_bound(binding, paperId, lambda: audit_meta_and_tables_payload(store, paperId, binding.file_hash, max_signals=maxSignals)))
+
+    @server.tool(annotations=_READONLY)
+    def audit_pdf_security(paperId: str, maxSignals: int = 30) -> CallToolResult:
+        """Audit hidden PDF text layers and prompt-injection directives on the startup PDF. Read-only."""
+        from paper_mcp_bundle import audit_pdf_security_payload
+        return _reply(_guard_bound(binding, paperId, lambda: audit_pdf_security_payload(store, paperId, binding.file_hash, max_signals=maxSignals)))
 
 
 def _register_analysis_tools(server, store, binding):

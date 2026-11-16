@@ -33,6 +33,8 @@ Codes are grouped by surface so the parent process can enrich them:
 * ``chart_*`` -- chart-shape (scene) edits
 * ``uri_*`` -- embedded ``/URI`` link edits
 * ``text_span_*`` / ``supplement_*`` -- PDF text spans and supplements
+* ``xlsx_*`` -- workbook cell edits
+* ``ipynb_*`` -- notebook cell edits
 * ``red_taxonomy_invalid`` / ``visual_operation_invalid`` -- request taxonomy
 
 Taxonomy codes get no candidates; their hint enumerates the valid vocabulary.
@@ -54,6 +56,8 @@ VALID_KINDS = (
     'uri-link',
     'text-span',
     'supplement-edit',
+    'xlsx-cell',
+    'ipynb-cell',
 )
 # Keys that would leak host layout if they reached a blind-agent payload.
 _BLOCKED_KEYS = frozenset({
@@ -149,6 +153,10 @@ def error_surface(code):
         return 'text'
     if code.startswith('supplement_'):
         return 'supplement'
+    if code.startswith('xlsx_'):
+        return 'xlsx'
+    if code.startswith('ipynb_'):
+        return 'ipynb'
     return 'none'
 
 

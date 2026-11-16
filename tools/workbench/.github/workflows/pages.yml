@@ -80,9 +80,11 @@ jobs:
           python app/examples/evidence_blue_v038/build_profile.py
           python app/examples/evidence_blue_v039/build_profile.py
           python app/examples/evidence_blue_v040/build_profile.py
+          python app/examples/evidence_blue_v041/build_profile.py
           python app/examples/adversarial_red_v01/build_profile.py
           python app/examples/adversarial_red_v02/build_profile.py
           python app/examples/adversarial_red_v03/build_profile.py
+          python app/examples/adversarial_red_v04/build_profile.py
           python -m unittest discover -s app/examples/evidence_blue_v033 -p "test_*.py" -q
           python -m unittest discover -s app/examples/evidence_blue_v034 -p "test_*.py" -q
           python -m unittest discover -s app/examples/evidence_blue_v035 -p "test_*.py" -q
@@ -91,9 +93,11 @@ jobs:
           python -m unittest discover -s app/examples/evidence_blue_v038 -p "test_*.py" -q
           python -m unittest discover -s app/examples/evidence_blue_v039 -p "test_*.py" -q
           python -m unittest discover -s app/examples/evidence_blue_v040 -p "test_*.py" -q
+          python -m unittest discover -s app/examples/evidence_blue_v041 -p "test_*.py" -q
           python -m unittest discover -s app/examples/adversarial_red_v01 -p "test_*.py" -q
           python -m unittest discover -s app/examples/adversarial_red_v02 -p "test_*.py" -q
           python -m unittest discover -s app/examples/adversarial_red_v03 -p "test_*.py" -q
+          python -m unittest discover -s app/examples/adversarial_red_v04 -p "test_*.py" -q
           python -m unittest discover -s tools/evaluation -p "test_*.py" -q
       - name: Shared API dependencies
         working-directory: cloud/api

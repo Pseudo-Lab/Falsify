@@ -24,7 +24,7 @@ MAX_WORKSPACE_PAPERS = 32
 MAX_SCAN_DEPTH = 2
 MASKED_REASON = "answer_key_name"
 MASK_NAME_PARTS = ("gold", "ledger", "answer", "answerkey", "solution", "red-plan", "whythard")
-_PRIORITY_WEIGHTS = {"D1": 5, "D2": 4, "D6": 4, "D4-1": 3}
+_PRIORITY_WEIGHTS = {"D1": 5, "D2": 4, "D6": 4, "D4-1": 3, "D7": 5, "D5": 3, "D4-2": 3}
 _CHUNK = 1 << 20
 
 
@@ -103,7 +103,7 @@ def _supplement_extensions():
     cached = getattr(_supplement_extensions, "cached", None)
     if cached is None:
         from paper_mcp_bundle import TEXT_EXTENSIONS
-        cached = TEXT_EXTENSIONS | frozenset({".docx"})
+        cached = TEXT_EXTENSIONS | frozenset({".docx", ".xlsx", ".ipynb", ".rmd", ".qmd"})
         _supplement_extensions.cached = cached
     return cached
 
@@ -408,13 +408,19 @@ def _merge_supplements(startup, paired, limit):
     return tuple(merged)
 
 
-def _validate_triage_limits(max_signals, include_figure_forensics, recompute_raw):
+def _require_bool(value, code):
+    if type(value) is not bool:
+        raise ValueError(code)
+
+
+def _validate_triage_limits(max_signals, include_figure_forensics, recompute_raw,
+                            include_flow_triage=True, include_internal_consistency=True):
     if type(max_signals) is not int or not 1 <= max_signals <= 100:
         raise ValueError("limit")
-    if type(include_figure_forensics) is not bool:
-        raise ValueError("include_figure_forensics")
-    if type(recompute_raw) is not bool:
-        raise ValueError("recompute_raw")
+    _require_bool(include_figure_forensics, "include_figure_forensics")
+    _require_bool(recompute_raw, "recompute_raw")
+    _require_bool(include_flow_triage, "include_flow_triage")
+    _require_bool(include_internal_consistency, "include_internal_consistency")
 
 
 def _triage_store(store, max_papers):
@@ -448,20 +454,136 @@ def _extend_code_audit(signals, bundle_mod, store, opened, bundle, max_signals):
         store, opened["paperId"], opened["fileHash"], bundle, max_signals=max_signals))
 
 
-def _paper_signals(store, opened, bundle, max_signals, include_figure_forensics, recompute_raw):
+def _accept_sensor_flag(params, kwargs, name, value):
+    if name in params:
+        kwargs[name] = value
+        return
+    if type(value) is not bool:
+        raise ValueError(name)
+
+
+def _sensor_kwargs(max_signals, include_figure_forensics, include_flow_triage, include_internal_consistency):
+    import inspect
     import paper_mcp_bundle as bundle_mod
+    params = inspect.signature(bundle_mod.run_blue_sensor_payload).parameters
+    kwargs = {
+        "max_signals": max_signals,
+        "digest_only": True,
+        "include_figure_forensics": include_figure_forensics,
+    }
+    _accept_sensor_flag(params, kwargs, "include_flow_triage", include_flow_triage)
+    _accept_sensor_flag(params, kwargs, "include_internal_consistency", include_internal_consistency)
+    return bundle_mod, kwargs
+
+
+def _paper_signals(store, opened, bundle, options):
+    bundle_mod, kwargs = _sensor_kwargs(
+        options["maxSignals"], options["includeFigureForensics"],
+        options["includeFlowTriage"], options["includeInternalConsistency"])
     signals = _signals_of(bundle_mod.run_blue_sensor_payload(
-        store, opened["paperId"], opened["fileHash"], max_signals=max_signals,
-        digest_only=True, include_figure_forensics=include_figure_forensics))
+        store, opened["paperId"], opened["fileHash"], **kwargs))
     if not bundle:
         return signals
+    limit = options["maxSignals"]
     _extend_signals(signals, lambda: bundle_mod.audit_supplements_payload(
-        store, opened["paperId"], opened["fileHash"], bundle, max_signals=max_signals))
-    if recompute_raw:
+        store, opened["paperId"], opened["fileHash"], bundle, max_signals=limit))
+    if options["recomputeRaw"]:
         _extend_signals(signals, lambda: bundle_mod.recompute_raw_supplement_payload(
-            store, opened["paperId"], opened["fileHash"], bundle, max_signals=max_signals))
-    _extend_code_audit(signals, bundle_mod, store, opened, bundle, max_signals)
+            store, opened["paperId"], opened["fileHash"], bundle, max_signals=limit))
+    _extend_code_audit(signals, bundle_mod, store, opened, bundle, limit)
     return signals
+
+
+def _triage_options(max_signals, include_figure_forensics, recompute_raw, include_flow_triage,
+                    include_internal_consistency):
+    return {
+        "maxSignals": max_signals,
+        "includeFigureForensics": include_figure_forensics,
+        "recomputeRaw": recompute_raw,
+        "includeFlowTriage": include_flow_triage,
+        "includeInternalConsistency": include_internal_consistency,
+    }
+
+
+def _supplement_row(item):
+    if not isinstance(item, dict):
+        return None
+    name, digest = item.get("name"), item.get("sha256")
+    if isinstance(name, str) and isinstance(digest, str) and digest:
+        return {"name": name, "sha256": digest}
+    return None
+
+
+def _supplement_rows(bundle):
+    rows = []
+    for item in bundle:
+        row = _supplement_row(item)
+        if row is not None:
+            rows.append(row)
+    return rows
+
+
+def _signal_payload(store, opened, bundle, options):
+    return {"signals": _paper_signals(store, opened, bundle, options)}
+
+
+def _signals_from_payload(payload):
+    if not isinstance(payload, dict):
+        return []
+    signals = payload.get("signals")
+    if not isinstance(signals, list):
+        return []
+    return [item for item in signals if isinstance(item, dict)]
+
+
+def _load_signals(cache, store, opened, bundle, options):
+    if cache is None:
+        return _signals_from_payload(_signal_payload(store, opened, bundle, options))
+    from paper_evidence_cache import compute_cache_key
+    key = compute_cache_key(
+        "workspace-triage", opened["fileHash"],
+        supplements=_supplement_rows(bundle), options=options)
+    payload, _hit = cache.get_or_compute(key, lambda: _signal_payload(store, opened, bundle, options))
+    return _signals_from_payload(payload)
+
+
+def _rank_from_signals(opened, entry, bundle, signals):
+    by_family = _family_counts(signals)
+    return {
+        "paperId": opened["paperId"],
+        "name": entry["name"],
+        "totalSignals": len(signals),
+        "byFamily": by_family,
+        "pairedSupplementCount": len(bundle),
+        "priorityScore": _priority_score(by_family),
+    }
+
+
+def _rank_body(store, path, entry, paired_paths, cache, options):
+    opened = paper_mcp.open_selected(store, path)
+    bundle = _load_paired_bundle(paired_paths)
+    signals = _load_signals(cache, store, opened, bundle, options)
+    return _rank_from_signals(opened, entry, bundle, signals)
+
+
+def _open_triage_cache(cache_dir):
+    if cache_dir is None:
+        return None
+    from paper_evidence_cache import EvidenceCache
+    return EvidenceCache(cache_dir)
+
+
+def _triage_payload(summary, ranked, cache):
+    payload = {
+        "schema": TRIAGE_SCHEMA,
+        "paperCount": summary["paperCount"],
+        "maskedCount": summary["maskedCount"],
+        "truncated": summary["truncated"],
+        "rankedPapers": ranked,
+    }
+    if cache is not None:
+        payload["cacheStats"] = cache.stats()
+    return payload
 
 
 def _family_counts(signals):
@@ -493,25 +615,13 @@ def _blank_rank(entry):
     }
 
 
-def _rank_paper(store, path, entry, paired_paths, max_signals, include_figure_forensics, recompute_raw):
+def _rank_paper(store, path, entry, paired_paths, cache, options):
     if path is None:
         return _blank_rank(entry)
     try:
-        opened = paper_mcp.open_selected(store, path)
-        bundle = _load_paired_bundle(paired_paths)
-        signals = _paper_signals(
-            store, opened, bundle, max_signals, include_figure_forensics, recompute_raw)
+        return _rank_body(store, path, entry, paired_paths, cache, options)
     except ValueError:
         return _blank_rank(entry)
-    by_family = _family_counts(signals)
-    return {
-        "paperId": opened["paperId"],
-        "name": entry["name"],
-        "totalSignals": len(signals),
-        "byFamily": by_family,
-        "pairedSupplementCount": len(bundle),
-        "priorityScore": _priority_score(by_family),
-    }
 
 
 def _rank_key(item):
@@ -519,26 +629,27 @@ def _rank_key(item):
 
 
 def triage_workspace(root, *, max_papers=MAX_WORKSPACE_PAPERS, max_signals_per_paper=25,
-                     include_figure_forensics=False, recompute_raw=True, store=None):
+                     include_figure_forensics=False, recompute_raw=True, store=None,
+                     include_flow_triage=True, include_internal_consistency=True, cache_dir=None):
     """Rank unmasked workspace PDFs. The result never contains a filesystem path."""
-    _validate_triage_limits(max_signals_per_paper, include_figure_forensics, recompute_raw)
+    _validate_triage_limits(
+        max_signals_per_paper, include_figure_forensics, recompute_raw,
+        include_flow_triage, include_internal_consistency)
     summary, paths, paired = _scan(root, max_papers)
     active = _triage_store(store, max_papers)
+    cache = _open_triage_cache(cache_dir)
+    options = _triage_options(
+        max_signals_per_paper, include_figure_forensics, recompute_raw,
+        include_flow_triage, include_internal_consistency)
     ranked = []
     for entry in summary["papers"]:
         if entry["masked"]:
             continue
         ranked.append(_rank_paper(
             active, paths.get(entry["paperId"]), entry, paired.get(entry["paperId"], ()),
-            max_signals_per_paper, include_figure_forensics, recompute_raw))
+            cache, options))
     ranked.sort(key=_rank_key, reverse=True)
-    return {
-        "schema": TRIAGE_SCHEMA,
-        "paperCount": summary["paperCount"],
-        "maskedCount": summary["maskedCount"],
-        "truncated": summary["truncated"],
-        "rankedPapers": ranked,
-    }
+    return _triage_payload(summary, ranked, cache)
 
 
 def load_workspace_supplements(paths):
@@ -580,12 +691,15 @@ def register_workspace_tools(server, session):
 
     @server.tool(name="triage_workspace", annotations=paper_mcp._READONLY)
     def triage_workspace_tool(maxSignalsPerPaper: int = 25, includeFigureForensics: bool = False,
-                              recomputeRaw: bool = True) -> CallToolResult:
+                              recomputeRaw: bool = True, includeFlowTriage: bool = True,
+                              includeInternalConsistency: bool = True) -> CallToolResult:
         """Read-only batch ranking of unmasked workspace PDFs. No filesystem path is returned."""
         try:
             payload = triage_workspace(
                 session.root, max_papers=session.max_papers, max_signals_per_paper=maxSignalsPerPaper,
-                include_figure_forensics=includeFigureForensics, recompute_raw=recomputeRaw, store=session.store)
+                include_figure_forensics=includeFigureForensics, recompute_raw=recomputeRaw,
+                include_flow_triage=includeFlowTriage, include_internal_consistency=includeInternalConsistency,
+                store=session.store)
         except ValueError as exc:
             return paper_mcp._error(paper_mcp._fixed(exc))
         except Exception:

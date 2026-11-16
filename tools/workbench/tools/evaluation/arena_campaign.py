@@ -13,8 +13,11 @@ import copy
 import hashlib
 import inspect
 import json
+import math
+import os
 from pathlib import Path
 import sys
+import time
 
 _EVAL_DIR = Path(__file__).resolve().parent
 if str(_EVAL_DIR) not in sys.path:
@@ -25,6 +28,7 @@ import arena_round  # noqa: E402
 import benchmark_suite  # noqa: E402
 
 CAMPAIGN_SCHEMA = 'falsify.evolution-lineage.v1'
+CHECKPOINT_SCHEMA = 'falsify.campaign-checkpoint.v1'
 ERROR_SCHEMA = 'falsify.evolution-campaign-error.v1'
 MAX_GENERATIONS_CAP = arena_duel.MAX_GENERATIONS_CAP
 _RECOVERABLE_DUEL = frozenset({
@@ -549,8 +553,199 @@ def _lineage(ctx: dict, records: list[dict]) -> dict:
     if ctx['role'] == 'both':
         lineage['finalBlueHarness'] = ctx['harness']
         lineage['finalRedHarness'] = ctx['red_harness']
+    if ctx.get('stopped_early'):
+        lineage['stoppedEarly'] = True
+        lineage['stoppedReason'] = 'budget_exhausted'
+    if ctx.get('resumed_from') is not None:
+        lineage['resumedFromGeneration'] = ctx['resumed_from']
     _scrub_lineage(lineage)
     return lineage
+
+
+def _require_budget(value):
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ArenaCampaignError('invalid_budget', 2)
+    number = float(value)
+    if not math.isfinite(number) or number <= 0:
+        raise ArenaCampaignError('invalid_budget', 2)
+    return number
+
+
+def _require_resume_flag(value) -> bool:
+    if type(value) is not bool:
+        raise ArenaCampaignError('resume_invalid', 2)
+    return value
+
+
+def _expect_checkpoint(condition) -> None:
+    if not condition:
+        raise ArenaCampaignError('checkpoint_invalid', 2)
+
+
+def _scrub_checkpoint(payload: dict) -> None:
+    try:
+        arena_round._scrub(payload, [], set())
+    except arena_round.DistillScrubError as error:
+        raise ArenaCampaignError(
+            'checkpoint_scrub_failed', 3, {'hitCount': len(error.hits)},
+        ) from None
+
+
+def _checkpoint_harness(ctx: dict):
+    if ctx['role'] == 'red':
+        return None, ctx['harness']
+    return ctx['harness'], ctx['red_harness']
+
+
+def _runtime_state(ctx: dict) -> dict:
+    bench = ctx['bench']
+    clean_bench = {k: v for k, v in bench.items() if k != 'caseResults'} if isinstance(bench, dict) else bench
+    return {
+        'metrics': ctx['metrics'],
+        'bench': clean_bench,
+        'holdoutPureFp': ctx['holdout_fp'],
+        'stealthYield': ctx.get('stealth_yield'),
+    }
+
+
+def _checkpoint_payload(ctx: dict, records: list[dict]) -> dict:
+    blue, red = _checkpoint_harness(ctx)
+    return {
+        'schema': CHECKPOINT_SCHEMA,
+        'completedGenerations': [record['generation'] for record in records],
+        'role': ctx['role'],
+        'generationsTarget': ctx['generations'],
+        'currentBlueHarness': blue,
+        'currentRedHarness': red,
+        'generationRecords': records,
+        'runtime': _runtime_state(ctx),
+        'summary': {'axes': {}},
+        'rules': [],
+        'scrubbed': True,
+        'answerKeyFree': True,
+    }
+
+
+def _atomic_json(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    blob = json.dumps(payload, ensure_ascii=False, indent=2) + '\n'
+    temporary = path.with_name(path.name + f'.{os.getpid()}.tmp')
+    temporary.write_text(blob, encoding='utf-8')
+    try:
+        os.replace(temporary, path)
+    except OSError:
+        temporary.unlink(missing_ok=True)
+        raise
+
+
+def _save_checkpoint(ctx: dict, records: list[dict], checkpoint_dir) -> None:
+    if checkpoint_dir is None:
+        return
+    payload = _checkpoint_payload(ctx, records)
+    _scrub_checkpoint(payload)
+    _atomic_json(Path(checkpoint_dir) / 'campaign-checkpoint.json', payload)
+
+
+def _read_checkpoint(path: Path) -> dict:
+    try:
+        payload = json.loads(path.read_text(encoding='utf-8'))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        raise ArenaCampaignError('checkpoint_invalid', 2) from None
+    if not isinstance(payload, dict):
+        raise ArenaCampaignError('checkpoint_invalid', 2)
+    return payload
+
+
+def _generation_numbers(records) -> list:
+    numbers = []
+    for row in records:
+        if not isinstance(row, dict):
+            raise ArenaCampaignError('checkpoint_invalid', 2)
+        numbers.append(row.get('generation'))
+    return numbers
+
+
+def _restore_harness(ctx: dict, payload: dict) -> None:
+    blue = payload.get('currentBlueHarness')
+    red = payload.get('currentRedHarness')
+    if ctx['role'] == 'red':
+        _expect_checkpoint(isinstance(red, dict))
+        ctx['harness'] = copy.deepcopy(red)
+        ctx['red_harness'] = None
+        return
+    _expect_checkpoint(isinstance(blue, dict))
+    ctx['harness'] = copy.deepcopy(blue)
+    if isinstance(red, dict):
+        ctx['red_harness'] = copy.deepcopy(red)
+        return
+    ctx['red_harness'] = None
+
+
+def _restore_runtime(ctx: dict, payload: dict) -> None:
+    runtime = payload.get('runtime')
+    _expect_checkpoint(isinstance(runtime, dict))
+    _expect_checkpoint(isinstance(runtime.get('bench'), dict))
+    _expect_checkpoint(isinstance(runtime.get('metrics'), dict))
+    ctx['bench'] = copy.deepcopy(runtime['bench'])
+    ctx['metrics'] = copy.deepcopy(runtime['metrics'])
+    ctx['holdout_fp'] = _fp_int(runtime.get('holdoutPureFp'), 0)
+    ctx['stealth_yield'] = runtime.get('stealthYield')
+
+
+def _apply_checkpoint(ctx: dict, payload: dict):
+    _expect_checkpoint(payload.get('schema') == CHECKPOINT_SCHEMA)
+    _expect_checkpoint(payload.get('role') == ctx['role'])
+    _expect_checkpoint(payload.get('generationsTarget') == ctx['generations'])
+    _expect_checkpoint(payload.get('scrubbed') is True)
+    _expect_checkpoint(payload.get('answerKeyFree') is True)
+    _scrub_checkpoint(payload)
+    records = payload.get('generationRecords')
+    completed = payload.get('completedGenerations')
+    _expect_checkpoint(isinstance(records, list) and bool(records))
+    numbers = _generation_numbers(records)
+    _expect_checkpoint(isinstance(completed, list) and completed == numbers)
+    _expect_checkpoint(numbers == list(range(len(records))))
+    _restore_harness(ctx, payload)
+    _restore_runtime(ctx, payload)
+    return copy.deepcopy(records), completed[-1]
+
+
+def _load_resume(ctx: dict, checkpoint_dir):
+    if checkpoint_dir is None:
+        return None
+    path = Path(checkpoint_dir) / 'campaign-checkpoint.json'
+    if not path.is_file():
+        return None
+    return _apply_checkpoint(ctx, _read_checkpoint(path))
+
+
+def _prepare_campaign(ctx: dict, checkpoint_dir, resume: bool):
+    loaded = _load_resume(ctx, checkpoint_dir) if resume else None
+    if loaded is not None:
+        ctx['resumed_from'] = loaded[1]
+        return loaded[0]
+    records = [_baseline(ctx)]
+    _save_checkpoint(ctx, records, checkpoint_dir)
+    return records
+
+
+def _budget_exceeded(budget, started: float, index: int) -> bool:
+    if budget is None or index < 1:
+        return False
+    return (time.perf_counter() - started) > budget
+
+
+def _run_remaining(ctx: dict, records: list[dict], checkpoint_dir, budget, started: float) -> None:
+    index = len(records)
+    while index <= ctx['generations']:
+        if _budget_exceeded(budget, started, index):
+            ctx['stopped_early'] = True
+            return
+        records.append(_run_generation(ctx, index))
+        _save_checkpoint(ctx, records, checkpoint_dir)
+        index += 1
 
 
 def run_evolution_campaign(
@@ -572,12 +767,18 @@ def run_evolution_campaign(
     benchmark_fn=None,
     base_red_harness: dict | None = None,
     compact_rules: bool = False,
+    checkpoint_dir: str | Path | None = None,
+    resume: bool = False,
+    max_total_seconds: float | None = None,
 ) -> dict:
     """Run a 1..3 generation campaign and return an answer-key-free lineage."""
     count = _require_generations(generations)
     role_name = _require_role(role)
     if type(compact_rules) is not bool:
         raise ArenaCampaignError('compact_rules_invalid', 2)
+    _require_resume_flag(resume)
+    budget = _require_budget(max_total_seconds)
+    started = time.perf_counter()
     harness, red_harness = _campaign_pair(role_name, base_harness, base_red_harness)
     ctx = {
         'sources': _require_sources(source_pdfs),
@@ -595,11 +796,17 @@ def run_evolution_campaign(
         'bench': None,
         'metrics': {},
         'holdout_fp': 0,
+        'stopped_early': False,
+        'resumed_from': None,
     }
-    records = [_baseline(ctx)]
-    for index in range(1, count + 1):
-        records.append(_run_generation(ctx, index))
+    records = _prepare_campaign(ctx, checkpoint_dir, resume)
+    _run_remaining(ctx, records, checkpoint_dir, budget, started)
     return _lineage(ctx, records)
+
+
+def run_arena_campaign(*args, **kwargs):
+    """Checkpoint-aware alias of ``run_evolution_campaign``."""
+    return run_evolution_campaign(*args, **kwargs)
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -626,6 +833,9 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument('--out', type=Path)
     parser.add_argument('--out-harness', type=Path)
     parser.add_argument('--out-red-harness', type=Path)
+    parser.add_argument('--checkpoint-dir', type=Path)
+    parser.add_argument('--resume', action='store_true')
+    parser.add_argument('--max-total-seconds', type=float)
     return parser
 
 
@@ -684,6 +894,9 @@ def _run_cli(args: argparse.Namespace) -> dict:
         max_recall_drop=args.max_recall_drop,
         base_red_harness=red_base,
         compact_rules=bool(args.compact_rules),
+        checkpoint_dir=args.checkpoint_dir,
+        resume=bool(args.resume),
+        max_total_seconds=args.max_total_seconds,
     )
 
 

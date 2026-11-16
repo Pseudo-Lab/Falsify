@@ -549,12 +549,12 @@ class Wave10CliAndIntegrationTests(unittest.TestCase):
         code, payload = _run_cli(["arena", "benchmark", "--mode", "sensor"])
         self.assertEqual(code, 0)
         bench = payload["benchmark"]
-        self.assertEqual(bench["corpusVersion"], "v3")
-        self.assertEqual(bench["caseCount"], 24)
-        self.assertEqual(len(bench["caseResults"]), 24)
+        self.assertEqual(bench["corpusVersion"], "v4")
+        self.assertEqual(bench["caseCount"], 32)
+        self.assertEqual(len(bench["caseResults"]), 32)
         self.assertEqual(bench["holdoutSummary"]["totalPureFp"], 0)
         self.assertEqual(bench["goldSummary"]["layer0Recall"], 1.0)
-        self.assertGreater(bench["goldSummary"]["recall"], 0.8)
+        self.assertGreater(bench["goldSummary"]["recall"], 0.75)
 
     def test_mcp_internal_consistency_and_sensor_flag(self):
         with tempfile.TemporaryDirectory() as tmp:

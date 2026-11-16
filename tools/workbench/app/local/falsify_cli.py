@@ -1,10 +1,11 @@
 """Unified headless agent JSON CLI for falsify RED/BLUE workflows.
 
 Usage:
-    python app/local/falsify_cli.py blue scan --pdf PATH [--supplement PATH ...] [--oracle] [--figure-forensics] [--flow-triage] [--internal-consistency] [--recompute-raw] [--audit-code] [--max-signals 50] [--digest-only] [--out JSON_PATH]
-    python app/local/falsify_cli.py blue scan-workspace --workspace DIR [--max-papers 32] [--max-signals-per-paper 25] [--figure-forensics] [--no-recompute-raw] [--out JSON_PATH]
+    python app/local/falsify_cli.py blue scan --pdf PATH [--supplement PATH ...] [--oracle] [--figure-forensics] [--flow-triage] [--internal-consistency] [--meta-tables] [--pdf-security] [--recompute-raw] [--audit-code] [--cache-dir DIR] [--sarif SARIF_PATH] [--max-signals 50] [--digest-only] [--out JSON_PATH]
+    python app/local/falsify_cli.py blue scan-workspace --workspace DIR [--max-papers 32] [--max-signals-per-paper 25] [--figure-forensics] [--no-recompute-raw] [--no-flow-triage] [--no-internal-consistency] [--cache-dir DIR] [--out JSON_PATH]
     python app/local/falsify_cli.py blue validate --pdf BLIND_PDF --report BLUE_REPORT [--supplement PATH ...] [--ledger CANDIDATES_JSON] [--emit-repair-pack] [--csv OUT_CSV] [--out JSON_PATH]
-    python app/local/falsify_cli.py blue finalize --pdf BLIND_PDF --report BLUE_REPORT [--repairs REPAIRS_JSON] [--supplement PATH ...] [--ledger CANDIDATES_JSON] [--out-report FINAL_REPORT_JSON] [--csv OUT_CSV] [--out JSON_PATH]
+    python app/local/falsify_cli.py blue finalize --pdf BLIND_PDF --report BLUE_REPORT [--repairs REPAIRS_JSON] [--supplement PATH ...] [--ledger CANDIDATES_JSON] [--out-report FINAL_REPORT_JSON] [--csv OUT_CSV] [--sarif SARIF_PATH] [--out JSON_PATH]
+    python app/local/falsify_cli.py blue ensemble --report PATH --report PATH [--report PATH ...] [--rater-id ID ...] [--pdf BLIND_PDF] [--supplement PATH ...] [--ledger CANDIDATES_JSON] [--min-consensus K] [--csv OUT_CSV] [--sarif SARIF_PATH] [--out JSON_PATH]
     python app/local/falsify_cli.py red targets --pdf PATH [--page N] [--query TEXT] [--include-baseline]
     python app/local/falsify_cli.py red plan --pdf PATH [--supplement PATH ...] [--target-difficulty L1|L2|L3|L4] [--max-bundles 5] [--claim TEXT] [--red-brief BRIEF_JSON_OR_PATH] [--out JSON_PATH]
     python app/local/falsify_cli.py red simulate --pdf PATH --ops OPS_JSON_OR_PATH [--supplement PATH ...] [--max-signals 50] [--out JSON_PATH]
@@ -16,13 +17,16 @@ Usage:
     python app/local/falsify_cli.py arena distill --round ROUND_JSON [--gold GOLD_JSON] [--max-rules 40] [--out PATCH_JSON]
     python app/local/falsify_cli.py arena duel --source-pdf SRC_PDF --red-cmd EXE [--red-arg VALUE ...] --blue-cmd EXE [--blue-arg VALUE ...] [--supplement PATH ...] [--holdout-pdf PDF ...] [--red-harness HARNESS_JSON] [--blue-harness HARNESS_JSON] [--min-difficulty L1|L2|L3|L4] [--runs 1] [--agent-timeout 180] [--max-rules 40] [--no-validate-quotes] [--out OUT_JSON]
     python app/local/falsify_cli.py arena apply-patch --harness HARNESS_JSON --patch PATCH_JSON [--role blue|red] [--max-generations 3] [--baseline-holdout-fp N] [--candidate-holdout-fp N] [--max-instructions-chars 12000] [--compact-rules] [--out OUT_JSON]
-    python app/local/falsify_cli.py arena evolve --source-pdf SRC_PDF [SRC_PDF ...] [--supplement PATH ...] [--holdout-pdf PDF ...] [--harness HARNESS_JSON] [--red-harness RED_HARNESS_JSON] [--role blue|red|both] --red-cmd EXE [--red-arg VALUE ...] --blue-cmd EXE [--blue-arg VALUE ...] [--generations 3] [--min-difficulty L1|L2|L3|L4] [--runs 1] [--agent-timeout 180] [--max-rules 40] [--max-recall-drop 0.0] [--compact-rules] [--out OUT_JSON] [--out-harness HARNESS_OUT] [--out-red-harness RED_HARNESS_OUT]
+    python app/local/falsify_cli.py arena evolve --source-pdf SRC_PDF [SRC_PDF ...] [--supplement PATH ...] [--holdout-pdf PDF ...] [--harness HARNESS_JSON] [--red-harness RED_HARNESS_JSON] [--role blue|red|both] --red-cmd EXE [--red-arg VALUE ...] --blue-cmd EXE [--blue-arg VALUE ...] [--generations 3] [--min-difficulty L1|L2|L3|L4] [--runs 1] [--agent-timeout 180] [--max-rules 40] [--max-recall-drop 0.0] [--compact-rules] [--checkpoint-dir DIR] [--resume] [--max-total-seconds S] [--out OUT_JSON] [--out-harness HARNESS_OUT] [--out-red-harness RED_HARNESS_OUT]
+    python app/local/falsify_cli.py arena tournament --source-pdf SRC_PDF [SRC_PDF ...] --red-entry SPEC [--red-entry SPEC ...] --blue-entry SPEC [--blue-entry SPEC ...] [--supplement PATH ...] [--holdout-pdf PDF ...] [--min-difficulty L1|L2|L3|L4] [--agent-timeout 180] [--no-validate-quotes] [--out OUT_JSON]
     python app/local/falsify_cli.py arena benchmark [--mode sensor|agent] [--agent-cmd EXE] [--agent-arg VALUE ...] [--case CASE_ID ...] [--baseline-report REPORT_JSON] [--max-recall-drop 0.0] [--allow-holdout-fp-increase] [--out OUT_JSON]
+    python app/local/falsify_cli.py schemas [--id SCHEMA_ID] [--out OUT_JSON]
     python app/local/falsify_cli.py mcp-config (--pdf PATH | --workspace DIR) [--role blue|red|both] [--analysis] [--oracle] [--supplement PATH ...] [--format json]
 """
 from __future__ import annotations
 
 import argparse
+import base64
 from collections import Counter
 import hashlib
 import importlib
@@ -521,18 +525,54 @@ def _scan_attached_audits(store, pid, fhash, args, deadline):
     return supp_paths, supp_res, raw_res, code_res
 
 
-def _cmd_blue_scan(args, deadline: float | None = None) -> tuple[dict, int]:
-    if args.max_signals < 1 or args.max_signals > 100:
-        raise _CliError("invalid_arguments", "--max-signals must be between 1 and 100.", exit_code=2)
-    store, summary = _open_pdf_store(args.pdf)
-    pid, fhash = summary["paperId"], summary["fileHash"]
-    _check_deadline(deadline)
+def _write_sarif_out(sarif_path: str | None, payload: dict, artifact_name: str, protected_paths: list[str]) -> None:
+    if not sarif_path:
+        return
+    sarif_mod = importlib.import_module("paper_sarif_export")
+    try:
+        from build_info import WORKBENCH_VERSION as tool_version
+    except Exception:
+        tool_version = "0.2.0"
+    try:
+        sarif_doc = sarif_mod.export_sarif_report(payload, artifact_uri=Path(artifact_name).name, tool_version=tool_version)
+    except ValueError as exc:
+        if "forbidden_red_key" in str(exc):
+            raise _CliError("forbidden_red_key", str(exc), exit_code=3) from None
+        raise _CliError("sarif_export_failed", str(exc), exit_code=2) from None
+    _write_json_out(sarif_path, sarif_doc, protected_paths)
+
+
+def _scan_cache_supplements(supp_paths: list[str]) -> list[dict]:
+    items = []
+    for raw_path in supp_paths:
+        p = Path(raw_path)
+        items.append({"name": p.name, "sha256": hashlib.sha256(p.read_bytes()).hexdigest()})
+    return items
+
+
+def _scan_options_dict(args) -> dict:
+    return {
+        "maxSignals": args.max_signals,
+        "digestOnly": bool(args.digest_only),
+        "figureForensics": bool(getattr(args, "figure_forensics", False)),
+        "flowTriage": bool(getattr(args, "flow_triage", False)),
+        "internalConsistency": bool(getattr(args, "internal_consistency", False)),
+        "metaTables": bool(getattr(args, "meta_tables", False)),
+        "pdfSecurity": bool(getattr(args, "pdf_security", False)),
+        "recomputeRaw": bool(getattr(args, "recompute_raw", False)),
+        "auditCode": bool(getattr(args, "audit_code", False)),
+    }
+
+
+def _compute_blue_scan_payload(store, pid: str, fhash: str, args, deadline) -> tuple[dict, list[str]]:
     sensor_res = run_blue_sensor(
         pid, file_hash=fhash, max_signals=args.max_signals,
         include_external_oracle=bool(args.oracle),
         include_figure_forensics=bool(getattr(args, "figure_forensics", False)),
         include_flow_triage=bool(getattr(args, "flow_triage", False)),
         include_internal_consistency=bool(getattr(args, "internal_consistency", False)),
+        include_meta_and_tables=bool(getattr(args, "meta_tables", False)),
+        include_pdf_security=bool(getattr(args, "pdf_security", False)),
         store=store,
     )
     supp_paths, supp_res, raw_res, code_res = _scan_attached_audits(store, pid, fhash, args, deadline)
@@ -552,8 +592,39 @@ def _cmd_blue_scan(args, deadline: float | None = None) -> tuple[dict, int]:
         payload["codeAudit"] = code_res
     if args.digest_only:
         payload = _compact_blue_payload(payload)
+    return payload, supp_paths
+
+
+def _cmd_blue_scan(args, deadline: float | None = None) -> tuple[dict, int]:
+    if args.max_signals < 1 or args.max_signals > 100:
+        raise _CliError("invalid_arguments", "--max-signals must be between 1 and 100.", exit_code=2)
+    store, summary = _open_pdf_store(args.pdf)
+    pid, fhash = summary["paperId"], summary["fileHash"]
+    supp_paths = _flatten_paths(args.supplement)
+    for sp in supp_paths:
+        _require_readable_file(sp, "--supplement")
+    _guard_output_paths([args.out, getattr(args, "sarif", None)], [args.pdf, *supp_paths])
+    _check_deadline(deadline)
+    cache_dir = getattr(args, "cache_dir", None)
+    if cache_dir and not args.oracle:
+        cache_mod = importlib.import_module("paper_evidence_cache")
+        try:
+            cache = cache_mod.EvidenceCache(cache_dir)
+            key = cache_mod.compute_cache_key(
+                "blue-scan", fhash,
+                supplements=_scan_cache_supplements(supp_paths),
+                options=_scan_options_dict(args),
+            )
+            cached, hit = cache.get_or_compute(key, lambda: _compute_blue_scan_payload(store, pid, fhash, args, deadline)[0])
+        except ValueError as exc:
+            raise _CliError("invalid_arguments", f"Cache error: {exc}", exit_code=2) from None
+        payload = {**cached, "cacheHit": hit}
+    else:
+        payload, supp_paths = _compute_blue_scan_payload(store, pid, fhash, args, deadline)
+    _write_sarif_out(getattr(args, "sarif", None), payload, args.pdf, [args.pdf, *supp_paths])
     if args.out:
-        _write_json_out(args.out, payload, [args.pdf, *supp_paths])
+        sarif_extra = [args.sarif] if getattr(args, "sarif", None) else []
+        _write_json_out(args.out, payload, [args.pdf, *supp_paths, *sarif_extra])
     return payload, 0
 
 
@@ -575,6 +646,9 @@ def _cmd_blue_scan_workspace(args, deadline: float | None = None) -> tuple[dict,
             max_signals_per_paper=args.max_signals_per_paper,
             include_figure_forensics=bool(args.figure_forensics),
             recompute_raw=not bool(args.no_recompute_raw),
+            include_flow_triage=not bool(getattr(args, "no_flow_triage", False)),
+            include_internal_consistency=not bool(getattr(args, "no_internal_consistency", False)),
+            cache_dir=getattr(args, "cache_dir", None),
         )
     except ValueError as exc:
         raise _CliError("invalid_arguments", f"Invalid workspace triage arguments: {exc}", exit_code=2) from None
@@ -661,7 +735,7 @@ def _cmd_blue_finalize(args, deadline: float | None = None) -> tuple[dict, int]:
     supp_paths = _flatten_paths(getattr(args, "supplement", None))
     supp_entries = [_load_supplement_entry(p) for p in supp_paths]
     protected = [p for p in [args.pdf, args.report, args.repairs, args.ledger, *supp_paths] if p]
-    _guard_output_paths([args.out_report, args.csv, args.out], protected)
+    _guard_output_paths([args.out_report, args.csv, getattr(args, "sarif", None), args.out], protected)
     _check_deadline(deadline)
     result = finalize_blue_report(
         store.source_bytes(pid, fhash),
@@ -683,8 +757,62 @@ def _cmd_blue_finalize(args, deadline: float | None = None) -> tuple[dict, int]:
         "finalizeSchema": result["schema"],
         **{k: v for k, v in result.items() if k not in ("schema", "ok")},
     }
+    _write_sarif_out(getattr(args, "sarif", None), result.get("finalizedReport") or payload, args.pdf, protected)
     if args.out:
-        extra_out = [p for p in (args.out_report, args.csv) if p]
+        extra_out = [p for p in (args.out_report, args.csv, getattr(args, "sarif", None)) if p]
+        _write_json_out(args.out, payload, [*protected, *extra_out])
+    return payload, 0
+
+
+def _load_ensemble_reports(report_paths: list[str]) -> list[dict]:
+    if len(report_paths) < 2:
+        raise _CliError(
+            "invalid_arguments",
+            "blue ensemble requires at least two --report paths.",
+            exit_code=2,
+            recovery_hint="Pass --report PATH at least twice.",
+        )
+    return [_read_json_file(p, label="--report") for p in report_paths]
+
+
+def _cmd_blue_ensemble(args, deadline: float | None = None) -> tuple[dict, int]:
+    report_paths = _flatten_paths(args.report)
+    reports = _load_ensemble_reports(report_paths)
+    rater_ids = _flatten_paths(getattr(args, "rater_id", None)) or None
+    supp_paths = _flatten_paths(getattr(args, "supplement", None))
+    supp_entries = [_load_supplement_entry(p) for p in supp_paths] if supp_paths else None
+    ledger = _read_json_file(args.ledger, label="--ledger") if getattr(args, "ledger", None) else None
+    pdf_bytes = _require_pdf_bytes(args.pdf)[1] if getattr(args, "pdf", None) else None
+    protected = [p for p in [*report_paths, getattr(args, "pdf", None), getattr(args, "ledger", None), *supp_paths] if p]
+    _guard_output_paths([args.csv, getattr(args, "sarif", None), args.out], protected)
+    _check_deadline(deadline)
+    ens_mod = importlib.import_module("blue_ensemble")
+    try:
+        res = ens_mod.ensemble_blue_reports(
+            reports,
+            rater_ids=rater_ids,
+            pdf_bytes=pdf_bytes,
+            supplements=supp_entries,
+            ledger_candidates=ledger,
+            min_consensus=getattr(args, "min_consensus", None),
+        )
+    except ValueError as exc:
+        if "forbidden_red_key" in str(exc):
+            raise _CliError("forbidden_red_key", f"BLUE ensemble rejected report: {exc}", exit_code=3) from None
+        raise _CliError("invalid_arguments", f"BLUE ensemble failed: {exc}", exit_code=2) from None
+    if args.csv and isinstance(res.get("csvText"), str):
+        csv_target = Path(args.csv)
+        csv_target.parent.mkdir(parents=True, exist_ok=True)
+        csv_target.write_text(res["csvText"], encoding="utf-8")
+    _write_sarif_out(
+        getattr(args, "sarif", None),
+        res.get("finalReport") or {"findings": res.get("findings", [])},
+        args.pdf or "manuscript.pdf",
+        protected,
+    )
+    payload = {"schema": SCHEMA, "ok": True, "command": "blue ensemble", "ensemble": res}
+    if args.out:
+        extra_out = [p for p in (args.csv, getattr(args, "sarif", None)) if p]
         _write_json_out(args.out, payload, [*protected, *extra_out])
     return payload, 0
 
@@ -1055,6 +1183,9 @@ def _supplements_for_detectability(entries: list[dict] | None):
             pages = entry.get("pages")
             text = "\n".join(str(page) for page in pages) if isinstance(pages, list) else ""
         cleaned = {k: v for k, v in entry.items() if k != "bytes"}
+        name_low = str(entry.get("name") or "").lower()
+        if isinstance(entry.get("bytes"), (bytes, bytearray)) and name_low.endswith((".xlsx", ".ipynb")):
+            cleaned["rawBytes"] = bytes(entry["bytes"])
         prepared.append({**cleaned, "text": text})
     return prepared
 
@@ -1247,8 +1378,15 @@ def _validate_red_apply_paths(args, src_path: Path, out_pdf: Path):
 def _normalize_red_supplements(supp_entries: list[dict] | None) -> list[dict] | None:
     if not supp_entries:
         return None
-    mutator = importlib.import_module("paper_text_span_mutator")
-    return mutator.normalize_supplements(supp_entries)
+    mutator = importlib.import_module("paper_supplement_mutator")
+    return mutator.normalize_red_supplements_extended(supp_entries)
+
+
+def _blind_supp_bytes(rec: dict) -> bytes:
+    encoded = rec.get("contentBase64")
+    if isinstance(encoded, str) and encoded:
+        return base64.b64decode(encoded)
+    return str(rec.get("text") or "").encode("utf-8")
 
 
 def _write_blind_supplements(out_dir_str: str | None, blind_supps: list[dict], protected: list[str]) -> list[str]:
@@ -1270,7 +1408,7 @@ def _write_blind_supplements(out_dir_str: str | None, blind_supps: list[dict], p
     out_dir.mkdir(parents=True, exist_ok=True)
     written = []
     for rec, dest in targets:
-        dest.write_bytes(rec["text"].encode("utf-8"))
+        dest.write_bytes(_blind_supp_bytes(rec))
         written.append(str(dest))
     return written
 
@@ -2020,12 +2158,78 @@ def _cmd_arena_evolve(args, deadline: float | None = None) -> tuple[dict, int]:
             max_recall_drop=args.max_recall_drop,
             base_red_harness=base_red_harness,
             compact_rules=bool(getattr(args, "compact_rules", False)),
+            checkpoint_dir=getattr(args, "checkpoint_dir", None),
+            resume=bool(getattr(args, "resume", False)),
+            max_total_seconds=getattr(args, "max_total_seconds", None),
         )
     except module.ArenaCampaignError as exc:
         raise _arena_duel_cli_error(exc, "evolve") from None
     _check_deadline(deadline)
     payload = {"schema": SCHEMA, "ok": True, "command": "arena evolve", "lineage": lineage}
     _write_evolve_outputs(args, payload, lineage, protected)
+    return payload, 0
+
+
+def _parse_tournament_entries(raw_specs: list[str], label: str) -> tuple[list[dict], list[str]]:
+    entries, file_paths = [], []
+    for raw in raw_specs:
+        doc, paths = _load_optional_json_dict(raw, label)
+        if doc is None:
+            raise _CliError("invalid_arguments", f"{label} cannot be empty.", exit_code=2)
+        entries.append(doc)
+        file_paths.extend(paths)
+    return entries, file_paths
+
+
+def _cmd_arena_tournament(args, deadline: float | None = None) -> tuple[dict, int]:
+    src_paths = _flatten_paths(args.source_pdf)
+    for sp in src_paths:
+        _require_pdf_bytes(sp)
+    supp_paths = _flatten_paths(getattr(args, "supplement", None))
+    holdout_paths = _flatten_paths(getattr(args, "holdout_pdf", None))
+    red_entries, red_files = _parse_tournament_entries(_flatten_paths(args.red_entry), "--red-entry")
+    blue_entries, blue_files = _parse_tournament_entries(_flatten_paths(args.blue_entry), "--blue-entry")
+    protected = [*src_paths, *supp_paths, *holdout_paths, *red_files, *blue_files]
+    _guard_output_paths([args.out], protected)
+    _check_deadline(deadline)
+    t_mod = importlib.import_module("arena_tournament")
+    try:
+        report = t_mod.run_arena_tournament(
+            source_pdfs=src_paths,
+            red_entries=red_entries,
+            blue_entries=blue_entries,
+            supplements=supp_paths or None,
+            holdout_pdfs=holdout_paths or None,
+            min_difficulty=args.min_difficulty,
+            agent_timeout=args.agent_timeout,
+            validate_quotes=not bool(args.no_validate_quotes),
+        )
+    except ValueError as exc:
+        code = "tournament_scrub_failed" if "scrub" in str(exc) else "invalid_arguments"
+        exit_c = 3 if code == "tournament_scrub_failed" else 2
+        raise _CliError(code, f"Arena tournament failed: {exc}", exit_code=exit_c) from None
+    _check_deadline(deadline)
+    payload = {"schema": SCHEMA, "ok": True, "command": "arena tournament", "tournament": report}
+    if args.out:
+        _write_json_out(args.out, payload, protected)
+    return payload, 0
+
+
+def _cmd_schemas(args, deadline: float | None = None) -> tuple[dict, int]:
+    _check_deadline(deadline)
+    sarif_mod = importlib.import_module("paper_sarif_export")
+    try:
+        catalog = sarif_mod.list_falsify_schemas(getattr(args, "id", None))
+    except ValueError as exc:
+        raise _CliError(
+            "schema_id_unknown",
+            f"Unknown schema id: {getattr(args, 'id', None)} ({exc})",
+            exit_code=2,
+            recovery_hint="Run 'falsify schemas' without --id to list all registered schemaIds.",
+        ) from None
+    payload = {"schema": SCHEMA, "ok": True, "command": "schemas", "catalog": catalog}
+    if getattr(args, "out", None):
+        _write_json_out(args.out, payload, [])
     return payload, 0
 
 
@@ -2083,8 +2287,12 @@ def _add_blue_parser(subparsers, parent):
     scan.add_argument("--figure-forensics", action="store_true")
     scan.add_argument("--flow-triage", action="store_true")
     scan.add_argument("--internal-consistency", action="store_true")
+    scan.add_argument("--meta-tables", action="store_true")
+    scan.add_argument("--pdf-security", action="store_true")
     scan.add_argument("--recompute-raw", action="store_true")
     scan.add_argument("--audit-code", action="store_true")
+    scan.add_argument("--cache-dir")
+    scan.add_argument("--sarif")
     scan.add_argument("--max-signals", type=int, default=50)
     scan.add_argument("--digest-only", action="store_true")
     scan.add_argument("--out")
@@ -2097,6 +2305,9 @@ def _add_blue_parser(subparsers, parent):
     scan_ws.add_argument("--max-signals-per-paper", type=int, default=25)
     scan_ws.add_argument("--figure-forensics", action="store_true")
     scan_ws.add_argument("--no-recompute-raw", action="store_true")
+    scan_ws.add_argument("--no-flow-triage", action="store_true")
+    scan_ws.add_argument("--no-internal-consistency", action="store_true")
+    scan_ws.add_argument("--cache-dir")
     scan_ws.add_argument("--out")
     validate = blue_sub.add_parser(
         "validate", parents=[parent],
@@ -2120,7 +2331,21 @@ def _add_blue_parser(subparsers, parent):
     finalize.add_argument("--ledger")
     finalize.add_argument("--out-report")
     finalize.add_argument("--csv")
+    finalize.add_argument("--sarif")
     finalize.add_argument("--out")
+    ensemble = blue_sub.add_parser(
+        "ensemble", parents=[parent],
+        help="Merge 2..12 independent blind BLUE reports with consensus and split-verdict arbitration",
+    )
+    ensemble.add_argument("--report", required=True, action="append", nargs="+")
+    ensemble.add_argument("--rater-id", action="append", nargs="+")
+    ensemble.add_argument("--pdf")
+    ensemble.add_argument("--supplement", action="append", nargs="+")
+    ensemble.add_argument("--ledger")
+    ensemble.add_argument("--min-consensus", type=int, default=None)
+    ensemble.add_argument("--csv")
+    ensemble.add_argument("--sarif")
+    ensemble.add_argument("--out")
 
 
 def _add_red_parser(subparsers, parent):
@@ -2264,13 +2489,30 @@ def _add_arena_evolution_parsers(arena_sub, parent):
     evolve.add_argument("--max-instructions-chars", type=int, default=16000)
     evolve.add_argument("--max-recall-drop", type=float, default=0.0)
     evolve.add_argument("--compact-rules", action="store_true")
+    evolve.add_argument("--checkpoint-dir")
+    evolve.add_argument("--resume", action="store_true")
+    evolve.add_argument("--max-total-seconds", type=float, default=None)
     evolve.add_argument("--out")
     evolve.add_argument("--out-harness")
     evolve.add_argument("--out-red-harness")
 
+    tournament = arena_sub.add_parser(
+        "tournament", parents=[parent],
+        help="Run an N x M RED-vs-BLUE round-robin tournament with Bradley-Terry and Elo ratings",
+    )
+    tournament.add_argument("--source-pdf", required=True, action="append", nargs="+")
+    tournament.add_argument("--red-entry", required=True, action="append", nargs="+")
+    tournament.add_argument("--blue-entry", required=True, action="append", nargs="+")
+    tournament.add_argument("--supplement", action="append", nargs="+")
+    tournament.add_argument("--holdout-pdf", action="append", nargs="+")
+    tournament.add_argument("--min-difficulty", choices=["L1", "L2", "L3", "L4"], default="L2")
+    tournament.add_argument("--agent-timeout", type=int, default=180)
+    tournament.add_argument("--no-validate-quotes", action="store_true")
+    tournament.add_argument("--out")
+
     bench = arena_sub.add_parser(
         "benchmark", parents=[parent],
-        help="Run the 24-case deterministic RED/BLUE + Holdout regression benchmark suite",
+        help="Run the 32-case deterministic RED/BLUE + Holdout regression benchmark suite",
     )
     bench.add_argument("--mode", choices=["sensor", "agent"], default="sensor")
     bench.add_argument("--agent-cmd")
@@ -2291,6 +2533,12 @@ def _build_parser() -> _JsonArgumentParser:
     _add_blue_parser(sub, shared)
     _add_red_parser(sub, shared)
     _add_blind_and_arena_parsers(sub, shared)
+    schemas = sub.add_parser(
+        "schemas", parents=[shared],
+        help="List or inspect Falsify JSON Schema contracts for agent tool integration",
+    )
+    schemas.add_argument("--id", default=None)
+    schemas.add_argument("--out")
     mcp_config = sub.add_parser(
         "mcp-config", parents=[shared],
         help="Print a stdio MCP client configuration for app/local/paper_mcp.py",
@@ -2310,6 +2558,7 @@ _DISPATCH = {
     ("blue", "scan-workspace"): _cmd_blue_scan_workspace,
     ("blue", "validate"): _cmd_blue_validate,
     ("blue", "finalize"): _cmd_blue_finalize,
+    ("blue", "ensemble"): _cmd_blue_ensemble,
     ("red", "targets"): _cmd_red_targets,
     ("red", "plan"): _cmd_red_plan,
     ("red", "simulate"): _cmd_red_simulate,
@@ -2322,7 +2571,9 @@ _DISPATCH = {
     ("arena", "duel"): _cmd_arena_duel,
     ("arena", "apply-patch"): _cmd_arena_apply_patch,
     ("arena", "evolve"): _cmd_arena_evolve,
+    ("arena", "tournament"): _cmd_arena_tournament,
     ("arena", "benchmark"): _cmd_arena_benchmark,
+    ("schemas", None): _cmd_schemas,
     ("mcp-config", None): _cmd_mcp_config,
 }
 

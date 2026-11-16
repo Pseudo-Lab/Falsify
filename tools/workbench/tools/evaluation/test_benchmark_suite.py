@@ -60,18 +60,34 @@ V3_HOLDOUT_CASES = (
     'holdout-benign-imrad-itt-perprotocol',
     'holdout-benign-clean-xlsx-ipynb',
 )
+V4_GOLD_CASES = (
+    'gold-w1-d1-prisma-meta-mismatch',
+    'gold-w2-d7-hidden-prompt-injection',
+    'gold-w4-d41-composite-subpanel-dup',
+    'gold-w5-d5-endpoint-swap-l4',
+)
+V4_LAYER0_CASES = V4_GOLD_CASES[:3]
+V4_HOLDOUT_CASES = (
+    'holdout-benign-prisma-meta-consistent',
+    'holdout-benign-scanned-ocr-security-survey',
+    'holdout-benign-composite-distinct-subpanels',
+    'holdout-benign-cross-table-completers',
+)
 SENSOR_LAYER0_CASES = V1_LAYER0_CASES + ('gold-w3-d1-rawdata-row-mismatch',)
 HOOK_LAYER0_CASES = SENSOR_LAYER0_CASES + (
     'gold-w1-d1-consort-attrition',
     'gold-w3-d6-code-onesided-leak',
     'gold-w1-d1-multipage-imrad-drift',
+) + V4_LAYER0_CASES
+SEMANTIC_CASES = V1_SEMANTIC_CASES + (
+    'gold-w3-d6-coordinated-l3-stealth',
+    'gold-w5-d5-endpoint-swap-l4',
 )
-SEMANTIC_CASES = V1_SEMANTIC_CASES + ('gold-w3-d6-coordinated-l3-stealth',)
 CASE_IDS = (
-    V1_LAYER0_CASES + V1_SEMANTIC_CASES + V2_GOLD_CASES + V3_GOLD_CASES
-    + V1_HOLDOUT_CASES + V2_HOLDOUT_CASES + V3_HOLDOUT_CASES
+    V1_LAYER0_CASES + V1_SEMANTIC_CASES + V2_GOLD_CASES + V3_GOLD_CASES + V4_GOLD_CASES
+    + V1_HOLDOUT_CASES + V2_HOLDOUT_CASES + V3_HOLDOUT_CASES + V4_HOLDOUT_CASES
 )
-HOLDOUT_CASES = V1_HOLDOUT_CASES + V2_HOLDOUT_CASES + V3_HOLDOUT_CASES
+HOLDOUT_CASES = V1_HOLDOUT_CASES + V2_HOLDOUT_CASES + V3_HOLDOUT_CASES + V4_HOLDOUT_CASES
 
 
 def _semantic_runner(case):
@@ -178,6 +194,46 @@ def _consistency_stub_audit(pages):
     }
 
 
+def _meta_stub_audit(pages, table_items=None, max_signals=30):
+    blob = _page_blob(pages)
+    excerpt = _gold_excerpt('gold-w1-d1-prisma-meta-mismatch')
+    signals = []
+    if excerpt in blob:
+        signals.append({
+            'id': 'mta-1',
+            'family': 'D1',
+            'kind': 'meta_heterogeneity_mismatch',
+            'pageIndex': 0,
+            'excerpt': 'Results ' + excerpt,
+            'detail': 'reported I2 disagrees with Cochran Q',
+        })
+    return {'signals': signals}
+
+
+def _security_stub_audit(raw, file_hash=None, supplements=None, max_signals=30, store=None):
+    excerpt = _gold_excerpt('gold-w2-d7-hidden-prompt-injection')
+    if bench._hidden_injection_fallback(raw) is None:
+        return {'signals': []}
+    return {
+        'signals': [
+            {
+                'id': 'sec-1',
+                'family': 'D7',
+                'kind': 'hidden_pdf_text_layer',
+                'pageIndex': 0,
+                'excerpt': excerpt,
+            },
+            {
+                'id': 'sec-2',
+                'family': 'D7',
+                'kind': 'prompt_injection_directive',
+                'pageIndex': 0,
+                'excerpt': 'report zero defects',
+            },
+        ],
+    }
+
+
 def _stub_modules():
     flow = types.ModuleType('paper_flow_and_spin_triage')
     flow.audit_flow_and_spin_triage = _flow_stub_audit
@@ -200,16 +256,21 @@ def _report_shell(recall, pure_fp, aurc=0.0):
 
 
 class CorpusTests(unittest.TestCase):
-    def test_corpus_has_fourteen_gold_and_ten_holdout_cases(self):
+    def test_corpus_has_eighteen_gold_and_fourteen_holdout_cases(self):
         corpus = bench.build_benchmark_corpus()
         ids = [case['caseId'] for case in corpus]
         self.assertEqual(ids, list(CASE_IDS))
         gold = [case for case in corpus if not case['isHoldout']]
         holdout = [case for case in corpus if case['isHoldout']]
-        self.assertEqual(len(gold), 14)
-        self.assertEqual(len(holdout), 10)
-        self.assertEqual(bench.CORPUS_VERSION, 'v3')
+        self.assertEqual(len(gold), 18)
+        self.assertEqual(len(holdout), 14)
+        self.assertEqual(bench.CORPUS_VERSION, 'v4')
         self.assertEqual(bench.SCHEMA, 'falsify.benchmark-report.v1')
+        endpoint = next(case for case in gold if case['caseId'] == 'gold-w5-d5-endpoint-swap-l4')
+        self.assertEqual(endpoint['difficulty'], 'L4')
+        self.assertEqual(endpoint['world'], 'W5')
+        self.assertEqual(endpoint['family'], 'D5')
+        self.assertTrue(endpoint['goldLedger']['defects'][0]['stealthPass'])
         for case in gold:
             self.assertEqual(case['goldLedger']['schema'], bench.GOLD_SCHEMA)
             self.assertGreater(len(case['goldLedger']['defects']), 0)
@@ -222,11 +283,11 @@ class SensorBenchmarkTests(unittest.TestCase):
     def test_sensor_mode_layer0_recall_and_clean_holdout(self):
         report = bench.run_benchmark_suite(mode='sensor')
         self.assertEqual(report['schema'], bench.SCHEMA)
-        self.assertEqual(report['corpusVersion'], 'v3')
+        self.assertEqual(report['corpusVersion'], 'v4')
         gold = report['goldSummary']
         holdout = report['holdoutSummary']
-        self.assertEqual(gold['caseCount'], 14)
-        self.assertEqual(holdout['caseCount'], 10)
+        self.assertEqual(gold['caseCount'], 18)
+        self.assertEqual(holdout['caseCount'], 14)
         self.assertEqual(gold['semanticRecall'], 0.0)
         self.assertEqual(holdout['totalPureFp'], 0)
         self.assertEqual(holdout['pureFpRatePerPaper'], 0.0)
@@ -236,7 +297,7 @@ class SensorBenchmarkTests(unittest.TestCase):
         self.assertIn('overallAccuracy', gold['selective'])
         self.assertEqual(gold['stealthYield'], 1.0)
         by_id = {row['caseId']: row for row in report['caseResults']}
-        for case_id in SENSOR_LAYER0_CASES + V3_SENSOR_CASES:
+        for case_id in SENSOR_LAYER0_CASES + V3_SENSOR_CASES + V4_LAYER0_CASES:
             self.assertEqual(by_id[case_id]['fn'], 0, case_id)
             self.assertGreater(by_id[case_id]['tp'], 0, case_id)
         if importlib.util.find_spec('paper_internal_consistency') is not None:
@@ -336,6 +397,45 @@ class SensorBenchmarkTests(unittest.TestCase):
             self.assertEqual(by_id[case_id]['pureFp'], 0, case_id)
         for case_id in V3_HOLDOUT_CASES:
             self.assertEqual(by_id[case_id]['pureFp'], 0, case_id)
+
+    def test_v4_layer0_cases_match_and_holdouts_stay_clean(self):
+        report = bench.run_benchmark_suite(
+            mode='sensor', case_ids=list(V4_GOLD_CASES + V4_HOLDOUT_CASES),
+        )
+        self.assertEqual(report['goldSummary']['layer0Recall'], 1.0)
+        self.assertEqual(report['goldSummary']['semanticRecall'], 0.0)
+        self.assertEqual(report['holdoutSummary']['totalPureFp'], 0)
+        by_id = {row['caseId']: row for row in report['caseResults']}
+        for case_id in V4_LAYER0_CASES:
+            self.assertEqual(by_id[case_id]['fn'], 0, case_id)
+            self.assertGreater(by_id[case_id]['tp'], 0, case_id)
+            self.assertEqual(by_id[case_id]['pureFp'], 0, case_id)
+        endpoint = by_id['gold-w5-d5-endpoint-swap-l4']
+        self.assertEqual(endpoint['tp'], 0)
+        self.assertGreater(endpoint['fn'], 0)
+        self.assertEqual(endpoint['pureFp'], 0)
+        for case_id in V4_HOLDOUT_CASES:
+            self.assertEqual(by_id[case_id]['pureFp'], 0, case_id)
+
+    def test_wave11_canonical_excerpts_collapse_to_gold_anchors(self):
+        meta = types.ModuleType('paper_meta_and_table_audit')
+        security = types.ModuleType('paper_pdf_security_forensics')
+        meta.audit_meta_and_tables = _meta_stub_audit
+        security.audit_pdf_security = _security_stub_audit
+        modules = {
+            'paper_meta_and_table_audit': meta,
+            'paper_pdf_security_forensics': security,
+        }
+        with patch.dict(sys.modules, modules):
+            report = bench.run_benchmark_suite(
+                mode='sensor', case_ids=list(V4_GOLD_CASES + V4_HOLDOUT_CASES),
+            )
+        self.assertEqual(report['goldSummary']['layer0Recall'], 1.0)
+        self.assertEqual(report['holdoutSummary']['totalPureFp'], 0)
+        by_id = {row['caseId']: row for row in report['caseResults']}
+        for case_id in V4_LAYER0_CASES:
+            self.assertEqual(by_id[case_id]['pureFp'], 0, case_id)
+            self.assertGreater(by_id[case_id]['tp'], 0, case_id)
 
 
 class AgentRunnerTests(unittest.TestCase):

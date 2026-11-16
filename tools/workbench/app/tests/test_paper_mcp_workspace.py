@@ -31,7 +31,7 @@ CHILD = "import sys\nsys.path[:0] = [sys.argv[1], sys.argv[2]]\nimport paper_mcp
 ORIGINAL_TOOLS = {
     "status", "list_items", "read_item", "render_region", "read_page_text",
     "search_text", "list_references", "audit_statistics", "run_blue_sensor", "audit_figures",
-    "audit_internal_consistency",
+    "audit_internal_consistency", "audit_meta_and_tables", "audit_pdf_security",
 }
 WORKSPACE_TOOLS = {
     "list_papers", "select_paper", "triage_workspace",
