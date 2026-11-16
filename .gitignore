@@ -6,3 +6,11 @@ __pycache__/
 
 # 이건규 님 파일럿 저장소 클론(정답지 포함). 공개 저장소에 넣지 않는다
 falsify-pilot/
+
+# Local harness plugin: prompts are shared privately, not through git
+.idea/
+*.stackdump
+.claude/
+.venv/
+plugin/prompts/*
+!plugin/prompts/README.md
