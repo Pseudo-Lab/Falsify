@@ -1,0 +1,4 @@
+pypdf
+PyMuPDF
+openpyxl
+reportlab  # only for tests/synthetic/make_fake_papers.py

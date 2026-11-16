@@ -1,0 +1,61 @@
+{
+  "autoMemoryEnabled": false,
+  "env": {
+    "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"
+  },
+  "permissions": {
+    "deny": [
+      "Bash(git push:*)",
+      "WebSearch",
+      "Bash(curl:*)",
+      "Bash(wget:*)",
+      "Bash(ssh:*)",
+      "Bash(git clone:*)",
+      "Bash(git fetch:*)",
+      "Bash(gh:*)",
+      "Bash(pip install:*)",
+      "Bash(npm install:*)",
+      "Bash(powershell:*)",
+      "Bash(powershell.exe:*)",
+      "Bash(pwsh:*)",
+      "Bash(pwsh.exe:*)",
+      "PowerShell",
+      "Read(../**)",
+      "Read(./papers/**)",
+      "Read(./.claude/**)",
+      "Edit(./papers/**)",
+      "Edit(./tools/**)",
+      "Edit(./.claude/**)",
+      "mcp__atlassian",
+      "mcp__github",
+      "mcp__notion",
+      "mcp__claude_ai_Atlassian_MCP",
+      "mcp__claude_ai_Notion",
+      "mcp__claude_ai_Claude_Docs",
+      "mcp__claude_ai_Gmail",
+      "mcp__claude_ai_Google_Calendar",
+      "mcp__claude_ai_Google_Drive",
+      "mcp__plugin_discord_discord",
+      "mcp__claude-in-chrome",
+      "mcp__Claude_Browser",
+      "mcp__computer-use"
+    ],
+    "allow": [
+      "Read(./runs/**)",
+      "Edit(./runs/**)",
+      "Bash(python tools/finish_run.py:*)",
+      "Bash(python tools/extract_pages.py:*)",
+      "Bash(python tools/render_pages.py:*)",
+      "Bash(python tools/mw_pvalues.py:*)",
+      "Bash(python tools/red_report.py:*)",
+      "Bash(python tools/main_make_patch.py:*)",
+      "WebFetch(domain:api.crossref.org)",
+      "WebFetch(domain:api.datacite.org)",
+      "WebFetch(domain:pubmed.ncbi.nlm.nih.gov)",
+      "WebFetch(domain:eutils.ncbi.nlm.nih.gov)",
+      "WebFetch(domain:drks.de)",
+      "WebFetch(domain:clinicaltrials.gov)"
+    ]
+  },
+  "enableAllProjectMcpServers": false
+}

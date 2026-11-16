@@ -1,0 +1,5 @@
+{
+  "name": "falsify",
+  "version": "0.1.0",
+  "description": "Falsify study harness: Blue (find planted defects in a paper) and Red (plant defects) sessions, with run folders, metadata and reports."
+}
